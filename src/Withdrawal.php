@@ -99,14 +99,26 @@ class Withdrawal {
         return $deliveredAt === '' ? false : strtotime($deliveredAt . ' UTC');
     }
 
-    /** Whether a physical line of the order has units in no (non-cancelled) parcel. */
+    /**
+     * Whether a physical line of the order has units in no (non-cancelled) parcel. A bundle ships as its components:
+     * each component SKU must be in parcels line quantity × its quantity per bundle times (R14 F3: the component units
+     * were summed against the bundle quantity, so half of a bundle's parts counted as all of it).
+     */
     private static function goodsNotInParcels(int $orderId): bool {
-        $stmt = Db::get()->prepare("SELECT oi.*, COALESCE((SELECT SUM(si.quantity) FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id
-                WHERE si.order_item_id = oi.id AND s.status <> 'cancelled'), 0) AS in_parcels
-            FROM order_items oi WHERE oi.order_id = ?");
-        $stmt->execute([$orderId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
-            if (!Inventory::isDigitalLine($item) && (int)$item['in_parcels'] < (int)$item['quantity']) return true;
+        $db = Db::get();
+        $parcels = $db->prepare("SELECT si.sku, COALESCE(SUM(si.quantity), 0) AS quantity FROM shipment_items si
+            JOIN shipments s ON s.id = si.shipment_id WHERE si.order_item_id = ? AND s.status <> 'cancelled' GROUP BY si.sku");
+        $items = $db->prepare("SELECT * FROM order_items WHERE order_id = ?");
+        $items->execute([$orderId]);
+        foreach ($items->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            $lines = Inventory::reservationLines($item);
+            if ($lines === []) continue;
+            $parcels->execute([(int)$item['id']]);
+            $inParcels = array_map('intval', array_column($parcels->fetchAll(PDO::FETCH_ASSOC), 'quantity', 'sku'));
+            foreach ($lines as $line) {
+                $required = (int)$item['quantity'] * max(1, (int)($line['quantity_per_bundle'] ?? 1));
+                if (($inParcels[(string)$line['sku']] ?? 0) < $required) return true;
+            }
         }
         return false;
     }

@@ -46,6 +46,7 @@ final class BankTransferInstructions {
             'variable_symbol' => $variableSymbol,
             'message' => (string)$order['order_number'],
             'due_date' => ShopTime::date('Y-m-d', $due, $storeId),
+            'due_date_display' => I18n::date(ShopTime::date('Y-m-d', $due, $storeId)),
             'pay_by_square' => $payBySquare,
             'qr_svg' => $payBySquare === '' ? '' : QrCode::svg($payBySquare, I18n::t('bank_transfer.qr_label')),
         ];
@@ -77,6 +78,8 @@ final class BankTransferInstructions {
         $fields = ['beneficiary' => 'beneficiary', 'iban' => 'iban_display', 'bic' => 'bic', 'amount' => 'amount_display',
             'vs' => 'variable_symbol', 'message' => 'message', 'due_date' => 'due_date'];
         foreach ($fields as $name => $field) $vars['bank_' . $name] = (string)($bank[$field] ?? '');
+        // The e-mail is written in the order's language, whichever locale renders the job.
+        if ($bank !== null) $vars['bank_due_date'] = I18n::date((string)$bank['due_date'], (string)($order['locale'] ?? '') ?: null);
         return $vars;
     }
 

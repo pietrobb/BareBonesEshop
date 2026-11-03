@@ -754,6 +754,7 @@ return [
     'admin.shipment.msg.unchanged' => 'Sledovanie sa nezmenilo.',
     'admin.shipment.msg.tracking_saved' => 'Sledovanie zásielky bolo uložené.',
     'admin.shipment.msg.cancelled' => 'Zásielka bola zrušená.',
+    'admin.shipment.msg.cancelled_label_active' => 'Zásielka bola zrušená, ale dopravca jej štítok nezrušil. Zrušte ho priamo u dopravcu, inak zásielku vyzdvihne.',
     'admin.shipment.msg.not_found' => 'Zásielka neexistuje.',
     'admin.shipment.msg.invalid_tracking' => 'Dopravca, číslo zásielky alebo odkaz sú neplatné (odkaz musí začínať http:// alebo https://).',
     'admin.shipment.msg.failed' => 'Zásielku sa nepodarilo uložiť.',

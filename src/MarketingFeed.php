@@ -73,9 +73,11 @@ class MarketingFeed {
     public static function rows(?string $locale = null): Generator {
         $locale = self::locale($locale);
         $catalog = StoreContext::current()->catalogId();
+        $digitalComponent = Db::tableExists('bundle_components') ? VariantAvailability::digitalComponentSql('p.id') : '0';
         $stmt = Db::get()->prepare("SELECT p.id, p.sku, p.slug, p.name, p.summary, p.description, p.category_id, p.brand_id,
                 p.price, p.compare_price, p.currency, p.stock, p.images, p.translations, p.gtin, p.mpn,
-                p.product_type, p.status, p.availability, p.available_from, p.inventory_policy, p.preorder_at, b.name AS brand_name
+                p.product_type, p.status, p.availability, p.available_from, p.inventory_policy, p.preorder_at, b.name AS brand_name,
+                {$digitalComponent} AS digital_component
             FROM products p LEFT JOIN brands b ON b.id=p.brand_id AND b.store_id=p.store_id
             WHERE p.store_id=:store AND p.status='active' AND p.id > :after ORDER BY p.id LIMIT " . self::CHUNK);
         $after = 0;
@@ -137,6 +139,8 @@ class MarketingFeed {
      * or one with stock is in stock; one sold ahead of stock follows its inventory policy (preorder or backorder).
      */
     private static function availability(array $product): string {
+        // R14: a bundle with an e-book component cannot be bought (Inventory::reserveLine refuses it), whatever its stock.
+        if ((int)($product['digital_component'] ?? 0) === 1) return 'out of stock';
         $variants = $product['_variant_state'] ?? null;
         if (is_array($variants)) {
             if (!$variants['purchasable']) return 'out of stock';

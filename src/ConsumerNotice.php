@@ -58,7 +58,7 @@ final class ConsumerNotice {
         // <!-- legal-updated: YYYY-MM-DD --> marker, else the template file's mtime — never "today".
         $updated = (string)($legal['updated_at'] ?? '');
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $updated)) $updated = preg_match('/<!--\s*legal-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->/', $html, $m) ? $m[1] : date('Y-m-d', (int)filemtime($tpl));
-        $vars['{{updated_at}}'] = esc($updated);
+        $vars['{{updated_at}}'] = esc(I18n::date($updated, $locale));
         // <!-- if:key -->…<!-- /if --> keeps its text (a label with the value) only when the store sets that key.
         $html = (string)preg_replace_callback('/<!--\s*if:([a-z_]+)\s*-->(.*?)<!--\s*\/if\s*-->/s',
             static fn(array $m): string => ($vars['{{' . $m[1] . '}}'] ?? '') !== '' ? $m[2] : '', $html);

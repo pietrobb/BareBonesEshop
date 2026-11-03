@@ -747,6 +747,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipment.msg.unchanged' => 'Śledzenie się nie zmieniło.',
     'admin.shipment.msg.tracking_saved' => 'Zapisano śledzenie przesyłki.',
     'admin.shipment.msg.cancelled' => 'Przesyłka została anulowana.',
+    'admin.shipment.msg.cancelled_label_active' => 'Przesyłka została anulowana, ale przewoźnik nie anulował jej etykiety. Anuluj ją bezpośrednio u przewoźnika, w przeciwnym razie odbierze przesyłkę.',
     'admin.shipment.msg.not_found' => 'Przesyłka nie istnieje.',
     'admin.shipment.msg.invalid_tracking' => 'Przewoźnik, numer przesyłki lub link są nieprawidłowe (link musi zaczynać się od http:// lub https://).',
     'admin.shipment.msg.failed' => 'Nie udało się zapisać przesyłki.',

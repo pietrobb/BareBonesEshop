@@ -72,7 +72,7 @@ function pagePurchaseOrders(): void {
     <p style="margin-bottom:1rem"><a class="btn btn-sm" href="admin.php?p=purchase_orders">← <?= esc(I18n::t('admin.customers.list')) ?></a></p>
     <div class="card">
         <p><?= esc((string)$order['supplier_name']) ?> → <?= esc(I18n::format('admin.po.warehouse_named', ['name' => (string)$order['warehouse_name']])) ?> · <?= esc(supplierOrderStatus((string)$order['status'])) ?>
-            <?= $order['expected_at'] ? ' · ' . esc(I18n::format('admin.po.expected_named', ['date' => substr((string)$order['expected_at'], 0, 10)])) : '' ?></p>
+            <?= $order['expected_at'] ? ' · ' . esc(I18n::format('admin.po.expected_named', ['date' => I18n::date(substr((string)$order['expected_at'], 0, 10))])) : '' ?></p>
         <form method="post" action="admin.php?p=purchase_orders&action=receive&id=<?= (int)$order['id'] ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <input type="hidden" name="receipt_key" value="<?= bin2hex(random_bytes(16)) ?>">
@@ -124,7 +124,7 @@ function pagePurchaseOrders(): void {
                 <td><?= esc(supplierOrderStatus((string)$po['status'])) ?></td>
                 <td><?= (int)$po['received_qty'] ?> / <?= (int)$po['ordered_qty'] ?></td>
                 <td><?= esc(I18n::price((int)$po['total_cost'], (string)$po['currency'])) ?></td>
-                <td class="muted"><?= esc(substr((string)$po['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$po['created_at'])) ?></td>
             </tr>
             <?php endforeach; ?>
             </tbody>

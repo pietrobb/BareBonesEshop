@@ -428,7 +428,7 @@ function pageReviews(): void {
                     <?php if (!empty($rv['title'])): ?><strong><?= esc($rv['title']) ?></strong><br><?php endif; ?>
                     <?= esc($rv['body']) ?>
                 </td>
-                <td class="muted"><?= esc(substr((string)$rv['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$rv['created_at'])) ?></td>
                 <td style="white-space:nowrap">
                     <form method="post" action="admin.php?p=reviews&action=approve" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -580,7 +580,7 @@ function pageCmsPages(): void {
                 <td><code><?= esc($pg['slug']) ?></code></td>
                 <td><?= esc($pg['title']) ?></td>
                 <td><span class="badge badge-<?= $pg['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc(adminCodeLabel('admin.cms.status.', (string)$pg['status'])) ?></span></td>
-                <td class="muted"><?= esc(substr($pg['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$pg['created_at'])) ?></td>
                 <td><a href="admin.php?p=page_edit&id=<?= (int)$pg['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.edit')) ?></a></td>
             </tr>
             <?php endforeach; ?>

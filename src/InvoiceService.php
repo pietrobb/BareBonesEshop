@@ -255,12 +255,13 @@ final class InvoiceService
         $link = self::downloadLink((int)($invoice['id'] ?? 0));
         $appUrl = Security::configuredAppUrl();
         $link = $appUrl === null ? $link : Security::storeAppUrl($appUrl, StoreContext::current()->config()) . Template::seoPath($link);
+        $mailLocale = (string)($order['locale'] ?? '') ?: (string)($invoice['locale'] ?? '') ?: I18n::locale();
         return [
             'order_number' => (string)($order['order_number'] ?? ''),
             'invoice_number' => (string)$invoice['number'],
             'customer_name' => (string)($order['customer_name'] ?? ''),
-            'issued_at' => (string)$invoice['issued_at'],
-            'due_date' => (string)$invoice['due_date'],
+            'issued_at' => I18n::date((string)$invoice['issued_at'], $mailLocale),
+            'due_date' => I18n::date((string)$invoice['due_date'], $mailLocale),
             'total_gross_formatted' => $total,
             'invoice_total' => $total,
             'invoice_download_url' => $link,

@@ -64,7 +64,7 @@ function pageSalesOverview(): void {
     <div style="display:flex;justify-content:space-between;align-items:start;gap:1rem;flex-wrap:wrap">
         <div>
             <h1 style="margin-bottom:.25rem"><?= esc(I18n::t('admin.title.sales')) ?></h1>
-            <p class="muted"><?= esc(I18n::t('admin.sales.live_data')) ?> · <?= esc(I18n::t('admin.sales.updated')) ?> <?= esc(date('Y-m-d H:i')) ?></p>
+            <p class="muted"><?= esc(I18n::t('admin.sales.live_data')) ?> · <?= esc(I18n::t('admin.sales.updated')) ?> <?= esc(I18n::dateTime(gmdate('Y-m-d H:i:s'))) ?></p>
         </div>
         <a class="btn" href="admin.php?p=sales"><?= esc(I18n::t('admin.sales.refresh')) ?></a>
     </div>
@@ -107,7 +107,7 @@ function pageSalesOverview(): void {
             <tr><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.sales.order_status')) ?></th><th><?= esc(I18n::t('admin.sales.payment_status')) ?></th><th><?= esc(I18n::t('admin.sales.digital')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th></th></tr>
             <?php foreach ($orders as $order): ?>
             <tr>
-                <td><strong><?= esc($order['order_number']) ?></strong><br><span class="muted"><?= esc(substr((string)$order['created_at'], 0, 16)) ?></span></td>
+                <td><strong><?= esc($order['order_number']) ?></strong><br><span class="muted"><?= esc(I18n::dateTime((string)$order['created_at'])) ?></span></td>
                 <td><?= esc($order['customer_name']) ?><br><span class="muted"><?= esc($order['customer_email']) ?></span></td>
                 <td><?= (int)$order['item_count'] ?> <?= esc(I18n::t('admin.sales.items_short')) ?></td>
                 <td><strong><?= I18n::price((int)$order['total'], $order['currency']) ?></strong></td>
@@ -200,7 +200,7 @@ function pageOrders(): void {
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc(OrderStatusLabels::order((string)$o['status'])) ?></span></td>
                 <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($o)) ?></span><br><span class="muted" title="<?= esc((string)($o['payment_method'] ?? '')) ?>"><?= esc(PaymentService::adminLabel($o)) ?></span></td>
-                <td class="muted"><?= esc(substr($o['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$o['created_at'])) ?></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
@@ -274,7 +274,7 @@ function pageOrder(): void {
             <p class="muted"><?= esc(I18n::t('admin.order.variable_symbol')) ?>: <strong data-variable-symbol><?= esc(BankTransferInstructions::variableSymbol($order)) ?></strong></p>
             <?php endif; ?>
             <p class="muted"><?= esc(I18n::t('admin.order.payment_reference')) ?>: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
-            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
+            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(I18n::dateTime((string)$latestPaymentTx['created_at'])) : '' ?></p>
             <?php if (Security::adminCan('orders.edit') && PaymentLink::payable($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_link" style="margin-top:.5rem" data-payment-link>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -370,8 +370,8 @@ function pageOrder(): void {
                 <td><?= esc($entitlement['label'] ?: $entitlement['download_name']) ?></td>
                 <td><span class="badge badge-<?= esc($entitlement['status']) ?>"><?= esc(adminCodeLabel('admin.entitlement.status.', (string)$entitlement['status'])) ?></span></td>
                 <td><?= (int)$entitlement['download_count'] ?> / <?= $entitlement['download_limit'] === null ? '∞' : (int)$entitlement['download_limit'] ?></td>
-                <td><?= $entitlement['expires_at'] === null ? '—' : esc(date('Y-m-d H:i', (int)$entitlement['expires_at'])) ?></td>
-                <td><?= esc($entitlement['delivered_at'] ?? '—') ?></td>
+                <td><?= $entitlement['expires_at'] === null ? '—' : esc(I18n::dateTime(gmdate('Y-m-d H:i:s', (int)$entitlement['expires_at']))) ?></td>
+                <td><?= esc(I18n::dateTime((string)($entitlement['delivered_at'] ?? '')) ?: '—') ?></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -388,7 +388,7 @@ function pageOrder(): void {
                 <td><?= esc($consent['consent_key']) ?></td>
                 <td><?= esc($consent['version']) ?></td>
                 <td><?= esc($consent['consent_text']) ?></td>
-                <td><?= esc($consent['created_at']) ?></td>
+                <td><?= esc(I18n::dateTime((string)$consent['created_at'])) ?></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -415,7 +415,7 @@ function pageOrder(): void {
                 <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
                 <td class="muted"><?= esc($raw['event_type'] ?? '') ?></td>
                 <td class="muted"><?= esc(implode(' · ', $details)) ?></td>
-                <td class="muted"><?= esc(substr($tx['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$tx['created_at'])) ?></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -436,7 +436,7 @@ function pageOrder(): void {
                 <td><?= esc($log['new_value'] ?? '') ?></td>
                 <td class="muted"><?= esc($log['note'] ?? '') ?></td>
                 <td><?= esc($log['actor']) ?></td>
-                <td class="muted"><?= esc(substr($log['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -463,7 +463,7 @@ function pageOrder(): void {
                 <td><span class="badge badge-<?= esc($em['status']) ?>"><?= esc(adminCodeLabel('admin.email.status.', (string)$em['status'])) ?></span>
                     <?php if (!empty($em['error'])): ?><br><small class="muted"><?= esc($em['error']) ?></small><?php endif; ?>
                 </td>
-                <td class="muted"><?= esc($em['sent_at'] ? substr($em['sent_at'], 0, 16) : substr($em['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc($em['sent_at'] ? I18n::dateTime((string)$em['sent_at']) : I18n::dateTime((string)$em['created_at'])) ?></td>
                 <td>
                     <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=email_resend" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -493,8 +493,8 @@ function pageOrder(): void {
                 <td><?= esc($inv['number']) ?></td>
                 <td><?= esc($inv['type'] ?? 'invoice') ?></td>
                 <td><span class="badge badge-vat-<?= esc($inv['vat_scenario'] ?? '') ?>"><?= esc($inv['vat_scenario'] ?? '—') ?></span></td>
-                <td><?= esc($inv['issued_at']) ?></td>
-                <td><?= esc($inv['due_date']) ?></td>
+                <td><?= esc(I18n::date((string)$inv['issued_at'])) ?></td>
+                <td><?= esc(I18n::date((string)$inv['due_date'])) ?></td>
                 <td><?= I18n::price((int)$inv['total_gross'], $inv['currency']) ?></td>
                 <td><span class="badge badge-<?= esc($inv['status']) ?>"><?= esc(adminCodeLabel('admin.invoice.status.', (string)$inv['status'])) ?></span></td>
                 <td>
@@ -571,7 +571,7 @@ function pageRma(): void {
             <?php foreach ($rmas as $r): ?>
             <?php $items = Rma::items((int)$r['id']); ?>
             <tr>
-                <td><?= esc($r['rma_number']) ?><br><span class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></span></td>
+                <td><?= esc($r['rma_number']) ?><br><span class="muted"><?= esc(I18n::dateTime((string)$r['created_at'])) ?></span></td>
                 <td><?= esc($orderNos[(int)$r['order_id']] ?? ('#' . $r['order_id'])) ?></td>
                 <td><ul class="muted" style="margin:0;padding-left:16px">
                     <?php foreach ($items as $it): ?>

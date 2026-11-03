@@ -262,6 +262,17 @@ class Fulfillment {
         }
     }
 
+    /**
+     * R14 T4: cancel a planned parcel, then (committed, no transaction open: it calls the carrier) its labels at the
+     * carrier. Null when the parcel was not planned; otherwise the AWBs the carrier left active.
+     *
+     * @return list<string>|null
+     */
+    public static function cancelWithLabels(int $orderId, int $shipmentId): ?array {
+        if (!self::cancel($shipmentId)) return null;
+        return ShippingService::cancelParcelLabels($orderId, $shipmentId);
+    }
+
     /** @return array{0:?string,1:?string,2:?string} trimmed carrier, tracking number and http(s) tracking URL */
     private static function tracking(?string $carrier, ?string $trackingNumber, ?string $trackingUrl): array {
         $values = [];

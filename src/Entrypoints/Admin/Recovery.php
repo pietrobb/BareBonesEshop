@@ -20,7 +20,7 @@ function pageAwaitingPayment(): void {
                 <td><?= esc($o['customer_name']) ?><br><span class="muted"><?= esc($o['customer_email']) ?></span></td>
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
                 <td class="muted"><?= esc($o['payment_label']) ?></td>
-                <td class="muted"><?= esc(substr((string)$o['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$o['created_at'])) ?></td>
                 <td class="<?= $age >= 72 ? 'status-error' : ($age >= 24 ? 'status-warn' : '') ?>"><?= $age < 48 ? $age . ' h' : intdiv($age, 24) . ' d' ?></td>
                 <td>
                     <?php if ($canEdit): ?>
@@ -67,9 +67,9 @@ function pageAbandonedCarts(): void {
                 <td><?= esc((string)$c['customer_email']) ?></td>
                 <td><?php foreach ($c['items'] as $item): ?><?= (int)($item['qty'] ?? 1) ?> × <?= esc((string)$item['name']) ?><br><?php endforeach; ?></td>
                 <td><?= I18n::price((int)($c['cart_value'] ?? 0), (string)($c['currency'] ?? '') ?: null) ?></td>
-                <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
-                <td class="muted"><?= esc(substr((string)($c['updated_at'] ?? $c['created_at']), 0, 16)) ?></td>
-                <td><?= esc($statusLabels[(string)($c['reminder_status'] ?? '')] ?? I18n::t('admin.recovery.waiting')) ?><?php if (!empty($c['reminded_at'])): ?><br><span class="muted"><?= esc(substr((string)$c['reminded_at'], 0, 16)) ?></span><?php endif; ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$c['created_at'])) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)($c['updated_at'] ?? $c['created_at']))) ?></td>
+                <td><?= esc($statusLabels[(string)($c['reminder_status'] ?? '')] ?? I18n::t('admin.recovery.waiting')) ?><?php if (!empty($c['reminded_at'])): ?><br><span class="muted"><?= esc(I18n::dateTime((string)$c['reminded_at'])) ?></span><?php endif; ?></td>
                 <td><?php if (!empty($c['order_id'])): ?><a href="admin.php?p=order&id=<?= (int)$c['order_id'] ?>">#<?= (int)$c['order_id'] ?></a><?php else: ?><span class="muted">—</span><?php endif; ?></td>
             </tr>
             <?php endforeach; ?>

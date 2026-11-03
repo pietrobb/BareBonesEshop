@@ -16,6 +16,25 @@
   the bulk list offers "refunded" only to admins who may refund. The product editor uploads up to 10 images at once
   (added at the end, nothing kept when one file is not an image) and lists the images with move up / move down /
   remove buttons over the "URL | alt" lines, which still work without JavaScript.
+- **Times, dates and log masking** (review round 14, T12, T13, T15, T21, UX6). The admin shows stored times in the
+  shop's time zone and the admin language's format (it printed UTC as "2026-07-01 22:30"); invoice dates, the
+  bank-transfer due day (page and e-mail, in the order's language) and the legal texts' "last changed" use the
+  language's date format. The API keeps ISO dates (`bank_transfer.due_date`; `due_date_display` is new). Feed
+  schedules with a wildcard minute or hour (`0 * * * *`, `*/15 * * * *`) follow the wall clock through clock changes
+  as cron does — they no longer skip the repeated autumn hour, and only fixed-time schedules catch up a time the
+  spring change skips. The logger masks HTTP Basic credentials without digits or shorter than 8 characters, any
+  `Authorization:` header value, URL passwords containing "@", and quoted or `password=` values containing spaces.
+  `AuditRound7StockRegression` counts its 15 days on the shop's calendar (it failed at 23:xx for two weeks after a
+  clock change).
+- **Shipping and the withdrawal period** (review round 14, T4, F3, carrier labels, feed). Cancelling a parcel in the
+  admin also cancels its labels at the carrier (they stayed active there, so the parcel was still picked up and its
+  cash on delivery collected); a label the carrier cannot cancel stays active, is reported and the admin is told to
+  cancel it with the carrier. The carrier's idempotency key names the parcel, so two parcels of one order labelled at
+  the same time get two labels (they were one carrier request with one AWB). A cancelled parcel gets no label, and a
+  label the carrier creates while its parcel is being cancelled is cancelled at the carrier instead of being recorded
+  on the cancelled parcel. The withdrawal period of a bundle starts once every component is in a delivered parcel,
+  counted as bundle quantity × units per bundle (the component units were summed against the bundle quantity). The
+  marketing feed lists a bundle with an e-book component as out of stock, as the shop does not sell it.
 - **Payments** (review round 14, finding 3, T2, T18, T20). A capture of an older payment attempt records that
   attempt as the order's payment (refunds go to the money), and pending-order expiry asks the gateway about every
   attempt, not only the newest. A hidden store opens its payment link and the pages its gateway returns to. The

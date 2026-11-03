@@ -234,7 +234,7 @@ try {
                 match ($a126Action) {
                     'groups_page' => assert_true(str_contains($a126Output, "value=\"A126GFREE-{$a126Store}-NAME\"") && str_contains($a126Output, 'value="5"') && str_contains($a126Output, 'name="csrf_token"'),
                         "{$a126Label}: own groups and the edited group's 5 % discount rendered"),
-                    'companies_page' => assert_true(str_contains($a126Output, "value=\"A126CO-{$a126Store}-NAME\"") && str_contains($a126Output, 'overené 2026-01-02') && str_contains($a126Output, 'bez limitu'),
+                    'companies_page' => assert_true(str_contains($a126Output, "value=\"A126CO-{$a126Store}-NAME\"") && str_contains($a126Output, 'overené 2. 1. 2026') && str_contains($a126Output, 'bez limitu'),
                         "{$a126Label}: own companies, VAT validation date and unlimited credit rendered"),
                     'customer_page' => assert_true(str_contains($a126Output, 'action=b2b&id=') && preg_match('#<option value="\d+" selected>A126GMEM-' . $a126Store . '-NAME#', $a126Output) === 1
                         && preg_match('#<option value="\d+" selected>A126CO-' . $a126Store . '-NAME#', $a126Output) === 1, "{$a126Label}: B2B card preselects the customer's own group and company"),

@@ -108,20 +108,33 @@ class Logger
     private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)(?!\[REDACTED)[^\s"\'&,;}]+/i';
 
     /**
-     * Secrets recognisable without a key: HTTP Basic credentials, the password in a URL (`scheme://user:pass@host`),
+     * Secrets recognisable without a key: HTTP Basic credentials (maskSecrets), the password in a URL (`scheme://user:pass@host`),
      * Stripe-style secret and restricted keys and webhook secrets, and PEM private keys. They run before SECRET_VALUE:
      * that one stops at whitespace, so after `secret: ` it would mask only `-----BEGIN` and leave the PEM body behind.
      */
     private const SECRET_PATTERNS = [
         '/-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/s' => '[REDACTED $1PRIVATE KEY]',
         '/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}|\bwhsec_[A-Za-z0-9]{8,}/' => '[REDACTED]',
-        '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s@/]+@#i' => '$1[REDACTED]@',
-        '/(\bBasic\s+)(?=[A-Za-z]*[0-9+\/=])[A-Za-z0-9+\/]{8,}={0,2}/i' => '$1[REDACTED]',
+        // The password of a URL runs to the last "@" before the host: "user:p@ss@host" must not leave "ss" behind.
+        '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s/?\#]+@#i' => '$1[REDACTED]@',
+        // Whatever credentials an Authorization header carries, however short.
+        '/(\bAuthorization["\']?\s*[:=]\s*["\']?(?:Basic|Bearer|Digest|Token|NTLM|Negotiate)\s+)(?!\[REDACTED)[^\s"\',;]+/i' => '$1[REDACTED]',
+        // A quoted value is masked up to its closing quote, spaces included ("password": "correct horse battery").
+        '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*["\']?\s*[=:]\s*)(["\'])(?!\[REDACTED)(?:(?!\2)[^\\\\]|\\\\.)*\2/i' => '$1$2[REDACTED]$2',
+        // An unquoted password may contain spaces: it runs on until the next "key=" / "key:" or a separator.
+        '/((?:password|passwd|passphrase)[\w-]*\s*[=:]\s*)(?![\["\'])[^\s"\'&,;}]+(?:[ \t]+(?![\w.-]+["\']?\s*[=:])(?!\[REDACTED)[^\s"\'&,;}]+)*/i' => '$1[REDACTED]',
         self::SECRET_VALUE => '$1$2[REDACTED]',
     ];
 
     private static function maskSecrets(string $text): string
     {
+        // HTTP Basic credentials: base64 of "user:password" — recognised by decoding, so letters-only and short ones too,
+        // while the word "Basic" in prose ("Basic shipping plan") stays.
+        $text = (string)preg_replace_callback('/(\bBasic\s+)([A-Za-z0-9+\/]{4,}={0,2})(?![\w+\/=])/i', static function (array $m): string {
+            $decoded = base64_decode($m[2], true);
+            $credentials = is_string($decoded) && str_contains($decoded, ':') && preg_match('//u', $decoded) && !preg_match('/[\x00-\x1F\x7F]/', $decoded);
+            return $credentials || preg_match('/[0-9+\/=]/', $m[2]) && strlen($m[2]) >= 8 ? $m[1] . '[REDACTED]' : $m[0];
+        }, $text);
         return (string)preg_replace(array_keys(self::SECRET_PATTERNS), array_values(self::SECRET_PATTERNS), $text);
     }
 
