@@ -69,14 +69,23 @@ try {
     assert_true(StoreSettings::removeStore('r13b', $pdo)['ok'], 'R13 T17: the store using it is removed first');
     $r13aStaffId = AdminIdentity::create('r13a-store-staff', 'R13a-password-staff', 'viewer', false);
     AdminIdentity::grantStore($r13aStaffId, 'r13a', ['*']);
+    $pdo->prepare("INSERT INTO api_clients (key_id, token_hash, store_id, name, scopes) VALUES (?, ?, 'r13a', 'R14 old store client', '[]')")
+        ->execute(['r14-' . bin2hex(random_bytes(4)), hash('sha256', random_bytes(16))]);
+    $r13aLegalSaved = DataOverrides::saveLegal('terms', 'en', '<p>R14 old store terms</p>', 'r13a');
     assert_true(StoreSettings::removeStore('r13a', $pdo)['ok'] && !isset($r13aStores()['stores']['r13a']), 'R13 T17: an unused store is removed');
     $r13aGrants = $pdo->prepare("SELECT COUNT(*) FROM admin_store_permissions WHERE store_id = 'r13a'");
     $r13aGrants->execute();
     assert_equals(0, (int)$r13aGrants->fetchColumn(), 'R13 T17: the removed store\'s admin grants go with it (a later store with the same id grants nobody)');
+    $r13aClients = $pdo->prepare("SELECT COUNT(*) FROM api_clients WHERE store_id = 'r13a'");
+    $r13aClients->execute();
+    assert_true($r13aLegalSaved && (int)$r13aClients->fetchColumn() === 0 && DataOverrides::legalPath('terms', 'en', 'r13a') === null,
+        'R14: the removed store\'s API clients and legal texts go with it (a later store with the same id inherits neither)');
 } finally {
     StoreSettings::setPathForTesting(null);
     $pdo->exec("DELETE FROM customers WHERE email = 'r13a-customer@example.test'");
     $pdo->exec("DELETE FROM admin_store_permissions WHERE store_id IN ('r13a', 'r13b')");
+    $pdo->exec("DELETE FROM api_clients WHERE store_id = 'r13a'");
+    DataOverrides::saveLegal('terms', 'en', '', 'r13a');
     if ($r13aStaffId > 0) $pdo->prepare('DELETE FROM admin_accounts WHERE id = ?')->execute([$r13aStaffId]);
 }
 
@@ -196,6 +205,12 @@ try {
     assert_true(!$r13aDenied($r) && is_array($r['flash']), $r13aLabel('R13 T17 fulfillment: still moves an order along its workflow', $r));
     $r = $r13aRun('fulfillment', ['p' => 'orders', 'action' => 'bulk_status'], ['order_ids' => ['999999'], 'new_status' => 'cancelled']);
     assert_true($r13aDenied($r), $r13aLabel('R13 T17 fulfillment: cannot cancel orders in bulk', $r));
+    $r13aBulkOptions = static fn(array $r): array => preg_match('#<select id="bulk-status"[^>]*>(.*?)</select>#s', $r['out'], $m) === 1
+        ? (preg_match_all('#<option value="([a-z_]+)"#', $m[1], $o) ? $o[1] : []) : ['(no bulk form)'];
+    $r13aFulfilOptions = $r13aBulkOptions($r13aRun('fulfillment', ['p' => 'orders']));
+    $r13aOwnerOptions = $r13aBulkOptions($r13aRun('owner', ['p' => 'orders']));
+    assert_true(in_array('cancelled', $r13aOwnerOptions, true) && !in_array('cancelled', $r13aFulfilOptions, true) && in_array('processing', $r13aFulfilOptions, true),
+        'R14: the bulk status list offers only statuses the role may set (fulfillment ' . json_encode($r13aFulfilOptions) . ', owner ' . json_encode($r13aOwnerOptions) . ')');
 
     // --- T17: re-authentication has an attempt limit --------------------------------------------------------------
     $r13aOwnerHash = static fn() => (string)($r13aRead('SELECT password_hash FROM admin_accounts WHERE id = ?', [$r13aIds['owner']])['password_hash'] ?? '');
@@ -209,9 +224,11 @@ try {
         $r13aLabel('R13 T17 re-auth: the fifth wrong current password signs the guessing session out', $r));
     Db::init($r13aPdo, 'sqlite');
     try { $r13aLogin('owner'); } finally { Db::init($r13aSuiteDb, $r13aSuiteDriver); }
+    // R14: the limit belongs to the guessing session. The owner signing in again is not locked out of changing the
+    // password for 15 minutes by someone else's guesses.
     $r = $r13aChange('R13a-password-owner');
-    assert_true(!password_verify('R13a-taken-over-password', $r13aOwnerHash()) && str_contains((string)($r['flash']['msg'] ?? json_encode($r['flash'])), '15'),
-        $r13aLabel('R13 T17 re-auth: within the window even the right current password is refused', $r));
+    assert_true(password_verify('R13a-taken-over-password', $r13aOwnerHash()),
+        $r13aLabel('R14 re-auth: after another session was locked, the owner\'s fresh session changes the password with the right current one', $r));
 } finally {
     $r13aPdo = null;
     if ($r13aPreviousKey === false) putenv('BBE_ADMIN_IDENTITY_KEY');

@@ -118,6 +118,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($ipAllowed && $accountAllowed) {
             [$ok, $c, $err] = Customers::login($email, $password);
             if ($ok) {
+                // A verification link opened while signed out comes back with this sign-in: mailbox and password together.
+                if (($verifyToken = Security::str($_POST['verify_token'] ?? '')) !== '') {
+                    $_SESSION['account_flash'] = AccountViewModel::verifyEmailFlash($verifyToken, (int)$c['id']);
+                    header('Location: ' . Template::storeUrl('/account.php'));
+                    exit;
+                }
                 $next = Security::safeLocalPath($_POST['next'] ?? null, Template::storeUrl('/account.php'));
                 header('Location: ' . $next);
                 exit;
@@ -397,14 +403,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ============================================================
-// E-mail verification link (works signed in or out; token is single-use)
+// E-mail verification link: verifies the signed-in account; signed out, the sign-in form carries it (R14 #1).
 // ============================================================
 $loggedIn = Customers::isLoggedIn();
 if ($p === 'verify_email') {
     $token = Security::str($_GET['token'] ?? '');
-    $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token) !== null;
-    $flash = $t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid');
-    $flashType = $verified ? 'ok' : 'error';
+    $fieldValues['verify_token'] = !$loggedIn && preg_match('/^[a-f0-9]{64}$/', $token) ? $token : '';
+    ['message' => $flash, 'type' => $flashType] = $loggedIn ? AccountViewModel::verifyEmailFlash($token, (int)$_SESSION['customer_id'])
+        : AccountViewModel::verifyEmailSignInFlash($fieldValues['verify_token']);
     $p = $loggedIn ? 'dashboard' : 'login';
 }
 

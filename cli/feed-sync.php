@@ -20,6 +20,12 @@ $verbose = in_array('--verbose', $argv ?? []);
 $all = in_array('--all', $argv ?? []);
 $list = in_array('--list', $argv ?? []);
 
+// cli/update.php is replacing files or migrating the database (T20): the next scheduled run syncs.
+if (!$list && MaintenanceMode::active(dirname(__DIR__))) {
+    if ($verbose) echo "Update in progress (maintenance mode); feed sync skipped.\n";
+    exit(0);
+}
+
 // Parse --feed=xxx
 $feedArg = null;
 foreach ($argv ?? [] as $arg) {

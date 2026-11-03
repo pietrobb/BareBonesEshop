@@ -65,6 +65,20 @@ final class WebInstaller
     }
 
     /**
+     * The development server (php -S) started with this shop's router.php, which applies the .htaccess rules itself
+     * and serves one request at a time, so it cannot answer its own self-check. php -S without the router serves
+     * src/, config and the starter data as plain files: that is checked like any other server.
+     * @param list<string> $includedFiles get_included_files() of this request (the first is the script PHP started)
+     */
+    public static function devRouterActive(string $root, string $sapi, array $includedFiles): bool
+    {
+        if ($sapi !== 'cli-server' || $includedFiles === []) return false;
+        $first = realpath((string)$includedFiles[0]);
+        $router = realpath($root . '/router.php');
+        return $first !== false && $router !== false && $first === $router;
+    }
+
+    /**
      * Whether the web server really hides the application: requests static files it must refuse from itself — the
      * src/ probe file and the starter manifests (demo/<name>/dist/*.json, next to the paid eBooks and the starter
      * database). Static files need no free PHP worker (with one FPM child the installer itself holds it). Without

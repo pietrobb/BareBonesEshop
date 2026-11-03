@@ -97,12 +97,18 @@ try {
     }
 
     if ($command === 'rotate-key') {
+        // R14 #4: the anchor is the key this shop is configured to trust. A key given on the command line (say, copied
+        // from a "how to rotate" note) would let any key endorse itself while the configured one stays trusted.
+        if (isset($options['public-key'])) {
+            throw new InvalidArgumentException('rotate-key takes no --public-key: the endorsement is checked against the configured update_public_key only');
+        }
+        $trustedKey = $configuredPublicKey !== '' ? $configuredPublicKey : $environmentPublicKey;
         $newKey = (string)($options['new-key'] ?? '');
         $endorsement = (string)($options['endorsement'] ?? '');
-        if ($publicKey === '' || $newKey === '' || $endorsement === '') {
-            throw new InvalidArgumentException('rotate-key requires the trusted key (update_public_key or --public-key), --new-key=KEY and --endorsement=SIG');
+        if ($trustedKey === '' || $newKey === '' || $endorsement === '') {
+            throw new InvalidArgumentException('rotate-key requires a configured update_public_key, --new-key=KEY and --endorsement=SIG');
         }
-        $rotation = UpdateKeyRotation::rotate($publicKey, $newKey, $endorsement, $stateDirectory);
+        $rotation = UpdateKeyRotation::rotate($trustedKey, $newKey, $endorsement, $stateDirectory);
         echo "Endorsement verified. Revoked the old key {$rotation['old']}; trusted from now on: {$rotation['new']}\n";
         $installed = UpdateKeyRotation::installKey($configuredPublicKey, $newKey);
         echo $installed !== null

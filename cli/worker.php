@@ -26,6 +26,12 @@ set_exception_handler(static function (Throwable $e): void {
 $once = in_array('--once', $argv ?? []);
 $verbose = in_array('--verbose', $argv ?? []);
 
+// cli/update.php is replacing files or migrating the database (T20): the next cron run picks the jobs up.
+if (MaintenanceMode::active(dirname(__DIR__))) {
+    if ($verbose) echo "Update in progress (maintenance mode); worker skipped.\n";
+    exit(0);
+}
+
 // The file backend needs a process lock; durable backends use per-job atomic leases
 // and intentionally permit multiple workers.
 $cfg = require __DIR__ . '/../config.php';

@@ -109,8 +109,8 @@ final class StoreSettings {
 
     /**
      * Remove a store without customer or accounting records. The default store, a store another one invoices as and
-     * a store whose catalogue or providers another store sells stay. The removed store's admin grants go with it, so
-     * a later store under the same id does not hand its staff to the people the old one was granted to.
+     * a store whose catalogue or providers another store sells stay. The removed store's admin grants, API clients and
+     * legal texts go with it, so a later store under the same id inherits none of them.
      */
     public static function removeStore(string $storeId, PDO $db): array {
         return self::locked(static function () use ($storeId, $db): array {
@@ -131,6 +131,11 @@ final class StoreSettings {
             unset($data['stores'][$storeId]);
             if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
             $db->prepare('DELETE FROM admin_store_permissions WHERE store_id = ?')->execute([$storeId]);
+            // R14: nor its API keys or legal texts — a new store under the old id starts without them.
+            foreach (['api_clients', 'api_idempotency'] as $table) {
+                if (Db::tableExists($table, $db)) $db->prepare("DELETE FROM {$table} WHERE store_id = ?")->execute([$storeId]);
+            }
+            DataOverrides::removeStoreLegal($storeId);
             AuditLog::log('store_settings', 0, ['store' => $storeId, 'removed' => $removed], null);
             return ['ok' => true, 'errors' => []];
         });
