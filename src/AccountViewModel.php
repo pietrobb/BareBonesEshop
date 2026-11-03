@@ -160,6 +160,24 @@ final class AccountViewModel
         return self::orderSummary($order, Orders::items((int)$order['id'])) + ['t' => array_map(static fn(string $key): string => I18n::t($key), $keys)];
     }
 
+    /**
+     * The e-mail verification link (single-use) for $customerId: the account signed in in this browser, or the one just
+     * signed in with the token the login form carried. R14 #1: the link alone never verifies (nor attaches guest orders).
+     * @return array{message: string, type: string}
+     */
+    public static function verifyEmailFlash(string $token, int $customerId): array
+    {
+        $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token, $customerId) !== null;
+        return ['message' => I18n::t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid'), 'type' => $verified ? 'ok' : 'error'];
+    }
+
+    /** Signed out, the link only fills the sign-in form; the flash says so (or that the link is malformed). */
+    public static function verifyEmailSignInFlash(string $token): array
+    {
+        $valid = $token !== '';
+        return ['message' => I18n::t($valid ? 'account.verify_email_sign_in' : 'account.verify_email_invalid'), 'type' => $valid ? 'ok' : 'error'];
+    }
+
     /** $order is already owner- and store-checked by Customers::order(). Amounts stay in the order's own currency. */
     private static function orderDetail(int $customerId, array $order): array
     {
