@@ -592,9 +592,9 @@ class FeedImport {
      * so fixed-time schedules ("0 0 * * *", "30 8 * * 1") silently fell back to a
      * 1-hour interval and ran hourly. We now answer the precise question: did a
      * minute matching the cron expression occur in the window (last_sync, now]?
-     * R11: on the shop's wall clock (ShopTime::zone()) and through DST changes the way cron does: a local time the
-     * autumn change repeats runs once (its first occurrence), local times the spring change skips run in the first
-     * minute after it.
+     * R11: on the shop's wall clock (ShopTime::zone()) and through DST changes the way cron does: a fixed local time
+     * the autumn change repeats runs once (its first occurrence), fixed local times the spring change skips run in the
+     * first minute after it; schedules with a wildcard minute or hour simply follow the wall clock (R14 T13).
      */
     private static function isDue(string $schedule, string $lastSync): bool {
         $last = strtotime($lastSync . ' UTC');
@@ -625,6 +625,9 @@ class FeedImport {
     private static function cronDueAt(array $parts, int $ts, callable $offset): bool {
         $current = $offset($ts);
         $wall = $ts + $current;
+        // Only fixed-time jobs get the DST adjustments (as cron does): a wildcard minute or hour ("*/15 * * * *",
+        // "0 * * * *") runs on the new wall clock — in both passes of a repeated hour, with no catch-up for a skipped one.
+        if (str_starts_with(trim($parts[0]), '*') || str_starts_with(trim($parts[1]), '*')) return self::cronMatchesWall($parts, $wall);
         $earlier = $offset($ts - 7200);
         if ($earlier > $current) {
             $first = $wall - $earlier;

@@ -58,7 +58,7 @@ function pageCompanies(): void {
                 <div class="form-row"><label for="co-name"><?= esc(I18n::t('admin.b2b.legal_name')) ?></label><input id="co-name" name="legal_name" value="<?= $value('legal_name') ?>" required maxlength="191"></div>
                 <div class="form-row"><label for="co-code"><?= esc(I18n::t('admin.b2b.code_hint_legal')) ?></label><input id="co-code" name="code" value="<?= $value('code') ?>" maxlength="191"></div>
                 <div class="form-row"><label for="co-reg"><?= esc(I18n::t('checkout_ico')) ?></label><input id="co-reg" name="registration_number" value="<?= $value('registration_number') ?>" maxlength="32"></div>
-                <div class="form-row"><label for="co-vat"><?= esc(I18n::t('checkout_vat_id')) ?><?= !empty($edit['vat_validated_at']) ? ' ' . esc(I18n::format('admin.b2b.vat_verified', ['date' => substr((string)$edit['vat_validated_at'], 0, 10)])) : '' ?></label><input id="co-vat" name="vat_id" value="<?= $value('vat_id') ?>" maxlength="20"></div>
+                <div class="form-row"><label for="co-vat"><?= esc(I18n::t('checkout_vat_id')) ?><?= !empty($edit['vat_validated_at']) ? ' ' . esc(I18n::format('admin.b2b.vat_verified', ['date' => I18n::dateTime((string)$edit['vat_validated_at'], false)])) : '' ?></label><input id="co-vat" name="vat_id" value="<?= $value('vat_id') ?>" maxlength="20"></div>
                 <div class="form-row"><label for="co-approval"><?= esc(I18n::t('admin.b2b.approval')) ?></label>
                     <select id="co-approval" name="approval_status">
                         <?php foreach (B2bAdmin::APPROVAL as $status): ?>

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Times, dates and log masking** (review round 14, T12, T13, T15, T21, UX6). The admin shows stored times in the
+  shop's time zone and the admin language's format (it printed UTC as "2026-07-01 22:30"); invoice dates, the
+  bank-transfer due day (page and e-mail, in the order's language) and the legal texts' "last changed" use the
+  language's date format. The API keeps ISO dates (`bank_transfer.due_date`; `due_date_display` is new). Feed
+  schedules with a wildcard minute or hour (`0 * * * *`, `*/15 * * * *`) follow the wall clock through clock changes
+  as cron does — they no longer skip the repeated autumn hour, and only fixed-time schedules catch up a time the
+  spring change skips. The logger masks HTTP Basic credentials without digits or shorter than 8 characters, any
+  `Authorization:` header value, URL passwords containing "@", and quoted or `password=` values containing spaces.
+  `AuditRound7StockRegression` counts its 15 days on the shop's calendar (it failed at 23:xx for two weeks after a
+  clock change).
 - **Credit notes and refunds** (review round 14, finding 2 and T18). A refund credit note takes its VAT split from
   what the invoice's earlier credit notes left uncredited, so after an item credit note no rate is credited
   beyond what was invoiced, and all credit notes of an invoice together never exceed it. The refund key and the

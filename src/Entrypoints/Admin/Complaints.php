@@ -23,7 +23,7 @@ function pageComplaints(): void {
             <tr><th><?= esc(I18n::t('admin.complaints.number')) ?></th><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('complaint.item')) ?></th><th><?= esc(I18n::t('complaint.defect')) ?></th><th><?= esc(I18n::t('complaint.remedy')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.action')) ?></th></tr>
             <?php foreach ($rows as $c): ?>
             <tr>
-                <td><?= esc($c['complaint_number']) ?><br><span class="muted"><?= esc(substr((string)$c['received_at'], 0, 16)) ?></span></td>
+                <td><?= esc($c['complaint_number']) ?><br><span class="muted"><?= esc(I18n::dateTime((string)$c['received_at'])) ?></span></td>
                 <td><a href="admin.php?p=order&id=<?= (int)$c['order_id'] ?>"><?= esc($c['order_number']) ?></a></td>
                 <td><?= esc($c['customer_name']) ?><br><span class="muted"><?= esc($c['customer_email']) ?></span></td>
                 <td><?= esc($c['item_name']) ?></td>

@@ -35,7 +35,7 @@ function pageAdminUsers(): void {
                 <td><?= esc((string)$a['role']) ?></td>
                 <td><span class="badge badge-<?= $a['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc(adminCodeLabel('admin.user.status.', (string)$a['status'])) ?></span></td>
                 <td><?= !empty($a['mfa_required']) ? '✓' : '—' ?></td>
-                <td class="muted"><?= esc(substr((string)($a['last_login_at'] ?? ''), 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)($a['last_login_at'] ?? ''))) ?></td>
                 <td>
                     <form method="post" action="admin.php?p=admin_users&amp;action=grant" style="display:flex;flex-wrap:wrap;gap:.25rem">
                         <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>">

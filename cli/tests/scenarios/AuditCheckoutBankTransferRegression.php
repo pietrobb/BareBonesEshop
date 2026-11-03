@@ -186,7 +186,7 @@ try {
             && str_contains($a136Html, 'SUBASKBX') && str_contains($a136Html, 'A136 Shop s.r.o.')
             && str_contains($a136Html, '<strong data-bank-amount>' . htmlspecialchars($a136Amount) . '</strong>')
             && str_contains($a136Html, '<strong data-bank-vs>' . $a136Id . '</strong>') && str_contains($a136Html, (string)$a136Order['order_number'])
-            && str_contains($a136Html, $a136Due), "{$l}: order-done shows beneficiary, IBAN, BIC, exact amount, variable symbol = order ID, message and due date");
+            && str_contains($a136Html, I18n::date($a136Due, 'sk')), "{$l}: order-done shows beneficiary, IBAN, BIC, exact amount, variable symbol = order ID, message and due date");
         assert_true(preg_match('~<svg [^>]*role="img" aria-label="QR kód PAY by square pre platbu objednávky"><rect [^>]*/><path d="(M\d+,\d+h1v1h-1z)+" fill="#000"/></svg>~', $a136Html) === 1,
             "{$l}: order-done embeds the PAY by square QR as an inline, labelled SVG (no external image, CSP-safe)");
 
