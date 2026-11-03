@@ -95,7 +95,7 @@ try {
     Db::init($r11oDb, 'sqlite');
     $r11oCount = static fn(string $sql, array $params = []): int => (int)(($s = $r11oDb->prepare($sql)) && $s->execute($params) ? $s->fetchColumn() : 0);
 
-    // Price-list repair: a CZ scope a failed old run left without COD, most countries, some rates and the links.
+    // Price-list repair: a CZ scope a failed old run left without payment methods, countries, some rates and the links.
     try {
         $r11oRepairFile = TEST_CLI_DIR . '/../migrations/20261101150000_price_list_repair.php';
         assert_true(is_file($r11oRepairFile), 'R11 price lists: a migration repairs a partially seeded scope by itself');
@@ -103,9 +103,10 @@ try {
             'rates' => $r11oCount("SELECT COUNT(*) FROM shipping_rates WHERE store_id = 'cz'"),
             'countries' => $r11oCount("SELECT COUNT(*) FROM payment_method_countries WHERE store_id = 'cz'"),
         ];
-        $r11oDb->exec("DELETE FROM payment_methods WHERE store_id = 'cz' AND code = 'cod'");
-        $r11oDb->exec("DELETE FROM payment_method_countries WHERE store_id = 'cz' AND country NOT IN ('CZ', 'SK')");
-        $r11oDb->exec("DELETE FROM shipping_rates WHERE store_id = 'cz' AND method_code = 'gls'");
+        // The run stopped after GLS's near-EU rate (R13 T11: what a run leaves is a prefix of the seed's inserts).
+        $r11oDb->exec("DELETE FROM shipping_rates WHERE store_id = 'cz' AND method_code = 'gls' AND zone_code = 'eu'");
+        $r11oDb->exec("DELETE FROM payment_methods WHERE store_id = 'cz'");
+        $r11oDb->exec("DELETE FROM payment_method_countries WHERE store_id = 'cz'");
         $r11oDb->exec("DELETE FROM payment_method_shipping WHERE store_id = 'cz'");
         // HU: the merchant runs it with an own courier and no COD — not a seed remainder.
         $r11oDb->exec("DELETE FROM payment_methods WHERE store_id = 'hu' AND code = 'cod'");

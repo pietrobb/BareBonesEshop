@@ -152,4 +152,39 @@ if ($r13oHasSources) {
         gc_collect_cycles();
     }
 }
+// T11. The price-list repair took any seed-only scope without COD links for a failed run's remainder, so a merchant
+// who deleted COD or a carrier from the seeded list got all of it back. A run leaves a prefix of the seed's inserts.
+$r13oMigrated = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+try {
+    (new Migrator($r13oMigrated, dirname(__DIR__, 3) . '/migrations', $r13oRoot . '/migrations.lock'))->apply(static fn($m) => null);
+    $r13oCount = static fn(string $sql): int => (int)$r13oMigrated->query($sql)->fetchColumn();
+    // CZ: the merchant stopped offering cash on delivery (the method, its countries and its carriers).
+    $r13oMigrated->exec("DELETE FROM payment_methods WHERE store_id = 'cz' AND code = 'cod'");
+    $r13oMigrated->exec("DELETE FROM payment_method_countries WHERE store_id = 'cz' AND method_code = 'cod'");
+    $r13oMigrated->exec("DELETE FROM payment_method_shipping WHERE store_id = 'cz'");
+    // HU: the merchant dropped GLS and took COD off the carriers.
+    $r13oMigrated->exec("DELETE FROM shipping_methods WHERE store_id = 'hu' AND code = 'gls'");
+    $r13oMigrated->exec("DELETE FROM shipping_rates WHERE store_id = 'hu' AND method_code = 'gls'");
+    $r13oMigrated->exec("DELETE FROM payment_method_shipping WHERE store_id = 'hu'");
+    // PL: the merchant narrowed COD to no country.
+    $r13oMigrated->exec("DELETE FROM payment_method_countries WHERE store_id = 'pl' AND method_code = 'cod'");
+    $r13oMigrated->exec("DELETE FROM payment_method_shipping WHERE store_id = 'pl'");
+    (require dirname(__DIR__, 3) . '/migrations/20261101150000_price_list_repair.php')->up($r13oMigrated, true);
+    assert_equals([0, 0, 0], [
+        $r13oCount("SELECT COUNT(*) FROM payment_methods WHERE store_id = 'cz' AND code = 'cod'"),
+        $r13oCount("SELECT COUNT(*) FROM payment_method_countries WHERE store_id = 'cz' AND method_code = 'cod'"),
+        $r13oCount("SELECT COUNT(*) FROM payment_method_shipping WHERE store_id = 'cz'"),
+    ], 'R13 T11: cash on delivery the merchant deleted is not brought back by the price-list repair');
+    assert_equals([0, 0], [
+        $r13oCount("SELECT COUNT(*) FROM shipping_methods WHERE store_id = 'hu' AND code = 'gls'"),
+        $r13oCount("SELECT COUNT(*) FROM shipping_rates WHERE store_id = 'hu' AND method_code = 'gls'"),
+    ], 'R13 T11: a carrier the merchant deleted is not brought back with its rates');
+    assert_equals([0, 0], [
+        $r13oCount("SELECT COUNT(*) FROM payment_method_countries WHERE store_id = 'pl' AND method_code = 'cod'"),
+        $r13oCount("SELECT COUNT(*) FROM payment_method_shipping WHERE store_id = 'pl'"),
+    ], 'R13 T11: COD countries the merchant removed stay removed');
+} catch (Throwable $e) {
+    assert_true(false, 'R13 T11: price-list repair (' . get_class($e) . ': ' . $e->getMessage() . ')');
+}
+$r13oMigrated = null;
 $r13oRm($r13oRoot);

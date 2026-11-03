@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- **Backups and the updater from review round 3** (review round 13, T6, T7, T8). The update signing key is
+- **Backups, the updater and the price-list repair from review round 3** (review round 13, T6, T7, T8, T11).
+  Migration `20261101150000_price_list_repair` no longer brings back what a merchant deleted from a seeded CZ/HU/PL
+  price list (cash on delivery, a carrier with its rates, COD countries): it completes only a remainder a failed
+  run can leave, an exact prefix of the seed's inserts; installs that applied the previous version keep it as
+  applied. The update signing key is
   rotated with an endorsement: `php cli/build-update.php endorse` signs the new public key with the current secret
   key, and `php cli/update.php rotate-key --new-key=... --endorsement=...` accepts it only if the key the shop
   trusts made that signature (not because the repository or release notes say so), writes it into the key file
