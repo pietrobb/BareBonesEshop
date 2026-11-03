@@ -339,7 +339,7 @@ class Customers {
         $token = self::startPasswordReset($email);
         if ($token === null) return 'unknown';
         // Keep the store prefix: tokens are store-scoped, so the link must reopen the same store.
-        $resetUrl = $baseUrl . Template::seoPath(Template::storeUrl('/account.php')) . '?p=reset&token=' . rawurlencode($token);
+        $resetUrl = $baseUrl . Template::seoPath(Template::storeUrl('/account.php?p=reset&token=' . rawurlencode($token)));
         $mail = MailService::send('account_password_reset', $email, $locale, [
             'customer_name' => $email,
             'reset_url'     => $resetUrl,
@@ -391,7 +391,7 @@ class Customers {
         }
         $token = self::startEmailVerification($customerId);
         if ($token === null) return 'failed';
-        $url = $baseUrl . Template::seoPath(Template::storeUrl('/account.php')) . '?p=verify_email&token=' . rawurlencode($token);
+        $url = $baseUrl . Template::seoPath(Template::storeUrl('/account.php?p=verify_email&token=' . rawurlencode($token)));
         $mail = MailService::send('account_email_verification', (string)$customer['email'], $locale, [
             'customer_name' => (string)(($customer['name'] ?? '') ?: $customer['email']),
             'verify_url'    => $url,

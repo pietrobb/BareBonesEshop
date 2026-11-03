@@ -82,6 +82,14 @@ if ($uri === "/__admin") {
     $fn();
     exit;
 }
+if ($uri === "/__slash") {
+    // The trailing-slash redirect with a further language active (/category/x/ is rewritten only without a store prefix).
+    Bootstrap::initStoreContext("/en/", "", "us");
+    I18n::setLocale("es");
+    require_once $r4App . "/src/Entrypoints/Storefront/CatalogPages.php";
+    redirectCategoryTrailingSlash((string)$_GET["category"]);
+    exit;
+}
 $entry = match ($uri) {
     "/", "/index.php", "/account.php", "/product.php" => $uri === "/" ? "index.php" : ltrim($uri, "/"),
     default => null,
@@ -243,6 +251,29 @@ try {
     $r4Legal = $r4Paths($r4Head($r4Http('GET', '/?page=privacy', [], $r4Sid)['body']));
     assert_true(str_contains($r4Legal, '<link rel="canonical" href="/?page=privacy">') && str_contains($r4Legal, 'hreflang="cs" href="/cs/?page=privacy"'),
         'R4 legal pages: the privacy page has a canonical and hreflang alternates');
+
+    // --- R14 UX2 (review run 250): storeUrl() adds ?lang=, so a caller's own query must go inside it, not after it ---
+    $r4OneQuery = static function (string $url, string $p = ''): bool {
+        parse_str((string)parse_url($url, PHP_URL_QUERY), $query);
+        return substr_count($url, '?') === 1 && ($query['lang'] ?? null) === 'es' && ($p === '' || ($query['p'] ?? null) === $p);
+    };
+    $r4UsSlash = $r4Http('GET', '/__slash?category=r4-us-cat/&lang=es&sort=name_asc', [], $r4Sid);
+    parse_str((string)parse_url($r4UsSlash['location'], PHP_URL_QUERY), $r4UsSlashQuery);
+    assert_true($r4UsSlash['status'] === 301 && str_contains($r4UsSlash['location'], '/en/category/r4-us-cat?') && $r4OneQuery($r4UsSlash['location'])
+        && ($r4UsSlashQuery['sort'] ?? null) === 'name_asc',
+        'R14 UX2: the trailing-slash 301 of a Spanish category keeps one ?lang=es and the sort (' . $r4UsSlash['status'] . ' ' . $r4UsSlash['location'] . ')');
+    $r4UsLogin = $r4Http('GET', '/en/account.php?p=login&lang=es', [], $r4Sid)['body'];
+    preg_match_all('#(?:href|value)="([^"]*account\.php\?[^"]*)"#', $r4UsLogin, $r4UsLinks);
+    $r4UsLinks = array_map(static fn(string $u): string => html_entity_decode($u, ENT_QUOTES), $r4UsLinks[1]);
+    // The language switcher's links of the other stores and of the store language rightly carry no lang.
+    $r4UsSpanish = array_filter($r4UsLinks, static fn(string $u): bool => str_contains($u, 'lang='));
+    $r4UsBroken = array_filter($r4UsSpanish, static fn(string $u): bool => !$r4OneQuery($u));
+    $r4UsPages = array_map(static function (string $u): string {
+        parse_str((string)parse_url($u, PHP_URL_QUERY), $q);
+        return (string)($q['p'] ?? '');
+    }, array_diff($r4UsSpanish, $r4UsBroken));
+    assert_true($r4UsBroken === [] && array_diff(['login', 'register', 'forgot'], $r4UsPages) === [],
+        'R14 UX2: the account links of a Spanish login page have one ?, their p= and lang=es (' . implode(' ', $r4UsBroken ?: $r4UsLinks) . ')');
 
     // --- 9: admin customers are paginated and the heading shows the real total ---
     $r4Admin = '';

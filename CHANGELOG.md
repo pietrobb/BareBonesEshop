@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Further language in links with their own query** (review round 14, UX2 follow-up). With a further language active,
+  the password-reset and e-mail verification links, the account page's links (login, register, forgot password,
+  orders, addresses), the specification-value search links and the category trailing-slash redirect got a second
+  `?` after `?lang=` (`/account.php?lang=es?p=reset&token=…`): the reset form never opened and the language was
+  lost. Their query now goes into `Template::storeUrl()`; account templates use `{{account.page_urls.<page>}}`.
+  Custom themes appending `?p=` to `{{account.action_url}}` should switch to those.
+
 - **Usability** (review round 14, UX1–UX8). Storefront links keep a store's further language (`?lang=en` in a
   Slovak store): the language was lost after the first click, and the English product link answered with a 301 to
   the Slovak slug. The search, sort and filter forms submit the language too (`{{> global/lang-field}}`, which
