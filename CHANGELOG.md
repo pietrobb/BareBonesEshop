@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Low findings of review round 13 and clock-dependent tests** (T21). A listing of more than 500 products with
+  variants no longer reads every variant of the later products as a download (`variantStatesMany` overwrote its
+  column expression). A digital product without its file is not sold, like a download variant, and `doctor`
+  counts it; a bundle with an e-book component is not sold either (its download was never delivered while its
+  "stock" was shipped) and `doctor` warns (`catalog.digital_bundles`). Saving variants before `migrate` no longer
+  fails on the missing `variants.digital`, and the unreleased `order_items.digital` backfill reads the snapshot keys
+  from the decoded attributes instead of a `LIKE` on the JSON. The cache rebuild no longer writes the per-group
+  price maps (`cache/prices/*.json`) nothing read: `pricing.json` catalog rules and customer group discounts are
+  not applied to any price, `doctor` now says so (`pricing.legacy_rules`) and the sample `pricing.json` ships none;
+  catalog discounts are promotions and price lists. A transfer due in whole days counts calendar days, so an order
+  placed just after local midnight before the clocks go back is no longer due a day early. The bookshop theme's
+  texts are translated (`bookshop.*` keys, all seven languages). Tests no longer depend on the hour they run.
 - **Admin fixes** (review round 13, T10, T17, UX8). A store can no longer be added under a path the shop
   routes itself (`/api`, `/product`, `/category`, `/page`, `/feeds`, `/assets`, an application directory, …):
   a `/api` store answered the whole JSON API in its own context. Such a prefix, hand-edited into

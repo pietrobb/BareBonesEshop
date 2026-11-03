@@ -162,7 +162,7 @@ try {
     assert_true(in_array('stores/cz/storefront/cs/cat/r4-cat/page-1.json', $r4Files, true) && !preg_grep('~r4-foreign-cat~', $r4Files)
         && !preg_grep('~^stores/(?!cz/)~', $r4Files) && !preg_grep('~/de/~', $r4Files),
         'R4 cache rebuild: category pages of the cz catalog only, in the cz namespace and languages (' . implode(', ', array_slice($r4Files, 0, 8)) . $r4Noise . ')');
-    assert_equals(['R4-SKU'], array_keys((array)($r4Rebuild['prices'] ?? [])), 'R4 cache rebuild: the price cache holds the cz catalog\'s products only');
+    assert_true(!array_key_exists('prices', (array)$r4Rebuild) || $r4Rebuild['prices'] === null, 'R4 cache rebuild: no per-group price map is written (r13: nothing read it)');
 
     // 6. cli/gdpr-export.php exports a customer of a non-default store, in that store; --store picks among duplicates.
     $r4Fx = new PDO('sqlite:' . $r4Db, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);

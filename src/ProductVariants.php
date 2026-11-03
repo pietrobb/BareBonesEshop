@@ -55,10 +55,11 @@ final class ProductVariants {
      * and, for a download, whether its file exists (missing_file: the variant is not sold until one is uploaded).
      */
     public static function forEditor(int $productId): array {
-        return array_map(static function(array $row): array {
+        $digitalProduct = VariantAvailability::isDigitalProduct($productId);
+        return array_map(static function(array $row) use ($digitalProduct): array {
             $row['stock'] = self::ledgered((string)$row['sku']) ? Warehouse::totalAvailable((string)$row['sku']) : (int)$row['stock'];
             $row['attrs_text'] = self::attrsText((string)($row['attrs'] ?? ''));
-            $row['missing_file'] = (int)($row['digital'] ?? 0) === 1 && !VariantAvailability::hasDownload((string)$row['sku']);
+            $row['missing_file'] = ($digitalProduct || (int)($row['digital'] ?? 0) === 1) && !VariantAvailability::hasDownload((string)$row['sku']);
             return $row;
         }, Products::variants($productId));
     }
@@ -149,12 +150,14 @@ final class ProductVariants {
                 $deletePrices->execute([':id' => $id]);
                 $deleteVariant->execute([':id' => $id, ':product' => $productId]);
             }
+            // Code deployed before `migrate` has no variants.digital yet: the rest of the row still saves.
+            $hasDigital = Db::hasColumn('variants', 'digital');
             $update = $db->prepare('UPDATE variants SET sku = :sku, name = :name, attrs = :attrs, price_absolute = :price_absolute, price_delta = :price_delta,
-                availability = :availability, inventory_policy = :inventory_policy, sort_order = :sort_order, digital = :digital WHERE id = :id AND product_id = :product');
-            $insert = $db->prepare('INSERT INTO variants (product_id, sku, name, attrs, price_absolute, price_delta, availability, inventory_policy, sort_order, digital, stock)
-                VALUES (:product, :sku, :name, :attrs, :price_absolute, :price_delta, :availability, :inventory_policy, :sort_order, :digital, 0)');
+                availability = :availability, inventory_policy = :inventory_policy, sort_order = :sort_order' . ($hasDigital ? ', digital = :digital' : '') . ' WHERE id = :id AND product_id = :product');
+            $insert = $db->prepare('INSERT INTO variants (product_id, sku, name, attrs, price_absolute, price_delta, availability, inventory_policy, sort_order' . ($hasDigital ? ', digital' : '') . ', stock)
+                VALUES (:product, :sku, :name, :attrs, :price_absolute, :price_delta, :availability, :inventory_policy, :sort_order' . ($hasDigital ? ', :digital' : '') . ', 0)');
             foreach ($validated['rows'] as &$row) {
-                $values = array_diff_key($row, ['id' => 1, 'stock' => 1, 'stock_loaded' => 1]);
+                $values = array_diff_key($row, ['id' => 1, 'stock' => 1, 'stock_loaded' => 1] + ($hasDigital ? [] : ['digital' => 1]));
                 $params = [':product' => $productId] + array_combine(array_map(static fn(string $k): string => ":{$k}", array_keys($values)), $values);
                 if ($row['id'] > 0) $update->execute($params + [':id' => $row['id']]);
                 else {

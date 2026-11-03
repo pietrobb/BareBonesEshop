@@ -73,6 +73,8 @@ class Inventory {
 
         $components = self::bundleComponents($productId);
         if ($components) {
+            // Its download would never be delivered (downloads follow the bundle's SKU) while its "stock" got shipped.
+            if (VariantAvailability::hasDigitalComponent($productId)) throw new InvalidArgumentException('A bundle with a digital component cannot be sold');
             $snapshots = [];
             $reserved = $quantity;
             $backordered = 0;

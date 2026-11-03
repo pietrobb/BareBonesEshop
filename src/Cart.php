@@ -236,9 +236,8 @@ class Cart {
             $qty = $isDigital ? 1 : ($allowsShortfall ? (int)$item['qty'] : min((int)$item['qty'], $stock));
             if ($isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
-            // A download variant without its file is not sold: the customer would pay for nothing.
-            if ($available && !empty($item['variant_id']) && (int)($variants[$item['variant_id']]['digital'] ?? 0) === 1
-                && !VariantAvailability::hasDownload((string)$sku)) $available = false;
+            // A download (digital product or variant) without its file is not sold: the customer would pay for nothing.
+            if ($available && $isDigital && !VariantAvailability::hasDownload((string)$sku)) $available = false;
             if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
 
             $unavailableReason = $available ? null : 'not_available';

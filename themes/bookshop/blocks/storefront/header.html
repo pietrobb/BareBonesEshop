@@ -1,6 +1,6 @@
 <header class="bk-header">
   <div class="bk-topbar"><div class="wrap">
-    <p class="bk-topbar__note">Public-domain classics &middot; eBooks download right after payment</p>
+    <p class="bk-topbar__note">{{t.bookshop.tagline}}</p>
     <div class="bk-topbar__links">
       {{#if language_links.length > 1}}<div class="lang-switch">{{#each language_links}}<a href="{{url}}"{{#if active}} class="active" aria-current="true"{{/if}}>{{label}}</a>{{/each}}</div>{{/if}}
       <a href="{{account_url}}">{{account_label}}</a>
@@ -11,7 +11,7 @@
     <form class="bk-search search-bar" method="get" action="{{home_url}}" role="search">
       <input type="hidden" name="page" value="search">
       <label class="sr-only" for="storefront-search">{{t.search}}</label>
-      <input id="storefront-search" type="search" name="q" placeholder="Title, author or genre" value="{{search_query}}" data-search-suggest="{{t.search_suggestions}}">
+      <input id="storefront-search" type="search" name="q" placeholder="{{t.bookshop.search_placeholder}}" value="{{search_query}}" data-search-suggest="{{t.search_suggestions}}">
       <button type="submit">{{t.search}}</button>
     </form>
     <a href="{{cart_url}}" class="bk-cart cart-icon">{{t.cart}}{{#if cart_count}}<span class="bk-cart__count cart-badge">{{cart_count}}</span>{{/if}}</a>

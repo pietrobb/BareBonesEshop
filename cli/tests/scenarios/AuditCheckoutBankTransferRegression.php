@@ -75,7 +75,7 @@ $_SERVER['HTTP_HOST'] = 'shop.example';
 $_SERVER['REQUEST_URI'] = '/index.php?page=checkout';
 Bootstrap::initLocale('/index.php');
 $input = json_decode($extra, true) ?: [];
-$orders = static fn(): array => $db->query("SELECT id, order_number, total, currency, payment_method, payment_status, status FROM orders ORDER BY id")->fetchAll();
+$orders = static fn(): array => $db->query("SELECT id, order_number, total, currency, payment_method, payment_status, status, store_id, created_at FROM orders ORDER BY id")->fetchAll();
 $result = static function (array $payload): never { exit("\nA136RESULT" . json_encode($payload + ['code' => 200, 'new_orders' => []], JSON_INVALID_UTF8_SUBSTITUTE)); };
 if (str_starts_with($action, 'member')) {
     $member = $db->query("SELECT id, password_hash FROM customers WHERE email = 'a136-member@example.test'")->fetch();
@@ -174,7 +174,11 @@ try {
         assert_true(count($r['new_orders']) === 1 && ($a136Order['payment_status'] ?? '') === 'pending', "{$l}: the no-JS checkout creates one unpaid bank-transfer order");
         $a136Id = (int)($a136Order['id'] ?? 0);
         $a136Amount = I18n::price((int)($a136Order['total'] ?? 0), (string)($a136Order['currency'] ?? 'eur'));
-        $a136Due = gmdate('Y-m-d', time() + PendingOrderExpiry::DEFAULT_OFFLINE_SECONDS['bank_transfer']);
+        // The order's day on the shop's calendar plus the term in days: a UTC date was a day off for orders placed
+        // after local midnight but before UTC midnight (T21).
+        $a136Due = (new DateTimeImmutable((string)($a136Order['created_at'] ?? 'now'), new DateTimeZone('UTC')))
+            ->setTimezone(ShopTime::zone((string)($a136Order['store_id'] ?? '') ?: null))
+            ->modify('+' . intdiv(PendingOrderExpiry::DEFAULT_OFFLINE_SECONDS['bank_transfer'], 86400) . ' days')->format('Y-m-d');
 
         [$l, , $html] = $a136Do('done', ['order_id' => $a136Id]);
         $a136Html = $a136Block($html);

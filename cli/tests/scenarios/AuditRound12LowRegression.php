@@ -84,20 +84,14 @@ try {
     assert_equals('in stock', $r12lFeed['R12L-BOOK'] ?? null, 'R12 low: the feed lists a book with paperbacks in stock as in stock (its product row holds no stock)');
 } catch (Throwable $e) { $r12lFail('marketing feed', $e); }
 
+// Round 13: the price map those rules fed (cache/prices/*.json) was read by nothing and is gone; the doctor now says
+// that a pricing.json catalog rule is not applied (AuditRound13LowRegression).
 try {
-    Pricing::setConfig(['customer_groups' => ['guest' => ['discount' => 0]], 'catalog_rules' => [
-        ['name' => 'eBooks -50 %', 'active' => true, 'conditions' => ['product_type' => 'digital'], 'discount_type' => 'percent', 'discount_value' => 50],
-    ]]);
-    $r12lWrite = new ReflectionMethod(CacheRebuild::class, 'writePrices');
-    $r12lOut = fopen('php://memory', 'w+');
-    $r12lWrite->invoke(null, $r12lOut, 'guest');
-    rewind($r12lOut);
-    $r12lPrices = json_decode((string)stream_get_contents($r12lOut), true);
-    fclose($r12lOut);
-    assert_equals([1500, 300, 1500], [$r12lPrices['R12L-BOOK'] ?? null, $r12lPrices['R12L-BOOK-EB'] ?? null, $r12lPrices['R12L-BOOK-PB'] ?? null],
-        'R12 low: a catalog rule on product_type "digital" prices the e-book variant, not the paperback or the book');
+    $r12lRule = ['name' => 'eBooks -50 %', 'active' => true, 'conditions' => ['product_type' => 'digital'], 'discount_type' => 'percent', 'discount_value' => 50];
+    $r12lCheck = Setup::legacyPricingCheck(['catalog_rules' => [$r12lRule]]);
+    assert_true($r12lCheck['status'] === 'warn' && str_contains($r12lCheck['message'], 'eBooks -50 %'),
+        'R12 low: a pricing.json catalog rule on product_type "digital" is reported as not applied (no price used it)');
 } catch (Throwable $e) { $r12lFail('catalog price rules', $e); }
-finally { Pricing::setConfig([]); }
 
 // A download variant without its file.
 try {

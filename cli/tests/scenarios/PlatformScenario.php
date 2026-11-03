@@ -300,6 +300,8 @@ assert_true(!CheckoutSession::verifyOwnership($digitalOrderId, 'cs_test_digital_
 $pdo->exec("INSERT INTO variants (id, product_id, sku, name, stock, availability) VALUES (9001, 9001, 'TEST-COMING-SOON', 'Future', 5, 'coming_soon')");
 assert_true(!VariantAvailability::isPurchasable(9001, 9001), 'Variants: coming_soon is rejected server-side');
 VariantAvailability::setStatus(9001, VariantAvailability::ACTIVE);
+// A variant of a download is sold under its own SKU and needs its own file (r13: one without it is not for sale).
+$pdo->exec("INSERT INTO digital_assets (sku, asset_key, storage_path, download_name) VALUES ('TEST-COMING-SOON', 'pdf', 'future.pdf', 'future.pdf')");
 assert_true(VariantAvailability::isPurchasable(9001, 9001), 'Variants: active digital variant is purchasable');
 $digitalCommerceMig->up($pdo, true);
 $variantIndexes = array_column($pdo->query("PRAGMA index_list(variants)")->fetchAll(PDO::FETCH_ASSOC), 'name');
@@ -993,6 +995,7 @@ $vmInsert->execute([':id' => 9703, ':category' => $vmCategory, ':sku' => 'VM-FOR
 $pdo->exec("INSERT INTO product_attrs (product_id, attr_name, attr_value, numeric_val) VALUES (9701, 'Generic field', 'Generic value', NULL)");
 $pdo->exec("INSERT INTO product_specifications (product_id, lang, criteria_name, criteria_value, numeric_val, sort_order) VALUES (9701, 'en', 'Length', '42', 42, 0)");
 $pdo->exec("INSERT INTO variants (product_id, sku, name, attrs, price_delta, stock, availability) VALUES (9701, 'VM-DIGITAL-A', 'Variant A', '{\"channel\":\"standard\"}', 0, 0, 'active')");
+$pdo->exec("INSERT INTO digital_assets (sku, asset_key, storage_path, download_name) VALUES ('VM-DIGITAL-A', 'file', 'vm-digital-a.pdf', 'vm-digital-a.pdf')");
 $pdo->exec("INSERT INTO variants (product_id, sku, name, attrs, price_absolute, stock, availability) VALUES (9703, 'VM-FORMAT-A', 'Format A', '{}', 1999, 4, 'active'), (9703, 'VM-FORMAT-OOS', 'Format OOS', '{}', 2499, 0, 'active')");
 $pdo->exec("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (9701, 9702, 'related', 0), (9701, 9703, 'format', 0)");
 
@@ -1210,6 +1213,7 @@ $pdo->exec("DELETE FROM product_related_products WHERE product_id BETWEEN 9701 A
 $pdo->exec("DELETE FROM product_attrs WHERE product_id BETWEEN 9701 AND 9703");
 $pdo->exec("DELETE FROM product_specifications WHERE product_id BETWEEN 9701 AND 9703");
 $pdo->exec("DELETE FROM variants WHERE product_id BETWEEN 9701 AND 9703");
+$pdo->exec("DELETE FROM digital_assets WHERE sku = 'VM-DIGITAL-A'");
 $pdo->exec("DELETE FROM products WHERE id BETWEEN 9701 AND 9703");
 StorefrontViewModelRegistry::reset();
 

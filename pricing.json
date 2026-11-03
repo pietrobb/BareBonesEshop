@@ -2,30 +2,11 @@
     "customer_groups": {
         "guest":      {"name": "Guest", "discount": 0},
         "registered": {"name": "Registered", "discount": 0},
-        "wholesale":  {"name": "Wholesale", "discount": 15},
-        "vip":        {"name": "VIP", "discount": 10}
+        "wholesale":  {"name": "Wholesale", "discount": 0},
+        "vip":        {"name": "VIP", "discount": 0}
     },
 
-    "catalog_rules": [
-        {
-            "name": "Summer Sale",
-            "active": true,
-            "from": "2026-06-01",
-            "to": "2026-08-31",
-            "conditions": {"category": "oblecenie"},
-            "discount_type": "percent",
-            "discount_value": 20,
-            "priority": 1
-        },
-        {
-            "name": "Bulk Electronics",
-            "active": true,
-            "conditions": {"category": "elektronika", "min_qty": 5},
-            "discount_type": "percent",
-            "discount_value": 10,
-            "priority": 2
-        }
-    ],
+    "catalog_rules": [],
 
     "cart_rules": [
         {

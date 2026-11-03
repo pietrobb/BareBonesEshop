@@ -1,7 +1,7 @@
 {
   "name": "BareBones Bookshop",
   "version": "1.0.0",
-  "description": "English bookshop storefront: book-cover cards, genre shelves, author index and a format picker (eBook, paperback, hardcover). Inherits checkout, cart and account from the default theme.",
+  "description": "Bookshop storefront in the store's language: book-cover cards, genre shelves, author index and a format picker (eBook, paperback, hardcover). Inherits checkout, cart and account from the default theme.",
   "parent": "default",
   "blocks": "blocks",
   "assets": {
