@@ -11,6 +11,14 @@ if (!$safe) {
     throw new RuntimeException('Refusing to seed a database that is not explicitly disposable E2E storage');
 }
 
+// Bank transfer is offered only with a checksum-valid IBAN, and the shipped sample's has wrong check digits: the E2E
+// shop is configured with a real-format test account, saved where the admin saves stores.json.
+$e2eStores = StoreSettings::load();
+if (!BankTransferInstructions::validIban(strtoupper(str_replace(' ', '', (string)($e2eStores['stores']['default']['legal']['iban'] ?? ''))))) {
+    $e2eStores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';
+    $e2eStoresPath = DataOverrides::storesWritePath() ?? throw new RuntimeException('No writable stores.json location for the E2E shop');
+    file_put_contents($e2eStoresPath, json_encode($e2eStores, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+}
 Bootstrap::initStoreContext('/', '127.0.0.1');
 $db = Db::get();
 if ((int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn() === 0) {
