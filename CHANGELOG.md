@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Shipping and the withdrawal period** (review round 14, T4, F3, carrier labels, feed). Cancelling a parcel in the
+  admin also cancels its labels at the carrier (they stayed active there, so the parcel was still picked up and its
+  cash on delivery collected); a label the carrier cannot cancel stays active, is reported and the admin is told to
+  cancel it with the carrier. The carrier's idempotency key names the parcel, so two parcels of one order labelled at
+  the same time get two labels (they were one carrier request with one AWB). A cancelled parcel gets no label, and a
+  label the carrier creates while its parcel is being cancelled is cancelled at the carrier instead of being recorded
+  on the cancelled parcel. The withdrawal period of a bundle starts once every component is in a delivered parcel,
+  counted as bundle quantity × units per bundle (the component units were summed against the bundle quantity). The
+  marketing feed lists a bundle with an e-book component as out of stock, as the shop does not sell it.
 - **Payments** (review round 14, finding 3, T2, T18, T20). A capture of an older payment attempt records that
   attempt as the order's payment (refunds go to the money), and pending-order expiry asks the gateway about every
   attempt, not only the newest. A hidden store opens its payment link and the pages its gateway returns to. The

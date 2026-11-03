@@ -747,6 +747,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipment.msg.unchanged' => 'A követés nem változott.',
     'admin.shipment.msg.tracking_saved' => 'A szállítmány követése mentve.',
     'admin.shipment.msg.cancelled' => 'A szállítmány törölve.',
+    'admin.shipment.msg.cancelled_label_active' => 'A szállítmány törölve, de a futár nem törölte a címkéjét. Törölje közvetlenül a futárnál, különben elviszi a csomagot.',
     'admin.shipment.msg.not_found' => 'A szállítmány nem létezik.',
     'admin.shipment.msg.invalid_tracking' => 'A szállító, a csomagszám vagy a link érvénytelen (a linknek http:// vagy https:// előtaggal kell kezdődnie).',
     'admin.shipment.msg.failed' => 'A szállítmányt nem sikerült menteni.',

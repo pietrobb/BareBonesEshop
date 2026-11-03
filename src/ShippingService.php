@@ -200,8 +200,10 @@ class ShippingService
 
         $adapter = self::findAdapter($carrierId);
         $order   = self::fetchOrder($orderId);
-        if ($shipmentId !== null && !in_array($shipmentId, array_map('intval', array_column(Fulfillment::shipments($orderId), 'id')), true)) {
-            throw new \RuntimeException("Shipment {$shipmentId} does not belong to order {$orderId}");
+        if ($shipmentId !== null) {
+            $parcel = array_values(array_filter(Fulfillment::shipments($orderId), static fn(array $s): bool => (int)$s['id'] === $shipmentId))[0] ?? null;
+            if ($parcel === null) throw new \RuntimeException("Shipment {$shipmentId} does not belong to order {$orderId}");
+            if (($parcel['status'] ?? '') === 'cancelled') throw new \RuntimeException("Shipment {$shipmentId} is cancelled");
         }
         $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
@@ -210,9 +212,10 @@ class ShippingService
         if ($order['cod_amount'] > 0 && $adapter instanceof ShippingLifecycleAdapter && !$adapter->supportsCOD()) {
             throw new \RuntimeException("Shipping carrier does not support cash on delivery: {$carrierId}");
         }
-        // Labels cancelled earlier: a new label is a new carrier request, not a replay of the cancelled one.
-        $cancelled = $db->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store");
-        $cancelled->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => $store]);
+        // Labels cancelled earlier: a new label is a new carrier request, not a replay of the cancelled one. Counted per
+        // parcel: the carrier's idempotency key names the parcel (R14: two parcels labelled at once got one AWB).
+        $cancelled = $db->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store{$shipmentFilter}");
+        $cancelled->execute($params);
         $order['label_sequence'] = (int)$cancelled->fetchColumn() + 1;
         $order['shipment_id'] = $shipmentId;
         // T9: the carrier API is called with no transaction open. Inside one, a slow carrier held the order lock (on
@@ -230,6 +233,22 @@ class ShippingService
             if ($concurrent) {
                 $db->commit();
                 return $concurrent;
+            }
+            // The parcel was cancelled while the carrier answered: the label is voided at the carrier (after the commit,
+            // the carrier is not called under the lock) instead of being recorded as active on a cancelled parcel.
+            if ($shipmentId !== null) {
+                $status = $db->prepare("SELECT status FROM shipments WHERE id = :id AND order_id = :order AND store_id = :store");
+                $status->execute([':id' => $shipmentId, ':order' => $orderId, ':store' => $store]);
+                if ($status->fetchColumn() === 'cancelled') {
+                    $db->commit();
+                    $voided = self::voidAtCarrier($carrierId, (string)$result['awb'], $orderId);
+                    $db->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data, shipment_id, cod_amount)
+                        VALUES (:order_id, :store, :carrier, :awb, :status, '', :shipment_id, 0)")->execute([
+                        ':order_id' => $orderId, ':store' => $store, ':carrier' => $carrierId, ':awb' => $result['awb'],
+                        ':status' => $voided ? 'cancelled' : 'created', ':shipment_id' => $shipmentId,
+                    ]);
+                    throw new \RuntimeException("Shipment {$shipmentId} was cancelled while its label was created");
+                }
             }
             // A label of another parcel took the cash on delivery while the carrier answered: the carrier collects what
             // this label carries, so it is recorded as sent and the double collection is reported for the merchant.
@@ -457,6 +476,50 @@ class ShippingService
         $db->prepare("UPDATE shipping_labels SET status = 'cancelled', updated_at = " . Db::now() . " WHERE id = :id AND status != 'cancelled'")
             ->execute([':id' => $label['id']]);
         return $result + ['awb' => (string)$label['awb'], 'status' => 'cancelled', 'idempotent_replay' => false];
+    }
+
+    /**
+     * R14 T4: the active labels of a cancelled parcel are cancelled at the carrier too (a label left active there was
+     * still picked up, delivered and collected). Runs outside a transaction (it calls the carrier). Returns the AWBs the
+     * carrier did not cancel (no cancellation support or an error): those stay active and are reported for the merchant.
+     *
+     * @return list<string>
+     */
+    public static function cancelParcelLabels(int $orderId, int $shipmentId): array
+    {
+        // A store without carrier labels has none to cancel.
+        if (!StoreContext::current()->allows('shipping') || !Db::hasColumn('shipping_labels', 'shipment_id')) return [];
+        $db = Db::get();
+        $stmt = $db->prepare("SELECT id, carrier, awb FROM shipping_labels
+            WHERE order_id = :order AND shipment_id = :shipment AND store_id = :store AND status != 'cancelled' ORDER BY id");
+        $stmt->execute([':order' => $orderId, ':shipment' => $shipmentId, ':store' => StoreContext::current()->id()]);
+        $labels = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        // Only a carrier call needs to be outside a transaction; a parcel without labels has nothing to call.
+        if ($labels !== [] && $db->inTransaction()) throw new \LogicException('ShippingService::cancelParcelLabels calls the carrier and must run outside a transaction');
+        $left = [];
+        foreach ($labels as $label) {
+            if (!self::voidAtCarrier((string)$label['carrier'], (string)$label['awb'], $orderId)) {
+                $left[] = (string)$label['awb'];
+                continue;
+            }
+            $db->prepare("UPDATE shipping_labels SET status = 'cancelled', updated_at = " . Db::now() . " WHERE id = :id AND status != 'cancelled'")
+                ->execute([':id' => $label['id']]);
+        }
+        return $left;
+    }
+
+    /** Cancel one label at its carrier; false (reported) when the carrier cannot or did not. */
+    private static function voidAtCarrier(string $carrierId, string $awb, int $orderId): bool
+    {
+        try {
+            $adapter = self::findAdapter($carrierId);
+            if (!$adapter instanceof ShippingLifecycleAdapter) throw new \RuntimeException("Shipping carrier does not support label cancellation: {$carrierId}");
+            $adapter->cancelLabel($awb);
+            return true;
+        } catch (\Throwable $e) {
+            IncidentMonitor::report('shipping.label_still_active', 'shipping', 'error', ['order_id' => $orderId, 'awb' => $awb, 'error' => $e->getMessage()]);
+            return false;
+        }
     }
 
     /**

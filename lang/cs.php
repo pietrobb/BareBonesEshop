@@ -747,6 +747,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipment.msg.unchanged' => 'Sledování se nezměnilo.',
     'admin.shipment.msg.tracking_saved' => 'Sledování zásilky bylo uloženo.',
     'admin.shipment.msg.cancelled' => 'Zásilka byla zrušena.',
+    'admin.shipment.msg.cancelled_label_active' => 'Zásilka byla zrušena, ale dopravce její štítek nezrušil. Zrušte ho přímo u dopravce, jinak zásilku vyzvedne.',
     'admin.shipment.msg.not_found' => 'Zásilka neexistuje.',
     'admin.shipment.msg.invalid_tracking' => 'Dopravce, číslo zásilky nebo odkaz jsou neplatné (odkaz musí začínat http:// nebo https://).',
     'admin.shipment.msg.failed' => 'Zásilku se nepodařilo uložit.',
