@@ -1775,6 +1775,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'methods.payment.bank_transfer_desc' => 'Átutalás a számlánkra a rendelés leadása után.',
     'methods.payment.cod' => 'Utánvét',
     'methods.payment.cod_desc' => 'Fizetés átvételkor, ha a választott futárszolgálat támogatja.',
+    'methods.payment.invoice' => 'Vásárlás számlára',
+    'methods.payment.invoice_desc' => 'Jóváhagyott céges fiókoknak: a számla kifizetése a megállapodott határidőn belül.',
     'powered_by' => 'A BareBones E-shop működteti', 'added_to_cart' => 'Hozzáadva ✓',
     'select_variant' => 'Válasszon változatot.', 'cart_error' => 'A termék nem adható hozzá.', 'variant_required' => 'Válasszon változatot.',
     'variant_invalid' => 'A kiválasztott változat érvénytelen.', 'product_invalid' => 'A termék nem érhető el.', 'product_unavailable' => 'Ez a választás nem érhető el.',

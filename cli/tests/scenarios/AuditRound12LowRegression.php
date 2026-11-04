@@ -81,7 +81,9 @@ try {
     $r12lFeed = [];
     while (($r12lRow = fgetcsv($r12lCsv, null, ',', '"', '\\')) !== false) $r12lFeed[$r12lRow[0]] = $r12lRow[3] ?? '';
     fclose($r12lCsv);
-    assert_equals('in stock', $r12lFeed['R12L-BOOK'] ?? null, 'R12 low: the feed lists a book with paperbacks in stock as in stock (its product row holds no stock)');
+    // R15: a product with variants is listed per variant (item_group_id R12L-BOOK), so the paperback carries the stock.
+    assert_equals(['in stock', null], [$r12lFeed['R12L-BOOK-PB'] ?? null, $r12lFeed['R12L-BOOK'] ?? null],
+        'R12 low: the feed lists a book with paperbacks in stock as in stock (its product row holds no stock)');
 } catch (Throwable $e) { $r12lFail('marketing feed', $e); }
 
 // Round 13: the price map those rules fed (cache/prices/*.json) was read by nothing and is gone; the doctor now says

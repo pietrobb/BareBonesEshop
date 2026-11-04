@@ -25,6 +25,8 @@ class MailService {
     public const MARKETING_TEMPLATES = ['cart_reminder'];
     /** Rate-limited order mail is retried at most this many times by the worker. */
     public const RATE_LIMIT_MAX_RETRIES = 3;
+    /** Sender when MAIL_FROM is unset; the doctors warn about it (UpgradeChecks::mailSender). */
+    public const DEFAULT_FROM = 'noreply@localhost.invalid';
 
     /** For tests: inject a specific adapter (bypasses env). */
     public static function useAdapter(?MailAdapter $a): void {
@@ -83,7 +85,7 @@ class MailService {
         $rendered = self::render($template, $locale, $vars);
 
         $adapter = self::adapter($providerCode);
-        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: 'noreply@localhost.invalid')));
+        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: self::DEFAULT_FROM)));
         if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => $adapter->adapterId(), 'error' => 'invalid sender'];
         }

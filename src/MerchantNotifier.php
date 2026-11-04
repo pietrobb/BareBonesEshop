@@ -21,7 +21,7 @@ class MerchantNotifier {
             'complaint' => 'merchant_complaint_received',
             default => 'merchant_order_paid',
         });
-        $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
+        $paymentLabel = PaymentService::orderLabel($order) ?: (string)($order['payment_method'] ?? '');
         $sent = 0;
         foreach ($recipients as $recipient) {
             if (!self::claim($orderId, $event, $recipient)) continue;
@@ -35,7 +35,7 @@ class MerchantNotifier {
                     'customer_email' => (string)$order['customer_email'],
                     'payment_id' => (string)($order['payment_id'] ?? ''),
                     'payment_status' => (string)($order['payment_status'] ?? ''),
-                    'payment_method' => (string)($paymentSnapshot['label'] ?? $paymentSnapshot['name'] ?? $order['payment_method'] ?? ''),
+                    'payment_method' => $paymentLabel,
                     'awaiting_payment' => ($order['payment_status'] ?? '') !== 'paid',
                     'admin_url' => self::adminOrderUrl($cfg, $orderId),
                     'items' => array_map(static fn(array $item): array => [

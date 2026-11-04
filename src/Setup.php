@@ -499,6 +499,9 @@ class Setup
     {
         $mail = self::mailProvider($config);
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
+        [$senderLevel, $senderMessage] = UpgradeChecks::mailSender();
+        $add($senderLevel === 'ok' ? 'pass' : $senderLevel, 'provider.mail_from', $senderMessage,
+            $senderLevel === 'ok' ? '' : 'Set MAIL_FROM in the environment to an address on the shop\'s own domain (with SPF/DKIM for it).');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
         $invalidWebhooks = Webhook::invalidEndpoints($config);

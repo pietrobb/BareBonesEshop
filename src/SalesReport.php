@@ -87,20 +87,33 @@ final class SalesReport {
     }
 
     /**
-     * Best sellers by revenue. Revenue is money received like totals(): what was refunded of an order is taken off its
-     * lines in proportion to their share of the order total, so a product never shows more than the order brought in.
-     * @return array<string, list<array{product_id:int, sku:string, name:string, quantity:int, revenue:int}>> currency => best sellers by revenue
+     * Best sellers by revenue, one row per variant (each variant has its own SKU and name). Revenue is money received
+     * like totals(): an item refund (a completed credit note line) is taken off the line it refunded; the rest of what
+     * was refunded of an order (a full or amount refund, shipping) off its lines in proportion to what is left of them,
+     * so a product never shows more than the order brought in and an item refund never lowers another product.
+     * @return array<string, list<array{product_id:int, variant_id:?int, sku:string, name:string, quantity:int, revenue:int}>> currency => best sellers by revenue
      */
     public static function topProducts(string $storeId, string $sinceUtc, int $limit = 10): array {
         [$source, $params] = self::revenueSource($storeId);
-        $kept = "CASE WHEN COALESCE(r.refunded, 0) <= 0 OR o.total <= 0 THEN oi.total
-            WHEN r.refunded >= o.total THEN 0 ELSE oi.total * 1.0 * (o.total - r.refunded) / o.total END";
-        $stmt = Db::get()->prepare("SELECT LOWER(o.currency) AS currency, oi.product_id, MAX(oi.sku) AS sku, MAX(oi.name) AS name,
+        $credits = '';
+        if (Db::tableExists('credit_note_items') && Db::tableExists('order_refunds')) {
+            $credited = "SELECT %s, SUM(cni.gross) AS credited FROM credit_note_items cni JOIN order_refunds rf ON rf.id = cni.refund_id
+                WHERE rf.store_id = :cstore AND rf.status = 'succeeded' GROUP BY %s";
+            $credits = ' LEFT JOIN (' . sprintf($credited, 'cni.order_item_id', 'cni.order_item_id') . ') ci ON ci.order_item_id = oi.id'
+                . ' LEFT JOIN (' . sprintf(str_replace(':cstore', ':costore', $credited), 'rf.order_id', 'rf.order_id') . ') co ON co.order_id = o.id';
+            $params += [':cstore' => $storeId, ':costore' => $storeId];
+        }
+        $line = $credits === '' ? 'oi.total' : '(oi.total - COALESCE(ci.credited, 0))';
+        $order = $credits === '' ? 'o.total' : '(o.total - COALESCE(co.credited, 0))';
+        $rest = $credits === '' ? 'COALESCE(r.refunded, 0)' : '(COALESCE(r.refunded, 0) - COALESCE(co.credited, 0))';
+        $kept = "CASE WHEN {$line} <= 0 OR {$order} <= 0 THEN 0 WHEN {$rest} <= 0 THEN {$line}
+            WHEN {$rest} >= {$order} THEN 0 ELSE {$line} * 1.0 * ({$order} - {$rest}) / {$order} END";
+        $stmt = Db::get()->prepare("SELECT LOWER(o.currency) AS currency, oi.product_id, MAX(oi.variant_id) AS variant_id, MAX(oi.sku) AS sku, MAX(oi.name) AS name,
                 COALESCE(SUM(oi.quantity), 0) AS quantity, COALESCE(SUM({$kept}), 0) AS revenue
-            FROM {$source} JOIN order_items oi ON oi.order_id = o.id
+            FROM {$source} JOIN order_items oi ON oi.order_id = o.id{$credits}
             WHERE " . self::revenueCondition() . " AND o.created_at >= :since
-            GROUP BY LOWER(o.currency), oi.product_id
-            ORDER BY revenue DESC, quantity DESC, oi.product_id ASC");
+            GROUP BY LOWER(o.currency), oi.product_id, COALESCE(oi.variant_id, 0)
+            ORDER BY revenue DESC, quantity DESC, oi.product_id ASC, MAX(oi.variant_id) ASC");
         $stmt->execute($params + [':store' => $storeId, ':since' => $sinceUtc]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -108,6 +121,7 @@ final class SalesReport {
             if (count($out[$currency] ?? []) >= $limit) continue;
             $out[$currency][] = [
                 'product_id' => (int)$row['product_id'],
+                'variant_id' => $row['variant_id'] === null ? null : (int)$row['variant_id'],
                 'sku' => (string)$row['sku'],
                 'name' => (string)$row['name'],
                 'quantity' => (int)$row['quantity'],

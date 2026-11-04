@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Reports, feed and translations** (review round 15). Top products list each variant on its own row, and a refunded
+  item comes off the line it refunded instead of being spread over the whole order; only the rest of a refund (an
+  amount or shipping refund) is spread over what is left. The Google Merchant and Meta feeds list one item per
+  variant (own SKU, price, availability, `item_group_id`, `color`/`size`) with a link that opens the product page on
+  that variant (`?variant=`), and a reduced product carries `price` plus `sale_price`. The B2B method seeded as
+  "Invoice purchase" now reads in the invoice's and e-mail's language, also on existing orders; the `payment_method`
+  e-mail variable is the method's name, not its code; the admin parcel list and label block name the carrier
+  ("Packeta") instead of its code. `php cli/update.php doctor` and `php cli/setup.php doctor` warn while `MAIL_FROM`
+  is unset (mail leaves from `noreply@localhost.invalid`) or on an example/reserved domain, and fail when it is not
+  a valid address (no e-mail is sent).
 - **Content, e-mails and GDPR** (review round 15). The e-mail template guard no longer lets hidden text through
   `color:white`, a text colour equal to (or too close to) its background, or `<font color>`: it compares the
   computed text and background colours. A legal page's "last updated" date follows the merchant's own edit of that

@@ -1796,6 +1796,8 @@ return [
     'methods.payment.bank_transfer_desc' => 'Prevodom na účet po odoslaní objednávky.',
     'methods.payment.cod' => 'Dobierka',
     'methods.payment.cod_desc' => 'Platba pri prevzatí, ak ju zvolený dopravca podporuje.',
+    'methods.payment.invoice' => 'Nákup na faktúru',
+    'methods.payment.invoice_desc' => 'Pre schválené firemné účty: úhrada faktúry v dohodnutej splatnosti.',
     'powered_by' => 'Poháňa BareBones E-shop',
     'added_to_cart' => 'Pridané ✓',
     'select_variant' => 'Vyberte variant.',
