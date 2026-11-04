@@ -212,7 +212,7 @@ assert_true(count($r8lDone['withdrawals']) === 1 && ($r8lRow['order_number'] ?? 
     && array_keys(json_decode((string)($r8lRow['items'] ?? '{}'), true) ?: []) === [$r8lItemIds['R8L-NEW'][0]] && preg_match('~^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d~', (string)($r8lRow['received_at'] ?? '')) === 1,
     'R8 withdrawal: the confirmed statement is recorded with the selected line and its receipt time, without a reason (' . json_encode($r8lRow) . ')');
 assert_true(($r8lMail['template'] ?? '') === 'withdrawal_received' && ($r8lMail['recipient'] ?? '') === 'r8l.guest@example.test'
-    && str_contains((string)($r8lPayload['received_at'] ?? ''), (string)($r8lRow['received_at'] ?? '-')) && ($r8lPayload['items'][0]['name'] ?? '') === 'R8L Chair'
+    && ($r8lPayload['received_at'] ?? '') === ShopTime::stamp((string)($r8lRow['received_at'] ?? '-'), 'sk') && ($r8lPayload['items'][0]['name'] ?? '') === 'R8L Chair'
     && ($r8lRow['confirmation_status'] ?? '') === 'sent' && str_contains((string)$r8lDone['output'], 'sme prijali'),
     'R8 withdrawal: the consumer gets an acknowledgement e-mail with the statement and its receipt time, and the page confirms it (' . json_encode($r8lMail, JSON_UNESCAPED_UNICODE) . ')');
 assert_true(in_array(['merchant_notify', 'withdrawal'], array_map(static fn(array $j): array => [(string)($j['type'] ?? ''), explode(':', (string)($j['payload']['event'] ?? ''))[0]], $r8lDone['jobs']), true),

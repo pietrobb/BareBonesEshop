@@ -844,6 +844,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
         AbandonedCarts::markConverted($orderId);
         Cart::clear();
+        unset($_SESSION[CheckoutService::DRAFT_KEY]);
         // Invalidate the submitted CSRF value after the irreversible create so
         // an exact browser/network replay cannot reserve stock a second time.
         Security::rotateCsrfToken();

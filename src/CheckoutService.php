@@ -2,6 +2,9 @@
 declare(strict_types=1);
 /** Canonical application boundary shared by HTML and JSON checkout transports. */
 class CheckoutService {
+    /** Session key of the contact and address the shopper last posted at checkout (formState()). */
+    public const DRAFT_KEY = 'checkout_draft';
+
     public static function isDigitalOnly(array $items): bool {
         if (!function_exists('cartIsDigitalOnly')) require_once __DIR__ . '/Http/ApiHandlers.php';
         return cartIsDigitalOnly($items);
@@ -275,12 +278,14 @@ class CheckoutService {
 
     /**
      * What the checkout form shows. A posted form keeps the shopper's values (after any refusal);
-     * a fresh form starts from the signed-in customer's profile and default shipping address.
+     * a fresh form starts from the signed-in customer's profile and default shipping address, then what the shopper
+     * last posted in this session (R15 low: a reload or a trip back to the cart keeps the typed contact and address;
+     * cleared when the order is placed and on logout).
      * Picking one of the customer's own saved addresses replaces the address fields; an id of
      * another customer's address is ignored. Countries come from the store's shipping zones.
      * @return array{values: array<string,string>, country: string, countries: array<string,string>, addresses: list<array{id:int,label:string,selected:bool}>}
      */
-    public static function formState(array $post, bool $posted): array {
+    public static function formState(array $post, bool $posted, bool $remember = false): array {
         $values = [];
         foreach (['name' => 255, 'email' => 255, 'phone' => 64, 'street' => 255, 'city' => 255, 'zip' => 32, 'notes' => 2000,
             'company' => 255, 'ico' => 40, 'dic' => 40, 'vat_id' => 40] as $key => $max) {
@@ -304,6 +309,16 @@ class CheckoutService {
                 if (trim((string)($picked[$key] ?? '')) !== '') $values[$key] = (string)$picked[$key];
             }
             $country = strtoupper((string)$picked['country']);
+        }
+        $draft = $_SESSION[self::DRAFT_KEY] ?? null;
+        if ($posted) {
+            // Only a submit that passed CSRF ($remember): a forged one must not prefill every later form in the session.
+            if ($remember) $_SESSION[self::DRAFT_KEY] = ['values' => $values, 'country' => $country];
+        } elseif (is_array($draft)) {
+            foreach ((array)($draft['values'] ?? []) as $key => $value) {
+                if (array_key_exists($key, $values) && is_string($value) && $value !== '') $values[$key] = $value;
+            }
+            if (is_string($draft['country'] ?? null) && $draft['country'] !== '') $country = $draft['country'];
         }
         $countries = ShippingService::destinationCountries();
         if (!isset($countries[$country])) {

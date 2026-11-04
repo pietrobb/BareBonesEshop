@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Low findings** (review round 15). An admin amount typed as `1,299` was read as 1,30 EUR (the comma taken as the
+  decimal separator, the rest rounded away); an amount with more decimals than the currency has is now refused with
+  a message instead of being rounded. A checkout form that failed validation or was reloaded kept nothing: the
+  contact and address last posted stay in the session and fill the form again (only from a post that passed the
+  CSRF check), and are dropped when the order is placed and on logout. Withdrawal and complaint confirmations (page and e-mail) gave the receipt time in UTC; they
+  show it on the shop's clock with its zone, and the 30-day complaint decision deadline counts from the shop's local
+  receipt day. A mutation sweep of MailService, Security, Warehouse, PaymentService and InvoiceService left survivors
+  the suite did not catch; new regression tests kill every one that can change behaviour (rate-limited mail retry,
+  form-action and role checks, stock reservation races and ledger signs, refund requests and bookings, credit caps
+  per VAT rate, the VAT breakdown and payment terms). A test of refund-period dates no longer flakes when the clock
+  crosses a second.
 - **Reports, feed and translations** (review round 15). Top products list each variant on its own row, and a refunded
   item comes off the line it refunded instead of being spread over the whole order; only the rest of a refund (an
   amount or shipping refund) is spread over what is left. The Google Merchant and Meta feeds list one item per

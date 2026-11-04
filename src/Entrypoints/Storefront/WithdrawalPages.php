@@ -26,7 +26,7 @@ function renderWithdrawal(): string {
                 $refusal = $result['error'];
                 if ($result['ok']) {
                     $view['done'] = $t($result['confirmation'] === 'sent' ? 'withdrawal.done' : 'withdrawal.done_no_mail',
-                        ['at' => $result['received_at'] . ' UTC', 'email' => (string)$order['customer_email'], 'order' => (string)$order['order_number']]);
+                        ['at' => ShopTime::stamp($result['received_at']), 'email' => (string)$order['customer_email'], 'order' => (string)$order['order_number']]);
                     $view['show_form'] = false;
                 }
             } elseif ($refusal === null) {

@@ -32,6 +32,17 @@ final class Money {
      */
     public static function parseInput(mixed $raw, string $currency): int {
         if (!is_string($raw)) return -1;
+        // R15 low: "1,299" is 1 299 or a typo, never 1,30 €: a decimal part finer than a cent is refused, not rounded.
+        // The decimal separator is found as Import::parsePriceToCents finds it (the last one when both kinds occur,
+        // a single one otherwise; a repeated one alone is digit grouping, "12,345,678").
+        $number = (string)preg_replace('/[.,]-$/', '', (string)preg_replace('/[^\d.,-]/', '', $raw));
+        $comma = strrpos($number, ',');
+        $dot = strrpos($number, '.');
+        $last = max($comma === false ? -1 : $comma, $dot === false ? -1 : $dot);
+        if ($last >= 0 && ($comma !== false && $dot !== false || substr_count($number, $number[$last]) === 1)
+            && strlen($number) - $last - 1 > 2) {
+            return -1;
+        }
         try {
             $cents = Import::parsePriceToCents($raw);
         } catch (\InvalidArgumentException $e) {

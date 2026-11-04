@@ -11,7 +11,9 @@ $r13rFail = static function (string $what, Throwable $e): void {
 // N4: an order of two books in two parcels. The period ran from the first delivered parcel (MAX over the delivered
 // ones), so it could close before the second book arrived; art. 9(2)(b)(i) starts it with the last one.
 $r13rDay = 86400;
-$r13rAgo = static fn(int $days): string => gmdate('Y-m-d H:i:s', time() - $days * $r13rDay);
+// One fixed "now": a timestamp written and the one expected must not straddle a second boundary (flaky under load).
+$r13rNow = time();
+$r13rAgo = static fn(int $days): string => gmdate('Y-m-d H:i:s', $r13rNow - $days * $r13rDay);
 $r13rCfg = new ReflectionProperty('Security', 'cfg');
 $r13rCfgPrev = $r13rCfg->getValue();
 $r13rCfg->setValue(null, ['rma_return_window_days' => 14] + (array)$r13rCfgPrev);
