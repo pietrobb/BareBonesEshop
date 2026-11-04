@@ -81,6 +81,11 @@ class Db {
         self::forgetSchema($pdo);
     }
 
+    /** Whether this request already opened the shared connection (get() would otherwise connect). */
+    public static function connected(): bool {
+        return self::$pdo !== null;
+    }
+
     /** Reset connection (for testing) */
     public static function reset(): void {
         self::$pdo = null;

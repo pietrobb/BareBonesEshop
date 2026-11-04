@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Web worker after a failed request** (review round 15, high 1). The page-request worker shares the request's
+  database connection. When the request died inside a transaction, every job of the pass ran inside it, looked
+  completed and was rolled back with the connection at exit: a credit note and its job vanished, a database or Redis
+  queue ran the job again, and SQLite stayed write-locked for the whole pass (up to 300 s). The pass now rolls that
+  transaction back first (`web_worker.request_transaction_rolled_back`), or skips and leaves the slot free when it
+  cannot. `cli/worker.php --once` now handles every ready job (within its 55 s budget), not only the first five.
+
 - **Further language in links with their own query** (review round 14, UX2 follow-up). With a further language active,
   the password-reset and e-mail verification links, the account page's links (login, register, forgot password,
   orders, addresses), the specification-value search links and the category trailing-slash redirect got a second
