@@ -252,7 +252,9 @@ function pageOrder(): void {
             <?php if (!empty($allowed)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=status" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <select name="new_status" aria-label="<?= esc(I18n::t('admin.order.change_status')) ?>">
+                <?php // R15: no preselected target, or one click on the button cancelled the order (the first allowed move). ?>
+                <select name="new_status" required aria-label="<?= esc(I18n::t('admin.order.change_status')) ?>">
+                    <option value="" selected>— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option>
                     <?php foreach ($allowed as $s): ?>
                     <option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option>
                     <?php endforeach; ?>

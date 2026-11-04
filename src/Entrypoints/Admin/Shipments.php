@@ -150,7 +150,7 @@ function adminShipmentWarehouseNames(): array {
 function handleOrderShipmentCreate(): void {
     Security::adminRequire('orders.ship');
     $orderId = Security::int($_GET['id'] ?? 0);
-    adminShipmentAction($orderId, static function(array $order) use ($orderId): string {
+    adminShipmentAction($orderId, static function(array $order) use ($orderId): string|array {
         $key = (string)($_POST['shipment_key'] ?? '');
         if (!preg_match('/^[a-f0-9]{32}$/', $key)) throw new DomainException('admin.shipment.msg.invalid_form');
         $coreKey = "admin:{$orderId}:{$key}";
@@ -186,21 +186,21 @@ function handleOrderShipmentCreate(): void {
             'order_id' => $orderId, 'warehouse_id' => $group['warehouse_id'], 'items' => $items,
             'status' => $shipNow ? 'shipped' : 'planned',
         ] + ($shipNow ? array_combine(['carrier', 'tracking_number', 'tracking_url'], $tracking) : []), 'Admin shipment');
-        return $shipNow ? 'admin.shipment.msg.shipped' : 'admin.shipment.msg.created';
+        return $shipNow ? ['admin.shipment.msg.shipped', Fulfillment::shippedJobsWithin($orderId)] : 'admin.shipment.msg.created';
     });
 }
 
 function handleOrderShipmentShip(): void {
     Security::adminRequire('orders.ship');
     $orderId = Security::int($_GET['id'] ?? 0);
-    adminShipmentAction($orderId, static function() use ($orderId): string {
+    adminShipmentAction($orderId, static function() use ($orderId): string|array {
         $shipment = adminOrderShipment($orderId, 'planned');
         adminShipmentWithdrawalCheck($orderId);
         $tracking = adminShipmentTrackingInput();
         if (!Fulfillment::ship((int)$shipment['id'], ...$tracking)) return 'admin.shipment.msg.already_done';
         AuditLog::log('shipment', (int)$shipment['id'], ['status' => 'planned'],
             ['status' => 'shipped'] + array_combine(['carrier', 'tracking_number', 'tracking_url'], $tracking), 'Admin shipment shipped');
-        return 'admin.shipment.msg.shipped';
+        return ['admin.shipment.msg.shipped', Fulfillment::shippedJobsWithin($orderId)];
     });
 }
 
@@ -230,7 +230,10 @@ function handleOrderShipmentCancel(): void {
     }, false, false);
 }
 
-/** Run one shipment change in a transaction (false: carrier-API changes take their own short one); DomainException messages are admin i18n keys. */
+/**
+ * Run one shipment change in a transaction (false: carrier-API changes take their own short one); DomainException
+ * messages are admin i18n keys. $change returns the message key, or [key, deferred jobs] pushed after the commit.
+ */
 function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrder = true, bool $transaction = true): void {
     $db = Db::get();
     if ($transaction) $db->beginTransaction();
@@ -240,8 +243,9 @@ function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrd
         $order = Orders::byId($orderId);
         if (!$order) throw new DomainException('admin.order.msg.not_found');
         if ($requireOpenOrder && !Fulfillment::orderShippable($order)) throw new DomainException('admin.shipment.not_shippable');
-        $message = $change($order);
+        [$message, $jobs] = (array)$change($order) + [1 => []];
         if ($transaction) $db->commit();
+        OrderWorkflow::pushDeferredJobs($jobs);
         setFlash('ok', I18n::t($message));
     } catch (Throwable $e) {
         if ($transaction && $db->inTransaction()) $db->rollBack();
