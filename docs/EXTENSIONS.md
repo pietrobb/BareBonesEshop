@@ -96,6 +96,15 @@ return [
   used. The shop and the other extensions keep running. Reasons are in the structured log
   (`extension.load_failed`), in `Extensions::errors()` and as a failing `extensions` check in
   `php cli/setup.php doctor`.
+- **Fatal errors quarantine the extension.** Some errors cannot be caught inside PHP: a provider
+  class that misses one of its interface's methods, a class declared twice, an incompatible method
+  signature. The request that hits one fails (HTTP 500), and the extension whose file raised it is
+  quarantined: the following requests, workers and CLI commands skip it like any broken extension,
+  and the reason (message, file, line) is in `Extensions::errors()`, the doctor and the log
+  (`extension.quarantined`). The quarantine lives in `<private_runtime_dir>/extension-quarantine.json`
+  (without that directory, in the system temp directory) and lifts by itself as soon as one of the
+  extension's PHP files changes; deleting the entry retries the unchanged extension. Running out of
+  memory or time does not quarantine.
 - Extensions run with the same privileges as core code. Review them like core changes.
 
 ## Database

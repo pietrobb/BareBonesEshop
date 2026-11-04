@@ -10,7 +10,8 @@
  * extensions/<code>/extension.php returns ['code' => '<code>', 'name' => ..., 'version' => ...,
  * 'register' => static function (ExtensionApi $api): void { ... }]; classes are autoloaded from
  * extensions/<code>/src/<Class>.php. A broken extension is skipped as a whole and reported by
- * errors(), the log and `cli/setup.php doctor`; the shop and the other extensions keep running.
+ * errors(), the log and `cli/setup.php doctor`; the shop and the other extensions keep running. A fatal error PHP
+ * cannot catch quarantines the extension that raised it (quarantineOnFatal) until its PHP files change.
  */
 final class Extensions
 {
@@ -26,6 +27,10 @@ final class Extensions
     private static array $roots = [];
     private static array $errors = [];
     private static array $autoloaders = [];
+    /** @var array<string,list<string>> enabled code => its root as given and resolved (fatal-error guard) */
+    private static array $guarded = [];
+    private static string $quarantineFile = '';
+    private static bool $guardRegistered = false;
 
     /** Load the enabled extensions once per process. $config/$directory default to config.php and <root>/extensions. */
     public static function boot(?array $config = null, ?string $directory = null): void
@@ -33,18 +38,59 @@ final class Extensions
         if (self::$booted) return;
         self::$booted = true;
         $config ??= self::config();
-        $directory ??= dirname(__DIR__) . '/' . self::DIRECTORY;
+        $directory = rtrim($directory ?? dirname(__DIR__) . '/' . self::DIRECTORY, '/\\');
         $enabled = $config['extensions'] ?? [];
         if (!is_array($enabled) || !array_is_list($enabled)) {
             self::fail('*', 'config "extensions" must be a list of extension codes');
             return;
         }
+        if ($enabled === []) return;
+        // R15: an error PHP cannot catch (a provider class missing its interface's methods, a class declared twice)
+        // ended every request of the shop. The request that hits one still fails, but the extension whose file raised
+        // it is quarantined: later requests skip it like any broken extension until its files change.
+        self::$quarantineFile = self::quarantinePath($config, $directory);
+        if (!self::$guardRegistered) {
+            register_shutdown_function([self::class, 'quarantineOnFatal']);
+            self::$guardRegistered = true;
+        }
+        $quarantine = self::readQuarantine();
         foreach ($enabled as $code) {
             $code = is_string($code) ? $code : '';
+            $root = $directory . '/' . $code;
             try {
-                self::load($code, rtrim($directory, '/\\'));
+                if (isset($quarantine[$code]) && preg_match('/^[a-z][a-z0-9-]{1,30}$/', $code)) {
+                    if (($quarantine[$code]['fingerprint'] ?? '') === self::fingerprint($root)) {
+                        throw new RuntimeException('quarantined after a fatal error at ' . date('Y-m-d H:i:s', (int)($quarantine[$code]['at'] ?? 0))
+                            . ': ' . (string)($quarantine[$code]['error'] ?? '') . ' (changing one of the extension\'s PHP files retries it)');
+                    }
+                }
+                if (preg_match('/^[a-z][a-z0-9-]{1,30}$/', $code)) self::$guarded[$code] = array_unique([self::normalize($root), self::normalize((string)(realpath($root) ?: $root))]);
+                self::load($code, $directory);
+                if (isset($quarantine[$code])) self::writeQuarantine($code, null);
             } catch (Throwable $e) {
                 self::fail($code, $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Shutdown guard: a fatal error raised in an enabled extension's file quarantines that extension. Memory and
+     * time limits are not the extension's fault alone and do not.
+     * @internal registered by boot()
+     */
+    public static function quarantineOnFatal(): void
+    {
+        $error = error_get_last();
+        if ($error === null || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return;
+        if (preg_match('/^(Allowed memory size|Maximum execution time)/', (string)$error['message'])) return;
+        $file = self::normalize((string)$error['file']);
+        foreach (self::$guarded as $code => $roots) {
+            foreach ($roots as $root) {
+                if (!str_starts_with($file, $root . '/')) continue;
+                $message = $error['message'] . ' in ' . substr($file, strlen($root) + 1) . ':' . $error['line'];
+                self::writeQuarantine($code, ['error' => $message, 'at' => time(), 'fingerprint' => self::fingerprint($root)]);
+                Logger::error('extension.quarantined', ['extension' => $code, 'error' => $message]);
+                return;
             }
         }
     }
@@ -182,7 +228,55 @@ final class Extensions
     {
         foreach (self::$autoloaders as $autoloader) spl_autoload_unregister($autoloader);
         self::$booted = false;
-        self::$loaded = self::$providers = self::$listeners = self::$storefront = self::$pages = self::$api = self::$roots = self::$errors = self::$autoloaders = [];
+        self::$loaded = self::$providers = self::$listeners = self::$storefront = self::$pages = self::$api = self::$roots = self::$errors = self::$autoloaders = self::$guarded = [];
+        self::$quarantineFile = '';
+    }
+
+    /** Quarantine file: in private_runtime_dir, else the temp directory, one per extensions directory. */
+    private static function quarantinePath(array $config, string $directory): string
+    {
+        $runtimeDir = rtrim((string)($config['private_runtime_dir'] ?? ''), '/\\');
+        if ($runtimeDir !== '' && is_dir($runtimeDir) && is_writable($runtimeDir)) return $runtimeDir . '/extension-quarantine.json';
+        return rtrim(sys_get_temp_dir(), '/\\') . '/bbeshop-' . substr(hash('sha256', self::normalize((string)(realpath($directory) ?: $directory))), 0, 16) . '-extension-quarantine.json';
+    }
+
+    /** @return array<string,array{error?:string,at?:int,fingerprint?:string}> */
+    private static function readQuarantine(): array
+    {
+        if (self::$quarantineFile === '' || !is_file(self::$quarantineFile)) return [];
+        $data = json_decode((string)file_get_contents(self::$quarantineFile), true);
+        return is_array($data) ? $data : [];
+    }
+
+    /** Set (or with null clear) one extension's quarantine entry. */
+    private static function writeQuarantine(string $code, ?array $entry): void
+    {
+        if (self::$quarantineFile === '') return;
+        $data = self::readQuarantine();
+        if ($entry === null) unset($data[$code]); else $data[$code] = $entry;
+        $temporary = self::$quarantineFile . '.' . getmypid() . '.tmp';
+        if (file_put_contents($temporary, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false || !rename($temporary, self::$quarantineFile)) {
+            @unlink($temporary);
+            Logger::error('extension.quarantine_not_written', ['extension' => $code, 'file' => self::$quarantineFile]);
+        }
+    }
+
+    /** Paths, sizes and modification times of the extension's PHP files: any edit, added or removed file changes it. */
+    private static function fingerprint(string $root): string
+    {
+        if (!is_dir($root)) return '';
+        $files = [];
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)) as $file) {
+            if ($file->isFile() && strtolower($file->getExtension()) === 'php') $files[] = substr(self::normalize($file->getPathname()), strlen(self::normalize($root))) . '|' . $file->getSize() . '|' . $file->getMTime();
+        }
+        sort($files);
+        return hash('sha256', implode("\n", $files));
+    }
+
+    private static function normalize(string $path): string
+    {
+        $path = rtrim(str_replace('\\', '/', $path), '/');
+        return PHP_OS_FAMILY === 'Windows' ? strtolower($path) : $path;
     }
 
     private static function load(string $code, string $directory): void
