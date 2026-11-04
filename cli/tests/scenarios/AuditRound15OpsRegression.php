@@ -99,7 +99,10 @@ try {
         'R15 medium: build-update.php fingerprint prints the value for the release notes with the same function as the shop');
     $r15oOps = (string)file_get_contents($r15oRoot . '/docs/OPERATIONS_RUNBOOK.md');
     $r15oAi = (string)file_get_contents($r15oRoot . '/docs/AI_UPDATE_RUNBOOK.md');
-    assert_true(str_contains($r15oOps, 'git tag -s vX.Y.Z') && str_contains($r15oOps, 'git verify-tag vX.Y.Z') && str_contains($r15oAi, 'git verify-tag vX.Y.Z'),
+    $r15oVerify = 'git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag vX.Y.Z';
+    $r15oSigners = (string)@file_get_contents($r15oRoot . '/releases/allowed_signers');
+    assert_true(str_contains($r15oOps, 'tag -s vX.Y.Z') && str_contains($r15oOps, $r15oVerify) && str_contains($r15oAi, $r15oVerify)
+        && preg_match('~^\S+@\S+ namespaces="git" ssh-ed25519 AAAA\S+~m', $r15oSigners) === 1,
         'R15 medium: the release checklist signs and verifies the tag, and the bootstrap runbook verifies it before exporting');
 } catch (Throwable $e) {
     $r15oFail('fingerprint/tags', $e);
