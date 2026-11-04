@@ -17,13 +17,13 @@ function adminShipmentLabelState(int $orderId, bool $open): array {
 /**
  * Label carriers for one order: only the carrier the customer chose (R15: a Packeta COD order was offered just the
  * in-store pickup label, the only connected one). A chosen carrier without a label API is listed as not connected.
- * An order without a rate snapshot keeps every carrier.
+ * No rate snapshot: every carrier. R16: a shipping.json delivery method ("standard") names none: all but in-store pickup.
  * @param array<string,?string> $carriers ShippingService::labelCarriers()
  * @return array<string,?string>
  */
 function adminOrderLabelCarriers(array $order, array $carriers): array {
     $own = ShippingService::orderCarrier($order);
-    if ($own === null) return $carriers;
+    if ($own === null) return ShippingService::isLegacyDeliveryOrder($order) ? array_diff_key($carriers, ['pickup' => true]) : $carriers;
     return [$own => array_key_exists($own, $carriers) ? $carriers[$own] : 'no label API'];
 }
 
