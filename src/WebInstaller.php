@@ -200,8 +200,9 @@ final class WebInstaller
 
     /**
      * The starter data of a demo package: demo/<name>/dist/starter.json naming a ready SQLite database, its private
-     * downloads and its stores.json. demo/ is denied over HTTP. Null for a plain install.
-     * @return array{name: string, database: string, downloads: string, stores: string}|null
+     * downloads, its stores.json and the release it was built from ('' when none). demo/ is denied over HTTP. Null for
+     * a plain install.
+     * @return array{name: string, database: string, downloads: string, stores: string, version: string}|null
      */
     public static function starter(string $root): ?array
     {
@@ -211,7 +212,8 @@ final class WebInstaller
             $dir = dirname($file);
             $path = static fn(string $key, string $default): string => $dir . '/' . basename((string)($manifest[$key] ?? $default));
             $starter = ['name' => (string)($manifest['name'] ?? 'Shop'), 'database' => $path('database', 'shop.sqlite'),
-                'downloads' => $path('downloads', 'downloads'), 'stores' => $path('stores', 'stores.json')];
+                'downloads' => $path('downloads', 'downloads'), 'stores' => $path('stores', 'stores.json'),
+                'version' => preg_match('/^[0-9][A-Za-z0-9._+-]{0,63}$/', (string)($manifest['version'] ?? '')) === 1 ? (string)$manifest['version'] : ''];
             if (is_file($starter['database']) && is_file($starter['stores'])) return $starter;
         }
         return null;
@@ -338,6 +340,7 @@ final class WebInstaller
             self::configurePayments(Db::get(), $stores, $v);
             $default = (string)($stores['default_store'] ?? 'default');
             $owner = AdminIdentity::createWithStore($v['admin_user'], $v['admin_password'], 'owner', true, $default, true);
+            if ($starter !== null) self::baselineRelease($starter, $config, $root);
             $leftover = $seeded ? self::removeStarter($starter, $root) : null;
             return ['admin' => ['username' => $v['admin_user']] + (array)$owner['enrollment'], 'doctor' => Setup::doctor($config, $root, Db::get()),
                 'starter' => $starter['name'] ?? null, 'leftover' => $leftover];
@@ -428,6 +431,19 @@ final class WebInstaller
     private static function h(mixed $value): string
     {
         return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /**
+     * R15: a package built from a release records it in the update state, in the folder cli/update.php uses, like
+     * `php cli/update.php baseline` — or the signed updater refuses the shop as of unknown version. An existing state
+     * (a reused private folder) is left as it is.
+     */
+    public static function baselineRelease(array $starter, array $config, string $root): void
+    {
+        if (($starter['version'] ?? '') === '') return;
+        $private = (string)($config['private_runtime_dir'] ?? dirname($root) . '/bareboneseshop-private');
+        $updater = new Updater($root, (string)($config['update_storage_dir'] ?? rtrim($private, '/\\') . '/updates'));
+        if (!$updater->hasInstalledState()) $updater->baseline($starter['version']);
     }
 
     /** The starter's stores.json becomes the install's own copy (apply then keeps it instead of the example). */

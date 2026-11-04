@@ -8,8 +8,8 @@ declare(strict_types=1);
  *
  * Usage: php demo/bookshop/package.php --out=DIR [--ref=HEAD] [--name=bareboneseshop-bookshop] [--shop-name="BareBones Books"] [--version=X.Y.Z]
  *
- * Built from a release tag (vX.Y.Z) the package records that release in .barebones-version.json, so a shop installed
- * from it is upgraded by the signed updater like any other installation. Entries carry Unix modes 0755/0644.
+ * Built from a release tag (vX.Y.Z) the package records that release in starter.json; install.php baselines the signed
+ * updater with it, so a shop installed from it is upgraded like any other installation. Entries carry Unix modes 0755/0644.
  *
  * Needs git, the vendor/bbf submodule checked out, and PHP with pdo_sqlite and zip. The files come from git archive
  * (LF, only tracked files), never from the working tree.
@@ -98,20 +98,15 @@ try {
         $target = $dist . '/downloads/' . str_replace('\\', '/', substr($file->getPathname(), strlen($downloads) + 1));
         $file->isDir() ? @mkdir($target, 0755, true) : copy($file->getPathname(), $target);
     }
-    file_put_contents($dist . '/starter.json', json_encode(['name' => $shopName, 'database' => 'shop.sqlite', 'downloads' => 'downloads', 'stores' => 'stores.json',
-        'ref' => trim($run(['git', 'rev-parse', $ref], $repo))], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-    unlink($shop . '/config.php');
-    // R15: the installed release, as `php cli/update.php baseline` records it, so the signed updater can upgrade the
-    // shop to the next release (it refuses an installation of unknown version). Built from a release tag only.
+    // R15: the release the package is built from. The web installer baselines the signed updater with it (as
+    // `php cli/update.php baseline` would), so the shop can be upgraded to the next release. Release tags only.
     $tag = trim((string)@shell_exec('git -C ' . escapeshellarg($repo) . ' describe --tags --exact-match ' . escapeshellarg($ref) . ' 2>' . (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null')));
     $version = (string)($options['version'] ?? (preg_match('/^v(\d+\.\d+\.\d+[A-Za-z0-9.+-]*)$/', $tag, $m) ? $m[1] : ''));
-    if ($version !== '') {
-        file_put_contents($shop . '/.barebones-version.json', json_encode(['version' => $version, 'baselined_at' => gmdate('c'), 'source' => 'bookshop-package'],
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-        echo "      release {$version} recorded for the updater\n";
-    } else {
-        echo "      not a release tag: no version recorded (the updater needs `php cli/update.php baseline --version=...`)\n";
-    }
+    echo $version !== '' ? "      release {$version}: the installer records it for the updater\n"
+        : "      not a release tag: no version recorded (upgrading needs `php cli/update.php baseline --version=...`)\n";
+    file_put_contents($dist . '/starter.json', json_encode(['name' => $shopName, 'database' => 'shop.sqlite', 'downloads' => 'downloads', 'stores' => 'stores.json',
+        'ref' => trim($run(['git', 'rev-parse', $ref], $repo))] + ($version !== '' ? ['version' => $version] : []), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+    unlink($shop . '/config.php');
     foreach (['cache', 'logs', 'jobs'] as $runtime) {
         foreach (glob($shop . '/' . $runtime . '/*') ?: [] as $leftover) if (basename($leftover) !== '.htaccess' && basename($leftover) !== '.gitkeep') $remove($leftover);
     }

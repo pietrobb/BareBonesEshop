@@ -64,6 +64,11 @@ final class Updater
         return false;
     }
 
+    public function hasInstalledState(): bool
+    {
+        return is_file($this->statePath());
+    }
+
     public function baseline(string $version): array
     {
         if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$/', $version)) {

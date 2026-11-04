@@ -107,6 +107,21 @@ try {
         $wiAgain = $e->getMessage();
     }
     assert_true(str_contains($wiAgain, 'already exists'), "Web installer: an existing database is never replaced by the starter ({$wiAgain})");
+
+    // R15: a package built from a release records it; the installer baselines the signed updater with it, in the
+    // folder cli/update.php reads (else the updater refuses the shop as of unknown version).
+    $wiState = $wiConfig['private_runtime_dir'] . '/updates/installed.json';
+    $wiStarterWith = static function (string $version) use ($wiDist, $wiRoot): array {
+        file_put_contents($wiDist . '/starter.json', json_encode(['name' => 'WI Starter', 'database' => 'shop.sqlite', 'downloads' => 'downloads', 'stores' => 'stores.json', 'version' => $version]));
+        return (array)WebInstaller::starter($wiRoot);
+    };
+    assert_equals(['', ''], [$wiStarter['version'] ?? null, $wiStarterWith('../../config')['version'] ?? null], 'R15 web installer: a starter without a release, or with an invalid one, has no version');
+    WebInstaller::baselineRelease((array)$wiStarter, $wiConfig, $wiRoot);
+    assert_true(!is_file($wiState), 'R15 web installer: a starter without a release records no installed version');
+    WebInstaller::baselineRelease($wiStarterWith('2.1.1'), $wiConfig, $wiRoot);
+    assert_equals('2.1.1', json_decode((string)@file_get_contents($wiState), true)['version'] ?? null, 'R15 web installer: the package release becomes the updater\'s installed version');
+    WebInstaller::baselineRelease($wiStarterWith('2.2.0'), $wiConfig, $wiRoot);
+    assert_equals('2.1.1', json_decode((string)@file_get_contents($wiState), true)['version'] ?? null, 'R15 web installer: an existing installed version is never overwritten');
 } catch (Throwable $e) { $wiFail('form, seller, payments and starter', $e); }
 
 // A clean clone-equivalent tree over HTTP: / and admin.php lead to install.php, the form installs, then install.php is gone.
