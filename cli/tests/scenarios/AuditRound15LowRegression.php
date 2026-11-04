@@ -50,9 +50,9 @@ try {
     $_SESSION = [];
     $r15lTyped = ['name' => 'R15L Typed', 'email' => 'r15l@example.test', 'phone' => '+421900000151', 'street' => 'R15L Street 1',
         'city' => 'Zilina', 'zip' => '01001', 'country' => 'SK', 'notes' => 'R15L note'];
-    CheckoutService::formState(['name' => ''] + $r15lTyped, true);
+    CheckoutService::formState(['name' => ''] + $r15lTyped, true, true);
     $r15lAfterRefusal = CheckoutService::formState([], false);
-    CheckoutService::formState($r15lTyped, true);
+    CheckoutService::formState($r15lTyped, true, true);
     $r15lReload = CheckoutService::formState([], false);
     assert_equals(['', 'r15l@example.test'], [$r15lAfterRefusal['values']['name'], $r15lAfterRefusal['values']['email']],
         'R15 low: a reload after a refused submit shows what was typed (the empty name stays empty)');
@@ -71,4 +71,76 @@ try {
     $r15lFail('checkout draft', $e);
 } finally {
     $_SESSION = [];
+}
+
+// (2b) Only a POST that passed CSRF leaves a draft: a forged or expired submit must not plant values that prefill every
+// later checkout form in the session. Real renderCheckout() in a child process on this database.
+try {
+    $r15lCategory = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
+    // Fixed id: an auto-assigned id follows the highest fixed id of earlier scenarios and collides with later ones.
+    $pdo->exec("INSERT INTO products (id, store_id, category_id, sku, slug, product_type, name, price, currency, stock, status, inventory_policy) VALUES
+        (98151, 'default', {$r15lCategory}, 'R15L-DRAFT', 'r15l-draft', 'simple', 'R15L draft goods', 1500, 'eur', 0, 'active', 'backorder')");
+    $r15lRoot = test_fixture_path('r15-low-draft');
+    mkdir($r15lRoot);
+    file_put_contents($r15lRoot . '/draft.php', <<<'PHP'
+<?php
+[, $root, $dbPath, $rules] = $argv;
+require $root . '/src/autoload.php';
+$db = new PDO('sqlite:' . $dbPath);
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+Db::init($db, 'sqlite');
+Pricing::setConfig((array)json_decode($rules, true));
+ConsentService::setDefinitionsForTesting([]);
+I18n::setLocale('sk');
+require $root . '/src/Entrypoints/Storefront/CheckoutPages.php';
+$t = static fn(string $key): string => $key;
+Security::sessionStart();
+$_SERVER['REMOTE_ADDR'] = '127.0.15.1';
+$_SERVER['HTTP_HOST'] = 'localhost';
+$field = static function (string $html, string $name): ?string {
+    if (!preg_match('~<input[^>]*\bname="' . $name . '"[^>]*>~', $html, $tag)) return null;
+    return preg_match('~\bvalue="([^"]*)"~', $tag[0], $m) ? html_entity_decode($m[1]) : '';
+};
+$page = static function (array $post) use ($field): array {
+    $_SERVER['REQUEST_METHOD'] = $post ? 'POST' : 'GET';
+    $_POST = $post;
+    $html = renderCheckout();
+    return ['email' => $field($html, 'email'), 'street' => $field($html, 'street'), 'draft' => isset($_SESSION[CheckoutService::DRAFT_KEY])];
+};
+$cart = ['p_98151' => ['product_id' => 98151, 'variant_id' => null, 'qty' => 1]];
+$planted = ['name' => 'Planted', 'email' => 'planted@example.invalid', 'street' => 'Planted 1', 'city' => 'Zilina', 'zip' => '01001', 'country' => 'SK'];
+$_SESSION = ['cart' => $cart, 'csrf_token' => 'r15l-good'];
+$rejected = $page(['checkout' => '1', 'csrf_token' => 'wrong'] + $planted);
+$afterRejected = $page([]);
+$_SESSION = ['cart' => $cart, 'csrf_token' => 'r15l-good'];
+$page(['checkout_refresh' => '1', 'csrf_token' => 'r15l-good'] + $planted);
+$afterRefresh = $page([]);
+echo 'R15LRESULT' . json_encode(['rejected' => $rejected, 'after_rejected' => $afterRejected, 'after_refresh' => $afterRefresh]);
+PHP);
+    $pdo->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchAll();
+    $r15lProcess = proc_open([PHP_BINARY, $r15lRoot . '/draft.php', dirname(TEST_CLI_DIR), $testDbPath, json_encode((new ReflectionProperty(Pricing::class, 'config'))->getValue())],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r15lPipes);
+    fclose($r15lPipes[0]);
+    $r15lOut = stream_get_contents($r15lPipes[1]) . stream_get_contents($r15lPipes[2]);
+    fclose($r15lPipes[1]);
+    fclose($r15lPipes[2]);
+    proc_close($r15lProcess);
+    @unlink($r15lRoot . '/draft.php');
+    @rmdir($r15lRoot);
+    $r15lAt = strrpos($r15lOut, 'R15LRESULT');
+    $r15lPage = $r15lAt === false ? null : json_decode(substr($r15lOut, $r15lAt + 10), true);
+    assert_true(is_array($r15lPage), 'R15 low: the checkout draft child process reports its pages (' . substr(trim($r15lOut), -300) . ')');
+    $r15lPage = (array)$r15lPage;
+    assert_equals(['planted@example.invalid', false], [$r15lPage['rejected']['email'] ?? null, $r15lPage['rejected']['draft'] ?? null],
+        'R15 low: a submit refused for its CSRF token re-renders with what it posted but stores no checkout draft');
+    assert_equals(['', ''], [$r15lPage['after_rejected']['email'] ?? null, $r15lPage['after_rejected']['street'] ?? null],
+        'R15 low: the next fresh checkout form after a CSRF-refused submit shows none of its values');
+    assert_equals(['planted@example.invalid', 'Planted 1', true],
+        [$r15lPage['after_refresh']['email'] ?? null, $r15lPage['after_refresh']['street'] ?? null, $r15lPage['after_refresh']['draft'] ?? null],
+        'R15 low: a refresh that passed CSRF keeps its values for the next fresh checkout form');
+} catch (Throwable $e) {
+    $r15lFail('checkout draft CSRF', $e);
+} finally {
+    $pdo->exec('DELETE FROM products WHERE id = 98151');
 }

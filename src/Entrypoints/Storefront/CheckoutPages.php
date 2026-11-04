@@ -74,9 +74,8 @@ function renderCheckout(): string {
     $posted = $_SERVER['REQUEST_METHOD'] === 'POST';
     $couponAction = $posted && is_string($_POST['coupon_action'] ?? null) ? $_POST['coupon_action'] : '';
     $formAction = $couponAction !== '' || ($posted && (isset($_POST['address_action']) || !empty($_POST['checkout_refresh'])));
-    if ($formAction && !Security::csrfValidate()) {
-        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => $t('home'), 'error_label' => $t('checkout_error_title'), 'message' => $t('checkout_csrf_error')]);
-    }
+    $csrfOk = $posted && Security::csrfValidate(); // also gates the checkout draft (formState)
+    if ($formAction && !$csrfOk) return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => $t('home'), 'error_label' => $t('checkout_error_title'), 'message' => $t('checkout_csrf_error')]);
     $placed = !$formAction && $posted && !empty($_POST['checkout']) ? processCheckout() : ['error' => ''];
     if (isset($placed['page'])) return $placed['page'];
     $checkoutError = $placed['error'];
@@ -85,7 +84,7 @@ function renderCheckout(): string {
         $cart = Cart::enriched()['items'];
         if (!$cart) return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => $t('home'), 'error_label' => $t('checkout_error_title'), 'message' => $checkoutError]);
     }
-    $state = CheckoutService::formState($_POST, $posted);
+    $state = CheckoutService::formState($_POST, $posted, $csrfOk);
     $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
     $country = $state['country'];
     // Priced in the order's VAT scenario: reverse charge and export show (and reach thresholds with) the net amounts charged.
