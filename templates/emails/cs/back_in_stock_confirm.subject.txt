@@ -1,0 +1,1 @@
+Potvrďte upozornění na dostupnost: {{product_name}}

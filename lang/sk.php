@@ -258,6 +258,11 @@ return [
     'back_in_stock.limit' => 'Táto adresa už čaká na príliš veľa produktov.',
     'back_in_stock.throttled' => 'Príliš veľa žiadostí. Skúste to neskôr.',
     'back_in_stock.expired' => 'Platnosť formulára vypršala. Skúste to znova.',
+    'back_in_stock.confirm_sent' => 'Ešte jeden krok: poslali sme vám e-mail s potvrdzovacím odkazom. Otvorte ho do 48 hodín, inak žiadosť vymažeme.',
+    'back_in_stock.failed' => 'Potvrdzovací e-mail sa nepodarilo odoslať. Skúste to prosím neskôr.',
+    'back_in_stock.confirm_invalid' => 'Tento potvrdzovací odkaz je neplatný alebo vypršal. Požiadajte prosím znova na stránke produktu.',
+    'back_in_stock.confirm_message' => 'Potvrďte, že chcete jeden e-mail, keď bude {product} opäť dostupný.',
+    'back_in_stock.confirm_submit' => 'Potvrdiť',
     'shop_now'         => 'Nakupovať',
 
     // Placeholders used in filter inputs

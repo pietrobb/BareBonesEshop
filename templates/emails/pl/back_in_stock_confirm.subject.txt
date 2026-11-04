@@ -1,0 +1,1 @@
+Potwierdź powiadomienie o dostępności: {{product_name}}

@@ -181,3 +181,89 @@ try {
     foreach (glob($r15gRoot . '/*') ?: [] as $r15gFile) @unlink($r15gFile);
     @rmdir($r15gRoot);
 }
+
+// 4. "Notify me when back in stock" had no double opt-in: anyone could sign a stranger's address up and the shop mailed
+//    it. The request now waits until the address opens the e-mailed link and presses the button (opening alone does
+//    nothing: mail scanners follow links); only confirmed requests are mailed, unconfirmed ones lapse after 48 hours.
+if (!function_exists('renderStockNotify')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/GuestPages.php';
+(require dirname(TEST_CLI_DIR) . '/migrations/20261104120000_back_in_stock_double_opt_in.php')->up($pdo, Db::isSqlite());
+$r15bLocale = I18n::locale();
+I18n::setLocale('en');
+Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+$r15bServer = $_SERVER;
+$r15bCfg = new ReflectionProperty(Security::class, 'cfg');
+$r15bCfgBase = Security::config();
+$r15bCfg->setValue(null, ['app_url' => 'https://r15b.example.test'] + $r15bCfgBase);
+$r15bWh = (int)$pdo->query("SELECT id FROM warehouses WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+    VALUES (9781, 'default', (SELECT MIN(id) FROM categories WHERE store_id = 'default'), 'R15B lamp', 'r15b-lamp', 'R15B-S', 'simple', 900, 'eur', 'active', 0, 'deny')")->execute();
+$pdo->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', ?, 'R15B-S', 0, 0)")->execute([$r15bWh]);
+$r15bRows = static fn(): array => $pdo->query("SELECT email, confirmed_at, token_hash FROM back_in_stock_requests WHERE product_id = 9781 ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+$r15bAlerts = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM email_log WHERE template = 'back_in_stock' AND recipient = 'r15b-shop@example.test'")->fetchColumn();
+$r15bRestock = static function (int $qty) use ($r15bWh): void {
+    Warehouse::setStock($r15bWh, 'R15B-S', $qty, 'count');
+    Warehouse::syncProductStock(['R15B-S']);
+};
+$r15bToken = static function (): string {
+    $mail = LogMail::lastCaptured() ?? [];
+    return preg_match('~page=stock-notify&(?:amp;)?confirm=([a-f0-9]{64})~', (string)($mail['html'] ?? ''), $m) ? $m[1] : '';
+};
+try {
+    LogMail::clearCaptured();
+    $r15bAsked = BackInStock::subscribe(9781, 'R15B-Shop@Example.test', 'en');
+    $r15bMail = LogMail::lastCaptured() ?? [];
+    $r15bLink = $r15bToken();
+    assert_true($r15bAsked === 'confirm_sent' && count($r15bRows()) === 1 && $r15bRows()[0]['confirmed_at'] === null
+        && ($r15bMail['to'] ?? '') === 'r15b-shop@example.test' && str_contains((string)($r15bMail['subject'] ?? ''), 'R15B lamp') && $r15bLink !== ''
+        && $r15bRows()[0]['token_hash'] === hash('sha256', $r15bLink),
+        'R15 back in stock: the form stores an unconfirmed request and e-mails the address a confirmation link (' . json_encode([$r15bAsked, $r15bRows(), $r15bMail['subject'] ?? null]) . ')');
+
+    $r15bAlertsBefore = $r15bAlerts();
+    $r15bRestock(3);
+    assert_equals([0, 0, 1], [BackInStock::process(['R15B-S']), $r15bAlerts() - $r15bAlertsBefore, count($r15bRows())],
+        'R15 back in stock: an unconfirmed request is not mailed when the product returns');
+    $r15bRestock(0);
+
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_GET = ['page' => 'stock-notify', 'confirm' => $r15bLink];
+    $_POST = [];
+    $r15bOpened = renderStockNotify();
+    assert_true(str_contains($r15bOpened, 'data-stock-notify-confirm') && str_contains($r15bOpened, 'R15B lamp') && $r15bRows()[0]['confirmed_at'] === null,
+        'R15 back in stock: opening the link shows a confirm button and confirms nothing');
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_GET = ['page' => 'stock-notify'];
+    $_POST = ['confirm' => $r15bLink, 'csrf_token' => 'forged'];
+    $r15bForged = renderStockNotify();
+    $_POST['csrf_token'] = Security::csrfToken();
+    $r15bConfirmed = renderStockNotify();
+    assert_true($r15bRows()[0]['confirmed_at'] !== null && $r15bRows()[0]['token_hash'] === null && str_contains($r15bConfirmed, esc(I18n::t('back_in_stock.subscribed')))
+        && str_contains($r15bForged, esc(I18n::t('back_in_stock.expired'))),
+        'R15 back in stock: the posted button (with the form token) confirms the request and spends the link');
+    assert_true(str_contains(renderStockNotify(), esc(I18n::t('back_in_stock.confirm_invalid'))), 'R15 back in stock: a spent link does not confirm again');
+
+    LogMail::clearCaptured();
+    assert_true(BackInStock::subscribe(9781, 'r15b-shop@example.test', 'en') === 'confirm_sent' && LogMail::captured() === [] && $r15bRows()[0]['confirmed_at'] !== null,
+        'R15 back in stock: asking again after confirming sends nothing and answers the same (the form does not reveal who waits)');
+
+    $r15bRestock(3);
+    assert_equals([1, 1, 0], [BackInStock::process(['R15B-S']), $r15bAlerts() - $r15bAlertsBefore, count($r15bRows())],
+        'R15 back in stock: the confirmed request is mailed once and deleted');
+    $r15bRestock(0);
+
+    BackInStock::subscribe(9781, 'r15b-late@example.test', 'en');
+    $r15bLate = $r15bToken();
+    $pdo->prepare("UPDATE back_in_stock_requests SET created_at = ? WHERE email = 'r15b-late@example.test'")->execute([gmdate('Y-m-d H:i:s', time() - (BackInStock::CONFIRM_HOURS + 1) * 3600)]);
+    BackInStock::process(['R15B-S']);
+    assert_true($r15bLate !== '' && BackInStock::pendingForToken($r15bLate) === null && !BackInStock::confirm($r15bLate) && $r15bRows() === [],
+        'R15 back in stock: a link not confirmed within 48 hours is void and the request is deleted');
+    assert_true(is_file(dirname(TEST_CLI_DIR) . '/templates/emails/sk/back_in_stock_confirm.html') && is_file(dirname(TEST_CLI_DIR) . '/templates/emails/de/back_in_stock_confirm.subject.txt'),
+        'R15 back in stock: the confirmation e-mail exists in every language');
+} finally {
+    $_SERVER = $r15bServer;
+    $r15bCfg->setValue(null, $r15bCfgBase);
+    $_GET = $_POST = [];
+    I18n::setLocale($r15bLocale);
+    $pdo->exec("DELETE FROM back_in_stock_requests WHERE product_id = 9781");
+    $pdo->exec("DELETE FROM warehouse_stock WHERE sku = 'R15B-S'");
+    $pdo->exec("DELETE FROM products WHERE id = 9781");
+}

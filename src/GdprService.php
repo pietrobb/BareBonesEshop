@@ -431,7 +431,7 @@ class GdprService {
         // Anyone can type an address into the form: an unverified account does not own the requests under it.
         $stockNotifications = [];
         if ((string)$ownership[':verified'] === '1' && self::hasTable($db, 'back_in_stock_requests')) {
-            $stmt = $db->prepare("SELECT id, product_id, email, locale, created_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
+            $stmt = $db->prepare("SELECT id, product_id, email, locale, created_at, confirmed_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
             $stmt->execute([$store, $email]);
             $stockNotifications = $stmt->fetchAll();
         }
