@@ -109,6 +109,13 @@ database and the eBook files.
    to (e.g. `/srv/bookshop-data`) and enter it. A folder inside the web root is always refused.
 5. Sign in at `/admin.php`. After the install `install.php` answers 404 and changes nothing.
 
+**Upgrading.** The package of a release records that release and `install.php` writes it to the update
+state in the private data folder, so the shop is upgraded like any installation with the signed updater: unpack the next release's update package and run
+`php cli/update.php apply --package=<folder>` in the shop folder (over SSH, or as a one-off cron job in
+the hosting panel where there is no shell); it keeps `config.php` and the private data folder. Its folders
+unpack as 0755 and files as 0644. A package built from a branch instead of a release tag records no
+version: run `php cli/update.php baseline --version=<release it was built from>` once before the first update.
+
 E-mails are only logged until you configure SMTP in `config.php`. To build the package yourself:
 `php demo/bookshop/package.php --out=/tmp` (needs git and the `vendor/bbf` submodule). The same
 `install.php` also installs a plain checkout without a shell; it then starts with an empty catalog.

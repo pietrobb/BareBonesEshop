@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
+  many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
+  0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.
+  A package built from a release tag records the release in its `starter.json` (`--version=` overrides) and
+  `install.php` baselines the signed updater with it, so the shop upgrades with `php cli/update.php apply` like any
+  other installation (README: Upgrading).
 - **Web worker after a failed request** (review round 15, high 1). The page-request worker shares the request's
   database connection. When the request died inside a transaction, every job of the pass ran inside it, looked
   completed and was rolled back with the connection at exit: a credit note and its job vanished, a database or Redis
