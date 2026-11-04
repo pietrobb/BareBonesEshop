@@ -60,7 +60,7 @@ try {
     [, $r15iRma] = Rma::create($r15iPaid, null, 'R15I paperback back', [$r15iPb => 1]);
     Rma::setStatus((int)$r15iRma, 'approved');
     $r15iRmaItem = (int)Rma::items((int)$r15iRma)[0]['id'];
-    Rma::receive((int)$r15iRma, [$r15iRmaItem => ['quantity' => 1, 'disposition' => 'restock']], 'r15i-receipt');
+    Rma::receive((int)$r15iRma, [$r15iRmaItem => ['quantity' => 1, 'disposition' => 'repair']], 'r15i-receipt');
     $r15iCredit = InvoiceService::credit((int)$r15iInvoice['id'], (int)$r15iRma, [$r15iRmaItem => 1], 'r15i-item');
     $r15iLeft = $r15iNet($r15iPaid);
     assert_true(($r15iLeft['5']['net'] ?? -1) >= 0 && ($r15iLeft['5']['vat'] ?? -1) >= 0 && ($r15iLeft['10 AT']['vat'] ?? -1) > 0,
@@ -107,7 +107,9 @@ try {
     $r15iFail('H4 refused COD', $e);
 } finally {
     foreach ($r15iOrders as $r15iCleanup) {
-        foreach (['credit_note_items' => 'refund_id IN (SELECT id FROM order_refunds WHERE order_id = ?)', 'order_refunds' => 'order_id = ?',
+        // Every row keyed by an RMA item or order line goes too: SQLite reuses the deleted ids for later scenarios.
+        foreach (['return_receipts' => 'rma_item_id IN (SELECT ri.id FROM rma_items ri JOIN rma_requests rr ON rr.id = ri.rma_id WHERE rr.order_id = ?)',
+            'credit_note_items' => 'refund_id IN (SELECT id FROM order_refunds WHERE order_id = ?)', 'order_refunds' => 'order_id = ?',
             'rma_items' => 'rma_id IN (SELECT id FROM rma_requests WHERE order_id = ?)', 'rma_requests' => 'order_id = ?',
             'invoice_sellers' => 'invoice_id IN (SELECT id FROM invoices WHERE order_id = ?)', 'invoices' => 'order_id = ?',
             'order_items' => 'order_id = ?', 'orders' => 'id = ?'] as $r15iTable => $r15iWhere) {
