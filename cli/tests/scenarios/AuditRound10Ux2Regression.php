@@ -219,13 +219,12 @@ assert_true(is_array(StorefrontViewModel::product($r10xRow(9774))['product']['ba
     'R10 UX8: the product model carries the "notify me" form only when the product cannot be bought');
 assert_true(str_contains($r10xSoldOutPage, 'data-back-in-stock') && str_contains($r10xSoldOutPage, 'page=stock-notify') && str_contains($r10xSoldOutPage, esc(I18n::t('back_in_stock.submit'))),
     'R10 UX8: the sold-out product page shows the "notify me" form');
-// The confirmation link (R15) is absolute, so the request needs app_url.
+// The confirmation link (R15) is absolute, so a request needs app_url (restored after the shared-catalog part below).
 $r10xCfg = new ReflectionProperty(Security::class, 'cfg');
 $r10xCfgBase = Security::config();
 $r10xCfg->setValue(null, ['app_url' => 'https://r10x.example.test'] + $r10xCfgBase);
 $r10xOutcomes = [BackInStock::subscribe(9774, 'R10x-Wait@Example.com', 'sk'), BackInStock::subscribe(9774, 'r10x-wait@example.com', 'sk'),
     BackInStock::subscribe(9774, 'not-an-email', 'sk'), BackInStock::subscribe(999999, 'r10x-wait@example.com', 'sk'), BackInStock::subscribe(9772, 'r10x-wait@example.com', 'sk')];
-$r10xCfg->setValue(null, $r10xCfgBase);
 assert_equals(['confirm_sent', 'confirm_sent', 'invalid', 'invalid', 'available'], $r10xOutcomes, 'R10 UX8: subscribe outcomes (repeat, bad e-mail, unknown product, product in stock)');
 $r10xWaiting = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE product_id = 9774")->fetchColumn();
 assert_equals(1, $r10xWaiting(), 'R10 UX8: one request per product and e-mail');
@@ -284,6 +283,7 @@ try {
     assert_equals([1, 0], [$r10xSharedMails() - $r10xSharedBefore, (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = 'r10xb'")->fetchColumn()],
         'R10 UX8 shared catalog: the second store\'s shopper gets one e-mail and the request is deleted');
 } finally {
+    $r10xCfg->setValue(null, $r10xCfgBase);
     $r10xStoresProp->setValue(null, $r10xStoresBefore);
     StoreContext::reset();
     StoreContext::activate($r10xContextBefore);

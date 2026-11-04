@@ -261,7 +261,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'back_in_stock.confirm_sent' => 'Prawie gotowe: wysłaliśmy Ci e-mail z linkiem potwierdzającym. Otwórz go w ciągu 48 godzin, w przeciwnym razie usuniemy prośbę.',
     'back_in_stock.failed' => 'Nie udało się wysłać e-maila z potwierdzeniem. Spróbuj ponownie później.',
     'back_in_stock.confirm_invalid' => 'Ten link potwierdzający jest nieprawidłowy lub wygasł. Poproś ponownie na stronie produktu.',
-    'back_in_stock.confirm_message' => 'Potwierdź, że chcesz otrzymać jeden e-mail, gdy {product} będzie znów dostępny.',
+    'back_in_stock.confirm_message' => 'Potwierdź, że chcesz otrzymać jeden e-mail, gdy produkt {product} będzie znów dostępny.',
     'back_in_stock.confirm_submit' => 'Potwierdź',
     'shop_now'         => 'Kup teraz',
     'ph_from'          => 'od',
