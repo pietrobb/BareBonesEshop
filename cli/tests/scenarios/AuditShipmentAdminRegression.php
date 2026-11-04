@@ -321,6 +321,10 @@ try {
                             array_key_exists('tracking_url', $a128Result['extra']['api'][0] ?? [])],
                         "{$a128Label}: order status shipped after a partial admin shipment ships exactly the remainder (" . json_encode($a128Result['extra']['transition'] ?? null) . ')'),
                 };
+                if ($a128Action === 'page') {
+                    assert_true(preg_match('/<select name="new_status" required[^>]*>\s*<option value="" selected>/', $a128Output) === 1,
+                        "{$a128Label}: R15 — the order status form preselects no status (it used to preselect the first move, e.g. Cancelled)");
+                }
                 if (in_array($a128Action, ['create_ship', 'create_side', 'ship_planned', 'withdrawn_ship_ack', 'create_planned', 'cancel_planned', 'tracking_update'], true)) {
                     $a128Partial = in_array($a128Action, ['create_ship', 'create_side', 'ship_planned', 'withdrawn_ship_ack'], true);
                     assert_equals([$a128Partial ? ['email_send:order_shipped'] : [], 'paid'], [$a128Result['jobs'] ?? null, $a128Status["A128-{$a128Store}"] ?? null],

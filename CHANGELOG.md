@@ -32,6 +32,14 @@
   cancelled order. The payment webhook route takes the provider codes adapters accept (`/api/v1/webhooks/payment/acme-pay`
   was a 404). At a provider whose checkout session id is not its payment id, the capture of the order's own session now
   records the payment id, so refunds go to the payment instead of the session.
+- **Fulfillment** (review round 15, high 5, high 6). "Create and ship" and "Ship" in the admin order detail never
+  moved the order to Shipped nor e-mailed the customer. The parcel with the last unshipped goods now does both (the
+  `order_shipped` e-mail carries that parcel's tracking); an earlier partial parcel e-mails its own tracking and the
+  order stays paid. An e-book credited through a return (RMA) stayed downloadable when the order kept the payment
+  status `paid` (refund without a provider payment): the credited line no longer resolves nor counts a download.
+  Labels are offered only for the carrier the customer chose: a Packeta cash-on-delivery order was offered just the
+  in-store pickup label (the only connected carrier); without the Packeta API the parcel is booked in its portal.
+  The order status form no longer preselects the first allowed move (for some orders Cancelled): it starts empty.
 
 - **Further language in links with their own query** (review round 14, UX2 follow-up). With a further language active,
   the password-reset and e-mail verification links, the account page's links (login, register, forgot password,

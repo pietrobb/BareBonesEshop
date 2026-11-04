@@ -15,6 +15,19 @@ function adminShipmentLabelState(int $orderId, bool $open): array {
 }
 
 /**
+ * Label carriers for one order: only the carrier the customer chose (R15: a Packeta COD order was offered just the
+ * in-store pickup label, the only connected one). A chosen carrier without a label API is listed as not connected.
+ * An order without a rate snapshot keeps every carrier.
+ * @param array<string,?string> $carriers ShippingService::labelCarriers()
+ * @return array<string,?string>
+ */
+function adminOrderLabelCarriers(array $order, array $carriers): array {
+    $own = ShippingService::orderCarrier($order);
+    if ($own === null) return $carriers;
+    return [$own => array_key_exists($own, $carriers) ? $carriers[$own] : 'no label API'];
+}
+
+/**
  * Cash on delivery of one parcel, shown whether or not a carrier API is connected: the amount to enter in the carrier's
  * portal on the one parcel that collects the order total, "prepaid" on every other parcel (ShippingService::parcelCodAmount).
  */
@@ -41,6 +54,7 @@ function renderShipmentLabelForm(array $order, array $shipment, array $labels, a
             : esc(I18n::t('admin.shipment.label_prepaid')) ?></p>
     <?php endforeach;
     if ($labels || !$carriers) return;
+    $carriers = adminOrderLabelCarriers($order, $carriers);
     $ready = array_keys(array_filter($carriers, static fn(?string $reason): bool => $reason === null));
     ?>
     <?php foreach (array_diff_key($carriers, array_flip($ready)) as $carrier => $reason): ?>
@@ -51,7 +65,7 @@ function renderShipmentLabelForm(array $order, array $shipment, array $labels, a
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
         <input type="hidden" name="shipment_id" value="<?= (int)$shipment['id'] ?>">
         <select name="label_carrier" aria-label="<?= esc(I18n::t('admin.shipment.carrier')) ?>">
-            <?php foreach ($ready as $carrier): ?><option value="<?= esc((string)$carrier) ?>"<?= (string)$carrier === (string)($order['carrier'] ?? '') ? ' selected' : '' ?>><?= esc((string)$carrier) ?></option><?php endforeach; ?>
+            <?php foreach ($ready as $carrier): ?><option value="<?= esc((string)$carrier) ?>"><?= esc((string)$carrier) ?></option><?php endforeach; ?>
         </select>
         <span class="muted"><?= $cod > 0 ? esc(I18n::format('admin.shipment.label_cod', ['amount' => I18n::price($cod, (string)$order['currency'])])) : esc(I18n::t('admin.shipment.label_prepaid')) ?></span>
         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.label_create')) ?></button>
@@ -63,10 +77,10 @@ function renderShipmentLabelForm(array $order, array $shipment, array $labels, a
 function handleOrderShipmentLabel(): void {
     Security::adminRequire('orders.ship');
     $orderId = Security::int($_GET['id'] ?? 0);
-    adminShipmentAction($orderId, static function() use ($orderId): string {
+    adminShipmentAction($orderId, static function(array $order) use ($orderId): string {
         $shipment = adminOrderShipment($orderId, 'planned');
         $carrier = (string)($_POST['label_carrier'] ?? '');
-        $carriers = ShippingService::labelCarriers();
+        $carriers = adminOrderLabelCarriers($order, ShippingService::labelCarriers());
         if (!array_key_exists($carrier, $carriers)) throw new DomainException('admin.shipment.msg.invalid_form');
         if ($carriers[$carrier] !== null) throw new DomainException('admin.shipment.msg.label_unavailable');
         $label = ShippingService::generateLabel($orderId, $carrier, (int)$shipment['id']);

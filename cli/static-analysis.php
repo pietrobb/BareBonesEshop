@@ -216,7 +216,8 @@ $architectureBudgets = [
     // +4 lines R10 UX7: "New order" button on the list, the line editor on the detail (ManualOrders.php, loaded like Shipments.php).
     // +3 lines R11 H8: the order detail explains that accepting a purchase on invoice issues its invoice due on the terms.
     // +4 lines, +1 coupling R11: payment and refund amounts are typed in the order currency, not in cents (Money).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 933, 'functions' => 16, 'max_function_lines' => 313, 'coupling' => 23],
+    // +2 lines R15: the status select starts on an empty "choose" option (it preselected Cancelled for some orders).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 935, 'functions' => 16, 'max_function_lines' => 314, 'coupling' => 23],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
@@ -242,10 +243,12 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 84, 'functions' => 4, 'max_function_lines' => 38, 'coupling' => 7],
     // +3 lines R11 H9: the parcel row shows its carrier label (ShipmentLabels.php) and the ship form keeps the label's tracking number;
     // +1 the parcel row shows the cash on delivery it collects.
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 281, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 10],
+    // +4 lines, +1 coupling (OrderWorkflow) R15 high 5: shipping the last goods moves the order to shipped and e-mails.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 285, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 11],
     // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected) and the
     // cash on delivery of every parcel, shown also when no carrier API is connected.
-    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 76, 'functions' => 4, 'max_function_lines' => 28, 'coupling' => 5],
+    // +14 lines, +1 function R15: only the carrier the customer chose is offered (adminOrderLabelCarriers).
+    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 28, 'coupling' => 5],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],
