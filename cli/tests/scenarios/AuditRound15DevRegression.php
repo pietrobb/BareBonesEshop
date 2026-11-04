@@ -77,3 +77,57 @@ PHP);
 } finally {
     $r15dRemove($r15dBase);
 }
+// Medium: the tracking webhook read only the core body format: a carrier adapter had no say in it.
+$r15tPdo = Db::get();
+$r15tCarrier = new class implements TrackingWebhookAdapter {
+    public function getRates(array $params): array { return []; }
+    public function generateLabel(array $order): array { throw new LogicException('not in this test'); }
+    public function trackShipment(string $awb): array { return []; }
+    public function supportsCOD(): bool { return false; }
+    public function carrierId(): string { return 'r15-carrier'; }
+    public function parseTrackingWebhook(array $payload, string $rawPayload): array {
+        $state = (string)($payload['parcel']['state'] ?? '');
+        return ['awb' => (string)($payload['parcel']['barcode'] ?? ''), 'status' => match ($state) { 'DLV' => 'delivered', 'TRN' => 'in_transit', default => $state }];
+    }
+};
+ShippingService::setAdapters(['r15-carrier' => $r15tCarrier]);
+putenv('SHIP_R15_CARRIER_WEBHOOK_SECRET=r15-carrier-secret-0123456789');
+try {
+    $r15tOrder = (int)$r15tPdo->query("SELECT id FROM orders WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
+    $r15tPdo->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data) VALUES (?, 'default', 'r15-carrier', 'R15-AWB-1', 'created', '')")->execute([$r15tOrder]);
+    $r15tHook = static function (array $body): array {
+        $raw = json_encode($body);
+        $ts = (string)time();
+        return ShippingService::handleTrackingWebhook('r15-carrier', json_decode($raw, true), hash_hmac('sha256', $ts . '.' . $raw, 'r15-carrier-secret-0123456789'), $raw, $ts);
+    };
+    $r15tStatus = static fn(): string => (string)$r15tPdo->query("SELECT status FROM shipping_labels WHERE awb = 'R15-AWB-1'")->fetchColumn();
+    assert_true(($r15tHook(['parcel' => ['barcode' => 'R15-AWB-1', 'state' => 'DLV']])['handled'] ?? false) === true && $r15tStatus() === 'delivered',
+        'R15 dev: a carrier adapter implementing TrackingWebhookAdapter reads its own notification format (DLV -> delivered)');
+    assert_equals('missing_awb', $r15tHook(['awb' => 'R15-AWB-1', 'status' => 'in_transit'])['reason'] ?? null,
+        'R15 dev: for such a carrier the body goes through the adapter, not the core {awb, status} format');
+} finally {
+    $r15tPdo->exec("DELETE FROM shipping_labels WHERE awb = 'R15-AWB-1'");
+    putenv('SHIP_R15_CARRIER_WEBHOOK_SECRET');
+    ShippingService::setAdapters([]);
+}
+
+// Medium: `php cli/test.php` as the README showed it aborted halfway on a fresh clone (no config.php, empty vendor/bbf
+// submodule). The runner now names both missing pieces and how to get them before running anything.
+$r15cRoot = test_fixture_path('r15-fresh-clone');
+try {
+    mkdir($r15cRoot . '/cli', 0777, true);
+    foreach (['cli-only.php', 'TestSuite.php'] as $r15cFile) copy(TEST_CLI_DIR . '/' . $r15cFile, $r15cRoot . '/cli/' . $r15cFile);
+    $r15cProcess = proc_open([PHP_BINARY, $r15cRoot . '/cli/TestSuite.php'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r15cPipes);
+    fclose($r15cPipes[0]);
+    $r15cOut = stream_get_contents($r15cPipes[1]) . stream_get_contents($r15cPipes[2]);
+    fclose($r15cPipes[1]); fclose($r15cPipes[2]);
+    $r15cExit = proc_close($r15cProcess);
+    assert_true($r15cExit === 1 && str_contains($r15cOut, 'cp config.example.php config.php') && str_contains($r15cOut, 'git submodule update --init'),
+        'R15 dev: on a fresh clone the test runner stops with how to create config.php and fetch vendor/bbf (' . trim($r15cOut) . ')');
+    $r15cReadme = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/README.md');
+    assert_true(str_contains($r15cReadme, 'git clone --recurse-submodules') && str_contains($r15cReadme, 'cp config.example.php config.php')
+        && is_file(dirname(TEST_CLI_DIR) . '/CONTRIBUTING.md'),
+        'R15 dev: the README test section clones with submodules and creates config.php; CONTRIBUTING.md exists');
+} finally {
+    $r15dRemove($r15cRoot);
+}
