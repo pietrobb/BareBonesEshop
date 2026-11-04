@@ -747,7 +747,7 @@ class GdprService {
         // that selects from orders, error 1093).
         $rows['orders'] = 0;
         if ($orderIds !== []) {
-            $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = ''
+            $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = '', updated_at = " . Db::now() . "
                 WHERE (ip_address <> '' OR customer_phone <> '' OR notes <> '')" . self::inList(' AND id', $orderIds));
             $stmt->execute($orderIds);
             $rows['orders'] = $stmt->rowCount();

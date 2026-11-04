@@ -254,9 +254,10 @@ if ($mysqlDsn) {
         foreach (['email' => 'VARCHAR(191) NULL', 'name' => 'VARCHAR(191) NULL', 'status' => "VARCHAR(16) NOT NULL DEFAULT 'active'", 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'email_verified_at' => 'DATETIME NULL'] as $a074vColumn => $a074vDef) {
             if (!in_array($a074vColumn, $a074vColumns, true)) $my->exec("ALTER TABLE customers ADD COLUMN {$a074vColumn} {$a074vDef}");
         }
-        // R13 UX5: verifying the address attaches the guest orders placed with it, so the bare probe orders table needs those columns.
+        // R13 UX5: verifying the address attaches the guest orders placed with it (and bumps updated_at for the API sync, R15),
+        // so the bare probe orders table needs those columns.
         $a074vOrderColumns = $my->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders'")->fetchAll(PDO::FETCH_COLUMN);
-        foreach (['customer_id' => 'INT NULL', 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'customer_email' => 'VARCHAR(191) NULL'] as $a074vColumn => $a074vDef) {
+        foreach (['customer_id' => 'INT NULL', 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'customer_email' => 'VARCHAR(191) NULL', 'updated_at' => 'DATETIME NULL'] as $a074vColumn => $a074vDef) {
             if (!in_array($a074vColumn, $a074vOrderColumns, true)) $my->exec("ALTER TABLE orders ADD COLUMN {$a074vColumn} {$a074vDef}");
         }
         $my->exec("INSERT INTO orders (id, customer_id, store_id, customer_email) VALUES (97405, NULL, 'default', ' A074-MySQL@example.com ')");
@@ -334,7 +335,10 @@ if ($mysqlDsn) {
         assert_equals(5, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product_price_history'")->fetchColumn(), 'MySQL live: R7 price history migration creates its table idempotently');
         $my->exec('DROP TABLE product_price_history');
         // The migration backfills delivered orders from status / updated_at, which the bare probe table lacked.
-        $my->exec("ALTER TABLE orders ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'pending', ADD COLUMN created_at DATETIME NULL, ADD COLUMN updated_at DATETIME NULL");
+        $deliveredAtOrderColumns = $my->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders'")->fetchAll(PDO::FETCH_COLUMN);
+        foreach (['status' => "VARCHAR(32) NOT NULL DEFAULT 'pending'", 'created_at' => 'DATETIME NULL', 'updated_at' => 'DATETIME NULL'] as $deliveredAtColumn => $deliveredAtDef) {
+            if (!in_array($deliveredAtColumn, $deliveredAtOrderColumns, true)) $my->exec("ALTER TABLE orders ADD COLUMN {$deliveredAtColumn} {$deliveredAtDef}");
+        }
         $my->exec("INSERT INTO orders (id, status, created_at, updated_at) VALUES (97001, 'delivered', '2026-10-01 08:00:00', '2026-10-03 09:00:00'), (97002, 'paid', '2026-10-01 08:00:00', '2026-10-02 09:00:00')");
         $deliveredAtMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261020140000_order_delivered_at.php';
         $deliveredAtMigrationMysql->up($my, false);
