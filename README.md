@@ -513,7 +513,8 @@ controls the publishing account could change those together with the key):
    trusted key's fingerprint; `doctor` fails on a revoked key.
 
 If the old secret key was lost there is no endorsement: verify the signed tag
-(`git verify-tag vX.Y.Z`), compare `php cli/update.php fingerprint --public-key=<key file
+(`git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag vX.Y.Z`, tags from
+v2.1.1 on), compare `php cli/update.php fingerprint --public-key=<key file
 from that tag>` with the release notes and replace the key by hand. A lost or possibly compromised key is also revoked in the code
 (`UpdateKeyRotation::SHIPPED_REVOKED`, e.g. the v1.9.0 key); say so in the release
 notes and do not apply packages signed with it that were not already verified.
