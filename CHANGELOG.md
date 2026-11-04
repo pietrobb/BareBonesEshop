@@ -9,6 +9,13 @@
   placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently.
+- **Refunds after a cancellation credit note, refunds by hand** (review round 16). A cancelled purchase on invoice
+  that was paid all the same had its invoice fully credited by the cancellation credit note; refunding that money
+  then failed for ever ("the refund exceeds what the invoice still has uncredited"), and its credit-note job raised a
+  critical incident. The refund now credits only what the invoice still has left (nothing, when the cancellation
+  credited all of it). "Request refund" on a payment returned by hand (bank transfer, cash on delivery) set the
+  payment to "Refund in progress" with nothing to execute it; such an order now offers only "Record manual refund",
+  and a request left from before shows the amount to pay back and record.
 - **Low findings** (review round 15). An admin amount typed as `1,299` was read as 1,30 EUR (the comma taken as the
   decimal separator, the rest rounded away); an amount with more decimals than the currency has is now refused with
   a message instead of being rounded. A checkout form that failed validation or was reloaded kept nothing: the

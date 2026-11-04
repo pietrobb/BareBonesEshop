@@ -644,6 +644,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.request_refund' => 'Erstattung anfordern',
     'admin.order.manual_refund' => 'Manuelle Erstattung erfassen',
     'admin.order.manual_refund_note' => 'Wie das Geld zurückgezahlt wurde (Pflichtfeld)',
+    'admin.order.manual_refund_pending_hint' => 'Eine Erstattung von {amount} wurde angefordert, diese Zahlung wird jedoch manuell erstattet: zahlen Sie sie zurück und erfassen Sie es unten.',
     'admin.order.retry_refund' => 'Erstattung erneut senden',
     'admin.order.retry_refund_hint' => 'Die Erstattung von {amount} wurde angefordert, aber nie an den Zahlungsanbieter gesendet.',
     'admin.order.confirm_refund' => 'Ausgezahlte Erstattung bestätigen',

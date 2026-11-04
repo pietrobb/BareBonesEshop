@@ -801,6 +801,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.request_refund' => 'Solicitar reembolso',
     'admin.order.manual_refund' => 'Registrar reembolso manual',
     'admin.order.manual_refund_note' => 'Cómo se devolvió el dinero (obligatorio)',
+    'admin.order.manual_refund_pending_hint' => 'Se solicitó un reembolso de {amount}, pero este pago se devuelve a mano: devuélvalo y regístrelo abajo.',
     'admin.order.retry_refund' => 'Reintentar reembolso',
     'admin.order.retry_refund_hint' => 'El reembolso de {amount} se solicitó, pero nunca se envió al proveedor de pago.',
     'admin.order.confirm_refund' => 'Confirmar reembolso pagado',

@@ -521,13 +521,16 @@ class PaymentService {
     /**
      * A refund an admin requested: claimed on the ledger like requestRefund(), then executed by a
      * payment_refund job at the provider (its refund webhook may complete it first). Money returned
-     * by hand (refundsByHand()) gets no job: the admin records it with completeManualRefund().
+     * by hand (refundsByHand()) cannot be requested: nothing would execute it (R16: the payment stayed
+     * refund_pending for ever); the admin records it with completeManualRefund().
      */
     public static function requestRefundAndQueue(int $orderId, int $amount, string $idempotencyKey, array $payload = []): void {
         if (Db::get()->inTransaction()) throw new \LogicException('The refund job is queued after commit: call outside a transaction');
+        $order = Orders::byId($orderId);
+        if ($order && self::refundsByHand($order)) throw new \LogicException('This payment is returned by hand: record the refund with completeManualRefund()');
         self::requestRefund($orderId, $amount, $idempotencyKey, $payload);
         $order = Orders::byId($orderId);
-        if (!$order || self::refundsByHand($order)) return;
+        if (!$order) return;
         JobQueue::push('payment_refund', [
             'order_id' => $orderId,
             'payment_id' => (string)$order['payment_id'],

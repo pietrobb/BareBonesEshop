@@ -644,6 +644,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.request_refund' => 'Visszatérítés kérése',
     'admin.order.manual_refund' => 'Kézi visszatérítés rögzítése',
     'admin.order.manual_refund_note' => 'Hogyan lett visszautalva a pénz (kötelező)',
+    'admin.order.manual_refund_pending_hint' => '{amount} visszatérítését kérték, de ez a fizetés kézzel térül vissza: utalja vissza, és rögzítse alább.',
     'admin.order.retry_refund' => 'Visszatérítés újrapróbálása',
     'admin.order.retry_refund_hint' => 'A(z) {amount} visszatérítését kérték, de soha nem küldték el a fizetési szolgáltatónak.',
     'admin.order.confirm_refund' => 'Kifizetett visszatérítés megerősítése',

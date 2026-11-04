@@ -651,6 +651,7 @@ return [
     'admin.order.request_refund' => 'Požiadať refund',
     'admin.order.manual_refund' => 'Zaznamenať ručný refund',
     'admin.order.manual_refund_note' => 'Ako boli peniaze vrátené (povinné)',
+    'admin.order.manual_refund_pending_hint' => 'Bolo vyžiadané vrátenie {amount}, táto platba sa však vracia ručne: peniaze vráťte a zaznamenajte to nižšie.',
     'admin.order.retry_refund' => 'Zopakovať refund',
     'admin.order.retry_refund_hint' => 'Refund {amount} bol vyžiadaný, ale nikdy neodoslaný poskytovateľovi platby.',
     'admin.order.confirm_refund' => 'Potvrdiť vyplatený refund',

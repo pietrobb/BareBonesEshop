@@ -644,6 +644,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.request_refund' => 'Poproś o zwrot',
     'admin.order.manual_refund' => 'Zapisz ręczny zwrot',
     'admin.order.manual_refund_note' => 'Jak zwrócono pieniądze (wymagane)',
+    'admin.order.manual_refund_pending_hint' => 'Zażądano zwrotu {amount}, ale ta płatność jest zwracana ręcznie: zwróć pieniądze i zapisz to poniżej.',
     'admin.order.retry_refund' => 'Ponów zwrot',
     'admin.order.retry_refund_hint' => 'Zwrot {amount} został zlecony, ale nigdy nie trafił do operatora płatności.',
     'admin.order.confirm_refund' => 'Potwierdź wypłacony zwrot',
