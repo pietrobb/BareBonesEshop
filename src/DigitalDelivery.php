@@ -260,7 +260,7 @@ class DigitalDelivery {
      * a partial refund keeps paid downloads, except of the line it credited (digital_revoke handles whole reversals).
      * R15 high 6: the credited line is checked whatever the payment status — a refund without a provider payment
      * (bank transfer, cash on delivery, refunded by hand) leaves the order 'paid'. consume() and claimResume() check
-     * the same payment, order and credit states in SQL (CREDITED_LINE_SQL).
+     * the same payment, order and credit states in SQL (notCreditedLineSql()).
      */
     private static function orderCoversDownload(array $row): bool {
         $paymentStatus = (string)($row['payment_status'] ?? '');
@@ -269,9 +269,15 @@ class DigitalDelivery {
         return !self::lineCredited((int)$row['order_item_id']);
     }
 
-    /** The entitlement's order line is on a credit note whose refund is pending or done. */
-    private const CREDITED_LINE_SQL = "EXISTS (SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
+    /**
+     * SQL condition: the entitlement's order line is not on a credit note whose refund is pending or done.
+     * Before the returns/credit-note migrations ran there is nothing credited to check (downloads degrade, not fail).
+     */
+    private static function notCreditedLineSql(): string {
+        if (!Db::hasColumn('digital_entitlements', 'order_item_id') || !Db::tableExists('credit_note_items')) return '';
+        return " AND NOT EXISTS (SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
                   WHERE cni.order_item_id = digital_entitlements.order_item_id AND r.status IN ('pending', 'succeeded'))";
+    }
 
     /** Free resumes of one counted download (inside its window, never past the bytes it already served). */
     public const MAX_FREE_RESUMES = 5;
@@ -335,8 +341,7 @@ class DigitalDelivery {
                   WHERE o.id = digital_entitlements.order_id
                     AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
-              )
-              AND NOT " . self::CREDITED_LINE_SQL);
+              )" . self::notCreditedLineSql());
         $stmt->execute([
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
             ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + self::RESUME_SLACK_BYTES, ':now' => $now,
@@ -394,8 +399,7 @@ class DigitalDelivery {
                   WHERE o.id = digital_entitlements.order_id
                     AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
-              )
-              AND NOT " . self::CREDITED_LINE_SQL);
+              )" . self::notCreditedLineSql());
         $now ??= time();
         $params = [':id' => $entitlementId, ':now' => $now];
         if ($tracking !== '') $params[':counted_at'] = $now;
@@ -542,6 +546,7 @@ class DigitalDelivery {
 
     /** The order line is on a credit note whose refund is pending or done. */
     private static function lineCredited(int $orderItemId): bool {
+        if (!Db::tableExists('credit_note_items')) return false;
         $stmt = Db::get()->prepare("SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
             WHERE cni.order_item_id = :item AND r.status IN ('pending', 'succeeded') LIMIT 1");
         $stmt->execute([':item' => $orderItemId]);
