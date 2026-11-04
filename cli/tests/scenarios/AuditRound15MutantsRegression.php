@@ -604,11 +604,12 @@ try {
             $r15mTerms(['service_type' => 'online_card'], ['payment_terms_days' => 14]),
             $r15mTerms(['service_type' => 'online_card'], []),
         ], 'R15 mutants: invoice terms apply only to a purchase on invoice with terms; other orders and a seller without terms get the default (and raise no warning)');
-    assert_equals([false, false, true], [
+    assert_equals([false, false, false, true], [
             InvoiceService::isReverseCharge([], ['country' => 'CZ', 'ic_dph' => 'CZ12345678']),
             InvoiceService::isReverseCharge(['country' => 'SK'], ['ic_dph' => 'CZ12345678']),
+            InvoiceService::isReverseCharge(['country' => 'SK'], ['country' => 'SK', 'ic_dph' => 'SK2020123456']),
             InvoiceService::isReverseCharge(['country' => 'SK'], ['country' => 'CZ', 'ic_dph' => 'CZ12345678']),
-        ], 'R15 mutants: reverse charge needs both countries (a snapshot without one raises no warning)');
+        ], 'R15 mutants: reverse charge needs two different countries (a snapshot without one raises no warning)');
 } catch (Throwable $e) {
     $r15mFail('invoice terms and reverse charge', $e);
 }
@@ -633,6 +634,31 @@ try {
         'R15 mutants: a net above the uncredited base is cut down to it, on the first line too (and raises no warning)');
 } catch (Throwable $e) {
     $r15mFail('credit cap', $e);
+}
+
+// InvoiceService::computeVatBreakdown: the last line absorbs the rounding residual of the discount spread (at its own
+// rate), free lines spread nothing, no payment fee adds no 0 % group; an order without per-line VAT uses the legacy
+// ratio (shipping included, an implausible rate read as 0 %, nothing at all gives no group).
+try {
+    $r15mVat = new ReflectionMethod(InvoiceService::class, 'computeVatBreakdown');
+    $r15mRates = static function (array $order, array $items) use ($r15mVat): array {
+        $order += ['total' => 0, 'discount_amount' => 0, 'shipping_cost' => 0, 'payment_fee' => 0, 'vat_scenario' => '', 'tax_amount' => 0, 'subtotal' => 0];
+        $rates = $r15mVat->invoke(null, $order, $items)['rates'];
+        ksort($rates);
+        return array_map(static fn(array $r): array => [(int)$r['net'], (int)$r['vat']], $rates);
+    };
+    assert_equals(['10' => [91, 9], '23' => [242, 56]], $r15mRates(['total' => 398, 'discount_amount' => 2],
+            [['total' => 300, 'vat_rate' => 23, 'vat_amount' => 56], ['total' => 100, 'vat_rate' => 10, 'vat_amount' => 9]]),
+        'R15 mutants: the last line takes what is left of the discount spread, and no payment fee adds no 0 % group');
+    assert_equals(['23' => [0, 0]], $r15mRates([], [['total' => 0, 'vat_rate' => 23, 'vat_amount' => 0], ['total' => 0, 'vat_rate' => 23, 'vat_amount' => 0]]),
+        'R15 mutants: free lines take no share of the discount (and divide by nothing)');
+    assert_equals([['23' => [1081, 249]], ['0' => [40, 60]], []], [
+            $r15mRates(['total' => 1330, 'subtotal' => 1230, 'shipping_cost' => 100, 'tax_amount' => 249], [['total' => 1230]]),
+            $r15mRates(['total' => 100, 'subtotal' => 100, 'tax_amount' => 60], [['total' => 100]]),
+            $r15mRates([], []),
+        ], 'R15 mutants: an order without per-line VAT uses the legacy ratio with shipping, reads a rate above 50 % as 0 %, and an empty order has no group (and raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('VAT breakdown', $e);
 }
 
 // InvoiceService::uncredited: a credit note line at a rate the invoice never had is skipped (no warning) and still
