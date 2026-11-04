@@ -107,6 +107,74 @@ return [
   memory or time does not quarantine.
 - Extensions run with the same privileges as core code. Review them like core changes.
 
+## Provider contracts
+
+The interfaces are in `adapters/`; the shipped implementations in `adapters/contrib/` are working
+examples. Amounts are always integers in minor units (cents) of the order's currency.
+
+### Payment (`PaymentAdapter`)
+
+- `createSession(array $order): array` is called when the customer submits the checkout and from
+  "pay again" / admin payment links. `$order` has `order_id`, `order_number`, `total`, `currency`
+  (lowercase), `customer_email`, `customer_name`, `locale`, `items`, `shipping_cost`, `success_url`,
+  `cancel_url` and `notify_url` (`/api/v1/webhooks/payment/<provider code>`). Return
+  `['url' => <where the browser goes>, 'session_id' => <your reference>]`; the session id is stored
+  as the order's payment reference. A URL on another origin needs `HostedCheckoutAdapter` and its
+  `redirectOrigins()`, or the checkout's CSP blocks the redirect.
+- Notifications arrive at `/api/v1/webhooks/payment/<provider code>` (the code may contain `-`).
+  Implement exactly one way to trust them:
+  `SignedWebhookPaymentAdapter::verifySignature($rawBody, $signatureHeader)` (the request is
+  rejected without it), or `PullVerifiedNotificationAdapter::verifiedEvent($request)`, which asks
+  your provider's API instead of believing the request.
+- `handleWebhook(array $payload)` / `verifiedEvent()` return
+  `['event_type' => ..., 'event_id' => <stable provider id>, 'data' => [...]]`. Event types the
+  state machine acts on: `payment.paid`, `payment.failed`, `refund.succeeded`, `payment.disputed`;
+  others are recorded and ignored. `data` names the order with `order_number` (or `order_id`) and
+  your `payment_id`, plus `amount` and `currency`: a `payment.paid` whose amount or currency differs
+  from the order is not booked and raises an incident. Each `event_id` is applied once.
+- `refund(string $paymentId, int $amount)` receives the provider payment id (`payment_id` from
+  your events, the session id until one arrived) and returns
+  `['status' => 'succeeded'|'pending'|'failed', 'refund_id' => ...]`.
+  `IdempotentRefundAdapter::refundWithIdempotency()` is used instead when implemented, and is
+  required for retry-safe refunds.
+- `getStatus(string $paymentId): string` is read by the expiry sweep and pay-again: `expired`,
+  `cancelled`/`canceled`, `failed`, `timeouted`, `rejected`, `error` mean "can no longer be paid";
+  anything else keeps the order waiting.
+- Optional: `CancellablePaymentAdapter::cancelPayment()` voids an unpaid session when the order is
+  cancelled; `PaymentStatusEventAdapter::statusEvent()` lets the sweep book a payment whose
+  notification never arrived.
+
+### Shipping (`ShippingAdapter`)
+
+- **Where prices come from.** When the store has shipping rates in the admin (Shipping → zones,
+  methods and rates; the migrations seed defaults) for the cart's country and currency, those rows
+  are the quote and **`getRates()` is not called**. `getRates($params)` is asked only when that table
+  has no matching row (or the store charges in another currency than its provider prices). Its
+  `$params` and return shape are documented in `adapters/ShippingAdapter.php`; a throwing carrier is
+  skipped (logged) and the others are still offered.
+- `generateLabel(array $order)` runs from the admin order detail ("Labels"), offered for the carrier
+  of the order's shipping method; return `['awb', 'label_data', 'carrier']`.
+  `ShippingLifecycleAdapter` adds pickup points and `cancelLabel()`.
+- `trackShipment($awb)` is **not polled** by the core: parcel status reaches the shop only through
+  tracking webhooks (below). `ShippingService::trackShipment($carrier, $awb)` calls it on demand,
+  e.g. from an extension's own job. `carrierId()` must equal the code stored on labels and
+  shipments and used in the tracking webhook URL.
+
+### Tracking webhooks
+
+`POST /api/v1/webhooks/shipping/<carrier>` takes a JSON body signed with HMAC-SHA256 (hex) of
+`<timestamp>.<raw body>` with the carrier's secret (`SHIP_<CARRIER>_WEBHOOK_SECRET` or
+`shipping_webhook_secrets[<carrier>]`, at least 16 characters); the signature is in
+`X-Shipping-Signature` (`X-Packeta-Signature`, `X-GLS-Signature` for those carriers) and the Unix
+timestamp in `X-Shipping-Timestamp` (±5 minutes). The core format of the body is
+`{"awb": "...", "status": "..."}`. A carrier adapter that implements `TrackingWebhookAdapter`
+receives the verified body in `parseTrackingWebhook($payload, $rawBody)` and returns that
+`['awb' => ..., 'status' => ...]` from its own format. Statuses: `created`, `in_transit`,
+`out_for_delivery`, `ready_for_pickup`, `failed`, `delivered`. An AWB no label or shipment carries
+is answered 404 (409 when several match), so the carrier redelivers it; a body without an AWB or
+with another status is acknowledged and changes nothing. A carrier whose own signature scheme differs needs a small relay
+that verifies it and re-signs as above.
+
 ## Database
 
 New product fields need no code: define attributes in the admin (Attributes, assigned to categories). Their

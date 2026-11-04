@@ -615,8 +615,16 @@ class ShippingService
             throw new \RuntimeException("Invalid webhook signature for carrier: {$carrierId}");
         }
 
-        $awb    = $payload['awb'] ?? $payload['tracking_number'] ?? '';
-        $status = strtolower(trim((string)($payload['status'] ?? '')));
+        // R15: a carrier adapter that reads its own notification format gets the verified body.
+        $parser = self::trackingWebhookParser($carrierId);
+        if ($parser !== null) {
+            $parsed = $parser->parseTrackingWebhook($payload, $rawPayload);
+            $awb = is_string($parsed['awb'] ?? null) ? trim($parsed['awb']) : '';
+            $status = strtolower(trim(is_string($parsed['status'] ?? null) ? $parsed['status'] : ''));
+        } else {
+            $awb    = $payload['awb'] ?? $payload['tracking_number'] ?? '';
+            $status = strtolower(trim((string)($payload['status'] ?? '')));
+        }
 
         if (!$awb) {
             return ['handled' => false, 'reason' => 'missing_awb'];
@@ -1082,6 +1090,15 @@ class ShippingService
             }
         }
         return $adapters;
+    }
+
+    /** The carrier's adapter when it reads its own tracking notification format (TrackingWebhookAdapter). */
+    private static function trackingWebhookParser(string $carrierId): ?TrackingWebhookAdapter
+    {
+        foreach (self::resolveAdapters() as $adapter) {
+            if ($adapter->carrierId() === $carrierId && $adapter instanceof TrackingWebhookAdapter) return $adapter;
+        }
+        return null;
     }
 
     private static function findAdapter(string $carrierId): ShippingAdapter
