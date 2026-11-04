@@ -661,13 +661,16 @@ try {
         'R15 mutants: the last line takes what is left of the discount spread, and no payment fee adds no 0 % group');
     assert_equals(['23' => [0, 0]], $r15mRates([], [['total' => 0, 'vat_rate' => 23, 'vat_amount' => 0], ['total' => 0, 'vat_rate' => 23, 'vat_amount' => 0]]),
         'R15 mutants: free lines take no share of the discount (and divide by nothing)');
-    assert_equals([['23' => [1081, 249]], ['50' => [100, 50]], ['0' => [40, 60]], [], ['0' => [500, 0]]], [
+    assert_equals(['10' => [100, 10], '23' => [101, 23]], $r15mRates(['total' => 234], [['total' => 123, 'vat_rate' => 23, 'vat_amount' => 23], ['total' => 110, 'vat_rate' => 10, 'vat_amount' => 10]]),
+        'R15 mutants: a rounding residual goes to the first of the groups with the largest net, not to a new 0 % group');
+    assert_equals([['23' => [1081, 249]], ['50' => [100, 50]], ['0' => [40, 60]], [], ['0' => [500, 0]], ['0' => [0, 50]]], [
             $r15mRates(['total' => 1330, 'subtotal' => 1330, 'discount_amount' => 100, 'shipping_cost' => 100, 'tax_amount' => 249], [['total' => 1330]]),
             $r15mRates(['total' => 150, 'subtotal' => 150, 'tax_amount' => 50], [['total' => 150]]),
             $r15mRates(['total' => 100, 'subtotal' => 100, 'tax_amount' => 60], [['total' => 100]]),
             $r15mRates([], []),
             $r15mRates(['total' => 500], []),
-        ], 'R15 mutants: an order without per-line VAT uses the legacy ratio after discount and with shipping, keeps 50 % but reads a rate above it as 0 %, and an empty order has no group while a total no group holds goes to 0 % (and raises no warning)');
+            $r15mRates(['total' => 50, 'subtotal' => 50, 'tax_amount' => 50], []),
+        ], 'R15 mutants: an order without per-line VAT uses the legacy ratio after discount and with shipping, keeps 50 % but reads a rate above it as 0 %, and an empty order has no group while a total no group holds goes to 0 %, and VAT without a base is still recorded as VAT (and raises no warning)');
     $r15mSegment = new ReflectionMethod(InvoiceService::class, 'proportionalSegment');
     assert_equals([3, 5, 0, 7, InvalidArgumentException::class, InvalidArgumentException::class, InvalidArgumentException::class, InvalidArgumentException::class, InvalidArgumentException::class], [
             $r15mSegment->invoke(null, 10, 1, 1, 3),
