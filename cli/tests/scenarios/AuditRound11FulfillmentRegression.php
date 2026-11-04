@@ -223,6 +223,25 @@ try {
     $r15lRow = $r15lForm();
     assert_equals([1, true, false], [preg_match_all('#<option value=#', $r15lRow), str_contains($r15lRow, '<option value="packeta">'), str_contains($r15lRow, 'value="pickup"')],
         'R15 labels: with the Packeta API connected the only label offered is Packeta');
+
+    // R16 high 3: a shipping.json method ("standard", "express") names a delivery speed, not a carrier. The order's
+    // snapshot carries carrier "standard", so the admin saw "Standard: carrier API not connected" and no label form
+    // although Packeta and GLS were connected. Such an order is offered every connected carrier but in-store pickup.
+    $r16lSnapshot = (string)Orders::byId($r11fCodOrderId)['shipping_rate_snapshot'];
+    try {
+        $pdo->prepare('UPDATE orders SET shipping_rate_snapshot = ? WHERE id = ?')->execute([json_encode(['key' => 'standard', 'method_code' => 'standard',
+            'carrier' => 'standard', 'provider' => 'legacy', 'label' => 'Standard Delivery', 'price' => 399]), $r11fCodOrderId]);
+        $r16lCarriers = adminOrderLabelCarriers(Orders::byId($r11fCodOrderId), ShippingService::labelCarriers()); // the label action checks the same list
+        $r16lRow = $r15lForm();
+        preg_match_all('#<option value="([^"]+)"#', $r16lRow, $r16lOptions);
+        assert_equals([null, ['packeta', 'gls'], false, false],
+            [ShippingService::orderCarrier(Orders::byId($r11fCodOrderId)), array_keys($r16lCarriers),
+                str_contains($r16lRow, 'data-label-unavailable="standard"'), in_array('pickup', $r16lOptions[1], true)],
+            'R16 high 3: a shipping.json "standard" order names no carrier: it is offered Packeta and GLS, never "standard not connected" or a pickup label');
+        assert_equals(['packeta', 'gls'], $r16lOptions[1], 'R16 high 3: with Packeta and GLS connected the shipping.json order gets the label form with both');
+    } finally {
+        $pdo->prepare('UPDATE orders SET shipping_rate_snapshot = ? WHERE id = ?')->execute([$r16lSnapshot, $r11fCodOrderId]);
+    }
     ShippingService::setAdapters(['packeta' => new PacketaShipping(), 'gls' => new GlsShipping()]);
     $r11fTotal = (int)Orders::byId($r11fCodOrderId)['total'];
     $r11fLabelA = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipA);
