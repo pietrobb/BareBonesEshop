@@ -258,14 +258,20 @@ class DigitalDelivery {
     /**
      * Whether the entitlement's order (payment_status, order_status, order_item_id) still pays for its download:
      * a partial refund keeps paid downloads, except of the line it credited (digital_revoke handles whole reversals).
-     * consume() and claimResume() check the same payment and order states in SQL.
+     * R15 high 6: the credited line is checked whatever the payment status — a refund without a provider payment
+     * (bank transfer, cash on delivery, refunded by hand) leaves the order 'paid'. consume() and claimResume() check
+     * the same payment, order and credit states in SQL (CREDITED_LINE_SQL).
      */
     private static function orderCoversDownload(array $row): bool {
         $paymentStatus = (string)($row['payment_status'] ?? '');
         if (!in_array($paymentStatus, ['paid', 'partially_refunded', 'refund_pending'], true)) return false;
         if (in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)) return false;
-        return $paymentStatus === 'paid' || !self::lineCredited((int)$row['order_item_id']);
+        return !self::lineCredited((int)$row['order_item_id']);
     }
+
+    /** The entitlement's order line is on a credit note whose refund is pending or done. */
+    private const CREDITED_LINE_SQL = "EXISTS (SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
+                  WHERE cni.order_item_id = digital_entitlements.order_item_id AND r.status IN ('pending', 'succeeded'))";
 
     /** Free resumes of one counted download (inside its window, never past the bytes it already served). */
     public const MAX_FREE_RESUMES = 5;
@@ -329,7 +335,8 @@ class DigitalDelivery {
                   WHERE o.id = digital_entitlements.order_id
                     AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
-              )");
+              )
+              AND NOT " . self::CREDITED_LINE_SQL);
         $stmt->execute([
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
             ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + self::RESUME_SLACK_BYTES, ':now' => $now,
@@ -387,7 +394,8 @@ class DigitalDelivery {
                   WHERE o.id = digital_entitlements.order_id
                     AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
-              )");
+              )
+              AND NOT " . self::CREDITED_LINE_SQL);
         $now ??= time();
         $params = [':id' => $entitlementId, ':now' => $now];
         if ($tracking !== '') $params[':counted_at'] = $now;
