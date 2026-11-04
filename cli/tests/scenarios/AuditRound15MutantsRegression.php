@@ -108,6 +108,36 @@ try {
     if ($r15mRemote === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r15mRemote;
 }
 
+// ... without REMOTE_ADDR (CLI, worker) it is 127.0.0.1, and a trusted proxy that sends no X-Forwarded-For is the client.
+$r15mForwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null;
+try {
+    $r15mCfg->setValue(null, ['trusted_proxies' => ['203.0.113.1']] + $r15mCfgBase);
+    unset($_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_X_FORWARDED_FOR']);
+    assert_equals('127.0.0.1', Security::clientIp(), 'R15 mutants: without REMOTE_ADDR the client IP is 127.0.0.1 (and raises no warning)');
+    $_SERVER['REMOTE_ADDR'] = '203.0.113.1';
+    assert_equals('203.0.113.1', Security::clientIp(), 'R15 mutants: a trusted proxy without X-Forwarded-For is the client (and raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('client IP without headers', $e);
+} finally {
+    $r15mCfg->setValue(null, $r15mCfgBase);
+    if ($r15mRemote === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r15mRemote;
+    if ($r15mForwarded !== null) $_SERVER['HTTP_X_FORWARDED_FOR'] = $r15mForwarded;
+}
+
+// Security::formTrapValidate: both age limits are inclusive — a 4 s old token passes min age 4, a 10 s old one ttl 10.
+$r15mTrapKey = 'form_trap_tokens_' . md5('r15m-age');
+try {
+    $r15mNow = microtime(true);
+    if ($r15mNow - floor($r15mNow) > 0.5) usleep((int)((ceil($r15mNow) - $r15mNow) * 1000000) + 2000);
+    $_SESSION[$r15mTrapKey] = ['r15m-min' => time() - 4, 'r15m-ttl' => time() - 10];
+    assert_equals([true, true], [Security::formTrapValidate('r15m-age', 'r15m-min', '', 4, 3600), Security::formTrapValidate('r15m-age', 'r15m-ttl', '', 0, 10)],
+        'R15 mutants: a form-trap token exactly at the minimum age or exactly at its ttl is accepted');
+} catch (Throwable $e) {
+    $r15mFail('form trap ages', $e);
+} finally {
+    unset($_SESSION[$r15mTrapKey]);
+}
+
 // Warehouse: a statement class lets a test act as a concurrent request right before a given query runs.
 final class R15MutantsStatement extends PDOStatement {
     public static ?Closure $hook = null;
@@ -237,9 +267,118 @@ try {
 
     Warehouse::release('R15M-SA', $r15mSa);
     Warehouse::delete($r15mAux);
-    if ($r15mOwnDefault) Warehouse::delete($r15mDefault);
 } catch (Throwable $e) {
     $r15mFail('warehouse totals', $e);
 } finally {
     if (Db::get()->inTransaction()) Db::get()->rollBack();
 }
+
+$r15mRow = static function (string $sku) use ($r15mDefault): array {
+    $stmt = Db::get()->prepare('SELECT qty, reserved FROM warehouse_stock WHERE warehouse_id = :w AND sku = :sku');
+    $stmt->execute([':w' => $r15mDefault, ':sku' => $sku]);
+    return array_map('intval', $stmt->fetch(PDO::FETCH_ASSOC) ?: []);
+};
+$r15mMovement = static function (string $sku, string $type): array {
+    $stmt = Db::get()->prepare('SELECT quantity_delta, reserved_delta FROM stock_movements WHERE sku = :sku AND movement_type = :type ORDER BY id DESC LIMIT 1');
+    $stmt->execute([':sku' => $sku, ':type' => $type]);
+    return array_map('intval', $stmt->fetch(PDO::FETCH_ASSOC) ?: []);
+};
+$r15mThrows = static function (Closure $run): string {
+    try {
+        $run();
+        return 'none';
+    } catch (Throwable $e) {
+        return get_class($e);
+    }
+};
+
+// Warehouse::release / restock / ship: only a reserved allocation of a real warehouse is touched (one without a status
+// counts as reserved), an invalid shipment allocation is refused up front, and the ledger books both as decreases.
+try {
+    Warehouse::setStock($r15mDefault, 'R15M-RL', 6, 'count');
+    $r15mSteal($r15mDefault, 'R15M-RL', 3);
+    $r15mIgnored = [['warehouse_id' => null, 'qty' => 2], ['warehouse_id' => $r15mDefault, 'qty' => 1, 'status' => 'released']];
+    Warehouse::release('R15M-RL', $r15mIgnored);
+    Warehouse::restock('R15M-RL', $r15mIgnored);
+    assert_equals(['qty' => 6, 'reserved' => 3], $r15mRow('R15M-RL'), 'R15 mutants: release and restock skip a backorder allocation and one no longer reserved');
+    Warehouse::release('R15M-RL', [['warehouse_id' => $r15mDefault, 'qty' => 1]]);
+    assert_equals([['qty' => 6, 'reserved' => 2], ['quantity_delta' => 0, 'reserved_delta' => -1]], [$r15mRow('R15M-RL'), $r15mMovement('R15M-RL', 'release')],
+        'R15 mutants: an allocation without a status is released; the ledger books -1 reserved');
+    Warehouse::restock('R15M-RL', [['warehouse_id' => $r15mDefault, 'qty' => 1]]);
+    assert_equals(['qty' => 7, 'reserved' => 2], $r15mRow('R15M-RL'), 'R15 mutants: an allocation without a status is restocked');
+    assert_equals(array_fill(0, 4, InvalidArgumentException::class), [
+        $r15mThrows(static fn() => Warehouse::ship('R15M-RL', ['warehouse_id' => $r15mDefault], 'r15m-s1')),
+        $r15mThrows(static fn() => Warehouse::ship('R15M-RL', ['warehouse_id' => 0, 'qty' => 1], 'r15m-s2')),
+        $r15mThrows(static fn() => Warehouse::ship('R15M-RL', ['warehouse_id' => $r15mDefault, 'qty' => 0], 'r15m-s3')),
+        $r15mThrows(static fn() => Warehouse::ship('R15M-RL', ['qty' => 1], 'r15m-s4')),
+    ], 'R15 mutants: a shipment allocation without quantity, with warehouse 0, with quantity 0 or without warehouse is invalid');
+    Warehouse::ship('R15M-RL', ['warehouse_id' => $r15mDefault, 'qty' => 1], 'r15m-ship');
+    assert_equals([['qty' => 6, 'reserved' => 1], ['quantity_delta' => -1, 'reserved_delta' => -1]], [$r15mRow('R15M-RL'), $r15mMovement('R15M-RL', 'shipment')],
+        'R15 mutants: a shipment consumes the reservation; the ledger books -1 on hand and -1 reserved');
+    $r15mSteal($r15mDefault, 'R15M-RL', -1);
+} catch (Throwable $e) {
+    $r15mFail('release/restock/ship', $e);
+}
+
+// Warehouse::bulkSetStock: an empty SKU, a count that is no integer and a negative count are skipped; a count equal to
+// the reservations is no oversell; a failure inside the caller's transaction leaves that transaction to the caller.
+try {
+    Warehouse::setStock($r15mDefault, 'R15M-FEED-EQ', 4, 'count');
+    $r15mSteal($r15mDefault, 'R15M-FEED-EQ', 2);
+    $r15mSkipped = null;
+    $r15mCount = Warehouse::bulkSetStock($r15mDefault, ['' => 3, 'R15M-FEED-ABC' => 'abc', 'R15M-FEED-NEG' => -1, 'R15M-FEED-EQ' => 2, 'R15M-FEED-OK' => 7], $r15mSkipped);
+    assert_equals([2, ['', 'R15M-FEED-ABC', 'R15M-FEED-NEG'], [], [], ['qty' => 2, 'reserved' => 2], ['qty' => 7, 'reserved' => 0]],
+        [$r15mCount, $r15mSkipped, $r15mRow(''), $r15mRow('R15M-FEED-ABC') + $r15mRow('R15M-FEED-NEG'), $r15mRow('R15M-FEED-EQ'), $r15mRow('R15M-FEED-OK')],
+        'R15 mutants: a feed skips an empty SKU, a non-integer count and a negative count and applies the rest');
+    $r15mSteal($r15mDefault, 'R15M-FEED-EQ', -2);
+
+    $r15mPdo = Db::get();
+    $r15mPdo->beginTransaction();
+    $r15mFailed = $r15mThrows(static fn() => Warehouse::bulkSetStock(987654321, ['R15M-FEED-TX' => 1]));
+    $r15mStillOpen = $r15mPdo->inTransaction();
+    if ($r15mStillOpen) $r15mPdo->rollBack();
+    assert_equals([RuntimeException::class, true], [$r15mFailed, $r15mStillOpen], 'R15 mutants: a feed failing inside the caller\'s transaction leaves that transaction to the caller');
+} catch (Throwable $e) {
+    $r15mFail('bulk stock', $e);
+} finally {
+    if (Db::get()->inTransaction()) Db::get()->rollBack();
+}
+
+// ... a feed count equal to the reservations is not an oversell (own migrated DB: the suite DB may lack the incidents).
+[$r15mSavedDb, $r15mSavedDriver] = [Db::get(), Db::driver()];
+$r15mLock = sys_get_temp_dir() . '/bbe-r15m-' . getmypid() . '.lock';
+try {
+    $r15mMemDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    (new Migrator($r15mMemDb, TEST_CLI_DIR . '/../migrations', $r15mLock))->apply(static fn($m) => null);
+    Db::init($r15mMemDb, 'sqlite');
+    $r15mMemWh = Warehouse::save(['code' => 'r15m-eq', 'name' => 'R15M eq', 'is_default' => 1]);
+    Warehouse::setStock($r15mMemWh, 'R15M-EQ', 4);
+    Warehouse::reserve('R15M-EQ', 2);
+    assert_equals(1, Warehouse::bulkSetStock($r15mMemWh, ['R15M-EQ' => 2]), 'R15 mutants: fixture — the feed count equal to the reservations is applied');
+    assert_equals(0, (int)$r15mMemDb->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'inventory.feed_below_reserved'")->fetchColumn(),
+        'R15 mutants: a feed count equal to the reservations is not reported as an oversell');
+} catch (Throwable $e) {
+    $r15mFail('feed oversell', $e);
+} finally {
+    Db::init($r15mSavedDb, $r15mSavedDriver);
+    @unlink($r15mLock);
+}
+
+// Warehouse::setAvailable: without a default warehouse nothing is booked and the caller is told; on MySQL the read of
+// the current stock is locked.
+try {
+    Db::get()->exec('UPDATE warehouses SET is_default = 0 WHERE id = ' . $r15mDefault);
+    try {
+        $r15mNoDefault = Warehouse::setAvailable('R15M-NODEF', 3);
+    } finally {
+        Db::get()->exec('UPDATE warehouses SET is_default = 1 WHERE id = ' . $r15mDefault);
+    }
+    assert_equals([false, 0], [$r15mNoDefault, Warehouse::totalAvailable('R15M-NODEF')], 'R15 mutants: setAvailable without a default warehouse returns false and books nothing');
+    $r15mSql = [];
+    $r15mWithHook(static function (string $sql) use (&$r15mSql): void { $r15mSql[] = $sql; }, static fn(): bool => Warehouse::setAvailable('R15M-LOCK', 2));
+    $r15mLocked = array_filter($r15mSql, static fn(string $sql): bool => str_contains($sql, 'SUM(qty - reserved)') && str_contains($sql, 'FOR UPDATE'));
+    assert_true(!Db::isMysql() || $r15mLocked !== [], 'R15 mutants: on MySQL setAvailable locks the stock it reads');
+} catch (Throwable $e) {
+    $r15mFail('setAvailable', $e);
+}
+if ($r15mOwnDefault) Warehouse::delete($r15mDefault);
