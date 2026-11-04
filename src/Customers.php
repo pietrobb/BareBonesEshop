@@ -417,7 +417,7 @@ class Customers {
         $email->execute([$customerId, $store]);
         $email = Str::normalizeEmail((string)$email->fetchColumn());
         if ($email === '') return 0;
-        $attach = $db->prepare('UPDATE orders SET customer_id = ? WHERE store_id = ? AND customer_id IS NULL AND LOWER(TRIM(customer_email)) = ?');
+        $attach = $db->prepare('UPDATE orders SET customer_id = ?, updated_at = ' . Db::now() . ' WHERE store_id = ? AND customer_id IS NULL AND LOWER(TRIM(customer_email)) = ?');
         $attach->execute([$customerId, $store, $email]);
         return $attach->rowCount();
     }

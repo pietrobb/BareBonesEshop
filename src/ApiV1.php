@@ -23,7 +23,11 @@ class ApiV1 {
         if ($method === 'GET' && $path === '/products') {
             ApiAuth::requireScope($client, 'products:read');
             return self::ok(self::page('products', 'id, sku, slug, name, product_type, price, compare_price,
-                currency, stock, status, weight_g, created_at, updated_at', $store->catalogId(), $query, [self::class, 'productDto']));
+                currency, stock, status, weight_g, created_at, updated_at', $store->catalogId(), $query, [self::class, 'productDto'], true));
+        }
+        if ($method === 'POST' && $path === '/products') {
+            ApiAuth::requireScope($client, 'products:write');
+            return self::withEtag(self::createProduct($body, $key, $client, $path));
         }
         if ($method === 'GET' && preg_match('#^/products/(\d+)$#', $path, $m)) {
             ApiAuth::requireScope($client, 'products:read');
@@ -36,12 +40,16 @@ class ApiV1 {
         }
         if ($method === 'GET' && $path === '/orders') {
             ApiAuth::requireScope($client, 'orders:read');
-            return self::ok(self::page('orders', '*', $store->id(), $query, [self::class, 'orderDto']));
+            $page = self::page('orders', '*', $store->id(), $query, static fn(array $row): array => $row, true);
+            $items = self::orderItems(array_map(static fn(array $row): int => (int)$row['id'], $page['data']));
+            $page['data'] = array_map(static fn(array $row): array => self::orderResource($row, $items[(int)$row['id']] ?? []), $page['data']);
+            return self::ok($page);
         }
         if ($method === 'GET' && preg_match('#^/orders/(\d+)$#', $path, $m)) {
             ApiAuth::requireScope($client, 'orders:read');
             $order = Orders::byId((int)$m[1]);
-            return $order ? self::ok(['data' => self::orderDto($order)]) : self::notFound('Order not found');
+            return $order ? self::ok(['data' => self::orderResource($order, self::orderItems([(int)$order['id']])[(int)$order['id']] ?? [])])
+                : self::notFound('Order not found');
         }
         if ($method === 'POST' && preg_match('#^/orders/(\d+)/status$#', $path, $m)) {
             ApiAuth::requireScope($client, 'orders:write');
@@ -71,7 +79,7 @@ class ApiV1 {
             ApiAuth::requireScope($client, 'customers:read');
             // Explicit columns: password hashes and tokens never leave the database.
             return self::ok(self::page('customers', 'id, email, name, phone, locale, status, email_verified_at,
-                last_login_at, created_at, updated_at', $store->id(), $query, [self::class, 'customerDto']));
+                last_login_at, created_at, updated_at', $store->id(), $query, [self::class, 'customerDto'], true));
         }
         if ($method === 'GET' && preg_match('#^/customers/(\d+)$#', $path, $m)) {
             ApiAuth::requireScope($client, 'customers:read');
@@ -106,22 +114,47 @@ class ApiV1 {
         return self::error(500, 'internal_error', 'Internal error');
     }
 
-    /** Cursor page over a store-owned table in stable id order; $table and $columns are code constants. */
-    private static function page(string $table, string $columns, string $storeId, array $query, callable $dto): array {
+    /**
+     * Cursor page over a store-owned table in stable id order; $table and $columns are code constants. With
+     * $changeFilter the page takes updated_after (rows with updated_at at or after it) and meta.server_time is the
+     * database clock read before the rows: an incremental sync passes the server_time of its first page as the next
+     * run's updated_after, so a change made while it was paging is fetched again rather than missed.
+     */
+    private static function page(string $table, string $columns, string $storeId, array $query, callable $dto, bool $changeFilter = false): array {
         $limit = self::limit($query['limit'] ?? 25);
         $afterId = self::decodeCursor((string)($query['cursor'] ?? ''));
-        $stmt = Db::get()->prepare("SELECT {$columns} FROM {$table} WHERE store_id=:store AND id>:after ORDER BY id LIMIT :limit");
+        $updatedAfter = self::updatedAfter($query['updated_after'] ?? null, $changeFilter);
+        $db = Db::get();
+        $serverTime = $changeFilter ? (string)$db->query('SELECT ' . Db::now())->fetchColumn() : null;
+        $stmt = $db->prepare("SELECT {$columns} FROM {$table} WHERE store_id=:store AND id>:after"
+            . ($updatedAfter !== null ? ' AND updated_at>=:updated' : '') . ' ORDER BY id LIMIT :limit');
         $stmt->bindValue(':store', $storeId);
         $stmt->bindValue(':after', $afterId, PDO::PARAM_INT);
+        if ($updatedAfter !== null) $stmt->bindValue(':updated', $updatedAfter);
         $stmt->bindValue(':limit', $limit + 1, PDO::PARAM_INT);
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $hasMore = count($rows) > $limit;
         if ($hasMore) array_pop($rows);
-        return [
-            'data' => array_map($dto, $rows),
-            'meta' => ['limit' => $limit, 'next_cursor' => $hasMore ? self::encodeCursor((int)end($rows)['id']) : null],
-        ];
+        $meta = ['limit' => $limit, 'next_cursor' => $hasMore ? self::encodeCursor((int)end($rows)['id']) : null];
+        if ($serverTime !== null) $meta['server_time'] = $serverTime;
+        return ['data' => array_map($dto, $rows), 'meta' => $meta];
+    }
+
+    /**
+     * updated_after as the stored UTC "Y-m-d H:i:s": the API's own timestamp format or ISO 8601 with Z or an offset.
+     * Null when absent; a value on a list without updated_at, or one that is not such a time, is a 400.
+     */
+    private static function updatedAfter(mixed $value, bool $allowed): ?string {
+        if ($value === null || $value === '') return null;
+        if (!$allowed) throw new InvalidArgumentException('updated_after is not supported on this list');
+        $pattern = '/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/';
+        $time = is_string($value) && preg_match($pattern, $value) ? date_create_immutable($value, new DateTimeZone('UTC')) : false;
+        $errors = DateTimeImmutable::getLastErrors();
+        if ($time === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            throw new InvalidArgumentException('updated_after must be a UTC time like 2026-11-04 10:00:00 or 2026-11-04T10:00:00Z');
+        }
+        return $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     }
 
     /**
@@ -241,6 +274,124 @@ class ApiV1 {
     }
 
     /**
+     * A new simple product through the CSV import path (catalog check, free slug, price history, stock booked in the
+     * default warehouse ledger). A SKU already used by a product or variant is a 409 sku_exists; nothing is stored
+     * and the key can be retried with another SKU.
+     *
+     * @return array{status:int,body:array}
+     */
+    private static function createProduct(array $body, string $key, array $client, string $path): array {
+        $allowed = ['sku', 'name', 'price', 'compare_price', 'stock', 'status', 'weight_g', 'slug', 'category_id'];
+        if (array_diff(array_keys($body), $allowed)) throw new InvalidArgumentException('Product contains unsupported fields');
+        $sku = self::sku($body['sku'] ?? null);
+        if (!is_string($body['name'] ?? null) || trim($body['name']) === '' || strlen($body['name']) > 191) {
+            throw new InvalidArgumentException('name is required (at most 191 bytes)');
+        }
+        if (!array_key_exists('price', $body)) throw new InvalidArgumentException('price is required');
+        foreach (['price', 'stock', 'weight_g'] as $field) {
+            if (array_key_exists($field, $body) && (!is_int($body[$field]) || $body[$field] < 0 || $body[$field] > self::MAX_INT)) {
+                throw new InvalidArgumentException("{$field} must be an integer from 0 to " . self::MAX_INT);
+            }
+        }
+        $comparePrice = $body['compare_price'] ?? null;
+        if ($comparePrice !== null && (!is_int($comparePrice) || $comparePrice < 0 || $comparePrice > self::MAX_INT)) {
+            throw new InvalidArgumentException('compare_price must be null or an integer from 0 to ' . self::MAX_INT);
+        }
+        $status = $body['status'] ?? 'draft';
+        if (!in_array($status, ['active', 'draft', 'archived'], true)) throw new InvalidArgumentException('Invalid product status');
+        $slug = $body['slug'] ?? null;
+        if ($slug !== null && (!is_string($slug) || Str::slug($slug) !== $slug || strlen($slug) > 191)) {
+            throw new InvalidArgumentException('slug must be lowercase letters, digits and hyphens');
+        }
+        $categoryId = $body['category_id'] ?? null;
+        if ($categoryId !== null && (!is_int($categoryId) || $categoryId < 1)) throw new InvalidArgumentException('category_id must be a category id');
+
+        return self::idempotentWrite($client, $key, 'POST', $path, $body, static function() use ($body, $sku, $status, $slug, $categoryId, $comparePrice, $client): array {
+            if (SkuGuard::taken($sku)) {
+                return self::error(409, 'sku_exists', 'A product or variant already uses this SKU') + ['store' => false];
+            }
+            if ($categoryId !== null && !Categories::byId($categoryId)) {
+                return self::error(422, 'unknown_category', 'category_id is not a category of this catalog') + ['store' => false];
+            }
+            $db = Db::get();
+            $row = ['sku' => $sku, 'name' => trim($body['name']), 'price' => $body['price'], 'status' => $status,
+                'weight_g' => $body['weight_g'] ?? 0, 'stock' => (string)($body['stock'] ?? 0)];
+            if ($comparePrice !== null) $row['compare_price'] = $comparePrice;
+            if ($slug !== null) $row['slug'] = $slug;
+            Import::importProduct($row, $db);
+            $productId = (int)self::catalogSku($sku);
+            if ($categoryId !== null) {
+                $db->prepare('UPDATE products SET category_id = :category WHERE id = :id')->execute([':category' => $categoryId, ':id' => $productId]);
+            }
+            CategoryCounts::refresh(CategoryCounts::ofProducts([$productId]));
+            $created = Products::byId($productId);
+            AuditLog::log('product', $productId, null, $created, 'API v1 client ' . $client['key_id']);
+            // There is no product.created event (the event list is stable): subscribers get the new representation.
+            Outbox::record(DomainEvents::PRODUCT_UPDATED, 'product', $productId, self::productDto($created));
+            return ['status' => 201, 'body' => ['data' => self::productDto($created), 'meta' => ['idempotent_replay' => false]],
+                'after' => static fn() => Cache::catalogChanged()];
+        });
+    }
+
+    /** Lines of the given orders keyed by order id, in line order. @param list<int> $orderIds */
+    private static function orderItems(array $orderIds): array {
+        if ($orderIds === []) return [];
+        $marks = implode(',', array_fill(0, count($orderIds), '?'));
+        $stmt = Db::get()->prepare("SELECT oi.* FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE oi.order_id IN ({$marks}) AND o.store_id = ? ORDER BY oi.id");
+        $stmt->execute([...$orderIds, StoreContext::current()->id()]);
+        $items = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) $items[(int)$item['order_id']][] = $item;
+        return $items;
+    }
+
+    /** The API's order: the event representation (orderDto) plus contact, address, shipping, payment and lines. */
+    private static function orderResource(array $row, array $items): array {
+        $address = json_decode((string)($row['shipping_addr'] ?? ''), true);
+        $address = is_array($address) ? $address : [];
+        $text = static fn(string $key): ?string => is_scalar($address[$key] ?? null) && trim((string)$address[$key]) !== '' ? trim((string)$address[$key]) : null;
+        $shipping = json_decode((string)($row['shipping_rate_snapshot'] ?? ''), true);
+        $point = is_array($shipping) && is_array($shipping['pickup_point'] ?? null) ? $shipping['pickup_point'] : null;
+        $dto = self::orderDto($row);
+        $dto['customer']['phone'] = trim((string)($row['customer_phone'] ?? '')) === '' ? null : trim((string)$row['customer_phone']);
+        return $dto + [
+            'locale' => trim((string)($row['locale'] ?? '')) === '' ? null : (string)$row['locale'],
+            'address' => [
+                'company' => $text('company'),
+                'street' => $text('street') ?? $text('address'),
+                'city' => $text('city'),
+                'zip' => $text('zip'),
+                'country' => ($country = $text('country')) === null ? null : strtoupper($country),
+                'ico' => $text('ico'),
+                'dic' => $text('dic'),
+                'ic_dph' => $text('ic_dph'),
+            ],
+            'shipping' => [
+                'method' => trim((string)($row['shipping_method'] ?? '')) === '' ? null : (string)$row['shipping_method'],
+                'pickup_point' => $point === null ? null : [
+                    'id' => isset($point['id']) && is_scalar($point['id']) ? (string)$point['id'] : null,
+                    'name' => isset($point['name']) && is_scalar($point['name']) ? (string)$point['name'] : null,
+                    'address' => isset($point['address']) && is_scalar($point['address']) ? (string)$point['address'] : null,
+                ],
+            ],
+            'payment_method' => trim((string)($row['payment_method'] ?? '')) === '' ? null : (string)$row['payment_method'],
+            'notes' => trim((string)($row['notes'] ?? '')) === '' ? null : (string)$row['notes'],
+            'items' => array_map(static fn(array $item): array => [
+                'id' => (int)$item['id'],
+                'product_id' => $item['product_id'] === null ? null : (int)$item['product_id'],
+                'variant_id' => ($item['variant_id'] ?? null) === null ? null : (int)$item['variant_id'],
+                'sku' => (string)$item['sku'],
+                'name' => (string)$item['name'],
+                'quantity' => (int)$item['quantity'],
+                'unit_price' => (int)$item['unit_price'],
+                'total' => (int)$item['total'],
+                'vat_rate' => ($item['vat_rate'] ?? null) === null ? null : (float)$item['vat_rate'],
+                'vat_amount' => (int)($item['vat_amount'] ?? 0),
+            ], $items),
+        ];
+    }
+
+    /**
      * Order status change through OrderWorkflow (stock, events, audit, jobs) with the same rules as the
      * admin: 'paid' needs a confirmed payment, 'refunded' the refunds:write scope.
      *
@@ -290,7 +441,8 @@ class ApiV1 {
             }
             return [
                 'status' => 200,
-                'body' => ['data' => self::orderDto(Orders::byId($orderId)), 'meta' => ['idempotent_replay' => false]],
+                'body' => ['data' => self::orderResource(Orders::byId($orderId), self::orderItems([$orderId])[$orderId] ?? []),
+                    'meta' => ['idempotent_replay' => false]],
                 'after' => static fn() => OrderWorkflow::pushDeferredJobs($jobs),
             ];
         });
@@ -462,7 +614,7 @@ class ApiV1 {
 
     /** Adds the ETag of the product in a 200 body (GET and PATCH, also a replayed PATCH). */
     private static function withEtag(array $result): array {
-        if ($result['status'] === 200 && is_array($result['body']['data'] ?? null)) {
+        if (in_array($result['status'], [200, 201], true) && is_array($result['body']['data'] ?? null)) {
             $result['headers'] = ['ETag' => self::etag($result['body']['data'])];
         }
         return $result;
