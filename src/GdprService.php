@@ -431,7 +431,7 @@ class GdprService {
         // Anyone can type an address into the form: an unverified account does not own the requests under it.
         $stockNotifications = [];
         if ((string)$ownership[':verified'] === '1' && self::hasTable($db, 'back_in_stock_requests')) {
-            $stmt = $db->prepare("SELECT id, product_id, email, locale, created_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
+            $stmt = $db->prepare("SELECT id, product_id, email, locale, created_at, confirmed_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
             $stmt->execute([$store, $email]);
             $stockNotifications = $stmt->fetchAll();
         }
@@ -549,6 +549,7 @@ class GdprService {
             // A registered table without an erasure step must not report a completed erasure.
             self::assertRegistryCovered('erase', array_keys($rows));
             self::recordErasure($db, $customerId, $customerId, $ownership);
+            $retained = count(self::customerOrderIds($db, $ownership));
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
@@ -562,6 +563,7 @@ class GdprService {
             'status' => 'anonymized',
             'customer_id' => $customerId,
             'rows' => $rows,
+            'retained_orders' => $retained,
         ];
     }
 
@@ -582,13 +584,14 @@ class GdprService {
                 + self::eraseSubject($db, 0, $email, $ownership, $placeholder, $erasureMarker);
             self::assertRegistryCovered('erase', array_keys($rows));
             self::recordErasure($db, null, 'guest', $ownership);
+            $retained = count(self::customerOrderIds($db, $ownership));
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
         self::logErasure(null, $email, $actor, $rows);
-        return ['status' => 'anonymized', 'customer_id' => null, 'rows' => $rows];
+        return ['status' => 'anonymized', 'customer_id' => null, 'rows' => $rows, 'retained_orders' => $retained];
     }
 
     /**
@@ -634,18 +637,44 @@ class GdprService {
         $account->execute([StoreContext::current()->id(), $email]);
         $ownership = [':order_store' => StoreContext::current()->id(), ':customer_id' => 0, ':verified' => (int)$account->fetchColumn() > 0 ? 0 : 1,
             ':guest' => 1, ':owner_email' => $email];
-        $carts = $db->prepare("SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
-        $carts->execute([$email, StoreContext::current()->id()]);
-        $stockRequests = 0;
-        if (self::hasTable($db, 'back_in_stock_requests')) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
-            $stmt->execute([StoreContext::current()->id(), $email]);
-            $stockRequests = (int)$stmt->fetchColumn();
-        }
-        if (self::customerOrderIds($db, $ownership) === [] && (int)$carts->fetchColumn() === 0 && $stockRequests === 0) {
+        if (self::customerOrderIds($db, $ownership) === [] && self::guestCartsAndRequests($db, $email) === 0) {
             throw new RuntimeException('No guest data for this e-mail');
         }
         return $ownership;
+    }
+
+    /** Abandoned carts and back-in-stock requests of the address in the current store: erasure deletes both. */
+    private static function guestCartsAndRequests(PDO $db, string $email): int {
+        $carts = $db->prepare("SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
+        $carts->execute([$email, StoreContext::current()->id()]);
+        $count = (int)$carts->fetchColumn();
+        if (self::hasTable($db, 'back_in_stock_requests')) {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+            $stmt->execute([StoreContext::current()->id(), $email]);
+            $count += (int)$stmt->fetchColumn();
+        }
+        return $count;
+    }
+
+    /**
+     * The address's last guest erasure in the current store (the 'erase' event without an account, matched by the
+     * address hash), or null when it was never erased. 'new_data' counts what an erasure would remove again: guest
+     * orders placed after it, and carts or back-in-stock requests (the erasure deleted all of them). The admin shows
+     * the erased state instead of offering an erasure that has nothing left to do.
+     * @return array{erased_at: string, new_data: int}|null
+     */
+    public static function guestErasure(string $email): ?array {
+        $email = Str::normalizeEmail($email);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return null;
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $stmt = $db->prepare("SELECT MAX(created_at) FROM gdpr_events WHERE store_id = ? AND action = 'erase' AND customer_id IS NULL AND email_hash = ?");
+        $stmt->execute([$store, self::hashPii(strtolower($email))]);
+        $erasedAt = $stmt->fetchColumn();
+        if ($erasedAt === false || $erasedAt === null) return null;
+        $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?) AND created_at > ?");
+        $stmt->execute([$store, $email, (string)$erasedAt]);
+        return ['erased_at' => (string)$erasedAt, 'new_data' => (int)$stmt->fetchColumn() + self::guestCartsAndRequests($db, $email)];
     }
 
     /** Erasure shared by accounts and guests: mail log, audit trail, coupon uses and eraseCustomerContent(). */

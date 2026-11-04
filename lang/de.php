@@ -258,6 +258,11 @@ return array_replace(require __DIR__ . '/en.php', [
     'back_in_stock.limit' => 'Diese Adresse wartet bereits auf zu viele Artikel.',
     'back_in_stock.throttled' => 'Zu viele Anfragen. Bitte versuchen Sie es später erneut.',
     'back_in_stock.expired' => 'Das Formular ist abgelaufen. Bitte versuchen Sie es erneut.',
+    'back_in_stock.confirm_sent' => 'Fast geschafft: Wir haben Ihnen einen Bestätigungslink gesendet. Öffnen Sie ihn innerhalb von 48 Stunden, sonst löschen wir die Anfrage.',
+    'back_in_stock.failed' => 'Die Bestätigungs-E-Mail konnte nicht gesendet werden. Bitte versuchen Sie es später erneut.',
+    'back_in_stock.confirm_invalid' => 'Dieser Bestätigungslink ist ungültig oder abgelaufen. Bitte fragen Sie auf der Produktseite erneut an.',
+    'back_in_stock.confirm_message' => 'Bestätigen Sie, dass Sie eine E-Mail erhalten möchten, sobald {product} wieder verfügbar ist.',
+    'back_in_stock.confirm_submit' => 'Bestätigen',
     'shop_now'         => 'Jetzt einkaufen',
     'ph_from'          => 'ab',
     'ph_to'            => 'bis',
@@ -1537,6 +1542,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Notiz',
     'admin.gdpr.invalid_customer' => 'Ungültiger Kunde.',
     'admin.gdpr.anonymized_ok'    => 'Kunde anonymisiert.',
+    'admin.gdpr.anonymized_summary' => 'Anonymisiert: {erased} Datensätze gelöscht oder bereinigt. {retained} Bestellungen behalten Name, Adresse und E-Mail für die gesetzliche Aufbewahrungsfrist der Buchhaltung (danach bereinigt).',
+    'admin.gdpr.guest_erased' => 'Anonymisiert am {date}. Für die Buchhaltung aufbewahrt: Name, Adresse und E-Mail in {count} Bestellungen.',
+    'admin.gdpr.guest_new_data' => ' Neue Daten seitdem: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymisierung fehlgeschlagen',
 
     // Customer account portal

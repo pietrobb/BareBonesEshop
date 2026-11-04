@@ -179,6 +179,8 @@ function pageGdpr(): void {
     }
     // Guests have no account row: their orders are found by the exact address.
     $guestOrders = GdprService::guestOrderCount($email);
+    // The orders stay after a guest erasure (retention), so the row says so instead of offering the same erasure again.
+    $guestErasure = $guestOrders > 0 ? GdprService::guestErasure($email) : null;
     $events = $db->prepare("SELECT * FROM gdpr_events WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT 50");
     $events->execute([':store' => StoreContext::current()->id()]);
     $events = $events->fetchAll();
@@ -222,13 +224,19 @@ function pageGdpr(): void {
             <?php if ($guestOrders > 0): ?>
             <tr>
                 <td>—</td><td><?= esc($email) ?></td>
-                <td colspan="2" class="muted"><?= esc(I18n::format('admin.gdpr.guest', ['count' => $guestOrders])) ?></td>
+                <td colspan="2" class="muted"><?= esc(I18n::format('admin.gdpr.guest', ['count' => $guestOrders])) ?>
+                    <?php if ($guestErasure !== null): ?>
+                    <br><span class="badge badge-draft"><?= esc(adminCodeLabel('admin.customer.status.', 'anonymized')) ?></span>
+                    <?= esc(I18n::format('admin.gdpr.guest_erased', ['date' => I18n::dateTime($guestErasure['erased_at']), 'count' => $guestOrders])) ?>
+                    <?php if ($guestErasure['new_data'] > 0): ?><?= esc(I18n::format('admin.gdpr.guest_new_data', ['count' => $guestErasure['new_data']])) ?><?php endif; ?>
+                    <?php endif; ?>
+                </td>
                 <td>
                     <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="guest_email" value="<?= esc($email) ?>">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
                     </form>
-                    <?php if (Security::adminCan('gdpr.erase')): ?>
+                    <?php if (Security::adminCan('gdpr.erase') && ($guestErasure === null || $guestErasure['new_data'] > 0)): ?>
                     <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" data-confirm="<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="guest_email" value="<?= esc($email) ?>">
@@ -320,7 +328,9 @@ function handleGdprAnonymize(): void {
             'payload' => $result,
             'note' => $guestEmail !== '' ? 'Admin anonymized a guest' : 'Admin anonymized customer #' . $customerId,
         ]);
-        setFlash('ok', I18n::t('admin.gdpr.anonymized_ok'));
+        // What went and what stays: the retained orders still show the name, address and e-mail.
+        setFlash('ok', isset($result['rows']) ? I18n::format('admin.gdpr.anonymized_summary', ['erased' => array_sum($result['rows']), 'retained' => $result['retained_orders']])
+            : I18n::t('admin.gdpr.anonymized_ok'));
     } catch (Throwable $e) {
         setFlash('err', I18n::t('admin.gdpr.anonymized_failed') . ': ' . $e->getMessage());
     }

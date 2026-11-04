@@ -12,6 +12,16 @@
   ("Packeta") instead of its code. `php cli/update.php doctor` and `php cli/setup.php doctor` warn while `MAIL_FROM`
   is unset (mail leaves from `noreply@localhost.invalid`) or on an example/reserved domain, and fail when it is not
   a valid address (no e-mail is sent).
+- **Content, e-mails and GDPR** (review round 15). The e-mail template guard no longer lets hidden text through
+  `color:white`, a text colour equal to (or too close to) its background, or `<font color>`: it compares the
+  computed text and background colours. A legal page's "last updated" date follows the merchant's own edit of that
+  text instead of staying at the shipped date. Anonymizing a guest in the admin GDPR screen now shows that the
+  address was erased and what retention keeps (name, address and e-mail on N orders, for accounting) instead of the
+  same row and button again; a later order from the address brings the button back as new data. "Notify me when
+  back in stock" is double opt-in: the address gets a confirmation link (valid 48 hours, confirmed by a posted
+  button, so mail scanners following the link confirm nothing) and only confirmed requests are mailed. Requests
+  stored before the upgrade were never confirmed and lapse after 48 hours (migration
+  `20261104120000_back_in_stock_double_opt_in`).
 - **Extensions and developer documentation** (review round 15). A broken extension class (for example a provider
   missing an interface method) ended every request with a fatal error, although the documentation promises that a
   broken extension is skipped. Such an extension is now quarantined after the request that hit the error and skipped

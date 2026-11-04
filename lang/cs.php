@@ -258,6 +258,11 @@ return array_replace(require __DIR__ . '/en.php', [
     'back_in_stock.limit' => 'Tato adresa už čeká na příliš mnoho produktů.',
     'back_in_stock.throttled' => 'Příliš mnoho požadavků. Zkuste to později.',
     'back_in_stock.expired' => 'Platnost formuláře vypršela. Zkuste to znovu.',
+    'back_in_stock.confirm_sent' => 'Ještě jeden krok: poslali jsme vám e-mail s potvrzovacím odkazem. Otevřete ho do 48 hodin, jinak žádost smažeme.',
+    'back_in_stock.failed' => 'Potvrzovací e-mail se nepodařilo odeslat. Zkuste to prosím později.',
+    'back_in_stock.confirm_invalid' => 'Tento potvrzovací odkaz je neplatný nebo vypršel. Požádejte prosím znovu na stránce produktu.',
+    'back_in_stock.confirm_message' => 'Potvrďte, že chcete jeden e-mail, až bude {product} opět dostupný.',
+    'back_in_stock.confirm_submit' => 'Potvrdit',
     'shop_now'         => 'Nakupovat',
     'ph_from'          => 'od',
     'ph_to'            => 'do',
@@ -1537,6 +1542,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Poznámka',
     'admin.gdpr.invalid_customer' => 'Neplatný zákazník.',
     'admin.gdpr.anonymized_ok'    => 'Zákazník anonymizován.',
+    'admin.gdpr.anonymized_summary' => 'Anonymizováno: {erased} záznamů smazáno nebo vyčištěno. {retained} objednávek si ponechává jméno, adresu a e-mail po zákonnou dobu archivace účetních záznamů (poté se vyčistí).',
+    'admin.gdpr.guest_erased' => 'Anonymizováno {date}. Ponecháno pro účetnictví: jméno, adresa a e-mail na {count} objednávkách.',
+    'admin.gdpr.guest_new_data' => ' Nové údaje od té doby: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymizace selhala',
 
     // Customer account portal
