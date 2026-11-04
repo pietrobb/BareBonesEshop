@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Extensions and developer documentation** (review round 15). A broken extension class (for example a provider
+  missing an interface method) ended every request with a fatal error, although the documentation promises that a
+  broken extension is skipped. Such an extension is now quarantined after the request that hit the error and skipped
+  until one of its PHP files changes (`extension.quarantined`, shown by the doctor). `docs/EXTENSIONS.md` documents
+  the payment, shipping and tracking adapter contracts (when `getRates()` is called, which events and statuses the
+  core acts on); a carrier with its own notification format implements `TrackingWebhookAdapter` instead of being
+  bypassed. New `docs/THEMES.md` (theme authoring) and `CONTRIBUTING.md`. The README test steps work on a fresh
+  clone (`--recurse-submodules`, `config.php`), and `cli/test.php` names what is missing instead of aborting
+  midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11. The file-queue worker takes its lock
+  in the jobs directory the queue really uses: two suites run side by side (two checkouts sharing the default
+  `jobs_dir`) no longer make a test's worker back off and drop out of the run.
+
 ## 2.1.1 — 2026-11-04
 
 **Security and correctness hotfix of 2.1.0** (review round 15, high 1–8). Update every 2.1.0 shop: among others a

@@ -363,6 +363,9 @@ failed-job, mail, payment, and webhook incidents without exposing secrets.
 
 ## Themes, content, marketing, and quality gates
 
+Writing a theme (manifest, template syntax, blocks, layouts, assets, `cli/theme-check.php`):
+[docs/THEMES.md](docs/THEMES.md).
+
 Migration `20260801230000_theme_content_marketing` adds store-scoped menus, scheduled
 banners, landing-page SEO fields, and exact-path redirects. Each store selects a
 package with `theme` in `stores.json`; every package has a private `theme.json`,
@@ -552,8 +555,15 @@ A zero-dependency test runner (no PHPUnit) covering services, the JSON API,
 migrations, and an optional HTTP smoke pass.
 
 ```bash
+git clone --recurse-submodules https://github.com/pietrobb/BareBonesEshop.git
+cd BareBonesEshop
+cp config.example.php config.php    # the suite reads the shop's config like CI does
 php cli/test.php
 ```
+
+In an existing clone without the `vendor/bbf` submodule run `git submodule update --init` first;
+`cli/test.php` stops with that hint when `config.php` or `vendor/bbf` is missing. Contributing
+(branches, the checks a PR must pass, browser tests): see `CONTRIBUTING.md`.
 
 The runner creates its SQLite database and fixtures in the system temp directory
 (`sys_get_temp_dir()`), not in the checkout, and deletes the database when it finishes.

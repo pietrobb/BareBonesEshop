@@ -2,6 +2,10 @@
 require_once __DIR__ . '/cli-only.php';
 
 /** BareBones Shop — canonical scenario test runner. */
+// A fresh clone has neither config.php nor the vendor/bbf submodule: say how to get them instead of aborting midway.
+$suiteMissing = array_filter([is_file(dirname(__DIR__) . '/config.php') ? '' : 'config.php is missing: cp config.example.php config.php',
+    is_file(dirname(__DIR__) . '/vendor/bbf/bbf_render.php') ? '' : 'vendor/bbf is empty: git submodule update --init']);
+if ($suiteMissing !== []) { fwrite(STDERR, "Cannot run the tests yet:\n  - " . implode("\n  - ", $suiteMissing) . "\n"); exit(1); }
 require __DIR__ . '/tests/TestHarness.php';
 
 ob_start();
