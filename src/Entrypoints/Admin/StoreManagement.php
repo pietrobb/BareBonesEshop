@@ -75,7 +75,7 @@ function handleStoreLegalSave(): void {
     $page = Security::str($_GET['legal'] ?? '');
     $lang = Security::str($_GET['text_lang'] ?? '');
     $storeId = Security::str($_GET['store'] ?? '');
-    $html = !empty($_POST['reset']) || !is_string($_POST['html'] ?? null) ? '' : str_replace("\r\n", "\n", $_POST['html']);
+    $html = !empty($_POST['reset']) || !is_string($_POST['html'] ?? null) ? '' : ConsumerNotice::stampLegalText($page, $lang, str_replace("\r\n", "\n", $_POST['html']), $storeId);
     $ok = isset(StoreSettings::load()['stores'][$storeId]) && DataOverrides::saveLegal($page, $lang, $html, $storeId);
     if ($ok) AuditLog::log('legal_text', 0, null, ['store' => $storeId, 'page' => $page, 'locale' => $lang, 'sha256' => $html === '' ? null : hash('sha256', $html)]);
     setFlash($ok ? 'ok' : 'err', I18n::t($ok ? 'admin.stores.legal_saved' : 'admin.stores.err.write'));

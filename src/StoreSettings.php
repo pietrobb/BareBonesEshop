@@ -180,6 +180,9 @@ final class StoreSettings {
         if ($errors) return ['ok' => false, 'errors' => $errors];
 
         $before = $store;
+        // The legal pages print the seller's identity and contact: changing them changes those pages' "last changed" date.
+        $printed = array_diff(self::LEGAL_TEXT, ['iban', 'bic', 'bank']);
+        if (!$sharesSeller && array_filter($printed, static fn(string $f): bool => (string)($before['legal'][$f] ?? '') !== (string)$legal[$f])) $legal['updated_at'] = date('Y-m-d');
         $store['name'] = $storeName;
         $store['oss_enabled'] = ($input['oss_enabled'] ?? '') === '1';
         $store['legal'] = $legal;
