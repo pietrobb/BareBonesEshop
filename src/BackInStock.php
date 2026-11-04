@@ -15,6 +15,10 @@ class BackInStock {
     public const CONFIRM_HOURS = 48;
     /** Open requests per address and store: bounds what one form can make the shop send to a stranger. */
     private const MAX_PER_EMAIL = 20;
+    /** A waiting request is mailed a new link at most once in this many minutes (asking again does not mail-bomb). */
+    private const RESEND_MINUTES = 60;
+    /** Confirmation links one address of a store receives per hour, over all products. */
+    private const LINKS_PER_HOUR = 3;
 
     private static array $pending = [];
     private static bool $shutdownRegistered = false;
@@ -27,10 +31,11 @@ class BackInStock {
     }
 
     /**
-     * 'confirm_sent' | 'invalid' (e-mail or product) | 'available' (can be bought now) | 'limit' | 'failed' (no link sent).
-     * The request is stored unconfirmed and the address is mailed a confirmation link; asking again sends a fresh link.
-     * An address that already confirmed gets no new mail, but the same answer: the form does not tell a stranger which
-     * addresses wait for which product.
+     * 'confirm_sent' | 'invalid' (e-mail or product) | 'available' (can be bought now) | 'limit' | 'throttled'
+     * (LINKS_PER_HOUR reached) | 'failed' (no link sent).
+     * The request is stored unconfirmed and the address is mailed a confirmation link; asking again sends a fresh link,
+     * but not within RESEND_MINUTES of the last one. An address that already confirmed (or got a link a moment ago) gets
+     * no new mail, but the same answer: the form does not tell a stranger which addresses wait for which product.
      */
     public static function subscribe(int $productId, string $email, string $locale): string {
         $email = Str::normalizeEmail($email);
@@ -43,6 +48,16 @@ class BackInStock {
         $count = $db->prepare('SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = :store AND email = :email AND product_id <> :product');
         $count->execute([':store' => $store, ':email' => $email, ':product' => $productId]);
         if ((int)$count->fetchColumn() >= self::MAX_PER_EMAIL) return 'limit';
+        $existing = $db->prepare('SELECT confirmed_at, created_at FROM back_in_stock_requests WHERE store_id = ? AND product_id = ? AND email = ?');
+        $existing->execute([$store, $productId, $email]);
+        $request = $existing->fetch(PDO::FETCH_ASSOC);
+        if ($request && ($request['confirmed_at'] !== null || (string)$request['created_at'] >= gmdate('Y-m-d H:i:s', time() - self::RESEND_MINUTES * 60))) {
+            return 'confirm_sent';
+        }
+        // An unconfirmed request's created_at is the time its last link was sent.
+        $recent = $db->prepare('SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = ? AND email = ? AND confirmed_at IS NULL AND created_at >= ?');
+        $recent->execute([$store, $email, gmdate('Y-m-d H:i:s', time() - 3600)]);
+        if ((int)$recent->fetchColumn() >= self::LINKS_PER_HOUR) return 'throttled';
         try {
             $baseUrl = AbandonedCarts::storeBaseUrl($store, Security::appUrl(Security::config()));
         } catch (RuntimeException $e) {
