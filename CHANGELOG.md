@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **ERP API** (review round 15, medium). An ERP could neither create a product, nor sync incrementally, nor book or
+  ship an order from the API alone. `POST /api/v1/products` (scope `products:write`, `Idempotency-Key`) creates a
+  simple product the way the CSV import does: unique slug, price history, stock booked in the default warehouse
+  ledger, `product.updated` to subscribers; an existing SKU is a 409 `sku_exists` and is never overwritten. The
+  product, order and customer lists take `updated_after` (UTC; `meta.server_time` of the first page is the next run's
+  value) and refuse it on lists without `updated_at`. Orders in the API carry their lines (SKU, name, quantity, unit
+  price, total, VAT), the delivery address with company IDs, phone, locale, shipping method and pickup point, payment
+  method and the customer's note; webhook payloads are unchanged. Attaching guest orders to a verified account and
+  erasing a customer now bump the orders' `updated_at`, since both change what the API shows. `docs/openapi.yaml`
+  documents all of it.
+
 ## 2.1.1 — 2026-11-04
 
 **Security and correctness hotfix of 2.1.0** (review round 15, high 1–8). Update every 2.1.0 shop: among others a

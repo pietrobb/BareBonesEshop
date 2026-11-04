@@ -19,6 +19,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UpdatedAfter'
       responses:
         '200':
           description: Product page
@@ -30,6 +31,51 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '400': { $ref: '#/components/responses/BadRequest' }
+    post:
+      operationId: createProduct
+      summary: Idempotently create a simple product
+      description: |
+        The product is created as the CSV import creates it: the slug is derived from the name unless given (and
+        made unique), the price is recorded in the price history and stock is booked in the default warehouse
+        ledger. Without category_id the product goes to the "uncategorized" category. Subscribers receive the
+        new product as a product.updated event (there is no separate product.created event).
+      x-required-scope: products:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductCreate' }
+      responses:
+        '201':
+          description: Created product; an identical retry returns the stored response with idempotent_replay=true and creates nothing
+          headers:
+            ETag:
+              description: Version of the new product
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Product' }
+                  meta: { $ref: '#/components/schemas/WriteMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: The Idempotency-Key was already used for a different request (idempotency_conflict), or a product or variant already uses the SKU (sku_exists; nothing is stored, update it with PATCH /products/{id})
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: category_id is not a category of the credential store catalog (unknown_category); nothing is stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /products/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -109,11 +155,12 @@ paths:
   /orders:
     get:
       operationId: listOrders
-      summary: List orders owned by the credential store
+      summary: List orders owned by the credential store, with their lines and address
       x-required-scope: orders:read
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UpdatedAfter'
       responses:
         '200':
           description: Order page
@@ -260,6 +307,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UpdatedAfter'
       responses:
         '200':
           description: Customer page
@@ -414,6 +462,17 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    UpdatedAfter:
+      name: updated_after
+      in: query
+      required: false
+      description: |
+        Only rows whose updated_at is at or after this UTC time ("2026-11-04 10:00:00", "2026-11-04" or ISO 8601
+        with Z or an offset). For an incremental sync, page through with the cursor and keep meta.server_time of
+        the FIRST page; pass it as updated_after on the next run. Allow an overlap of a few minutes (subtract it
+        from server_time), since a change committed by a long transaction can carry an earlier updated_at; rows
+        seen twice are harmless because they are identified by id. Not accepted on lists without updated_at (400).
+      schema: { type: string, maxLength: 40 }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -482,10 +541,51 @@ components:
         compare_price: { type: [integer, 'null'], minimum: 0, maximum: 2000000000 }
         stock: { type: integer, minimum: 0, maximum: 2000000000, description: Available quantity; the difference is booked as an api_adjustment in the default warehouse ledger. }
         weight_g: { type: integer, minimum: 0, maximum: 2000000000 }
+    ProductCreate:
+      type: object
+      additionalProperties: false
+      required: [sku, name, price]
+      properties:
+        sku: { type: string, minLength: 1, maxLength: 191, description: Unique across products and variants of every catalog. }
+        name: { type: string, minLength: 1, maxLength: 191 }
+        price: { type: integer, minimum: 0, maximum: 2000000000 }
+        compare_price: { type: [integer, 'null'], minimum: 0, maximum: 2000000000 }
+        stock: { type: integer, minimum: 0, maximum: 2000000000, default: 0, description: Available quantity, booked in the default warehouse ledger. }
+        status: { type: string, enum: [active, draft, archived], default: draft }
+        weight_g: { type: integer, minimum: 0, maximum: 2000000000, default: 0 }
+        slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 191, description: Derived from the name when omitted; a slug taken by another product gets a -2, -3… suffix. }
+        category_id: { type: integer, minimum: 1 }
+    Address:
+      type: object
+      required: [company, street, city, zip, country, ico, dic, ic_dph]
+      properties:
+        company: { type: [string, 'null'] }
+        street: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        zip: { type: [string, 'null'] }
+        country: { type: [string, 'null'], description: ISO 3166-1 alpha-2, upper case. }
+        ico: { type: [string, 'null'], description: Company registration number (IČO). }
+        dic: { type: [string, 'null'], description: Tax number (DIČ). }
+        ic_dph: { type: [string, 'null'], description: VAT ID (IČ DPH). }
+    OrderItem:
+      type: object
+      required: [id, product_id, variant_id, sku, name, quantity, unit_price, total, vat_rate, vat_amount]
+      properties:
+        id: { type: integer }
+        product_id: { type: [integer, 'null'] }
+        variant_id: { type: [integer, 'null'] }
+        sku: { type: string }
+        name: { type: string, description: Product name at the time of the order. }
+        quantity: { type: integer, minimum: 1 }
+        unit_price: { type: integer, description: Gross unit price in minor units. }
+        total: { type: integer, description: Gross line total in minor units. }
+        vat_rate: { type: [number, 'null'], description: VAT rate in percent. }
+        vat_amount: { type: integer }
     Order:
       type: object
       additionalProperties: false
-      required: [id, number, status, payment_status, customer, totals, created_at, updated_at]
+      required: [id, number, status, payment_status, customer, totals, created_at, updated_at, locale, address, shipping, payment_method, notes, items]
+      description: Webhook events carry the fields up to updated_at; the API adds the contact, address, shipping, payment and lines. Shipped quantities are in GET /orders/{id}/shipments.
       properties:
         id: { type: integer }
         number: { type: string }
@@ -498,6 +598,23 @@ components:
             id: { type: [integer, 'null'] }
             name: { type: string }
             email: { type: string, format: email }
+            phone: { type: [string, 'null'], description: Present in API responses, not in webhook events. }
+        locale: { type: [string, 'null'] }
+        address: { $ref: '#/components/schemas/Address' }
+        shipping:
+          type: object
+          required: [method, pickup_point]
+          properties:
+            method: { type: [string, 'null'] }
+            pickup_point:
+              type: [object, 'null']
+              properties:
+                id: { type: [string, 'null'] }
+                name: { type: [string, 'null'] }
+                address: { type: [string, 'null'] }
+        payment_method: { type: [string, 'null'] }
+        notes: { type: [string, 'null'], description: The customer's note to the order. }
+        items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
         totals:
           type: object
           required: [subtotal, discount, shipping, tax, total, currency]
@@ -602,6 +719,7 @@ components:
       properties:
         limit: { type: integer }
         next_cursor: { type: [string, 'null'] }
+        server_time: { type: string, description: 'Database UTC time ("Y-m-d H:i:s") read before the page; only on lists that take updated_after.' }
     ProductPage:
       type: object
       required: [data, meta]
