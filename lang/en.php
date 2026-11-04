@@ -1537,6 +1537,9 @@ return [
     'admin.gdpr.note'             => 'Note',
     'admin.gdpr.invalid_customer' => 'Invalid customer.',
     'admin.gdpr.anonymized_ok'    => 'Customer anonymized.',
+    'admin.gdpr.anonymized_summary' => 'Anonymized: {erased} records deleted or scrubbed. {retained} orders keep the name, address and e-mail for the accounting retention period (scrubbed after it).',
+    'admin.gdpr.guest_erased' => 'Anonymized on {date}. Kept for accounting: name, address and e-mail on {count} orders.',
+    'admin.gdpr.guest_new_data' => ' New data since then: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymization failed',
 
     // Customer account portal

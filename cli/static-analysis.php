@@ -195,7 +195,8 @@ $architectureBudgets = [
     // R14 UX7: image list of the product editor (move up/down, remove) over the "URL | alt" textarea.
     'src/Entrypoints/Admin/ImageOrder.php' => ['lines' => 55, 'functions' => 1, 'max_function_lines' => 45, 'coupling' => 2],
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
-    'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
+    // +10 lines R15: the GDPR page shows a guest's erasure (date, retained orders) and the erasure flash says what went and what stays.
+    'src/Entrypoints/Admin/Customers.php' => ['lines' => 340, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
     'src/Entrypoints/Admin/EmailTemplates.php' => ['lines' => 135, 'functions' => 7, 'max_function_lines' => 46, 'coupling' => 3],
     // Data files: route => page modules, side menu and page permissions.
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],

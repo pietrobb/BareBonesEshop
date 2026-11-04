@@ -1537,6 +1537,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Notatka',
     'admin.gdpr.invalid_customer' => 'Nieprawidłowy klient.',
     'admin.gdpr.anonymized_ok'    => 'Klient zanonimizowany.',
+    'admin.gdpr.anonymized_summary' => 'Zanonimizowano: {erased} rekordów usuniętych lub wyczyszczonych. {retained} zamówień zachowuje imię i nazwisko, adres i e-mail przez ustawowy okres przechowywania dokumentacji księgowej (potem są czyszczone).',
+    'admin.gdpr.guest_erased' => 'Zanonimizowano {date}. Zachowane do celów księgowych: imię i nazwisko, adres i e-mail w {count} zamówieniach.',
+    'admin.gdpr.guest_new_data' => ' Nowe dane od tego czasu: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonimizacja nie powiodła się',
 
     // Customer account portal

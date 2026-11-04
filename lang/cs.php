@@ -1537,6 +1537,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Poznámka',
     'admin.gdpr.invalid_customer' => 'Neplatný zákazník.',
     'admin.gdpr.anonymized_ok'    => 'Zákazník anonymizován.',
+    'admin.gdpr.anonymized_summary' => 'Anonymizováno: {erased} záznamů smazáno nebo vyčištěno. {retained} objednávek si ponechává jméno, adresu a e-mail po zákonnou dobu archivace účetních záznamů (poté se vyčistí).',
+    'admin.gdpr.guest_erased' => 'Anonymizováno {date}. Ponecháno pro účetnictví: jméno, adresa a e-mail na {count} objednávkách.',
+    'admin.gdpr.guest_new_data' => ' Nové údaje od té doby: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymizace selhala',
 
     // Customer account portal

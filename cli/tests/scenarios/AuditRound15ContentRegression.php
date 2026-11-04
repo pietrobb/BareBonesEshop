@@ -102,3 +102,82 @@ try {
     }
     @rmdir($r15cTmp);
 }
+
+// 3. Anonymizing a guest in the admin changed nothing the merchant could see: the GDPR page showed the same row, order
+//    count and button, and the flash was a bare "anonymized". The orders stay (accounting retention), so the page now
+//    says the address was erased and what was kept, the flash says what went, and the button returns only for new data.
+//    Each request is its own PHP process (the handler ends with exit) on one SQLite file.
+$r15gRoot = test_fixture_path('r15-gdpr-guest');
+mkdir($r15gRoot);
+$r15gFixture = $r15gRoot . '/request.php';
+file_put_contents($r15gFixture, <<<'PHP'
+<?php
+[, $root, $target, $phase] = $argv;
+require $root . '/src/autoload.php';
+require $root . '/src/Entrypoints/Admin/Shared.php';
+require $root . '/src/Entrypoints/Admin/Customers.php';
+set_error_handler(static function(int $severity, string $message, string $file, int $line): bool {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+$db = new PDO('sqlite:' . $target, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+Db::init($db, 'sqlite');
+$guestOrder = static function(string $number, string $createdAt) use ($db): void {
+    $db->prepare("INSERT INTO orders (order_number, store_id, customer_name, customer_email, customer_phone, shipping_addr, payment_method, subtotal, total, notes, ip_address, created_at)
+        VALUES (?, 'default', 'R15G Guest', 'R15G-Guest@Example.test', '+421900111222', '{\"street\":\"Hlavná 1\"}', 'cod', 1000, 1000, 'call me', '198.51.100.7', ?)")->execute([$number, $createdAt]);
+};
+if ($phase === 'setup') {
+    (new Migrator($db, $root . '/migrations', dirname(__FILE__) . '/migrate.lock'))->apply();
+    $guestOrder('R15G-1', '2026-01-02 03:04:05');
+    $guestOrder('R15G-2', '2026-01-03 03:04:05');
+    $db->exec("INSERT INTO orders (order_number, store_id, customer_name, customer_email, payment_method, subtotal, total) VALUES ('R15G-OTHER', 'default', 'Other', 'r15g-other@example.test', 'cod', 1, 1)");
+    exit(0);
+}
+if ($phase === 'new_order') { $guestOrder('R15G-3', '2999-01-01 00:00:00'); exit(0); }
+StoreContext::activate(StoreContext::resolve(Bootstrap::stores(), '/', '', 'default'));
+I18n::setLocale('en');
+$_SESSION = ['admin_role' => 'owner', 'admin_user' => 'r15g', 'csrf_token' => 'r15g-token'];
+$_GET = ['p' => 'gdpr', 'email' => 'r15g-guest@example.test'];
+ob_start();
+register_shutdown_function(static function() use ($db): void {
+    $output = (string)ob_get_clean();
+    $orders = $db->query("SELECT order_number, customer_phone, notes, ip_address FROM orders WHERE order_number LIKE 'R15G-%' ORDER BY order_number")->fetchAll();
+    print json_encode(['output' => $output, 'flash' => $_SESSION['flash'] ?? null, 'orders' => $orders], JSON_THROW_ON_ERROR);
+});
+if ($phase === 'anonymize') {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_POST = ['csrf_token' => 'r15g-token', 'guest_email' => 'r15g-guest@example.test'];
+    handleGdprAnonymize();
+}
+pageGdpr();
+PHP);
+$r15gRun = static function(string $phase) use ($r15gFixture, $r15gRoot): array {
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($r15gFixture) . ' ' . escapeshellarg(dirname(TEST_CLI_DIR)) . ' '
+        . escapeshellarg($r15gRoot . '/shop.sqlite') . ' ' . escapeshellarg($phase) . ' 2>&1');
+    return json_decode($out, true) ?? ['output' => $out, 'flash' => null, 'orders' => []];
+};
+$r15gButton = static fn(array $r): bool => str_contains((string)$r['output'], 'name="guest_email"') && substr_count((string)$r['output'], 'action=anonymize') === 1;
+$r15gText = static fn(array $r): string => html_entity_decode(strip_tags((string)$r['output']), ENT_QUOTES);
+try {
+    $r15gRun('setup');
+    $r15gBefore = $r15gRun('page');
+    assert_true($r15gButton($r15gBefore) && !str_contains($r15gText($r15gBefore), 'Kept for accounting'),
+        'R15 GDPR guest fixture: before the erasure the guest row offers "anonymize" (' . substr($r15gText($r15gBefore), 0, 300) . ')');
+    $r15gErased = $r15gRun('anonymize');
+    $r15gFlash = (string)($r15gErased['flash']['msg'] ?? $r15gErased['flash'][1] ?? json_encode($r15gErased['flash']));
+    assert_true(str_contains($r15gFlash, '2 orders keep the name, address and e-mail') && preg_match('/Anonymized: [1-9]\d* records deleted or scrubbed/', $r15gFlash) === 1,
+        'R15 GDPR guest: the flash says what was erased and which orders keep data for accounting (' . $r15gFlash . ')');
+    $r15gAfter = $r15gRun('page');
+    $r15gAfterText = $r15gText($r15gAfter);
+    assert_true(!$r15gButton($r15gAfter) && str_contains($r15gAfterText, 'Anonymized on ') && str_contains($r15gAfterText, 'Kept for accounting: name, address and e-mail on 2 orders'),
+        'R15 GDPR guest: after the erasure the row shows the erased state and what was kept, without offering the same erasure (' . substr($r15gAfterText, 0, 600) . ')');
+    assert_equals([['order_number' => 'R15G-1', 'customer_phone' => '', 'notes' => '', 'ip_address' => ''], ['order_number' => 'R15G-2', 'customer_phone' => '', 'notes' => '', 'ip_address' => '']],
+        array_values(array_filter($r15gAfter['orders'], static fn(array $o): bool => $o['order_number'] !== 'R15G-OTHER')),
+        'R15 GDPR guest: the guest orders lose phone, note and IP address');
+    $r15gRun('new_order');
+    $r15gNew = $r15gRun('page');
+    assert_true($r15gButton($r15gNew) && str_contains($r15gText($r15gNew), 'New data since then: 1.'),
+        'R15 GDPR guest: an order placed after the erasure brings the button back and is counted as new data');
+} finally {
+    foreach (glob($r15gRoot . '/*') ?: [] as $r15gFile) @unlink($r15gFile);
+    @rmdir($r15gRoot);
+}

@@ -1537,6 +1537,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Megjegyzés',
     'admin.gdpr.invalid_customer' => 'Érvénytelen ügyfél.',
     'admin.gdpr.anonymized_ok'    => 'Ügyfél anonimizálva.',
+    'admin.gdpr.anonymized_summary' => 'Anonimizálva: {erased} rekord törölve vagy megtisztítva. {retained} rendelés megőrzi a nevet, címet és e-mailt a számviteli megőrzési idő alatt (utána megtisztul).',
+    'admin.gdpr.guest_erased' => 'Anonimizálva: {date}. Számviteli célra megőrizve: név, cím és e-mail {count} rendelésen.',
+    'admin.gdpr.guest_new_data' => ' Azóta új adatok: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Az anonimizálás sikertelen',
 
     // Customer account portal

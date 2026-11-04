@@ -1537,6 +1537,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Notiz',
     'admin.gdpr.invalid_customer' => 'Ungültiger Kunde.',
     'admin.gdpr.anonymized_ok'    => 'Kunde anonymisiert.',
+    'admin.gdpr.anonymized_summary' => 'Anonymisiert: {erased} Datensätze gelöscht oder bereinigt. {retained} Bestellungen behalten Name, Adresse und E-Mail für die gesetzliche Aufbewahrungsfrist der Buchhaltung (danach bereinigt).',
+    'admin.gdpr.guest_erased' => 'Anonymisiert am {date}. Für die Buchhaltung aufbewahrt: Name, Adresse und E-Mail in {count} Bestellungen.',
+    'admin.gdpr.guest_new_data' => ' Neue Daten seitdem: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymisierung fehlgeschlagen',
 
     // Customer account portal

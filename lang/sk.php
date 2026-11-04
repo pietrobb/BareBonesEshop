@@ -1546,6 +1546,9 @@ return [
     'admin.gdpr.note'             => 'Poznámka',
     'admin.gdpr.invalid_customer' => 'Neplatný zákazník.',
     'admin.gdpr.anonymized_ok'    => 'Zákazník anonymizovaný.',
+    'admin.gdpr.anonymized_summary' => 'Anonymizované: {erased} záznamov zmazaných alebo vyčistených. {retained} objednávok si ponecháva meno, adresu a e-mail počas zákonnej lehoty uchovávania účtovných záznamov (potom sa vyčistia).',
+    'admin.gdpr.guest_erased' => 'Anonymizované {date}. Ponechané pre účtovníctvo: meno, adresa a e-mail na {count} objednávkach.',
+    'admin.gdpr.guest_new_data' => ' Nové údaje odvtedy: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymizácia zlyhala',
 
     // Customer account portal
