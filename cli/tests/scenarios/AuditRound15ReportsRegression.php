@@ -69,6 +69,41 @@ if ($phase === 'setup') {
     $credit($czk, (int)$db->lastInsertId(), 1000, 'czk');
     $credit($czk, $lamp, 3000, 'czk', 'pending');
     $refund->execute([$czk, 2200, 'czk', 'r15r-czk-refund']);
+    // Feed: a book reduced from 10 € to 8 € (the 10 € proven by the price history), and a T-shirt in three sizes.
+    $db->prepare("INSERT INTO products (id, store_id, category_id, sku, name, slug, price, compare_price, currency, stock, status) VALUES
+        (5, 'default', ?, 'R15F-BOOK', 'R15F Book', 'r15f-book', 800, 1000, 'eur', 5, 'active'),
+        (6, 'default', ?, 'R15F-TEE', 'R15F Tee', 'r15f-tee', 1200, NULL, 'eur', 0, 'active')")->execute([$category, $category]);
+    $db->prepare("INSERT INTO product_price_history (product_id, price, lowest_prior, changed_at) VALUES (5, 800, 1000, ?)")->execute([gmdate('Y-m-d H:i:s', time() - 5 * 86400)]);
+    $variant = $db->prepare("INSERT INTO variants (id, product_id, sku, name, attrs, price_delta, price_absolute, stock, sort_order) VALUES (?, 6, ?, ?, ?, ?, ?, ?, ?)");
+    $variant->execute([61, 'R15F-TEE-S', 'S', '{"Size":"S","Color":"red"}', 0, null, 3, 1]);
+    $variant->execute([62, 'R15F-TEE-L', 'L', '{"size":"L"}', 0, 1500, 2, 2]);
+    $variant->execute([63, 'R15F-TEE-XL', 'XL', '{}', 100, null, 0, 3]);
+    exit(0);
+}
+if ($phase === 'feed') {
+    I18n::setLocale('en');
+    $xml = simplexml_load_string(MarketingFeed::google('https://r15f.example.test', 'en'));
+    $items = [];
+    foreach ($xml->channel->item as $item) {
+        $g = $item->children('http://base.google.com/ns/1.0');
+        if (!str_starts_with((string)$g->id, 'R15F-')) continue;
+        $items[(string)$g->id] = array_filter(['title' => (string)$g->title, 'price' => (string)$g->price, 'sale_price' => (string)$g->sale_price,
+            'availability' => (string)$g->availability, 'item_group_id' => (string)$g->item_group_id, 'color' => (string)$g->color, 'size' => (string)$g->size,
+            'link' => (string)$g->link], static fn(string $v): bool => $v !== '');
+    }
+    $meta = array_map(static fn(string $l): array => str_getcsv($l, ',', '"', '\\'), preg_split('/\r?\n/', trim(MarketingFeed::meta('https://r15f.example.test', 'en'))));
+    $metaRows = [];
+    foreach (array_slice($meta, 1) as $cells) {
+        $row = array_combine($meta[0], $cells);
+        if (str_starts_with($row['id'], 'R15F-')) $metaRows[$row['id']] = [$row['price'], $row['sale_price'] ?? '', $row['item_group_id'] ?? ''];
+    }
+    $tee = $db->query('SELECT * FROM products WHERE id = 6')->fetch();
+    $page = static function (?string $variant) use ($tee): array {
+        $_GET = $variant === null ? [] : ['variant' => $variant];
+        $product = StorefrontViewModel::product($tee)['product'];
+        return [$product['price']['formatted'], array_values(array_column(array_filter($product['variants'], static fn(array $v): bool => $v['selected']), 'sku'))];
+    };
+    echo json_encode(['items' => $items, 'meta' => $metaRows, 'page' => [$page(null), $page('62'), $page('63'), $page('x')]], JSON_UNESCAPED_UNICODE);
     exit(0);
 }
 $top = SalesReport::topProducts('default', gmdate('Y-m-d H:i:s', time() - 86400));
@@ -108,6 +143,23 @@ try {
             assert_equals([['R15R-LAMP', 'R15R-LAMP', null, 1, 2100], ['R15R-BULB', 'R15R-BULB', null, 1, 0]], $r15rData['top']['czk'] ?? null,
                 "R15 reports {$r15rDriver}: the item refund comes off the bulb; the goodwill refund is spread over what is left (lamp 30 x 28/40), a pending credit note takes nothing");
             assert_equals(['czk' => 2800, 'eur' => 3500], $r15rData['revenue'] ?? null, "R15 reports {$r15rDriver}: the totals are unchanged (money received)");
+
+            // 2. The Google feed had one item per product: no variants (sizes, colours, their own prices and stock) and
+            //    no sale_price, so a reduced product was listed at its reduced price as the regular one.
+            [$r15rExit, $r15rOut, $r15rErr] = $r15rRun([$r15rDriver, 'feed', $r15rApp, $r15rTarget]);
+            $r15rFeed = json_decode((string)$r15rOut, true) ?: [];
+            assert_equals([0, ''], [$r15rExit, $r15rErr], "R15 feed {$r15rDriver}: the feeds and the product page render");
+            $r15rTeeLink = 'https://r15f.example.test/product/r15f-tee?variant=';
+            assert_equals([
+                'R15F-BOOK' => ['title' => 'R15F Book', 'price' => '10.00 EUR', 'sale_price' => '8.00 EUR', 'availability' => 'in stock', 'link' => 'https://r15f.example.test/product/r15f-book'],
+                'R15F-TEE-S' => ['title' => 'R15F Tee — S', 'price' => '12.00 EUR', 'availability' => 'in stock', 'item_group_id' => 'R15F-TEE', 'color' => 'red', 'size' => 'S', 'link' => $r15rTeeLink . '61'],
+                'R15F-TEE-L' => ['title' => 'R15F Tee — L', 'price' => '15.00 EUR', 'availability' => 'in stock', 'item_group_id' => 'R15F-TEE', 'size' => 'L', 'link' => $r15rTeeLink . '62'],
+                'R15F-TEE-XL' => ['title' => 'R15F Tee — XL', 'price' => '13.00 EUR', 'availability' => 'out of stock', 'item_group_id' => 'R15F-TEE', 'link' => $r15rTeeLink . '63'],
+            ], $r15rFeed['items'] ?? null, "R15 feed {$r15rDriver}: the reduced book has price + sale_price; the T-shirt is one item per variant (own SKU, price, stock, size/colour) grouped by the product SKU");
+            assert_equals(['R15F-BOOK' => ['10.00 EUR', '8.00 EUR', ''], 'R15F-TEE-S' => ['12.00 EUR', '', 'R15F-TEE'], 'R15F-TEE-L' => ['15.00 EUR', '', 'R15F-TEE'], 'R15F-TEE-XL' => ['13.00 EUR', '', 'R15F-TEE']],
+                $r15rFeed['meta'] ?? null, "R15 feed {$r15rDriver}: the Meta catalog CSV carries the same items with sale_price and item_group_id");
+            assert_equals([['12,00 €', ['R15F-TEE-S']], ['15,00 €', ['R15F-TEE-L']], ['12,00 €', ['R15F-TEE-S']], ['12,00 €', ['R15F-TEE-S']]], $r15rFeed['page'] ?? null,
+                "R15 feed {$r15rDriver}: the variant link opens the product page on that variant at its price; a sold-out or unknown variant falls back to the default");
         } finally {
             if ($r15rDriver === 'mysql') $r15rRun([$r15rDriver, 'teardown', $r15rApp, $r15rTarget]);
         }

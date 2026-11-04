@@ -32,12 +32,14 @@ class MarketingFeed {
             '<description>Product catalog</description>',
         ]) . "\n");
         foreach (self::rows($locale) as $product) {
-            $lines = ['<item>'];
-            foreach (self::googleFields($product, $baseUrl) as $tag => $value) {
-                if ($value !== '') $lines[] = '<g:' . $tag . '>' . $e($value) . '</g:' . $tag . '>';
+            foreach (self::items($product, $baseUrl) as $item) {
+                $lines = ['<item>'];
+                foreach ($item as $tag => $value) {
+                    if ($value !== '') $lines[] = '<g:' . $tag . '>' . $e($value) . '</g:' . $tag . '>';
+                }
+                $lines[] = '</item>';
+                fwrite($out, implode("\n", $lines) . "\n");
             }
-            $lines[] = '</item>';
-            fwrite($out, implode("\n", $lines) . "\n");
         }
         fwrite($out, "</channel></rss>\n");
     }
@@ -46,17 +48,19 @@ class MarketingFeed {
     public static function writeMeta($out, string $baseUrl, ?string $locale = null): void {
         $baseUrl = self::baseUrl($baseUrl);
         $locale = self::locale($locale);
-        $headers = ['id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link', 'brand', 'gtin', 'mpn'];
+        $headers = ['id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link', 'brand', 'gtin', 'mpn', 'sale_price', 'item_group_id', 'color', 'size'];
         fputcsv($out, $headers, ',', '"', '\\');
         // Merchant-entered text must not become a spreadsheet formula when the CSV is opened.
         $cell = [Security::class, 'csvCell'];
         foreach (self::rows($locale) as $product) {
-            $google = self::googleFields($product, $baseUrl);
-            fputcsv($out, [
-                $cell($google['id']), $cell($google['title']), $cell($google['description']), $google['availability'],
-                $google['condition'], $google['price'], $google['link'], $google['image_link'],
-                $cell($google['brand']), $cell($google['gtin']), $cell($google['mpn']),
-            ], ',', '"', '\\');
+            foreach (self::items($product, $baseUrl) as $google) {
+                fputcsv($out, [
+                    $cell($google['id']), $cell($google['title']), $cell($google['description']), $google['availability'],
+                    $google['condition'], $google['price'], $google['link'], $google['image_link'],
+                    $cell($google['brand']), $cell($google['gtin']), $cell($google['mpn']),
+                    $google['sale_price'], $cell($google['item_group_id']), $cell($google['color']), $cell($google['size']),
+                ], ',', '"', '\\');
+            }
         }
     }
 
@@ -91,8 +95,10 @@ class MarketingFeed {
             $context = ProductEnrichmentContext::forProducts($chunk, [], null);
             // A product with variants (a book in eBook/paperback/hardcover) keeps its stock on the variants.
             $variantStates = VariantAvailability::variantStatesMany(array_map(static fn(array $p): int => (int)$p['id'], $chunk));
+            $variants = self::variantsOf(array_keys($variantStates));
             foreach ($chunk as $product) {
                 if (isset($variantStates[(int)$product['id']])) $product['_variant_state'] = $variantStates[(int)$product['id']];
+                $product['_variants'] = $variants[(int)$product['id']] ?? [];
                 $translations = json_decode((string)($product['translations'] ?? '{}'), true);
                 $translated = is_array($translations) ? ($translations[$locale] ?? []) : [];
                 foreach (['name', 'summary', 'description', 'slug'] as $field) {
@@ -107,6 +113,62 @@ class MarketingFeed {
         } while (count($chunk) === self::CHUNK);
     }
 
+    /**
+     * The feed items of one product: the product itself, or (when it has variants) one item per variant grouped by the
+     * product's SKU (item_group_id), each with its own SKU, price and availability as the product page offers that
+     * variant, and a link that opens the page on it (?variant=). A product's GTIN/MPN is not copied onto its variants.
+     * @return list<array<string, string>>
+     */
+    private static function items(array $product, string $baseUrl): array {
+        $base = self::googleFields($product, $baseUrl);
+        if (($product['_variants'] ?? []) === []) return [$base];
+        $items = [];
+        foreach ($product['_variants'] as $row) {
+            $variant = StorefrontViewModel::variant($product, $row);
+            $schema = (string)$variant['availability']['schema'];
+            $availability = (int)($product['digital_component'] ?? 0) === 1 || str_ends_with($schema, '/OutOfStock') ? 'out of stock'
+                : (str_ends_with($schema, '/InStock') ? 'in stock' : (str_ends_with($schema, '/PreOrder') ? 'preorder' : 'backorder'));
+            $attrs = json_decode((string)($row['attrs'] ?? '{}'), true);
+            $attr = static function (array $names) use ($attrs): string {
+                foreach (is_array($attrs) ? $attrs : [] as $key => $value) {
+                    if (in_array(mb_strtolower(trim((string)$key)), $names, true) && is_scalar($value)) return mb_substr(trim((string)$value), 0, 100);
+                }
+                return '';
+            };
+            $items[] = [
+                'id' => $variant['sku'],
+                'title' => (string)$product['name'] . ($variant['name'] !== '' ? ' — ' . $variant['name'] : ''),
+                'link' => $base['link'] . '?variant=' . $variant['id'],
+                'availability' => $availability,
+                'availability_date' => $availability === 'preorder'
+                    ? self::isoDate((string)(($row['available_from'] ?? '') ?: ($product['available_from'] ?? '') ?: ($product['preorder_at'] ?? ''))) : '',
+                'price' => Money::decimal($variant['price_amount_minor'], $variant['currency']) . ' ' . $variant['currency'],
+                'sale_price' => '', // the product page shows a variant's own price, never a reduction
+                'gtin' => '', 'mpn' => '',
+                'item_group_id' => $base['id'],
+                'color' => $attr(['color', 'colour', 'farba', 'barva', 'farbe', 'kolor', 'szín']),
+                'size' => $attr(['size', 'veľkosť', 'velkost', 'velikost', 'größe', 'rozmiar', 'méret', 'talla']),
+            ] + $base;
+        }
+        return $items;
+    }
+
+    /**
+     * Variants of these products in the product page's order.
+     * @param list<int> $productIds
+     * @return array<int, list<array>> product id => variant rows
+     */
+    private static function variantsOf(array $productIds): array {
+        if ($productIds === []) return [];
+        $marks = implode(',', array_fill(0, count($productIds), '?'));
+        $stmt = Db::get()->prepare("SELECT v.* FROM variants v JOIN products p ON p.id = v.product_id
+            WHERE p.store_id = ? AND v.product_id IN ({$marks}) ORDER BY v.product_id, v.sort_order, v.id");
+        $stmt->execute([StoreContext::current()->catalogId(), ...$productIds]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(int)$row['product_id']][] = $row;
+        return $out;
+    }
+
     private static function googleFields(array $product, string $baseUrl): array {
         $images = json_decode((string)($product['images'] ?? '[]'), true);
         $first = is_array($images) ? ($images[0] ?? '') : '';
@@ -116,6 +178,11 @@ class MarketingFeed {
         $description = trim(strip_tags((string)($product['summary'] ?: $product['description'])));
         $availability = self::availability($product);
         $currency = strtoupper(trim((string)($product['currency'] ?? ''))) ?: strtoupper(StoreContext::current()->currency());
+        $price = max(0, (int)$product['price']);
+        // The struck-through price the storefront shows (capped to the 30-day low, PriceHistory::capCompare) is the
+        // regular price; what the guest pays is the sale price.
+        $compare = (int)($product['compare_price'] ?? 0) > $price ? (int)$product['compare_price'] : null;
+        $money = static fn(int $amount): string => Money::decimal($amount, $currency) . ' ' . $currency;
         return [
             'id' => (string)$product['sku'],
             'title' => (string)$product['name'],
@@ -125,11 +192,15 @@ class MarketingFeed {
             'availability' => $availability,
             'availability_date' => $availability === 'preorder'
                 ? self::isoDate((string)(($product['available_from'] ?? '') ?: ($product['preorder_at'] ?? ''))) : '',
-            'price' => Money::decimal(max(0, (int)$product['price']), $currency) . ' ' . $currency,
+            'price' => $money($compare ?? $price),
+            'sale_price' => $compare === null ? '' : $money($price),
             'condition' => 'new',
             'brand' => (string)($product['brand_name'] ?? ''),
             'gtin' => (string)($product['gtin'] ?? ''),
             'mpn' => (string)($product['mpn'] ?? ''),
+            'item_group_id' => '',
+            'color' => '',
+            'size' => '',
         ];
     }
 
