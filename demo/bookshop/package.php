@@ -25,7 +25,7 @@ $name = (string)($options['name'] ?? 'bareboneseshop-bookshop');
 $shopName = (string)($options['shop-name'] ?? 'BareBones Books');
 if ($out === '' || !is_dir($out) || preg_match('/^[A-Za-z0-9._-]+$/', $name) !== 1 || preg_match('/^[A-Za-z0-9._\/-]+$/', $ref) !== 1
     || (isset($options['version']) && preg_match('/^[0-9][A-Za-z0-9._+-]{0,63}$/', (string)$options['version']) !== 1)) {
-    fwrite(STDERR, "Usage: php demo/bookshop/package.php --out=DIR [--ref=HEAD] [--name=bareboneseshop-bookshop] [--shop-name=\"BareBones Books\"]\n");
+    fwrite(STDERR, "Usage: php demo/bookshop/package.php --out=DIR [--ref=HEAD] [--name=bareboneseshop-bookshop] [--shop-name=\"BareBones Books\"] [--version=X.Y.Z]\n");
     exit(64);
 }
 
@@ -122,6 +122,9 @@ try {
     $zip = new ZipArchive();
     if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::EXCL) !== true) throw new RuntimeException("Cannot create {$zipFile}");
     $entries = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($shop, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+    // The top folder gets its own entry too, or unzip creates it under the host's umask (0777 with umask 000).
+    $zip->addEmptyDir($name);
+    $zip->setExternalAttributesName($name . '/', ZipArchive::OPSYS_UNIX, 040755 << 16);
     foreach ($entries as $entry) {
         $local = $name . '/' . str_replace('\\', '/', substr($entry->getPathname(), strlen($shop) + 1));
         $entry->isDir() ? $zip->addEmptyDir($local) : $zip->addFile($entry->getPathname(), $local);
