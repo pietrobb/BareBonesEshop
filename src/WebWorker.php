@@ -87,7 +87,8 @@ final class WebWorker
         if (!Db::transactionOpen($db)) return true;
         try {
             Db::rollBackOpen($db);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Logger::exception('web_worker.request_transaction_rollback_failed', $e);
         }
         $released = !Db::transactionOpen($db);
         Logger::warning($released ? 'web_worker.request_transaction_rolled_back' : 'web_worker.skipped_open_transaction');

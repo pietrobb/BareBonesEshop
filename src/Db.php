@@ -286,6 +286,7 @@ class Db {
      * on SQLite before PHP 8.4 (inTransaction() is false). pdo_mysql's inTransaction() reads the server's
      * in-transaction status flag, so it already sees a raw BEGIN on MySQL and MariaDB (@@in_transaction is
      * MariaDB-only). SQLite refuses BEGIN only while a transaction is open.
+     * @phpstan-impure
      */
     public static function transactionOpen(?PDO $db = null): bool {
         $db ??= self::get();
