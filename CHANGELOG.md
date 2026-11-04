@@ -9,6 +9,11 @@
   transaction back first (`web_worker.request_transaction_rolled_back`), or skips and leaves the slot free when it
   cannot. `cli/worker.php --once` now handles every ready job (within its 55 s budget), not only the first five.
 
+- **Manual orders and unverified accounts** (review round 15, high 2). An order entered in the admin joined any
+  active account with the buyer's e-mail, verified or not: signing up with someone else's address showed their
+  address, phone, invoices and downloads. Only an account with a verified address gets the order now; otherwise it
+  stays a guest order and joins the account when its holder verifies the address (signed in to it).
+
 - **Further language in links with their own query** (review round 14, UX2 follow-up). With a further language active,
   the password-reset and e-mail verification links, the account page's links (login, register, forgot password,
   orders, addresses), the specification-value search links and the category trailing-slash redirect got a second

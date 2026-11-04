@@ -319,8 +319,13 @@ final class ManualOrder {
         return $product === null ? null : ['product_id' => (int)$product['id'], 'variant_id' => null];
     }
 
+    /**
+     * R15 high 2: only an account that proved this e-mail gets the order. Anyone can sign up with someone else's
+     * address; the order (address, phone, invoice, downloads) then stays a guest order and joins the account through
+     * Customers::attachGuestOrders() once the address is verified by the account holder.
+     */
     private static function customerIdFor(string $email): ?int {
-        $stmt = Db::get()->prepare("SELECT id FROM customers WHERE email = ? AND store_id = ? AND status = 'active'");
+        $stmt = Db::get()->prepare("SELECT id FROM customers WHERE email = ? AND store_id = ? AND status = 'active' AND email_verified_at IS NOT NULL");
         $stmt->execute([Str::normalizeEmail($email), StoreContext::current()->id()]);
         $id = (int)$stmt->fetchColumn();
         return $id > 0 ? $id : null;
