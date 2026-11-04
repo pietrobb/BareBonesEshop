@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Release process and upgrade** (review round 15, high 7). A v1.8.0 shop adopted exactly per the runbook answered
+  503 on `/readyz` and the admin: its `stores.json` (main store keyed `sk`, no `default_store`, no channels) stayed as
+  it was, while every migrated row belongs to the store `default`. `update.php apply` and `setup.php apply` now write
+  an upgraded copy into `private_runtime_dir` (main store → `default`, the old file stays for a rollback), and both
+  doctors report a v1.x file. The 2.1.0 notes gave the SHA-256 of the key file instead of what
+  `php cli/update.php fingerprint` prints; they now give that value, which `php cli/build-update.php fingerprint`
+  prints for release notes. The release checklist signs (`git tag -s`) and verifies tags, and the bootstrap runbook
+  verifies the tag before exporting it. An update rollback now also counts the invoices, credit notes and refunds it
+  discards, and raises the restored invoice/credit note counters back past the numbers already issued, so no number
+  is issued twice.
 - **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
   many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
   0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.

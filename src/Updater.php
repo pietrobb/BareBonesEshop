@@ -11,7 +11,14 @@ final class Updater
     ];
 
     /** Tables whose MAX(id) at snapshot time shows what a database rollback throws away. */
-    private const HIGH_WATER_TABLES = ['orders', 'payment_transactions'];
+    // R15: invoices (credit notes are invoices of type credit_note) and refunds are counted too: a rollback discarding
+    // them must say so, and their numbers must not be issued again (see numberingHighWater()).
+    private const HIGH_WATER_TABLES = ['orders', 'payment_transactions', 'invoices', 'order_refunds'];
+    /** Document number series: the current one, and the legacy one the migration window still numbers from. */
+    private const NUMBERING_TABLES = [
+        'invoice_number_counters' => ['store_id', 'type', 'year', 'prefix'],
+        'invoice_counters' => ['year', 'prefix'],
+    ];
 
     private string $root;
     private string $stateDirectory;
@@ -288,8 +295,9 @@ final class Updater
             } elseif (is_array($snapshot) && isset($snapshot['id'])) {
                 // Counted before the restore wipes them: writes since the snapshot that the rollback discards.
                 $discarded = $this->discardedWrites($snapshot);
+                $numbering = $this->numberingHighWater();
                 try {
-                    $this->restoreSnapshot($snapshot['id'], true);
+                    $restored = $this->restoreSnapshot($snapshot['id'], true, $numbering);
                     $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage(), $discarded);
                 } catch (Throwable $rollbackError) {
                     throw new RuntimeException(
@@ -299,7 +307,7 @@ final class Updater
                         $e
                     );
                 }
-                $notice = $this->reportDiscardedWrites($discarded, 'automatic rollback');
+                $notice = $this->reportDiscardedWrites($discarded, 'automatic rollback', $restored['numbering_raised']);
                 if ($notice !== null) {
                     throw new RuntimeException($e->getMessage() . '; ' . $notice, 0, $e);
                 }
@@ -356,10 +364,10 @@ final class Updater
             }
             MaintenanceMode::enter($this->root, 'rollback ' . $snapshotId);
             $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
-            $result = $this->restoreSnapshot($snapshotId, $force);
+            $result = $this->restoreSnapshot($snapshotId, $force, $databaseAt !== null ? $this->numberingHighWater() : []);
             $this->setSnapshotStatus($snapshotId, 'rolled-back', null, $discarded);
-            $this->reportDiscardedWrites($discarded, 'manual rollback');
-            return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded];
+            $notice = $this->reportDiscardedWrites($discarded, 'manual rollback', $result['numbering_raised']);
+            return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice];
         } finally {
             MaintenanceMode::leave($this->root);
             $this->unlock();
@@ -650,8 +658,11 @@ final class Updater
         return $metadata;
     }
 
-    private function restoreSnapshot(string $snapshotId, bool $force): array
+    /** @param array|string $numbering numberingHighWater() read before the restore: raised again on the restored database. */
+    private function restoreSnapshot(string $snapshotId, bool $force, array|string $numbering = []): array
     {
+        $numberingRaised = is_string($numbering) ? $numbering : null;
+        if (is_string($numbering)) $numbering = [];
         $metadata = $this->snapshotMetadata($snapshotId);
         $directory = $this->snapshotDirectory($snapshotId);
 
@@ -669,12 +680,13 @@ final class Updater
 
         $database = is_array($metadata['database'] ?? null) ? $metadata['database'] : null;
         $isMysql = $database !== null && ($database['driver'] ?? null) === 'mysql';
+        if ($database === null) $numberingRaised = null; // code-only rollback: the counters stay as they are
         if ($isMysql && $this->databaseBackup === null) {
             throw new RuntimeException('MySQL rollback requires the configured dump/restore adapter');
         }
         $sqliteSource = $database !== null && !$isMysql ? $this->verifiedSqliteSnapshot($directory, $database) : null;
 
-        $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource): void {
+        $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource, $numbering, &$numberingRaised): void {
             if ($isMysql) {
                 // First, so that a refused rollback (other sessions still connected) leaves code and database untouched.
                 $this->database = null;
@@ -715,6 +727,10 @@ final class Updater
                 $this->installAbsoluteFile($sqliteSource, $livePath);
                 @unlink($livePath . '-wal');
                 @unlink($livePath . '-shm');
+                if ($numbering !== []) {
+                    $numberingRaised = self::tryRaiseNumbering(static fn(): PDO => new PDO('sqlite:' . $livePath, null, null,
+                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), $numbering);
+                }
             }
         };
 
@@ -730,7 +746,10 @@ final class Updater
             gc_collect_cycles();
             SqliteMaintenance::exclusive($livePath, 'update rollback', $restore);
         }
-        return ['snapshot' => $snapshotId, 'restored_files' => count($metadata['files'])];
+        if ($isMysql && $numbering !== [] && class_exists('Db', false)) {
+            $numberingRaised = self::tryRaiseNumbering(static fn(): PDO => Db::get(), $numbering); // reconnects after Db::reset()
+        }
+        return ['snapshot' => $snapshotId, 'restored_files' => count($metadata['files']), 'numbering_raised' => $numberingRaised];
     }
 
     private function verifiedSqliteSnapshot(string $snapshotDirectory, array $database): string
@@ -1062,20 +1081,115 @@ final class Updater
     }
 
     /**
+     * The last number of every document series (invoices, credit notes), read before a rollback restores the database.
+     * Documents numbered after the snapshot were already sent; the restored counters would hand their numbers out again.
+     * Never throws (it runs right before an automatic rollback): an unreadable counter is returned as the error text.
+     * @return array<string, list<array<string, int|string>>>|string table => rows (key columns + last_number), or the error
+     */
+    private function numberingHighWater(): array|string
+    {
+        $marks = [];
+        if ($this->database === null) {
+            return $marks;
+        }
+        try {
+            foreach (self::NUMBERING_TABLES as $table => $key) {
+                if (!self::tableExists($this->database, $table)) continue; // not created (yet) on this installation
+                $columns = implode(', ', $key);
+                $marks[$table] = $this->database->query("SELECT {$columns}, MAX(last_number) AS last_number FROM {$table}
+                    GROUP BY {$columns}")->fetchAll(PDO::FETCH_ASSOC);
+            }
+        } catch (Throwable $e) {
+            return get_class($e) . ': ' . $e->getMessage();
+        }
+        return $marks;
+    }
+
+    private static function tableExists(PDO $database, string $table): bool
+    {
+        $statement = $database->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? $database->prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+            : $database->prepare('SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?');
+        $statement->execute([$table]);
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * raiseNumbering() on the restored database. The database is already restored, so a failure here is reported
+     * (the error text instead of the count), not thrown as a failed rollback.
+     */
+    private static function tryRaiseNumbering(Closure $connect, array $numbering): int|string
+    {
+        try {
+            return self::raiseNumbering($connect(), $numbering);
+        } catch (Throwable $e) {
+            return get_class($e) . ': ' . $e->getMessage();
+        }
+    }
+
+    /**
+     * Raises the restored counters back to $marks (never lowers one), so the next document continues after the last
+     * number issued before the rollback. Returns how many series were raised.
+     */
+    private static function raiseNumbering(PDO $database, array $marks): int
+    {
+        if (isset($marks['invoice_number_counters']) && !self::tableExists($database, 'invoice_number_counters')) {
+            // Rolled back to before the per-seller series existed: the legacy (year, prefix) series numbers again.
+            $legacy = [];
+            foreach (array_merge($marks['invoice_counters'] ?? [], $marks['invoice_number_counters']) as $row) {
+                $id = $row['year'] . "\0" . $row['prefix'];
+                $legacy[$id] = ['year' => $row['year'], 'prefix' => $row['prefix'],
+                    'last_number' => max((int)($legacy[$id]['last_number'] ?? 0), (int)$row['last_number'])];
+            }
+            $marks['invoice_counters'] = array_values($legacy);
+            unset($marks['invoice_number_counters']);
+        }
+        $raised = 0;
+        foreach ($marks as $table => $rows) {
+            $key = self::NUMBERING_TABLES[$table] ?? null;
+            if ($key === null || !self::tableExists($database, $table)) continue;
+            $where = implode(' AND ', array_map(static fn(string $column): string => "{$column} = :{$column}", $key));
+            $current = $database->prepare("SELECT MAX(last_number) FROM {$table} WHERE {$where}");
+            $update = $database->prepare("UPDATE {$table} SET last_number = :n WHERE {$where} AND last_number < :n");
+            $insert = $database->prepare("INSERT INTO {$table} (" . implode(', ', $key) . ', last_number) VALUES (:'
+                . implode(', :', $key) . ', :n)');
+            foreach ($rows as $row) {
+                $params = [];
+                foreach ($key as $column) $params[":{$column}"] = $row[$column];
+                $current->execute($params);
+                $restored = $current->fetchColumn();
+                $issued = (int)$row['last_number'];
+                if ($restored !== null && $restored !== false && (int)$restored >= $issued) continue;
+                ($restored === null || $restored === false ? $insert : $update)->execute($params + [':n' => $issued]);
+                $raised++;
+            }
+        }
+        return $raised;
+    }
+
+    /**
      * Makes a rollback that discards data loud: logs and raises a critical incident when rows were
      * (or may have been) written since the snapshot. Returns the operator notice, or null when the
      * rollback provably discarded no tracked rows.
      */
-    private function reportDiscardedWrites(?array $discarded, string $context): ?string
+    private function reportDiscardedWrites(?array $discarded, string $context, int|string|null $numberingRaised = null): ?string
     {
+        // The counters could not be raised: the next invoice or credit note may repeat a number already sent.
+        $numberingNotice = is_string($numberingRaised)
+            ? "; the invoice/credit note counters could not be raised past the numbers issued before the rollback ({$numberingRaised}):"
+                . ' raise invoice_number_counters by hand before the shop issues another document'
+            : '';
+        if ($numberingNotice !== '' && class_exists('IncidentMonitor')) {
+            IncidentMonitor::report('update.rollback_numbering', 'update', 'critical', ['error' => $numberingRaised]);
+        }
         if ($discarded === null) {
-            return null;
+            return $numberingNotice !== '' ? $context . ' restored the database' . $numberingNotice : null;
         }
         $known = array_filter($discarded, static fn($count): bool => is_int($count));
         $total = array_sum($known);
         $unknown = array_keys(array_diff_key($discarded, $known));
         if ($total === 0 && $unknown === []) {
-            return null;
+            return $numberingNotice !== '' ? $context . ' restored the database' . $numberingNotice : null;
         }
         $parts = [];
         foreach ($known as $table => $count) {
@@ -1083,7 +1197,11 @@ final class Updater
         }
         if ($unknown !== []) $parts[] = 'an unknown number of ' . implode('/', $unknown) . ' rows';
         $notice = "{$context} discarded " . implode(' and ', $parts) . ' written after the update snapshot;'
-            . ' recover them from the pre-update data (orders, payments, payment provider records) before reopening the shop';
+            . ' recover them from the pre-update data (orders, payments, payment provider records) before reopening the shop'
+            . (($known['invoices'] ?? 0) > 0 || in_array('invoices', $unknown, true)
+                ? '; discarded invoices and credit notes were already issued: their numbers are not issued again, re-enter them from the sent PDFs'
+                : '')
+            . $numberingNotice;
         if (class_exists('IncidentMonitor')) {
             IncidentMonitor::report('update.rollback_discarded_writes', 'update', 'critical', ['count' => $total]);
         }

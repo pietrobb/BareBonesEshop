@@ -166,6 +166,12 @@ try {
         foreach ((array)($result['discarded_writes'] ?? []) as $table => $count) {
             echo "  discarded since the snapshot: {$table}=" . ($count === null ? 'unknown' : $count) . "\n";
         }
+        if (is_int($result['numbering_raised'] ?? null) && $result['numbering_raised'] > 0) {
+            echo "  invoice/credit note numbering continues after the discarded numbers: {$result['numbering_raised']} series raised\n";
+        }
+        if (($result['notice'] ?? null) !== null) {
+            fwrite(STDERR, "WARNING: {$result['notice']}\n");
+        }
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }

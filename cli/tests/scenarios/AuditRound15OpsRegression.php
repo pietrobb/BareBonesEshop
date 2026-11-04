@@ -104,3 +104,88 @@ try {
 } catch (Throwable $e) {
     $r15oFail('fingerprint/tags', $e);
 }
+
+// Medium: an update rollback counted only orders and payments. Invoices, credit notes and refunds written during the
+// update vanished without a word, and the restored counters issued the numbers of the sent documents a second time.
+$r15uBase = test_fixture_path('r15-ops-rollback');
+try {
+    foreach (['base', 'target', 'installed'] as $tree) mkdir("{$r15uBase}/{$tree}/src", 0750, true);
+    mkdir($r15uBase . '/target/migrations', 0750, true);
+    file_put_contents($r15uBase . '/base/src/Core.php', "before\n");
+    file_put_contents($r15uBase . '/target/src/Core.php', "after\n");
+    file_put_contents($r15uBase . '/target/migrations/20990101000003_r15.php', "<?php return new class {};\n");
+    file_put_contents($r15uBase . '/installed/src/Core.php', "before\n");
+    UpdatePackageBuilder::build($r15uBase . '/base', $r15uBase . '/target', $r15uBase . '/package', '4.1.0', '4.0.0');
+    $r15uPackage = new UpdatePackage($r15uBase . '/package', null, true);
+    $r15uPdo = static fn(string $path): PDO => new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $r15uSchema = static function (string $path, bool $perSeller) use ($r15uPdo): void {
+        $db = $r15uPdo($path);
+        $db->exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, note TEXT)');
+        $db->exec('CREATE TABLE payment_transactions (id INTEGER PRIMARY KEY, note TEXT)');
+        $db->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, number TEXT, type TEXT)');
+        $db->exec('CREATE TABLE order_refunds (id INTEGER PRIMARY KEY, amount INTEGER)');
+        $db->exec("CREATE TABLE invoice_counters (year INTEGER NOT NULL, prefix TEXT NOT NULL DEFAULT '', last_number INTEGER NOT NULL DEFAULT 0, type TEXT NOT NULL DEFAULT 'invoice', PRIMARY KEY (year, prefix))");
+        $db->exec("INSERT INTO invoice_counters (year, prefix, last_number) VALUES (2026, '', 7)");
+        if ($perSeller) {
+            $db->exec("CREATE TABLE invoice_number_counters (store_id TEXT NOT NULL, type TEXT NOT NULL, year INTEGER NOT NULL, prefix TEXT NOT NULL DEFAULT '', last_number INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (store_id, type, year, prefix))");
+            $db->exec("INSERT INTO invoice_number_counters VALUES ('default', 'invoice', 2026, '', 7)");
+        }
+        $db->exec("INSERT INTO invoices (number, type) VALUES ('20260007', 'invoice')");
+    };
+    // While the migration ran, the shop issued invoice 8 and 9, credit note 1 and a refund; then the migration failed.
+    $r15uUpdater = static function (string $path, string $state, bool $perSeller) use ($r15uBase, $r15uPdo): Updater {
+        return new Updater($r15uBase . '/installed', $r15uBase . '/' . $state, $r15uPdo($path), static function () use ($path, $r15uPdo, $perSeller): void {
+            $writer = $r15uPdo($path);
+            $writer->exec("INSERT INTO invoices (number, type) VALUES ('20260008', 'invoice'), ('20260009', 'invoice'), ('D20260001', 'credit_note')");
+            $writer->exec('INSERT INTO order_refunds (amount) VALUES (1299)');
+            if ($perSeller) {
+                $writer->exec("UPDATE invoice_number_counters SET last_number = 9 WHERE type = 'invoice'");
+                $writer->exec("INSERT INTO invoice_number_counters VALUES ('default', 'credit_note', 2026, 'D', 1)");
+            } else {
+                // The failing update had already created the per-seller series and numbered there.
+                $writer->exec("CREATE TABLE invoice_number_counters (store_id TEXT NOT NULL, type TEXT NOT NULL, year INTEGER NOT NULL, prefix TEXT NOT NULL DEFAULT '', last_number INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (store_id, type, year, prefix))");
+                $writer->exec("INSERT INTO invoice_number_counters VALUES ('default', 'invoice', 2026, '', 9), ('default', 'credit_note', 2026, 'D', 1)");
+            }
+            $writer = null;
+            throw new RuntimeException('simulated r15 migration failure');
+        });
+    };
+    $r15uApply = static function (Updater $updater) use ($r15uPackage): string {
+        try { $updater->apply($r15uPackage); return ''; } catch (Throwable $e) { return $e->getMessage(); }
+    };
+
+    $r15uPath = $r15uBase . '/shop.sqlite';
+    $r15uSchema($r15uPath, true);
+    $r15uOne = $r15uUpdater($r15uPath, 'state', true);
+    $r15uOne->baseline('4.0.0');
+    $r15uError = $r15uApply($r15uOne);
+    $r15uOne = null;
+    $r15uDb = $r15uPdo($r15uPath);
+    $r15uCounters = $r15uDb->query("SELECT type || '/' || prefix || '=' || last_number FROM invoice_number_counters ORDER BY type")->fetchAll(PDO::FETCH_COLUMN);
+    $r15uSnapshot = array_values(array_filter((new Updater($r15uBase . '/installed', $r15uBase . '/state'))->listSnapshots(), static fn(array $s): bool => ($s['status'] ?? '') === 'auto-rolled-back'))[0] ?? [];
+    assert_true(str_contains($r15uError, 'simulated r15 migration failure') && str_contains($r15uError, '3 invoices row(s)') && str_contains($r15uError, '1 order_refunds row(s)')
+        && str_contains($r15uError, 'their numbers are not issued again'),
+        'R15 medium: the automatic rollback names the discarded invoices/credit notes and refunds');
+    assert_equals([1, 1, 0], [(int)$r15uDb->query('SELECT COUNT(*) FROM invoices')->fetchColumn(), (int)($r15uSnapshot['discarded_writes']['order_refunds'] ?? -1),
+        (int)$r15uDb->query('SELECT COUNT(*) FROM order_refunds')->fetchColumn()], 'R15 medium: the database was restored and the snapshot records the discarded refund');
+    assert_equals(['credit_note/D=1', 'invoice/=9'], $r15uCounters,
+        'R15 medium: after the rollback the next invoice is 10 and the next credit note 2: no number already sent is issued again');
+    $r15uDb = null;
+
+    // Rolled back to before the per-seller series existed: the legacy (year, prefix) series is raised instead.
+    $r15uLegacy = $r15uBase . '/legacy.sqlite';
+    $r15uSchema($r15uLegacy, false);
+    $r15uTwo = $r15uUpdater($r15uLegacy, 'state-legacy', false);
+    $r15uTwo->baseline('4.0.0');
+    $r15uApply($r15uTwo);
+    $r15uTwo = null;
+    $r15uDb = $r15uPdo($r15uLegacy);
+    assert_equals([9, 1], [(int)$r15uDb->query("SELECT MAX(last_number) FROM invoice_counters WHERE year = 2026 AND prefix = ''")->fetchColumn(),
+        (int)$r15uDb->query("SELECT MAX(last_number) FROM invoice_counters WHERE year = 2026 AND prefix = 'D'")->fetchColumn()],
+        'R15 medium: rolled back to before the per-seller series, the legacy series it numbers from again continues after the discarded numbers');
+    $r15uDb = null;
+} catch (Throwable $e) {
+    $r15oFail('update rollback of documents', $e);
+} finally {
+    $r15oRemove($r15uBase);
+}
