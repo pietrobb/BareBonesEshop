@@ -84,3 +84,23 @@ try {
 } finally {
     $r15oRemove($r15oBase);
 }
+
+// Medium: the v2.1.0 notes published sha256sum of the key file, which no shop's `update.php fingerprint` shows; tags
+// were not signed although the runbooks start from "the signed tag".
+try {
+    $r15oRoot = dirname(TEST_CLI_DIR);
+    $r15oFingerprint = UpdateKeyRotation::fingerprint($r15oRoot . '/releases/update-public.key');
+    $r15oNotes = (string)file_get_contents($r15oRoot . '/CHANGELOG.md');
+    $r15oNotes210 = substr($r15oNotes, (int)strpos($r15oNotes, '## 2.1.0'));
+    assert_true(preg_match('/^ {4}([0-9a-f]{64})\r?$/m', $r15oNotes210, $m) === 1 && $m[1] === $r15oFingerprint,
+        'R15 medium: the fingerprint the 2.1.0 notes give is the one update.php fingerprint prints for the shipped key');
+    $r15oBuild = (string)file_get_contents($r15oRoot . '/cli/build-update.php');
+    assert_true(str_contains($r15oBuild, "'fingerprint'") && str_contains($r15oBuild, 'UpdateKeyRotation::fingerprint($public)'),
+        'R15 medium: build-update.php fingerprint prints the value for the release notes with the same function as the shop');
+    $r15oOps = (string)file_get_contents($r15oRoot . '/docs/OPERATIONS_RUNBOOK.md');
+    $r15oAi = (string)file_get_contents($r15oRoot . '/docs/AI_UPDATE_RUNBOOK.md');
+    assert_true(str_contains($r15oOps, 'git tag -s vX.Y.Z') && str_contains($r15oOps, 'git verify-tag vX.Y.Z') && str_contains($r15oAi, 'git verify-tag vX.Y.Z'),
+        'R15 medium: the release checklist signs and verifies the tag, and the bootstrap runbook verifies it before exporting');
+} catch (Throwable $e) {
+    $r15oFail('fingerprint/tags', $e);
+}

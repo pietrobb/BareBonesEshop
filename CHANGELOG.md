@@ -268,9 +268,12 @@
 
 **Update signing key rotated.** The secret key that signed v1.9.0 was lost, so v2.1.0 is the first
 release signed with a new Ed25519 key. `releases/update-public.key` now holds the new public key; its
-SHA-256 fingerprint is
+fingerprint, as `php cli/update.php fingerprint --public-key=<that file>` prints it, is
 
-    78d6474a733bcf39f73a58e64b28c20fcd5e9f59b6e6d2b38e481b2b66460e53
+    ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
+
+(Corrected after the release: the notes first gave `78d6474a…0e53`, the SHA-256 of the key file itself, which
+`sha256sum releases/update-public.key` prints; both identify the same key.)
 
 On every shop, before applying the v2.1.0 package: compare the fingerprint of `releases/update-public.key`
 from the `v2.1.0` tag with the value above, replace the file that `update_public_key` points to, then run

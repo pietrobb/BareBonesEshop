@@ -12,7 +12,7 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $rawArguments = array_slice($argv ?? [], 1);
-$subcommand = in_array($rawArguments[0] ?? null, ['keygen', 'endorse'], true) ? (string)array_shift($rawArguments) : null;
+$subcommand = in_array($rawArguments[0] ?? null, ['keygen', 'endorse', 'fingerprint'], true) ? (string)array_shift($rawArguments) : null;
 $keygen = $subcommand === 'keygen';
 $options = [];
 foreach ($rawArguments as $argument) {
@@ -32,6 +32,20 @@ if ($keygen) {
     try {
         generateUpdateKeypair((string)($options['public'] ?? ''), (string)($options['secret'] ?? ''));
         echo "Ed25519 update keypair created. Keep the secret key offline.\n";
+        exit(0);
+    } catch (Throwable $e) {
+        fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+        exit(1);
+    }
+}
+
+if ($subcommand === 'fingerprint') {
+    // R15: the value for the release notes is the one `php cli/update.php fingerprint` shows on a shop (the hash of the
+    // key bytes), not a hash of the key file: v2.1.0's notes published the file hash and no shop could match it.
+    try {
+        $public = (string)($options['public'] ?? '');
+        if ($public === '') throw new InvalidArgumentException('fingerprint requires --public=FILE_OR_KEY');
+        echo UpdateKeyRotation::fingerprint($public) . "\n";
         exit(0);
     } catch (Throwable $e) {
         fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
@@ -150,6 +164,7 @@ function buildUpdateHelp(): void
     echo "  php cli/build-update.php --from=DIR --to=DIR --version=VERSION --output=DIR [options]\n";
     echo "  php cli/build-update.php keygen --public=FILE --secret=FILE\n";
     echo "  php cli/build-update.php endorse --secret-key=CURRENT_SECRET --new-public=NEW_PUBLIC_KEY\n";
+    echo "  php cli/build-update.php fingerprint --public=releases/update-public.key\n";
     echo "Options:\n";
     echo "  --base-version=VERSION  Required installed version for this delta\n";
     echo "  --secret-key=KEY        Ed25519 secret key as base64, hex, or a file path\n";

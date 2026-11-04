@@ -502,6 +502,8 @@ controls the publishing account could change those together with the key):
    `php cli/build-update.php endorse --secret-key=CURRENT_SECRET --new-public=NEW_PUBLIC`.
    Commit the new key to `releases/update-public.key` and publish the printed key,
    fingerprint and endorsement in the release notes of the first release signed with it.
+   `php cli/build-update.php fingerprint --public=releases/update-public.key` prints the
+   same fingerprint as `php cli/update.php fingerprint` on a shop (not `sha256sum` of the file).
 3. On each shop, before applying that release:
    `php cli/update.php rotate-key --new-key=KEY --endorsement=SIG`. It refuses a key the
    shop's configured key did not endorse (there is no `--public-key` override), writes the new key into the file
@@ -510,9 +512,9 @@ controls the publishing account could change those together with the key):
    signed with it is refused from then on. `php cli/update.php fingerprint` shows the
    trusted key's fingerprint; `doctor` fails on a revoked key.
 
-If the old secret key was lost there is no endorsement: compare the fingerprint of
-the key file from the tagged commit with the release notes and replace the key by
-hand. A lost or possibly compromised key is also revoked in the code
+If the old secret key was lost there is no endorsement: verify the signed tag
+(`git verify-tag vX.Y.Z`), compare `php cli/update.php fingerprint --public-key=<key file
+from that tag>` with the release notes and replace the key by hand. A lost or possibly compromised key is also revoked in the code
 (`UpdateKeyRotation::SHIPPED_REVOKED`, e.g. the v1.9.0 key); say so in the release
 notes and do not apply packages signed with it that were not already verified.
 

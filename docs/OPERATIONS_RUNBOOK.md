@@ -159,4 +159,21 @@ Rollback is complete only when readiness is green, the critical browser smoke pa
 - Manual keyboard-only browser pass at 200% zoom, visible focus, landmarks, form errors, checkout, account, invoice download, and admin critical flows.
 - Merchant legal identity, production tax registrations/rates, invoice numbering, rounding, reverse-charge/OSS/export wording, and accounting reconciliation.
 
+### Tagging and publishing a release
+
+The update runbooks start from "an LF export of the signed tag", so every release tag is signed (GPG or SSH)
+and verified before anything is built from it:
+
+```bash
+git tag -s vX.Y.Z -m "BareBonesEshop X.Y.Z"   # or: git -c gpg.format=ssh -c user.signingkey=KEY.pub tag -s ...
+git verify-tag vX.Y.Z                          # must print "Good signature"
+git push origin vX.Y.Z
+git archive vX.Y.Z | tar -x -C /trusted/bareboneseshop-X.Y.Z
+php cli/build-update.php fingerprint --public=/trusted/bareboneseshop-X.Y.Z/releases/update-public.key
+```
+
+Publish the signing key's public part (GitHub: the signer's verified GPG/SSH signing key) and, in the release
+notes, the update key fingerprint exactly as `build-update.php fingerprint` prints it: it is what
+`php cli/update.php fingerprint` shows on every shop. Tags up to v2.1.0 are annotated but not signed.
+
 Record the release SHA, CI run URL, all six job results, browser/WCAG evidence, benchmark profile, restore-drill evidence, operator, timestamp, remote SHA, and clean `main`. A repository-green result is not a substitute for the live-provider checks above.
