@@ -538,8 +538,54 @@ try {
     PaymentService::recordEvent($r15mRf, 'refund.succeeded', 'refunded', 100, 'eur', 'r15m-rf-booked', ['note' => 'r15m']);
     assert_equals([false, false], [$r15mSettled->invoke(null, 987654, 'order_refund_987654', 1), $r15mSettled->invoke(null, $r15mRf, 'order_refund_' . $r15mRf, 100)],
         'R15 mutants: no order, or a booked refund that settles no request, does not settle the refund request (and raises no warning)');
+    assert_equals([false, true, false], [$r15mSettled->invoke(null, $r15mRf, 'order_refund_' . $r15mRf, 900), $r15mSettled->invoke(null, $r15mRf, 'order_refund_' . $r15mRf, 901),
+            $r15mSettled->invoke(null, $r15mRf, 'r15m-not-a-refund-job', 100)],
+        'R15 mutants: a refund that exactly reaches the order total is not settled by the ledger cap (one cent more is), and an execute key naming no request settles nothing');
 } catch (Throwable $e) {
     $r15mFail('refund request', $e);
+} finally {
+    if (Db::get()->inTransaction()) Db::get()->rollBack();
+    Db::init($r15mSavedDb, $r15mSavedDriver);
+    @unlink($r15mLock);
+}
+
+// PaymentService::bookRefundWithin (via bookProviderRefund): a refund of 0 and a replayed event key book nothing, the
+// booked row names the provider refund id, and a refund on a payment that cannot be refunded is logged as ignored.
+try {
+    $r15mMemDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    (new Migrator($r15mMemDb, TEST_CLI_DIR . '/../migrations', $r15mLock))->apply(static fn($m) => null);
+    Db::init($r15mMemDb, 'sqlite');
+    $r15mBookOrder = static function (string $number, string $paymentStatus) use ($r15mMemDb): int {
+        $r15mMemDb->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency,
+                status, payment_status, payment_method, payment_id, payment_method_snapshot, store_id, created_at)
+            VALUES (?, 'R15M', 'r15m@example.test', '', '{}', 1000, 0, 0, 0, 1000, 'eur', 'processing', ?, 'card', 'pi_r15m', '{\"provider\":\"stripe\"}', ?, " . Db::now() . ")")
+            ->execute([$number, $paymentStatus, StoreContext::current()->id()]);
+        return (int)$r15mMemDb->lastInsertId();
+    };
+    $r15mTxRow = static function (string $key) use ($r15mMemDb): array {
+        $stmt = $r15mMemDb->prepare("SELECT status, amount, raw_response FROM payment_transactions WHERE idempotency_key = ?");
+        $stmt->execute([$key]);
+        $row = $stmt->fetch() ?: [];
+        return $row ? [(string)$row['status'], (int)$row['amount'], json_decode((string)$row['raw_response'], true) ?: []] : [];
+    };
+    $r15mPaid = $r15mBookOrder('R15M-BK-PAID', 'paid');
+    assert_equals([false, []], [PaymentService::bookProviderRefund($r15mPaid, 'stripe', 're_r15m_0', 0, 'refund.succeeded', 'r15m-bk-0'), $r15mTxRow('r15m-bk-0')],
+        'R15 mutants: a provider refund of 0 books nothing');
+    assert_true(PaymentService::bookProviderRefund($r15mPaid, 'stripe', 're_r15m_1', 200, 'refund.succeeded', 'r15m-bk-1'), 'R15 mutants: a provider refund is booked');
+    $r15mBooked = $r15mTxRow('r15m-bk-1');
+    assert_equals(['partially_refunded', 200, 're_r15m_1'], [$r15mBooked[0] ?? null, $r15mBooked[1] ?? null, $r15mBooked[2]['refund_id'] ?? null],
+        'R15 mutants: the booked refund row records the provider refund id');
+    assert_equals(false, PaymentService::bookProviderRefund($r15mPaid, 'stripe', 're_r15m_2', 200, 'refund.succeeded', 'r15m-bk-1'),
+        'R15 mutants: a replayed event key books no second refund, even under another refund id');
+
+    $r15mPending = $r15mBookOrder('R15M-BK-PENDING', 'pending');
+    $r15mIgnored = PaymentService::bookProviderRefund($r15mPending, 'stripe', 're_r15m_3', 300, 'refund.succeeded', 'r15m-bk-3');
+    $r15mLogged = $r15mTxRow('r15m-bk-3');
+    assert_equals([false, 'ignored', 300, 'pending', 'pending'],
+        [$r15mIgnored, $r15mLogged[0] ?? null, $r15mLogged[1] ?? null, $r15mLogged[2]['payment_status'] ?? null, (string)$r15mMemDb->query("SELECT payment_status FROM orders WHERE id = {$r15mPending}")->fetchColumn()],
+        'R15 mutants: a refund on a payment that was never paid is logged as ignored and leaves the payment as it was');
+} catch (Throwable $e) {
+    $r15mFail('provider refund booking', $e);
 } finally {
     if (Db::get()->inTransaction()) Db::get()->rollBack();
     Db::init($r15mSavedDb, $r15mSavedDriver);
