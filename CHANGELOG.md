@@ -14,6 +14,12 @@
   address, phone, invoices and downloads. Only an account with a verified address gets the order now; otherwise it
   stays a guest order and joins the account when its holder verifies the address (signed in to it).
 
+- **Payments** (review round 15). The expiry sweep no longer cancels an order whose "pay again" opened a new gateway
+  session after the sweep asked about the earlier attempts (or is opening one right now): the customer could pay the
+  cancelled order. The payment webhook route takes the provider codes adapters accept (`/api/v1/webhooks/payment/acme-pay`
+  was a 404). At a provider whose checkout session id is not its payment id, the capture of the order's own session now
+  records the payment id, so refunds go to the payment instead of the session.
+
 - **Further language in links with their own query** (review round 14, UX2 follow-up). With a further language active,
   the password-reset and e-mail verification links, the account page's links (login, register, forgot password,
   orders, addresses), the specification-value search links and the category trailing-slash redirect got a second
