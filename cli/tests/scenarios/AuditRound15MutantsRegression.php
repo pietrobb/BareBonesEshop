@@ -468,3 +468,45 @@ try {
     $r15mFail('setAvailable order / catalog', $e);
 }
 if ($r15mOwnDefault) Warehouse::delete($r15mDefault);
+
+// PaymentService::chargedFee: under reverse charge / export only the fixed part loses the domestic VAT (a quote
+// without a currency is EUR); without it, or without a fixed part, the fee is charged as quoted.
+try {
+    $r15mNet = Money::round(Cart::netOfDomesticVat(200, 'SK', 'standard', null), 'eur');
+    assert_true($r15mNet > 0 && $r15mNet < 200, 'R15 mutants: fixture — SK domestic VAT makes 2.00 net smaller (' . $r15mNet . ')');
+    assert_equals([300, 100 + $r15mNet, 300], [
+        PaymentService::chargedFee(['fee' => 300, 'fixed_fee' => 200], false, 'SK'),
+        PaymentService::chargedFee(['fee' => 300, 'fixed_fee' => 200], true, 'SK'),
+        PaymentService::chargedFee(['fee' => 300, 'fixed_fee' => 0], true, 'SK'),
+    ], 'R15 mutants: a payment fee loses the domestic VAT of its fixed part only when charged net of it');
+    assert_true(!PaymentService::canPaymentTransition('r15m-unknown', 'paid'), 'R15 mutants: an unknown payment status allows no transition (and raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('payment fee', $e);
+}
+
+// PaymentService::availableMethods: a cart in a currency the store has no own prices for gets only methods without
+// amounts — a minimum, a maximum or a free-above limit each counts like a fixed fee.
+[$r15mSavedDb, $r15mSavedDriver] = [Db::get(), Db::driver()];
+try {
+    $r15mMemDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    (new Migrator($r15mMemDb, TEST_CLI_DIR . '/../migrations', $r15mLock))->apply(static fn($m) => null);
+    Db::init($r15mMemDb, 'sqlite');
+    $r15mScope = StoreContext::current()->providerId();
+    $r15mMethod = $r15mMemDb->prepare("INSERT INTO payment_methods (store_id, code, provider, name, service_type, min_amount, max_amount, free_above, fixed_fee, sort_order)
+        VALUES (?, ?, '', ?, 'offline', ?, ?, ?, 0, 1)");
+    $r15mCountry = $r15mMemDb->prepare("INSERT INTO payment_method_countries (store_id, method_code, country) VALUES (?, ?, 'SK')");
+    foreach (['r15m-min' => [100, null, null], 'r15m-max' => [0, 100000, null], 'r15m-free' => [0, null, 5000], 'r15m-none' => [0, null, null]] as $r15mCode => [$r15mMinAmount, $r15mMaxAmount, $r15mFreeAbove]) {
+        $r15mMethod->execute([$r15mScope, $r15mCode, $r15mCode, $r15mMinAmount, $r15mMaxAmount, $r15mFreeAbove]);
+        $r15mCountry->execute([$r15mScope, $r15mCode]);
+    }
+    $r15mOffered = static fn(string $currency): array => array_values(array_filter(array_column(PaymentService::availableMethods('SK', $currency, 1000), 'code'),
+        static fn(string $code): bool => str_starts_with($code, 'r15m-')));
+    assert_true(!StoreContext::current()->usesProviderPrices('czk'), 'R15 mutants: fixture — the store has no own CZK prices');
+    assert_equals([['r15m-free', 'r15m-max', 'r15m-min', 'r15m-none'], ['r15m-none']], [$r15mOffered('eur'), $r15mOffered('czk')],
+        'R15 mutants: a CZK cart is not offered a method with an EUR minimum, maximum or free-above amount');
+} catch (Throwable $e) {
+    $r15mFail('payment methods by currency', $e);
+} finally {
+    Db::init($r15mSavedDb, $r15mSavedDriver);
+    @unlink($r15mLock);
+}
