@@ -510,3 +510,38 @@ try {
     Db::init($r15mSavedDb, $r15mSavedDriver);
     @unlink($r15mLock);
 }
+
+// PaymentService::requestRefund: 0 is no refund; a request is booked (provider from the method when the snapshot names
+// none) and says so; a refused request inside the caller's transaction leaves it to the caller. refundRequestSettled:
+// a missing order settles nothing, and a booked refund that settles no request is not one.
+try {
+    $r15mMemDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    (new Migrator($r15mMemDb, TEST_CLI_DIR . '/../migrations', $r15mLock))->apply(static fn($m) => null);
+    Db::init($r15mMemDb, 'sqlite');
+    $r15mMemDb->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency,
+            status, payment_status, payment_method, payment_id, payment_method_snapshot, store_id, created_at)
+        VALUES ('R15M-RF', 'R15M', 'r15m@example.test', '', '{}', 1000, 0, 0, 0, 1000, 'eur', 'processing', 'paid', 'bank', '', '{}', ?, " . Db::now() . ")")
+        ->execute([StoreContext::current()->id()]);
+    $r15mRf = (int)$r15mMemDb->lastInsertId();
+    assert_equals(InvalidArgumentException::class, $r15mThrows(static fn() => PaymentService::requestRefund(987654, 0, 'r15m-rf-0')), 'R15 mutants: a refund request of 0 is refused');
+    assert_true(PaymentService::requestRefund($r15mRf, 300, 'r15m-rf-1') === true, 'R15 mutants: a refund request reports that it was booked');
+    assert_equals(['bank', '300'], array_values(array_map('strval', $r15mMemDb->query("SELECT provider, amount FROM payment_transactions WHERE idempotency_key = 'r15m-rf-1'")->fetch() ?: [])),
+        'R15 mutants: a request on an order whose method snapshot names no provider books the payment method (and raises no warning)');
+    $r15mMemDb->exec("UPDATE orders SET payment_status = 'paid' WHERE id = {$r15mRf}");
+    $r15mMemDb->beginTransaction();
+    $r15mRefused = $r15mThrows(static fn() => PaymentService::requestRefund($r15mRf, 5000, 'r15m-rf-2'));
+    $r15mStillOpen = $r15mMemDb->inTransaction();
+    if ($r15mStillOpen) $r15mMemDb->rollBack();
+    assert_equals([LogicException::class, true], [$r15mRefused, $r15mStillOpen], 'R15 mutants: a refund refused inside the caller\'s transaction leaves that transaction to the caller');
+
+    $r15mSettled = new ReflectionMethod(PaymentService::class, 'refundRequestSettled');
+    PaymentService::recordEvent($r15mRf, 'refund.succeeded', 'refunded', 100, 'eur', 'r15m-rf-booked', ['note' => 'r15m']);
+    assert_equals([false, false], [$r15mSettled->invoke(null, 987654, 'order_refund_987654', 1), $r15mSettled->invoke(null, $r15mRf, 'order_refund_' . $r15mRf, 100)],
+        'R15 mutants: no order, or a booked refund that settles no request, does not settle the refund request (and raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('refund request', $e);
+} finally {
+    if (Db::get()->inTransaction()) Db::get()->rollBack();
+    Db::init($r15mSavedDb, $r15mSavedDriver);
+    @unlink($r15mLock);
+}
