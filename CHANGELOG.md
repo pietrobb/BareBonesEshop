@@ -8,7 +8,9 @@
 manual order no longer exposes a buyer's data to an unverified account with their e-mail, and the web worker no
 longer runs jobs inside a failed request's transaction.
 
-Signed with the same update key as 2.1.0; `php cli/update.php fingerprint` on the shop prints
+Signed with the same update key as 2.1.0, whose fingerprint (`php cli/build-update.php fingerprint
+--public=releases/update-public.key` in the 2.1.1 tree, and `php cli/update.php fingerprint` on a shop from 2.1.1
+on; 2.1.0 has no such command) is
 
     ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
 
