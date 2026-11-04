@@ -480,6 +480,7 @@ try {
         PaymentService::chargedFee(['fee' => 300, 'fixed_fee' => 0], true, 'SK'),
     ], 'R15 mutants: a payment fee loses the domestic VAT of its fixed part only when charged net of it');
     assert_true(!PaymentService::canPaymentTransition('r15m-unknown', 'paid'), 'R15 mutants: an unknown payment status allows no transition (and raises no warning)');
+    assert_equals(0, PaymentService::chargedFee(['fixed_fee' => 0], false, 'SK'), 'R15 mutants: a quote without a fee charges none (and raises no warning)');
 } catch (Throwable $e) {
     $r15mFail('payment fee', $e);
 }
@@ -541,6 +542,14 @@ try {
     assert_equals([false, true, false], [$r15mSettled->invoke(null, $r15mRf, 'order_refund_' . $r15mRf, 900), $r15mSettled->invoke(null, $r15mRf, 'order_refund_' . $r15mRf, 901),
             $r15mSettled->invoke(null, $r15mRf, 'r15m-not-a-refund-job', 100)],
         'R15 mutants: a refund that exactly reaches the order total is not settled by the ledger cap (one cent more is), and an execute key naming no request settles nothing');
+
+    $r15mMemDb->exec("UPDATE orders SET payment_status = 'paid' WHERE id = {$r15mRf}");
+    $r15mReplay = $r15mThrows(static fn() => PaymentService::requestRefund($r15mRf, 50, 'r15m-rf-1'));
+    $r15mMemDb->exec("CREATE TRIGGER r15m_rf_fail BEFORE INSERT ON payment_transactions WHEN NEW.idempotency_key = 'r15m-rf-fail' BEGIN SELECT RAISE(ABORT, 'r15m ledger down'); END");
+    $r15mDown = $r15mThrows(static fn() => PaymentService::requestRefund($r15mRf, 50, 'r15m-rf-fail'));
+    $r15mMemDb->exec("DROP TRIGGER r15m_rf_fail");
+    assert_equals([RuntimeException::class, PDOException::class, 'paid'], [$r15mReplay, $r15mDown, (string)$r15mMemDb->query("SELECT payment_status FROM orders WHERE id = {$r15mRf}")->fetchColumn()],
+        'R15 mutants: a replayed request key, or a request the ledger cannot record, is refused and leaves the payment as it was');
 } catch (Throwable $e) {
     $r15mFail('refund request', $e);
 } finally {
@@ -652,11 +661,25 @@ try {
         'R15 mutants: the last line takes what is left of the discount spread, and no payment fee adds no 0 % group');
     assert_equals(['23' => [0, 0]], $r15mRates([], [['total' => 0, 'vat_rate' => 23, 'vat_amount' => 0], ['total' => 0, 'vat_rate' => 23, 'vat_amount' => 0]]),
         'R15 mutants: free lines take no share of the discount (and divide by nothing)');
-    assert_equals([['23' => [1081, 249]], ['0' => [40, 60]], []], [
-            $r15mRates(['total' => 1330, 'subtotal' => 1230, 'shipping_cost' => 100, 'tax_amount' => 249], [['total' => 1230]]),
+    assert_equals([['23' => [1081, 249]], ['50' => [100, 50]], ['0' => [40, 60]], [], ['0' => [500, 0]]], [
+            $r15mRates(['total' => 1330, 'subtotal' => 1330, 'discount_amount' => 100, 'shipping_cost' => 100, 'tax_amount' => 249], [['total' => 1330]]),
+            $r15mRates(['total' => 150, 'subtotal' => 150, 'tax_amount' => 50], [['total' => 150]]),
             $r15mRates(['total' => 100, 'subtotal' => 100, 'tax_amount' => 60], [['total' => 100]]),
             $r15mRates([], []),
-        ], 'R15 mutants: an order without per-line VAT uses the legacy ratio with shipping, reads a rate above 50 % as 0 %, and an empty order has no group (and raises no warning)');
+            $r15mRates(['total' => 500], []),
+        ], 'R15 mutants: an order without per-line VAT uses the legacy ratio after discount and with shipping, keeps 50 % but reads a rate above it as 0 %, and an empty order has no group while a total no group holds goes to 0 % (and raises no warning)');
+    $r15mSegment = new ReflectionMethod(InvoiceService::class, 'proportionalSegment');
+    assert_equals([3, 5, 0, 7, InvalidArgumentException::class, InvalidArgumentException::class, InvalidArgumentException::class, InvalidArgumentException::class, InvalidArgumentException::class], [
+            $r15mSegment->invoke(null, 10, 1, 1, 3),
+            $r15mSegment->invoke(null, 10, 0, 1, 2),
+            $r15mSegment->invoke(null, 0, 0, 1, 1),
+            $r15mSegment->invoke(null, 10, 1, 2, 3),
+            $r15mThrows(static fn() => $r15mSegment->invoke(null, -1, 0, 1, 1)),
+            $r15mThrows(static fn() => $r15mSegment->invoke(null, 10, -1, 1, 2)),
+            $r15mThrows(static fn() => $r15mSegment->invoke(null, 10, 0, 0, 1)),
+            $r15mThrows(static fn() => $r15mSegment->invoke(null, 10, 0, 1, 0)),
+            $r15mThrows(static fn() => $r15mSegment->invoke(null, 10, 1, 2, 2)),
+        ], 'R15 mutants: a proportional credit share takes the edges (nothing before it, a total of 0, up to the last unit) and refuses each invalid input on its own');
 } catch (Throwable $e) {
     $r15mFail('VAT breakdown', $e);
 }
