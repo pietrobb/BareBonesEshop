@@ -15,6 +15,18 @@ $r15aCall = static function (string $method, string $path, array $query = [], ar
     }
 };
 $r15aCategory = (int)$pdo->query("SELECT id FROM categories WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
+// The full suite leaves many orders behind: follow next_cursor like an ERP would instead of trusting the first page.
+$r15aSyncOrder = static function (string $since, int $orderId) use ($r15aCall): ?array {
+    $cursor = '';
+    do {
+        $page = $r15aCall('GET', '/orders', ['updated_after' => $since, 'limit' => 100] + ($cursor === '' ? [] : ['cursor' => $cursor]))['body'] ?? [];
+        foreach ($page['data'] ?? [] as $order) {
+            if ($order['id'] === $orderId) return $order;
+        }
+        $cursor = (string)($page['meta']['next_cursor'] ?? '');
+    } while ($cursor !== '');
+    return null;
+};
 
 // POST /products: a new product with its stock booked in the warehouse ledger, retry-safe.
 $r15aNew = ['sku' => 'R15A-NEW', 'name' => 'R15 ERP product', 'price' => 2490, 'stock' => 7, 'weight_g' => 300, 'category_id' => $r15aCategory];
@@ -86,8 +98,7 @@ assert_equals(['Kniha s.r.o.', 'Hlavná 1', 'Košice', '04001', 'SK', '12345678'
     'R15 API: the order carries the delivery address and company IDs');
 assert_equals(['+421900333444', 'packeta', 'bank_transfer'], [$r15aDetail['customer']['phone'] ?? null, $r15aDetail['shipping']['method'] ?? null, $r15aDetail['payment_method'] ?? null],
     'R15 API: the order carries the phone, shipping method and payment method');
-$r15aList = $r15aCall('GET', '/orders', ['updated_after' => '2000-01-01', 'limit' => 100])['body']['data'] ?? [];
-$r15aListed = array_values(array_filter($r15aList, static fn(array $order): bool => $order['id'] === $r15aOrder))[0] ?? [];
+$r15aListed = $r15aSyncOrder('2000-01-01', $r15aOrder) ?? [];
 assert_equals([$r15aDetail['items'], $r15aDetail['address']], [$r15aListed['items'] ?? null, $r15aListed['address'] ?? null],
     'R15 API: GET /orders carries the same lines and address as the detail');
 
@@ -96,14 +107,12 @@ $pdo->exec("UPDATE orders SET updated_at = '2020-01-01 00:00:00', customer_id = 
 $pdo->prepare("INSERT INTO customers (store_id, email, name, password_hash, status, email_verified_at) VALUES ('default', 'r15a-buyer@example.com', 'R15 Buyer', 'x', 'active', '2026-01-01 00:00:00')")->execute();
 $r15aCustomer = (int)$pdo->lastInsertId();
 Customers::attachGuestOrders($r15aCustomer);
-$r15aSynced = $r15aCall('GET', '/orders', ['updated_after' => '2021-01-01', 'limit' => 100])['body']['data'] ?? [];
-assert_true(in_array($r15aOrder, array_column($r15aSynced, 'id'), true), 'R15 API: attaching a guest order to an account bumps its updated_at');
+assert_true($r15aSyncOrder('2021-01-01', $r15aOrder) !== null, 'R15 API: attaching a guest order to an account bumps its updated_at');
 
 OrderWorkflow::transition($r15aOrder, 'cancelled', 'R15 API cleanup');
 
 // Erasure clears the phone and notes on the order (shown by the API): the next sync must fetch it again.
 $pdo->exec("UPDATE orders SET updated_at = '2020-01-01 00:00:00' WHERE id = {$r15aOrder}");
 GdprService::anonymizeCustomer($r15aCustomer, 'admin');
-$r15aErased = array_values(array_filter($r15aCall('GET', '/orders', ['updated_after' => '2021-01-01', 'limit' => 100])['body']['data'] ?? [],
-    static fn(array $order): bool => $order['id'] === $r15aOrder))[0] ?? null;
+$r15aErased = $r15aSyncOrder('2021-01-01', $r15aOrder);
 assert_equals(null, $r15aErased === null ? 'missing' : $r15aErased['customer']['phone'], 'R15 API: erasing the customer bumps the order\'s updated_at; the sync sees the phone gone');
