@@ -440,6 +440,9 @@ php cli/restore.php <backup.sql> --i-stopped-writers   # MySQL/MariaDB: scratch 
 php cli/restore.php <backup> --files[-only] [--force]  # invoices, uploads, GDPR salt
 ```
 
+`<backup>` is the path `--list` prints, relative to the backup storage
+(`2026/10/16/eshop-20261016-020000.db`); an absolute path to a file inside a
+local backup storage is accepted too, any other path is refused.
 Restores verify the backup's SHA-256 and size and take a `pre-restore-snapshot`
 first. The `.files.tar` archive holds the GDPR salt, the secret behind every
 pseudonymised GDPR record: keep backups on encrypted, access-controlled storage.
