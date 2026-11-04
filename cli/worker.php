@@ -38,9 +38,7 @@ $cfg = require __DIR__ . '/../config.php';
 $lock = null;
 $lockFile = null;
 if (!JobQueue::supportsConcurrentWorkers()) {
-    $jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
-    if (!is_dir($jobsDir)) mkdir($jobsDir, 0750, true);
-    $lockFile = $jobsDir . '/worker.lock';
+    $lockFile = JobQueue::workerLockFile();
     $lock = JobQueue::acquireWorkerLock($lockFile);
     if ($lock === null) {
         if ($verbose) echo "Worker is already running.\n";
