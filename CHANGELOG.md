@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Rollback numbering on MySQL/MariaDB** (review round 16, high). After an update rollback on MySQL or MariaDB the
+  invoice and credit note counters were not raised past the numbers issued during the update, so those numbers were
+  issued a second time: the counter update bound one named placeholder twice, which native prepares reject (HY093;
+  SQLite accepts it). A regression test now scans every SQL string in `src/` and `extensions/` for a repeated named
+  placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by
+  v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
+  tracked as an unknown number of discarded rows instead of skipping them silently.
 - **Low findings** (review round 15). An admin amount typed as `1,299` was read as 1,30 EUR (the comma taken as the
   decimal separator, the rest rounded away); an amount with more decimals than the currency has is now refused with
   a message instead of being rounded. A checkout form that failed validation or was reloaded kept nothing: the

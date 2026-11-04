@@ -171,6 +171,8 @@ try {
         'R15 medium: the automatic rollback names the discarded invoices/credit notes and refunds');
     assert_equals([1, 1, 0], [(int)$r15uDb->query('SELECT COUNT(*) FROM invoices')->fetchColumn(), (int)($r15uSnapshot['discarded_writes']['order_refunds'] ?? -1),
         (int)$r15uDb->query('SELECT COUNT(*) FROM order_refunds')->fetchColumn()], 'R15 medium: the database was restored and the snapshot records the discarded refund');
+    assert_equals(['orders', 'payment_transactions', 'invoices', 'order_refunds', 'customers'], $r15uSnapshot['database']['high_water_tables'] ?? null,
+        'R16 medium: the update snapshot records which tables it tracked, so a later rollback tells "did not exist" from "not tracked"');
     assert_equals(['credit_note/D=1', 'invoice/=9'], $r15uCounters,
         'R15 medium: after the rollback the next invoice is 10 and the next credit note 2: no number already sent is issued again');
     $r15uDb = null;
