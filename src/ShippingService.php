@@ -373,6 +373,14 @@ class ShippingService
         return $carriers;
     }
 
+    /** The carrier the customer chose for the order (its frozen rate), or null when the order has no rate snapshot. */
+    public static function orderCarrier(array $order): ?string
+    {
+        $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
+        $carrier = is_array($snapshot) ? trim((string)($snapshot['carrier'] ?? '')) : '';
+        return $carrier !== '' ? $carrier : null;
+    }
+
     /** Labels of an order (newest first), with the shipment they belong to when known. */
     public static function labels(int $orderId): array
     {

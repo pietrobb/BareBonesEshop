@@ -324,6 +324,14 @@ try {
     assert_true(DigitalDelivery::resolve($r6Tokens[0]) !== null, 'ARR 6: a refund in flight keeps paid downloads');
     $pdo->prepare("UPDATE orders SET payment_status = 'refunded' WHERE id = ?")->execute([$r6]);
     assert_true(DigitalDelivery::resolve($r6Tokens[0]) === null, 'ARR 6: a fully refunded payment ends downloads');
+    // R15 high 6: an RMA credit note without a provider payment (bank transfer, cash on delivery, refunded by hand)
+    // leaves the order 'paid': the credited e-book must stop downloading all the same, also in the counted download.
+    $pdo->prepare("UPDATE orders SET payment_status = 'paid' WHERE id = ?")->execute([$r6]);
+    $r6Entitlement2 = (int)$pdo->query("SELECT id FROM digital_entitlements WHERE order_item_id = {$r6Item2}")->fetchColumn();
+    assert_equals([true, false, false], [DigitalDelivery::resolve($r6Tokens[0]) !== null, DigitalDelivery::resolve($r6Tokens[1]) !== null, DigitalDelivery::consume($r6Entitlement2)],
+        'R15 H6: on a paid order the RMA-credited e-book neither resolves nor counts a download; the other line still downloads');
+    $pdo->prepare("UPDATE order_refunds SET status = 'failed' WHERE id = ?")->execute([$r6Refund]);
+    assert_equals([true, true], [DigitalDelivery::resolve($r6Tokens[1]) !== null, DigitalDelivery::consume($r6Entitlement2)], 'R15 H6: a failed refund gives the download back');
 } catch (Throwable $e) {
     assert_true(false, 'Refund robustness regression raised ' . get_class($e) . ': ' . $e->getMessage() . ' @' . basename($e->getFile()) . ':' . $e->getLine());
 } finally {

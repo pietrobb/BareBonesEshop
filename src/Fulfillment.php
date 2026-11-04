@@ -229,6 +229,33 @@ class Fulfillment {
         return $ids;
     }
 
+    /**
+     * R15 high 5: after a shipment of the order left (inside the caller's transaction): once all its goods shipped and
+     * none wait on a backorder the order becomes 'shipped' through the workflow (status, "on its way" e-mail, the
+     * invoice of cash on delivery, ERP); a partial shipment e-mails the customer that parcel's tracking. Deferred jobs.
+     * @return list<array{0:string,1:array,2:int}>
+     */
+    public static function shippedJobsWithin(int $orderId): array {
+        $order = Orders::byId($orderId);
+        if (!$order) return [];
+        if (self::allShipped($orderId) && in_array('shipped', OrderWorkflow::allowedFor($order), true)) {
+            return OrderWorkflow::transitionWithin($orderId, 'shipped', 'All goods shipped');
+        }
+        return [['email_send', ['template' => 'order_shipped', 'to' => $order['customer_email'], 'locale' => $order['locale'] ?? '', 'order_id' => $orderId], 5]];
+    }
+
+    /** No planned shipment, no backordered unit and nothing left to put in a shipment. */
+    private static function allShipped(int $orderId): bool {
+        foreach (self::shipments($orderId) as $shipment) if ($shipment['status'] === 'planned' || $shipment['status'] === 'shipping') return false;
+        $stmt = Db::get()->prepare('SELECT COALESCE(SUM(backordered_qty), 0) FROM order_items WHERE order_id = :order');
+        $stmt->execute([':order' => $orderId]);
+        if ((int)$stmt->fetchColumn() > 0) return false;
+        foreach (self::shippable($orderId) as $group) {
+            if (array_sum(array_column($group['lines'], 'remaining')) > 0) return false;
+        }
+        return true;
+    }
+
     /** Correct carrier/tracking of a shipped shipment of the active store; false when nothing changed. */
     public static function updateTracking(int $shipmentId, ?string $carrier, ?string $trackingNumber, ?string $trackingUrl): bool {
         [$carrier, $trackingNumber, $trackingUrl] = self::tracking($carrier, $trackingNumber, $trackingUrl);

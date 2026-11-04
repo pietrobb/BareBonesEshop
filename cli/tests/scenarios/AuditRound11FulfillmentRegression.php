@@ -203,7 +203,27 @@ try {
     assert_equals([[$r11fCodTotal, I18n::format('admin.shipment.label_cod', ['amount' => $r11fPrice])], [0, $r11fPrepaid]], $r11fParcelCod(),
         'R11 H9: the shipped parcel keeps showing what it collected, the planned one stays prepaid');
 
+    // R15: the form offered every connected carrier, i.e. only in-store pickup: a Packeta COD order got a pickup label.
+    $r15lForm = static function () use ($r11fCodOrderId, $r11fShipB): string {
+        ob_start();
+        renderOrderShipments(Orders::byId($r11fCodOrderId));
+        $html = (string)ob_get_clean();
+        return preg_match('#<tr data-shipment="' . $r11fShipB . '">.*?</tr>#s', $html, $m) ? $m[0] : '';
+    };
+    ShippingService::setAdapters(['pickup' => new PersonalPickup(), 'packeta' => new PacketaShipping(), 'gls' => new GlsShipping()]);
+    $r15lRow = $r15lForm();
+    assert_equals(['packeta', ['packeta'], false, true],
+        [ShippingService::orderCarrier(Orders::byId($r11fCodOrderId)), array_keys(adminOrderLabelCarriers(Orders::byId($r11fCodOrderId), ShippingService::labelCarriers())),
+            str_contains($r15lRow, 'data-shipment-label-form'), str_contains($r15lRow, 'data-label-unavailable="packeta"')],
+        'R15 labels: a Packeta order is offered no pickup label; Packeta not connected = book it in the portal');
+    assert_equals(['pickup', 'gls'], array_keys(adminOrderLabelCarriers(['shipping_rate_snapshot' => ''], ['pickup' => null, 'gls' => 'x'])),
+        'R15 labels: an order without a rate snapshot keeps every carrier');
+
     putenv('SHIP_MOCK_LABELS=1');
+    $r15lRow = $r15lForm();
+    assert_equals([1, true, false], [preg_match_all('#<option value=#', $r15lRow), str_contains($r15lRow, '<option value="packeta">'), str_contains($r15lRow, 'value="pickup"')],
+        'R15 labels: with the Packeta API connected the only label offered is Packeta');
+    ShippingService::setAdapters(['packeta' => new PacketaShipping(), 'gls' => new GlsShipping()]);
     $r11fTotal = (int)Orders::byId($r11fCodOrderId)['total'];
     $r11fLabelA = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipA);
     $r11fLabelB = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipB);

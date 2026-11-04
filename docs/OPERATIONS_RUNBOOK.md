@@ -159,4 +159,24 @@ Rollback is complete only when readiness is green, the critical browser smoke pa
 - Manual keyboard-only browser pass at 200% zoom, visible focus, landmarks, form errors, checkout, account, invoice download, and admin critical flows.
 - Merchant legal identity, production tax registrations/rates, invoice numbering, rounding, reverse-charge/OSS/export wording, and accounting reconciliation.
 
+### Tagging and publishing a release
+
+The update runbooks start from "an LF export of the signed tag", so every release tag is signed and verified
+before anything is built from it. Tags from v2.1.1 on are signed with the SSH key listed in
+`releases/allowed_signers` (fingerprint `SHA256:+6NmgAQLsyy8akzFUqhZuzHqgHZ7cR/Yrz1VbRpyEik`); its private part
+is kept offline with the update signing key, never on a server:
+
+```bash
+git -c gpg.format=ssh -c user.signingkey=<tag-signing-ed25519 private key> tag -s vX.Y.Z -m "BareBonesEshop X.Y.Z"
+git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag vX.Y.Z   # must print "Good \"git\" signature"
+git push origin vX.Y.Z
+git archive vX.Y.Z | tar -x -C /trusted/bareboneseshop-X.Y.Z
+php cli/build-update.php fingerprint --public=/trusted/bareboneseshop-X.Y.Z/releases/update-public.key
+```
+
+Give in the release notes the tag key fingerprint above and the update key fingerprint exactly as
+`build-update.php fingerprint` prints it: it is what `php cli/update.php fingerprint` shows on every shop. Verify
+with an `allowed_signers` copy you already trust (an earlier release or these notes), not only with the one inside
+the tag being checked. Tags up to v2.1.0 are annotated but not signed.
+
 Record the release SHA, CI run URL, all six job results, browser/WCAG evidence, benchmark profile, restore-drill evidence, operator, timestamp, remote SHA, and clean `main`. A repository-green result is not a substitute for the live-provider checks above.

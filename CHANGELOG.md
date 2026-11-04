@@ -13,6 +13,37 @@
   midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11. The file-queue worker takes its lock
   in the jobs directory the queue really uses: two suites run side by side (two checkouts sharing the default
   `jobs_dir`) no longer make a test's worker back off and drop out of the run.
+
+## 2.1.1 — 2026-11-04
+
+**Security and correctness hotfix of 2.1.0** (review round 15, high 1–8). Update every 2.1.0 shop: among others a
+manual order no longer exposes a buyer's data to an unverified account with their e-mail, and the web worker no
+longer runs jobs inside a failed request's transaction.
+
+Signed with the same update key as 2.1.0, whose fingerprint (`php cli/build-update.php fingerprint
+--public=releases/update-public.key` in the 2.1.1 tree, and `php cli/update.php fingerprint` on a shop from 2.1.1
+on; 2.1.0 has no such command) is
+
+    ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
+
+The tag `v2.1.1` is the first signed tag (SSH key `SHA256:+6NmgAQLsyy8akzFUqhZuzHqgHZ7cR/Yrz1VbRpyEik`, listed in
+`releases/allowed_signers`): `git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag v2.1.1`.
+The GitHub release `v2.1.1` carries `update-2.1.0-2.1.1` (installed 2.1.0: `php cli/update.php apply
+--package=...`), `update-2.0.0-2.1.1` and `update-1.8.0-2.1.1` (run from the trusted 2.1.1 tree with
+`--installed=<shop root>`, see `docs/AI_UPDATE_RUNBOOK.md`; a v1.8.0 shop now upgrades its `stores.json`).
+
+- **Release process and upgrade** (review round 15, high 7). A v1.8.0 shop adopted exactly per the runbook answered
+  503 on `/readyz` and the admin: its `stores.json` (main store keyed `sk`, no `default_store`, no channels) stayed as
+  it was, while every migrated row belongs to the store `default`. `update.php apply` and `setup.php apply` now write
+  an upgraded copy into `private_runtime_dir` (main store → `default`, the old file stays for a rollback), and both
+  doctors report a v1.x file. The 2.1.0 notes gave the SHA-256 of the key file instead of what
+  `php cli/update.php fingerprint` prints; they now give that value, which `php cli/build-update.php fingerprint`
+  prints for release notes. The release checklist signs (`git tag -s`) and verifies tags, and the bootstrap runbook
+  verifies the tag before exporting it. An update rollback now also counts the invoices, credit notes and refunds it
+  discards, and raises the restored invoice/credit note counters back past the numbers already issued, so no number
+  is issued twice. The `order_item_digital` backfill runs in id ranges of 5,000 lines instead of one UPDATE of the
+  whole table (156 s and deadlocks at 4 million lines), and `php cli/migrate.php apply` puts the shop into
+  maintenance (503) while migrations run, as `update.php` does.
 - **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
   many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
   0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.
@@ -43,6 +74,14 @@
   cancelled order. The payment webhook route takes the provider codes adapters accept (`/api/v1/webhooks/payment/acme-pay`
   was a 404). At a provider whose checkout session id is not its payment id, the capture of the order's own session now
   records the payment id, so refunds go to the payment instead of the session.
+- **Fulfillment** (review round 15, high 5, high 6). "Create and ship" and "Ship" in the admin order detail never
+  moved the order to Shipped nor e-mailed the customer. The parcel with the last unshipped goods now does both (the
+  `order_shipped` e-mail carries that parcel's tracking); an earlier partial parcel e-mails its own tracking and the
+  order stays paid. An e-book credited through a return (RMA) stayed downloadable when the order kept the payment
+  status `paid` (refund without a provider payment): the credited line no longer resolves nor counts a download.
+  Labels are offered only for the carrier the customer chose: a Packeta cash-on-delivery order was offered just the
+  in-store pickup label (the only connected carrier); without the Packeta API the parcel is booked in its portal.
+  The order status form no longer preselects the first allowed move (for some orders Cancelled): it starts empty.
 
 - **Further language in links with their own query** (review round 14, UX2 follow-up). With a further language active,
   the password-reset and e-mail verification links, the account page's links (login, register, forgot password,
@@ -279,9 +318,12 @@
 
 **Update signing key rotated.** The secret key that signed v1.9.0 was lost, so v2.1.0 is the first
 release signed with a new Ed25519 key. `releases/update-public.key` now holds the new public key; its
-SHA-256 fingerprint is
+fingerprint, as `php cli/update.php fingerprint --public-key=<that file>` prints it, is
 
-    78d6474a733bcf39f73a58e64b28c20fcd5e9f59b6e6d2b38e481b2b66460e53
+    ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
+
+(Corrected after the release: the notes first gave `78d6474a…0e53`, the SHA-256 of the key file itself, which
+`sha256sum releases/update-public.key` prints; both identify the same key.)
 
 On every shop, before applying the v2.1.0 package: compare the fingerprint of `releases/update-public.key`
 from the `v2.1.0` tag with the value above, replace the file that `update_public_key` points to, then run

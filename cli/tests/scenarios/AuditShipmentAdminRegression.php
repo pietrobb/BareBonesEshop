@@ -55,6 +55,7 @@ if ($driver === 'mysql') {
     $db->exec("USE `{$target}`");
 }
 Db::init($db, $driver);
+JobQueue::setDir(dirname(__FILE__) . '/jobs');
 $idOf = static function(string $table, string $column, string $value) use ($db): int {
     $stmt = $db->prepare("SELECT id FROM {$table} WHERE {$column} = ?");
     $stmt->execute([$value]);
@@ -132,7 +133,15 @@ register_shutdown_function(static function() use ($db, $snapshot, &$before, &$ex
     $output = ob_get_contents();
     if ($extra instanceof Closure) $extra = $extra();
     ob_clean();
-    $result = ['output'=>$output, 'http_status'=>http_response_code(), 'before'=>$before, 'after'=>$snapshot(), 'flash'=>$_SESSION['flash'] ?? null, 'extra'=>$extra];
+    // R15: the customer e-mails and ERP updates the action queued (type:template/status), all jobs removed for the next run.
+    $jobs = [];
+    foreach (glob(dirname(__FILE__) . '/jobs/pending/*.json') ?: [] as $file) {
+        $job = json_decode((string)file_get_contents($file), true);
+        if (in_array($job['type'] ?? '', ['email_send', 'erp_order_update', 'invoice_issue'], true)) $jobs[] = $job['type'] . ':' . ($job['payload']['template'] ?? $job['payload']['status'] ?? '');
+        unlink($file);
+    }
+    sort($jobs);
+    $result = ['output'=>$output, 'http_status'=>http_response_code(), 'before'=>$before, 'after'=>$snapshot(), 'flash'=>$_SESSION['flash'] ?? null, 'extra'=>$extra, 'jobs'=>$jobs];
     $db->depth = 1;
     $db->rollBack();
     print json_encode($result, JSON_THROW_ON_ERROR);
@@ -158,6 +167,12 @@ match ($action) {
     'withdrawn_ship_ack' => [$withdraw(), $_POST = ['csrf_token'=>'a128-token', 'shipment_id'=>(string)$setupShipment(), 'withdrawal_ack'=>'1'] + $tracking, handlePost('order', 'shipment_ship')],
     'page' => [$extra = static fn(): array => ['shippable' => Fulfillment::shippable($orderId())], pageOrder()],
     'create_ship' => [$_POST = $create([$line() => '3'], $tracking + ['ship_now'=>'1']), handlePost('order', 'shipment_create')],
+    // R15 high 5: the parcel with the last goods makes the order shipped (status + e-mail), not just the shipment.
+    'create_ship_last' => [Fulfillment::ship($setupShipment()), Fulfillment::ship(Fulfillment::createShipment($orderId(), (int)$side, [['order_item_id'=>$itemId(), 'sku'=>"A128P-{$own}", 'quantity'=>2]], 'core:a128side')),
+        $_POST = $create([$line() => '4'], $tracking + ['ship_now'=>'1']), handlePost('order', 'shipment_create')],
+    'ship_planned_last' => [Fulfillment::ship(Fulfillment::createShipment($orderId(), (int)$side, [['order_item_id'=>$itemId(), 'sku'=>"A128P-{$own}", 'quantity'=>2]], 'core:a128side')),
+        Fulfillment::ship(Fulfillment::createShipment($orderId(), (int)$main, [['order_item_id'=>$itemId(), 'sku'=>"A128P-{$own}", 'quantity'=>4]], 'core:a128main')),
+        $_POST = ['csrf_token'=>'a128-token', 'shipment_id'=>(string)$setupShipment()] + $tracking, handlePost('order', 'shipment_ship')],
     'create_planned' => [$_POST = $create([$line() => '2']), handlePost('order', 'shipment_create')],
     'create_side' => [$_POST = $create([$line() => '2'], ['warehouse'=>$side, 'ship_now'=>'1']), handlePost('order', 'shipment_create')],
     'create_replay' => [$_POST = $create([$line() => '2']), Fulfillment::createShipment($orderId(), (int)$main,
@@ -210,7 +225,7 @@ $a128Refused = [
     // R9: goods the consumer withdrew from are not shipped without an explicit acknowledgement.
     'withdrawn_ship' => 'Confirm the warning', 'withdrawn_create_ship' => 'Confirm the warning', 'withdrawn_status' => 'Confirm the warning',
 ];
-$a128Actions = array_merge(['page', 'create_ship', 'create_planned', 'create_side', 'create_replay', 'ship_planned', 'cancel_planned', 'tracking_update',
+$a128Actions = array_merge(['page', 'create_ship', 'create_ship_last', 'ship_planned_last', 'create_planned', 'create_side', 'create_replay', 'ship_planned', 'cancel_planned', 'tracking_update',
     'order_shipped_after_partial', 'viewer_create', 'withdrawn_page', 'withdrawn_bulk', 'withdrawn_ship_ack'], array_keys($a128Refused));
 $a128Drivers = ['sqlite' => $a128Root . '/shipments.sqlite'];
 if (getenv('TEST_MYSQL_DSN')) $a128Drivers['mysql'] = 'bbe_a128_shipments_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '_test';
@@ -272,6 +287,9 @@ try {
                         [[$a128New[0]['status'] ?? null, $a128New[0]['carrier'] ?? null, $a128New[0]['tracking_number'] ?? null, $a128New[0]['tracking_url'] ?? null],
                             $a128Items[($a128New[0]['id'] ?? 0) . ':shipped'] ?? 0, $a128StockOf('main'), count($a128Moves), $a128Fulfil["A128-{$a128Store}"] ?? null, $a128Status["A128-{$a128Store}"] ?? null],
                         "{$a128Label}: partial shipment shipped with tracking, stock and ledger booked, order stays paid"),
+                    'create_ship_last', 'ship_planned_last' => assert_equals(['shipped', 'fulfilled', [5, 1], [2, 0], ['email_send:order_shipped', 'erp_order_update:shipped']],
+                        [$a128Status["A128-{$a128Store}"] ?? null, $a128Fulfil["A128-{$a128Store}"] ?? null, $a128StockOf('main'), $a128StockOf('side'), $a128Result['jobs'] ?? null],
+                        "{$a128Label}: R15 high 5 — the parcel with the last goods makes the order shipped and e-mails the customer"),
                     'create_planned' => assert_equals(['planned', 2, [10, 6], 0], [$a128New[0]['status'] ?? null, $a128Items[($a128New[0]['id'] ?? 0) . ':planned'] ?? 0, $a128StockOf('main'), count($a128Moves)],
                         "{$a128Label}: planned shipment does not touch stock"),
                     'create_side' => assert_equals(['shipped', 2, [2, 0], [10, 6]], [$a128New[0]['status'] ?? null, $a128Items[($a128New[0]['id'] ?? 0) . ':shipped'] ?? 0, $a128StockOf('side'), $a128StockOf('main')],
@@ -303,6 +321,15 @@ try {
                             array_key_exists('tracking_url', $a128Result['extra']['api'][0] ?? [])],
                         "{$a128Label}: order status shipped after a partial admin shipment ships exactly the remainder (" . json_encode($a128Result['extra']['transition'] ?? null) . ')'),
                 };
+                if ($a128Action === 'page') {
+                    assert_true(preg_match('/<select name="new_status" required[^>]*>\s*<option value="" selected>/', $a128Output) === 1,
+                        "{$a128Label}: R15 — the order status form preselects no status (it used to preselect the first move, e.g. Cancelled)");
+                }
+                if (in_array($a128Action, ['create_ship', 'create_side', 'ship_planned', 'withdrawn_ship_ack', 'create_planned', 'cancel_planned', 'tracking_update'], true)) {
+                    $a128Partial = in_array($a128Action, ['create_ship', 'create_side', 'ship_planned', 'withdrawn_ship_ack'], true);
+                    assert_equals([$a128Partial ? ['email_send:order_shipped'] : [], 'paid'], [$a128Result['jobs'] ?? null, $a128Status["A128-{$a128Store}"] ?? null],
+                        "{$a128Label}: R15 high 5 — " . ($a128Partial ? 'a partial parcel e-mails its tracking, the order stays paid' : 'no parcel left, no e-mail'));
+                }
             }
         }
     }
