@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Release process and upgrade** (review round 15, high 7). A v1.8.0 shop adopted exactly per the runbook answered
+  503 on `/readyz` and the admin: its `stores.json` (main store keyed `sk`, no `default_store`, no channels) stayed as
+  it was, while every migrated row belongs to the store `default`. `update.php apply` and `setup.php apply` now write
+  an upgraded copy into `private_runtime_dir` (main store → `default`, the old file stays for a rollback), and both
+  doctors report a v1.x file. The 2.1.0 notes gave the SHA-256 of the key file instead of what
+  `php cli/update.php fingerprint` prints; they now give that value, which `php cli/build-update.php fingerprint`
+  prints for release notes. The release checklist signs (`git tag -s`) and verifies tags, and the bootstrap runbook
+  verifies the tag before exporting it. An update rollback now also counts the invoices, credit notes and refunds it
+  discards, and raises the restored invoice/credit note counters back past the numbers already issued, so no number
+  is issued twice. The `order_item_digital` backfill runs in id ranges of 5,000 lines instead of one UPDATE of the
+  whole table (156 s and deadlocks at 4 million lines), and `php cli/migrate.php apply` puts the shop into
+  maintenance (503) while migrations run, as `update.php` does.
 - **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
   many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
   0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.
@@ -276,9 +288,12 @@
 
 **Update signing key rotated.** The secret key that signed v1.9.0 was lost, so v2.1.0 is the first
 release signed with a new Ed25519 key. `releases/update-public.key` now holds the new public key; its
-SHA-256 fingerprint is
+fingerprint, as `php cli/update.php fingerprint --public-key=<that file>` prints it, is
 
-    78d6474a733bcf39f73a58e64b28c20fcd5e9f59b6e6d2b38e481b2b66460e53
+    ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
+
+(Corrected after the release: the notes first gave `78d6474a…0e53`, the SHA-256 of the key file itself, which
+`sha256sum releases/update-public.key` prints; both identify the same key.)
 
 On every shop, before applying the v2.1.0 package: compare the fingerprint of `releases/update-public.key`
 from the `v2.1.0` tag with the value above, replace the file that `update_public_key` points to, then run

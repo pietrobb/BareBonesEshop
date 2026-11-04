@@ -166,6 +166,12 @@ try {
         foreach ((array)($result['discarded_writes'] ?? []) as $table => $count) {
             echo "  discarded since the snapshot: {$table}=" . ($count === null ? 'unknown' : $count) . "\n";
         }
+        if (is_int($result['numbering_raised'] ?? null) && $result['numbering_raised'] > 0) {
+            echo "  invoice/credit note numbering continues after the discarded numbers: {$result['numbering_raised']} series raised\n";
+        }
+        if (($result['notice'] ?? null) !== null) {
+            fwrite(STDERR, "WARNING: {$result['notice']}\n");
+        }
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }
@@ -222,6 +228,12 @@ try {
         . "{$result['already_current']} already current. Rollback snapshot: {$result['snapshot']}\n";
     foreach ($result['retired'] as $retiredPath) {
         echo "Moved obsolete generated file {$retiredPath} into the snapshot (retired/)\n";
+    }
+    // R15 high 7: a shop adopted from v1.x still has the old stores.json, which this release cannot run on (503).
+    if (DataOverrides::storesNeedUpgrade($root, $config)) {
+        $stores = DataOverrides::seedStores($root, $config);
+        echo $stores !== null ? "stores.json: {$stores['action']} ({$stores['path']})\n"
+            : "WARNING: stores.json is in the v1.x format and no private_runtime_dir is configured; run php cli/setup.php apply after setting it\n";
     }
     try {
         $pruned = $updater->pruneSnapshots((int)($config['update_snapshots_keep'] ?? 3));

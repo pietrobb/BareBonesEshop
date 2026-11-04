@@ -138,8 +138,11 @@ class Migrator {
         ],
         // R13 low: the backfill reads the snapshot keys from the decoded attrs instead of a LIKE on the JSON.
         '20261103090000_order_item_digital' => [
-            'cd4b8440632086049355bd8c1fb2249ea2faff1b371eb086e0a860d31e906602' => ['de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4', '3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf'],
-            '920356b24b9c5aa670771f0eadc4a18756f0d95d440cbfd31f92cefcf86053cf' => ['de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4', '3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf'],
+            // R15: the batched version (same result); the earlier whole-table versions were applied by main installs.
+            'cd4b8440632086049355bd8c1fb2249ea2faff1b371eb086e0a860d31e906602' => ['a20305ca19fd60641752e83dfedb82f19ea7b03d9680dfb8c1877e2dd30dcedd', '5566dfce8dcb9869f2f0b443bfa8a356fca4a229e1c0278b326b443b1a4f5817'],
+            '920356b24b9c5aa670771f0eadc4a18756f0d95d440cbfd31f92cefcf86053cf' => ['a20305ca19fd60641752e83dfedb82f19ea7b03d9680dfb8c1877e2dd30dcedd', '5566dfce8dcb9869f2f0b443bfa8a356fca4a229e1c0278b326b443b1a4f5817'],
+            'de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4' => ['a20305ca19fd60641752e83dfedb82f19ea7b03d9680dfb8c1877e2dd30dcedd', '5566dfce8dcb9869f2f0b443bfa8a356fca4a229e1c0278b326b443b1a4f5817'],
+            '3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf' => ['a20305ca19fd60641752e83dfedb82f19ea7b03d9680dfb8c1877e2dd30dcedd', '5566dfce8dcb9869f2f0b443bfa8a356fca4a229e1c0278b326b443b1a4f5817'],
         ],
     ];
 

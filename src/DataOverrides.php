@@ -66,7 +66,17 @@ final class DataOverrides
         $source = is_file($legacy) ? $legacy : $appRoot . '/' . self::STORES_EXAMPLE;
         if (!is_file($source)) return null; // not an application tree; doctor reports the missing stores
         $content = @file_get_contents($source);
-        if ($content === false || !is_array(json_decode($content, true))) throw new RuntimeException("Cannot read {$source}");
+        $data = $content === false ? null : json_decode($content, true);
+        if (!is_array($data)) throw new RuntimeException("Cannot read {$source}");
+        // A v1.x stores.json is upgraded into the copy; the old file stays, so a rollback to v1.x still reads its own.
+        $upgraded = $source === $legacy ? self::upgradeLegacyStores($data) : null;
+        if ($upgraded !== null) {
+            $json = json_encode($upgraded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+            if (!self::ensureDir($dir) || !self::atomicWrite($target, $json)) throw new RuntimeException("Cannot write {$target}");
+            @chmod($target, 0640);
+            return ['path' => $target, 'action' => 'upgraded from the v1.x format (main store "' . self::legacyMainStore($data)
+                . '" is now "default"); the application root file is kept unchanged for a rollback'];
+        }
         // The example's sample stores (cz, pl, hu, de, us with made-up sellers) come in hidden: no storefront until the
         // merchant enters the seller and publishes the store in Admin → Stores and seller.
         if ($source !== $legacy) $content = (string)preg_replace('/"sample"\s*:\s*true\b/', '"public": false', $content);
@@ -75,6 +85,50 @@ final class DataOverrides
         if ($source !== $legacy) return ['path' => $target, 'action' => 'created from ' . self::STORES_EXAMPLE];
         // A read-only code directory (Docker) keeps the old file; the data directory copy takes precedence anyway.
         return ['path' => $target, 'action' => @unlink($legacy) ? 'moved from the application root' : 'copied from the application root'];
+    }
+
+    /**
+     * R15 high 7: a v1.x stores.json has no default_store, no store ids and no channels, and keys the main store (the
+     * one without url_prefix) by its country ("sk"). Every row the migrations scoped belongs to the store 'default',
+     * and the workers, cron and admin open that store: the shop answered 503. Returns the current format (the main
+     * store renamed to 'default', the others keep their keys; one shared catalog; the API channel), or null when $data
+     * is not a v1.x file. Additive otherwise: every existing field is kept.
+     */
+    public static function upgradeLegacyStores(array $data): ?array
+    {
+        $stores = $data['stores'] ?? null;
+        if (isset($data['default_store']) || !is_array($stores) || $stores === []) return null;
+        $main = self::legacyMainStore($data);
+        $mainCurrency = strtolower((string)($stores[$main]['currency'] ?? ''));
+        $upgraded = [];
+        foreach ($stores as $key => $store) {
+            if (!is_array($store)) continue;
+            $id = (string)$key === $main ? 'default' : (string)$key;
+            $sameProvider = $id === 'default' || strtolower((string)($store['currency'] ?? '')) === $mainCurrency;
+            $upgraded[$id] = ['id' => $id] + $store + ['domains' => [], 'catalog_scope' => 'default',
+                'provider_scope' => $sameProvider ? 'default' : $id, 'theme' => 'default', 'channels' => ['storefront', 'api']];
+        }
+        $data['default_store'] = 'default';
+        $data['stores'] = $upgraded;
+        return $data;
+    }
+
+    /** The main store of a v1.x stores.json: 'default' when present, else the one without url_prefix, else the first. */
+    private static function legacyMainStore(array $data): string
+    {
+        $stores = (array)($data['stores'] ?? []);
+        if (isset($stores['default'])) return 'default';
+        foreach ($stores as $key => $store) {
+            if (is_array($store) && rtrim((string)($store['url_prefix'] ?? ''), '/') === '') return (string)$key;
+        }
+        return (string)array_key_first($stores);
+    }
+
+    /** True when the stores.json in use is still in the v1.x format (see upgradeLegacyStores). */
+    public static function storesNeedUpgrade(string $appRoot, array $config): bool
+    {
+        $data = json_decode((string)@file_get_contents(self::storesPath($appRoot, $config)), true);
+        return is_array($data) && self::upgradeLegacyStores($data) !== null;
     }
 
     /**
