@@ -10,6 +10,12 @@ OUT=${OUT:-$ROOT/test-results/bookshop-package}
 rm -rf "$OUT" && mkdir -p "$OUT/unpacked"
 php "$ROOT/demo/bookshop/package.php" --out="$OUT" --ref="$REF"
 php -r '$z = new ZipArchive; if ($z->open($argv[1]) !== true || !$z->extractTo($argv[2])) exit(1);' "$OUT/bareboneseshop-bookshop.zip" "$OUT/unpacked"
+# R15: every entry carries Unix modes, none group/world-writable (an entry without them unpacks as 0777 on many hosts).
+php -r '$z = new ZipArchive; $z->open($argv[1]); $bad = [];
+  for ($i = 0; $i < $z->numFiles; $i++) { $z->getExternalAttributesIndex($i, $os, $attr); $mode = ($attr >> 16) & 0777;
+    if ($os !== ZipArchive::OPSYS_UNIX || $mode === 0 || ($mode & 0022) !== 0) $bad[] = sprintf("%s %o", $z->getNameIndex($i), $mode); }
+  if ($bad) { fwrite(STDERR, count($bad) . " zip entries without safe Unix modes, e.g. " . implode(", ", array_slice($bad, 0, 5)) . "\n"); exit(1); }
+  echo "zip modes: " . $z->numFiles . " entries, none writable by group or others\n";' "$OUT/bareboneseshop-bookshop.zip"
 
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" -p "127.0.0.1:$PORT:80" "php:$PHP_IMAGE-apache" >/dev/null
