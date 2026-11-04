@@ -214,7 +214,11 @@ class Setup
         $stores = is_file($storesPath) ? json_decode((string)file_get_contents($storesPath), true) : null;
         $defaultStore = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $storeOk = is_array($stores) && isset($stores['stores'][$defaultStore]);
-        $add($storeOk ? 'pass' : 'fail', 'stores.default', $storeOk ? "Default store: {$defaultStore}" : 'stores.json has no valid default store', 'Define default_store and its store record.');
+        $legacyStores = is_array($stores) && DataOverrides::upgradeLegacyStores($stores) !== null;
+        $add($storeOk ? 'pass' : 'fail', 'stores.default', $storeOk ? "Default store: {$defaultStore}"
+            : ($legacyStores ? 'stores.json is in the v1.x format (no default_store)' : 'stores.json has no valid default store'),
+            $legacyStores ? 'Run php cli/setup.php apply: it writes the upgraded copy to private_runtime_dir/stores.json (the main store becomes "default").'
+                : 'Define default_store and its store record.');
         $onExample = basename($storesPath) === DataOverrides::STORES_EXAMPLE;
         $add($onExample ? 'warn' : 'pass', 'stores.file', $onExample ? 'The shop runs on the shipped stores.example.json.' : "Stores file: {$storesPath}",
             $onExample ? 'Run php cli/setup.php apply: it copies the example into private_runtime_dir/stores.json, the file the admin edits (git tracks only the example).' : '');

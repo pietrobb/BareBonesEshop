@@ -404,6 +404,14 @@ final class Updater
                 : 'config.php points ' . implode(', ', $inside) . ' inside the application root (or uses a relative path), which this release refuses'
                     . ' (the admin, workers and cron fail); move them outside the web root (default: ../bareboneseshop-private/…)'
                     . ' and move their contents before the update');
+            if (DataOverrides::storesNeedUpgrade($this->root, $config)) {
+                $hasDataDirectory = DataOverrides::dir($config) !== null;
+                $add($hasDataDirectory ? 'warn' : 'fail', 'stores', $hasDataDirectory
+                    ? 'stores.json is in the v1.x format (no default_store); apply writes the upgraded copy to private_runtime_dir/stores.json'
+                        . ' (the main store becomes "default") and keeps the old file for a rollback'
+                    : 'stores.json is in the v1.x format (no default_store) and no private_runtime_dir is configured for the upgraded copy;'
+                        . ' this release would answer 503: set private_runtime_dir first');
+            }
         }
 
         $add(PHP_VERSION_ID >= 80100 ? 'ok' : 'fail', 'php', 'PHP ' . PHP_VERSION . ' (8.1+ required)');

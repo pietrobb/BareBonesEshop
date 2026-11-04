@@ -223,6 +223,12 @@ try {
     foreach ($result['retired'] as $retiredPath) {
         echo "Moved obsolete generated file {$retiredPath} into the snapshot (retired/)\n";
     }
+    // R15 high 7: a shop adopted from v1.x still has the old stores.json, which this release cannot run on (503).
+    if (DataOverrides::storesNeedUpgrade($root, $config)) {
+        $stores = DataOverrides::seedStores($root, $config);
+        echo $stores !== null ? "stores.json: {$stores['action']} ({$stores['path']})\n"
+            : "WARNING: stores.json is in the v1.x format and no private_runtime_dir is configured; run php cli/setup.php apply after setting it\n";
+    }
     try {
         $pruned = $updater->pruneSnapshots((int)($config['update_snapshots_keep'] ?? 3));
         if ($pruned) echo 'Deleted ' . count($pruned) . " old update snapshot(s) (update_snapshots_keep).\n";
