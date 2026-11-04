@@ -140,12 +140,13 @@ try {
 
 // Security::adminCanAssumeRole / orderStatusPermission: an owner may assume any role; anyone else never owner and
 // only a role whose every permission they hold; cancelling an order takes orders.edit even with orders.status.
-$r15mAdmin = array_intersect_key($_SESSION ?? [], ['admin_role' => 1, 'admin_identity_id' => 1]);
+$r15mAdmin = array_intersect_key($_SESSION ?? [], ['admin_role' => 1, 'admin_identity_id' => 1, 'admin_store_permissions' => 1]);
 try {
     Security::setRolesForTesting(['roles' => [
         'r15m-clerk' => ['permissions' => ['orders.status', 'orders.view']],
         'r15m-viewer' => ['permissions' => ['orders.view']],
         'r15m-wide' => ['permissions' => ['orders.view', 'products.edit']],
+        'r15m-products' => ['permissions' => ['products.*']],
     ]]);
     unset($_SESSION['admin_identity_id']);
     $_SESSION['admin_role'] = 'owner';
@@ -155,11 +156,17 @@ try {
         'R15 mutants: a clerk may not assume owner nor a role with a permission it lacks, but a role within its own');
     assert_equals(['orders.status', 'orders.edit'], [Security::orderStatusPermission('shipped'), Security::orderStatusPermission('cancelled')],
         'R15 mutants: with orders.status a workflow move needs orders.status, cancelling still orders.edit');
+    $_SESSION['admin_role'] = 'r15m-products';
+    assert_equals([true, true, false, false], array_map([Security::class, 'adminCan'], ['products.edit', 'products', 'orders.view', 'productsx.edit']),
+        'R15 mutants: a products.* wildcard grants products and products.<x>, nothing else');
+    $_SESSION['admin_identity_id'] = 881501;
+    unset($_SESSION['admin_store_permissions']);
+    assert_true(!Security::adminCan('products.edit'), 'R15 mutants: an identity session without store grants may do nothing (and raises no warning)');
 } catch (Throwable $e) {
     $r15mFail('admin roles', $e);
 } finally {
     Security::setRolesForTesting(null);
-    unset($_SESSION['admin_role'], $_SESSION['admin_identity_id']);
+    unset($_SESSION['admin_role'], $_SESSION['admin_identity_id'], $_SESSION['admin_store_permissions']);
     foreach ($r15mAdmin as $r15mKey => $r15mValue) $_SESSION[$r15mKey] = $r15mValue;
 }
 
