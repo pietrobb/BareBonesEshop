@@ -138,6 +138,31 @@ try {
     unset($_SESSION[$r15mTrapKey]);
 }
 
+// Security::adminCanAssumeRole / orderStatusPermission: an owner may assume any role; anyone else never owner and
+// only a role whose every permission they hold; cancelling an order takes orders.edit even with orders.status.
+$r15mAdmin = array_intersect_key($_SESSION ?? [], ['admin_role' => 1, 'admin_identity_id' => 1]);
+try {
+    Security::setRolesForTesting(['roles' => [
+        'r15m-clerk' => ['permissions' => ['orders.status', 'orders.view']],
+        'r15m-viewer' => ['permissions' => ['orders.view']],
+        'r15m-wide' => ['permissions' => ['orders.view', 'products.edit']],
+    ]]);
+    unset($_SESSION['admin_identity_id']);
+    $_SESSION['admin_role'] = 'owner';
+    assert_true(Security::adminCanAssumeRole('owner'), 'R15 mutants: an owner may assume the owner role');
+    $_SESSION['admin_role'] = 'r15m-clerk';
+    assert_equals([false, true, false, true], array_map([Security::class, 'adminCanAssumeRole'], ['owner', 'r15m-viewer', 'r15m-wide', 'r15m-clerk']),
+        'R15 mutants: a clerk may not assume owner nor a role with a permission it lacks, but a role within its own');
+    assert_equals(['orders.status', 'orders.edit'], [Security::orderStatusPermission('shipped'), Security::orderStatusPermission('cancelled')],
+        'R15 mutants: with orders.status a workflow move needs orders.status, cancelling still orders.edit');
+} catch (Throwable $e) {
+    $r15mFail('admin roles', $e);
+} finally {
+    Security::setRolesForTesting(null);
+    unset($_SESSION['admin_role'], $_SESSION['admin_identity_id']);
+    foreach ($r15mAdmin as $r15mKey => $r15mValue) $_SESSION[$r15mKey] = $r15mValue;
+}
+
 // Warehouse: a statement class lets a test act as a concurrent request right before a given query runs.
 final class R15MutantsStatement extends PDOStatement {
     public static ?Closure $hook = null;
@@ -355,8 +380,8 @@ try {
     Warehouse::setStock($r15mMemWh, 'R15M-EQ', 4);
     Warehouse::reserve('R15M-EQ', 2);
     assert_equals(1, Warehouse::bulkSetStock($r15mMemWh, ['R15M-EQ' => 2]), 'R15 mutants: fixture — the feed count equal to the reservations is applied');
-    assert_equals(0, (int)$r15mMemDb->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'inventory.feed_below_reserved'")->fetchColumn(),
-        'R15 mutants: a feed count equal to the reservations is not reported as an oversell');
+    assert_equals(0, (int)$r15mMemDb->query("SELECT COUNT(*) FROM operational_incidents WHERE code IN ('inventory.feed_below_reserved', 'inventory.feed_invalid_rows')")->fetchColumn(),
+        'R15 mutants: a feed count equal to the reservations is not reported as an oversell, and a clean feed reports no invalid rows');
 } catch (Throwable $e) {
     $r15mFail('feed oversell', $e);
 } finally {
@@ -380,5 +405,59 @@ try {
     assert_true(!Db::isMysql() || $r15mLocked !== [], 'R15 mutants: on MySQL setAvailable locks the stock it reads');
 } catch (Throwable $e) {
     $r15mFail('setAvailable', $e);
+}
+
+// Warehouse::reserve: 0 units is no reservation; a row with units already reserved is taken in one guarded UPDATE
+// (its free units, not qty + reserved — that would always take the lost-race path).
+try {
+    assert_equals(InvalidArgumentException::class, $r15mThrows(static fn() => Warehouse::reserve('R15M-RL', 0)), 'R15 mutants: a reservation of 0 units is refused');
+    Warehouse::setStock($r15mDefault, 'R15M-ONE', 5, 'count');
+    $r15mSteal($r15mDefault, 'R15M-ONE', 2);
+    $r15mUpdates = 0;
+    $r15mAlloc = $r15mWithHook(static function (string $sql) use (&$r15mUpdates, $r15mReserveSql): void {
+        if (str_contains($sql, $r15mReserveSql)) $r15mUpdates++;
+    }, static fn(): array => Warehouse::reserve('R15M-ONE', 4, Inventory::BACKORDER));
+    assert_equals(['updates' => 1, 'reserved' => 3, 'short' => 1], ['updates' => $r15mUpdates] + array_intersect_key($r15mSplit($r15mAlloc), ['reserved' => 1, 'short' => 1]),
+        'R15 mutants: the free units of a partly reserved row are reserved in one UPDATE');
+    Warehouse::release('R15M-ONE', $r15mAlloc);
+    $r15mSteal($r15mDefault, 'R15M-ONE', -2);
+} catch (Throwable $e) {
+    $r15mFail('reserve one update', $e);
+}
+
+// Warehouse::setAvailable takes a decrease from the default warehouse first; a stock change flips a product's
+// availability and so marks the catalog changed; stock.adjusted is recorded only for a SKU the catalog sells.
+try {
+    $r15mAux2 = Warehouse::save(['code' => 'r15m-aux2', 'name' => 'R15M aux 2', 'priority' => -40, 'is_default' => 0]);
+    Warehouse::setStock($r15mDefault, 'R15M-ORD', 5, 'count');
+    Warehouse::setStock($r15mAux2, 'R15M-ORD', 5, 'count');
+    Warehouse::setAvailable('R15M-ORD', 7);
+    $r15mQty = Db::get()->prepare("SELECT warehouse_id, qty FROM warehouse_stock WHERE sku = 'R15M-ORD' ORDER BY warehouse_id");
+    $r15mQty->execute();
+    assert_equals([$r15mDefault => 2, $r15mAux2 => 5], array_map('intval', $r15mQty->fetchAll(PDO::FETCH_KEY_PAIR)), 'R15 mutants: a decrease takes the default warehouse\'s free stock first');
+
+    $r15mEvents = static fn(): int => (int)Db::get()->query("SELECT COUNT(*) FROM event_outbox WHERE event_type = " . Db::get()->quote(DomainEvents::STOCK_ADJUSTED))->fetchColumn();
+    $r15mEventsBefore = $r15mEvents();
+    Warehouse::adjustStock($r15mDefault, 'R15M-ORD', 1);
+    assert_equals($r15mEventsBefore, $r15mEvents(), 'R15 mutants: a stock change of a SKU without a product records no stock.adjusted');
+
+    Db::get()->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status) VALUES (?, (SELECT MIN(id) FROM categories), 'R15M-CAT', 'r15m-cat', 'R15M cat', 1000, 0, 'active')")
+        ->execute([StoreContext::current()->catalogId()]);
+    $r15mMarker = (new ReflectionMethod(Cache::class, 'catalogMarker'))->invoke(null, StoreContext::current()->catalogId());
+    $r15mSynced = static function (string $sku) use ($r15mMarker): bool {
+        @unlink($r15mMarker);
+        Warehouse::syncProductStock([$sku]);
+        clearstatcache(true, $r15mMarker);
+        return is_file($r15mMarker);
+    };
+    Warehouse::setStock($r15mDefault, 'R15M-CAT', 3, 'count');
+    $r15mCatStock = static fn(): int => (int)Db::get()->query("SELECT stock FROM products WHERE sku = 'R15M-CAT'")->fetchColumn();
+    assert_equals([0, true, 3, false], [$r15mCatStock(), $r15mSynced('R15M-CAT'), $r15mCatStock(), $r15mSynced('R15M-CAT')],
+        'R15 mutants: syncing a product into stock marks the catalog changed; a sync that flips nothing does not');
+    Warehouse::adjustStock($r15mDefault, 'R15M-CAT', 1);
+    assert_equals($r15mEventsBefore + 1, $r15mEvents(), 'R15 mutants: a stock change of a catalog SKU records stock.adjusted');
+    Warehouse::delete($r15mAux2);
+} catch (Throwable $e) {
+    $r15mFail('setAvailable order / catalog', $e);
 }
 if ($r15mOwnDefault) Warehouse::delete($r15mDefault);
