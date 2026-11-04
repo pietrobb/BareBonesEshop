@@ -1,0 +1,1 @@
+Erősítse meg az elérhetőségi értesítést: {{product_name}}

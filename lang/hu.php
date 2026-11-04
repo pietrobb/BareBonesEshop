@@ -258,6 +258,11 @@ return array_replace(require __DIR__ . '/en.php', [
     'back_in_stock.limit' => 'Ez a cím már túl sok termékre vár.',
     'back_in_stock.throttled' => 'Túl sok kérés. Próbálja újra később.',
     'back_in_stock.expired' => 'Az űrlap lejárt. Kérjük, próbálja újra.',
+    'back_in_stock.confirm_sent' => 'Már csak egy lépés: e-mailben elküldtük a megerősítő linket. Nyissa meg 48 órán belül, különben töröljük a kérést.',
+    'back_in_stock.failed' => 'A megerősítő e-mailt nem sikerült elküldeni. Kérjük, próbálja újra később.',
+    'back_in_stock.confirm_invalid' => 'Ez a megerősítő link érvénytelen vagy lejárt. Kérjük, kérje újra a termék oldalán.',
+    'back_in_stock.confirm_message' => 'Erősítse meg, hogy kér egy e-mailt, amikor a(z) {product} újra elérhető.',
+    'back_in_stock.confirm_submit' => 'Megerősítés',
     'shop_now'         => 'Vásároljon most',
     'ph_from'          => 'től',
     'ph_to'            => 'ig',
@@ -1537,6 +1542,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.note'             => 'Megjegyzés',
     'admin.gdpr.invalid_customer' => 'Érvénytelen ügyfél.',
     'admin.gdpr.anonymized_ok'    => 'Ügyfél anonimizálva.',
+    'admin.gdpr.anonymized_summary' => 'Anonimizálva: {erased} rekord törölve vagy megtisztítva. {retained} rendelés megőrzi a nevet, címet és e-mailt a számviteli megőrzési idő alatt (utána megtisztul).',
+    'admin.gdpr.guest_erased' => 'Anonimizálva: {date}. Számviteli célra megőrizve: név, cím és e-mail {count} rendelésen.',
+    'admin.gdpr.guest_new_data' => ' Azóta új adatok: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Az anonimizálás sikertelen',
 
     // Customer account portal

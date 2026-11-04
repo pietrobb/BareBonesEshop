@@ -45,25 +45,53 @@ final class ConsumerNotice {
         ];
     }
 
-    /** A legal page (privacy / terms / cookies) of $locale (else English) of a store (null = current) filled with the seller's data, as HTML. */
-    public static function renderLegal(string $page, string $locale, array $legal, ?string $storeId = null): string {
+    private const UPDATED_MARKER = '/<!--\s*legal-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->\n?/';
+
+    /** The file of the text in effect: the store's own (saved in the admin), else the shipped one of $locale, else English. */
+    public static function legalTemplatePath(string $page, string $locale, ?string $storeId = null): string {
         $dir = dirname(__DIR__) . '/templates/legal/';
         $tpl = $dir . $locale . '/' . $page . '.html';
         if (!preg_match('/^[a-z]{2}$/', $locale) || !is_file($tpl)) $tpl = $dir . 'en/' . $page . '.html';
-        $tpl = DataOverrides::legalPath($page, $locale, $storeId) ?? $tpl; // the store's own text, saved in the admin
+        return DataOverrides::legalPath($page, $locale, $storeId) ?? $tpl;
+    }
+
+    /**
+     * The merchant's text as saved: its <!-- legal-updated --> marker set to today when the wording differs from the
+     * text in effect, else kept at that text's date (saving it unchanged is no change). The editor shows the shipped
+     * text with the shipped date, so without this an edited text kept announcing the old date.
+     */
+    public static function stampLegalText(string $page, string $locale, string $html, ?string $storeId = null): string {
+        // An empty text resets to the shipped one; an unknown page or language is refused by DataOverrides::saveLegal.
+        if (trim($html) === '' || !DataOverrides::validLegal($page, $locale, $storeId ?? 'default')) return $html;
+        $tpl = self::legalTemplatePath($page, $locale, $storeId);
+        $current = (string)@file_get_contents($tpl);
+        $wording = static fn(string $text): string => trim((string)preg_replace(self::UPDATED_MARKER, '', str_replace("\r\n", "\n", $text)));
+        $date = $wording($current) === $wording($html) ? self::textDate($current, $tpl) : date('Y-m-d');
+        return "<!-- legal-updated: {$date} -->\n" . ltrim((string)preg_replace(self::UPDATED_MARKER, '', str_replace("\r\n", "\n", $html)));
+    }
+
+    /** A legal page (privacy / terms / cookies) of $locale (else English) of a store (null = current) filled with the seller's data, as HTML. */
+    public static function renderLegal(string $page, string $locale, array $legal, ?string $storeId = null): string {
+        $tpl = self::legalTemplatePath($page, $locale, $storeId);
         $html = (string)file_get_contents($tpl);
         $vars = [];
         foreach (self::legalVars($legal) as $key => $value) $vars['{{' . $key . '}}'] = esc($value);
-        // The date the text last changed: the store's legal.updated_at, else the template's own
-        // <!-- legal-updated: YYYY-MM-DD --> marker, else the template file's mtime — never "today".
-        $updated = (string)($legal['updated_at'] ?? '');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $updated)) $updated = preg_match('/<!--\s*legal-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->/', $html, $m) ? $m[1] : date('Y-m-d', (int)filemtime($tpl));
+        // The date the page last changed — never "today": the later of the text's own date and the store's
+        // legal.updated_at (set when the seller details the pages print are changed in the admin).
+        $updated = self::textDate($html, $tpl);
+        $storeDate = (string)($legal['updated_at'] ?? '');
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $storeDate) && $storeDate > $updated) $updated = $storeDate;
         $vars['{{updated_at}}'] = esc(I18n::date($updated, $locale));
         // <!-- if:key -->…<!-- /if --> keeps its text (a label with the value) only when the store sets that key.
         $html = (string)preg_replace_callback('/<!--\s*if:([a-z_]+)\s*-->(.*?)<!--\s*\/if\s*-->/s',
             static fn(array $m): string => ($vars['{{' . $m[1] . '}}'] ?? '') !== '' ? $m[2] : '', $html);
         // A key the store's legal block does not set is left out, never printed as a placeholder.
         return (string)preg_replace('/\{\{[a-z_]+\}\}/', '', strtr($html, $vars));
+    }
+
+    /** The text's <!-- legal-updated: YYYY-MM-DD --> marker, else its file's mtime. */
+    private static function textDate(string $html, string $file): string {
+        return preg_match(self::UPDATED_MARKER, $html, $m) ? $m[1] : date('Y-m-d', (int)@filemtime($file));
     }
 
     /** The seller of $order: its identity from the invoicing seller, ADR and other legal keys from the store. */

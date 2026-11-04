@@ -92,9 +92,14 @@ function orderStatusView(array $order): array {
     ];
 }
 
-/** POST only: store the request and say so; the product page offers the form when the product cannot be bought. */
+/**
+ * POST only: store the request and e-mail its confirmation link; the product page offers the form when the product
+ * cannot be bought. With ?confirm= it is the page that link opens (renderStockNotifyConfirm).
+ */
 function renderStockNotify(): string {
     $t = static fn(string $key): string => I18n::t($key);
+    $token = Security::str($_POST['confirm'] ?? $_GET['confirm'] ?? '');
+    if ($token !== '') return renderStockNotifyConfirm($token);
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
         return Template::render('storefront/status-message', ['message' => $t('back_in_stock.invalid')]);
@@ -109,4 +114,25 @@ function renderStockNotify(): string {
     $result = BackInStock::subscribe(Security::int($_POST['product_id'] ?? 0), Security::str($_POST['email'] ?? ''), I18n::locale());
     if ($result === 'invalid') http_response_code(422);
     return Template::render('storefront/status-message', ['message' => $t('back_in_stock.' . $result)]);
+}
+
+/** The e-mailed confirmation link. Opening it confirms nothing (mail scanners follow links); the posted button does. */
+function renderStockNotifyConfirm(string $token): string {
+    $t = static fn(string $key): string => I18n::t($key);
+    $request = Security::rateLimit('back_in_stock_confirm', 30, 600) ? BackInStock::pendingForToken($token) : null;
+    if ($request === null) {
+        http_response_code(404);
+        return Template::render('storefront/status-message', ['message' => $t('back_in_stock.confirm_invalid')]);
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!Security::csrfValidate()) {
+            http_response_code(403);
+            return Template::render('storefront/status-message', ['message' => $t('back_in_stock.expired')]);
+        }
+        return Template::render('storefront/status-message', ['message' => $t(BackInStock::confirm($token) ? 'back_in_stock.subscribed' : 'back_in_stock.confirm_invalid')]);
+    }
+    return Template::render('storefront/stock-notify-confirm', [
+        'heading' => $t('back_in_stock.title'), 'message' => I18n::format('back_in_stock.confirm_message', ['product' => (string)$request['product_name']]),
+        'action' => Template::storeUrl('/?page=stock-notify'), 'csrf_token' => Security::csrfToken(), 'token' => $token, 'submit_label' => $t('back_in_stock.confirm_submit'),
+    ]);
 }

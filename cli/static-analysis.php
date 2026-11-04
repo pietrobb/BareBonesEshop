@@ -195,7 +195,8 @@ $architectureBudgets = [
     // R14 UX7: image list of the product editor (move up/down, remove) over the "URL | alt" textarea.
     'src/Entrypoints/Admin/ImageOrder.php' => ['lines' => 55, 'functions' => 1, 'max_function_lines' => 45, 'coupling' => 2],
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
-    'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
+    // +10 lines R15: the GDPR page shows a guest's erasure (date, retained orders) and the erasure flash says what went and what stays.
+    'src/Entrypoints/Admin/Customers.php' => ['lines' => 340, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
     'src/Entrypoints/Admin/EmailTemplates.php' => ['lines' => 135, 'functions' => 7, 'max_function_lines' => 46, 'coupling' => 3],
     // Data files: route => page modules, side menu and page permissions.
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
@@ -292,7 +293,8 @@ $architectureBudgets = [
     /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 147, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // R10 UX8: guest order status lookup, back-in-stock form, checkout/confirmation account views; the rules live in BackInStock and GuestCheckoutAccount.
     // +4 lines R11 H1: the confirmation page's offer e-mails the account link instead of taking a password.
-    'src/Entrypoints/Storefront/GuestPages.php' => ['lines' => 112, 'functions' => 6, 'max_function_lines' => 32, 'coupling' => 10],
+    // +26 lines, +1 function R15: the back-in-stock confirmation page (double opt-in); the rules live in BackInStock.
+    'src/Entrypoints/Storefront/GuestPages.php' => ['lines' => 138, 'functions' => 7, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
     // R8 withdrawal function: identify → review → confirm; the rules live in Withdrawal.
     'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 4],

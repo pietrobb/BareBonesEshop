@@ -162,6 +162,7 @@ echo "\n--- Audit round 10 (UX 8): guest order status, account after a guest ord
 if (!function_exists('renderOrderStatus')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/GuestPages.php';
 if (!function_exists('renderProduct')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/CatalogPages.php';
 (require TEST_CLI_DIR . '/../migrations/20261025120000_back_in_stock_requests.php')->up($pdo, Db::isSqlite());
+(require TEST_CLI_DIR . '/../migrations/20261104120000_back_in_stock_double_opt_in.php')->up($pdo, Db::isSqlite());
 $r10xGuestOrder = Orders::byId((int)($r10xCheckout['order_id'] ?? 0)) ?? [];
 $r10xLookup = static function (string $number, string $email, ?string $csrf = null): string {
     $_SERVER['REQUEST_METHOD'] = 'POST';
@@ -218,11 +219,18 @@ assert_true(is_array(StorefrontViewModel::product($r10xRow(9774))['product']['ba
     'R10 UX8: the product model carries the "notify me" form only when the product cannot be bought');
 assert_true(str_contains($r10xSoldOutPage, 'data-back-in-stock') && str_contains($r10xSoldOutPage, 'page=stock-notify') && str_contains($r10xSoldOutPage, esc(I18n::t('back_in_stock.submit'))),
     'R10 UX8: the sold-out product page shows the "notify me" form');
-assert_equals(['subscribed', 'subscribed', 'invalid', 'invalid', 'available'], [BackInStock::subscribe(9774, 'R10x-Wait@Example.com', 'sk'), BackInStock::subscribe(9774, 'r10x-wait@example.com', 'sk'),
-    BackInStock::subscribe(9774, 'not-an-email', 'sk'), BackInStock::subscribe(999999, 'r10x-wait@example.com', 'sk'), BackInStock::subscribe(9772, 'r10x-wait@example.com', 'sk')],
-    'R10 UX8: subscribe outcomes (repeat, bad e-mail, unknown product, product in stock)');
+// The confirmation link (R15) is absolute, so a request needs app_url (restored after the shared-catalog part below).
+$r10xCfg = new ReflectionProperty(Security::class, 'cfg');
+$r10xCfgBase = Security::config();
+$r10xCfg->setValue(null, ['app_url' => 'https://r10x.example.test'] + $r10xCfgBase);
+$r10xOutcomes = [BackInStock::subscribe(9774, 'R10x-Wait@Example.com', 'sk'), BackInStock::subscribe(9774, 'r10x-wait@example.com', 'sk'),
+    BackInStock::subscribe(9774, 'not-an-email', 'sk'), BackInStock::subscribe(999999, 'r10x-wait@example.com', 'sk'), BackInStock::subscribe(9772, 'r10x-wait@example.com', 'sk')];
+assert_equals(['confirm_sent', 'confirm_sent', 'invalid', 'invalid', 'available'], $r10xOutcomes, 'R10 UX8: subscribe outcomes (repeat, bad e-mail, unknown product, product in stock)');
 $r10xWaiting = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE product_id = 9774")->fetchColumn();
 assert_equals(1, $r10xWaiting(), 'R10 UX8: one request per product and e-mail');
+// Double opt-in (R15): the shopper opened the e-mailed link; AuditRound15ContentRegression covers the link itself.
+$r10xConfirm = static fn(string $email) => $pdo->prepare('UPDATE back_in_stock_requests SET confirmed_at = ' . Db::now() . ', token_hash = NULL WHERE email = ?')->execute([$email]);
+$r10xConfirm('r10x-wait@example.com');
 $r10xExport = GdprService::PII_REGISTRY['back_in_stock_requests'] ?? [];
 assert_equals(['delete', 'stock_notifications'], [$r10xExport['erase'] ?? null, $r10xExport['export'] ?? null], 'R10 UX8: the request e-mail is in the GDPR registry (export + erase)');
 
@@ -254,7 +262,8 @@ try {
     Warehouse::syncProductStock(['R10X-D']);
     BackInStock::flush();
     Bootstrap::initStoreContext('/', '', 'r10xb');
-    assert_equals('subscribed', BackInStock::subscribe(9774, 'r10x-shared@example.com', 'sk'), 'R10 UX8 shared catalog: a shopper of the second store asks for the sold-out product');
+    assert_equals('confirm_sent', BackInStock::subscribe(9774, 'r10x-shared@example.com', 'sk'), 'R10 UX8 shared catalog: a shopper of the second store asks for the sold-out product');
+    $r10xConfirm('r10x-shared@example.com');
     Bootstrap::initStoreContext('/', '', 'default');
     JobQueue::pull(500);
     Warehouse::setStock($r10xWarehouse, 'R10X-D', 4, 'count');
@@ -274,6 +283,7 @@ try {
     assert_equals([1, 0], [$r10xSharedMails() - $r10xSharedBefore, (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = 'r10xb'")->fetchColumn()],
         'R10 UX8 shared catalog: the second store\'s shopper gets one e-mail and the request is deleted');
 } finally {
+    $r10xCfg->setValue(null, $r10xCfgBase);
     $r10xStoresProp->setValue(null, $r10xStoresBefore);
     StoreContext::reset();
     StoreContext::activate($r10xContextBefore);

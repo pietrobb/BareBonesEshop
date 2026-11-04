@@ -258,6 +258,11 @@ return [
     'back_in_stock.limit' => 'This address is already waiting for too many products.',
     'back_in_stock.throttled' => 'Too many requests. Please try again later.',
     'back_in_stock.expired' => 'The form has expired. Please try again.',
+    'back_in_stock.confirm_sent' => 'Almost done: we have e-mailed you a confirmation link. Open it within 48 hours, otherwise we delete the request.',
+    'back_in_stock.failed' => 'We could not send the confirmation e-mail. Please try again later.',
+    'back_in_stock.confirm_invalid' => 'This confirmation link is invalid or has expired. Please ask again on the product page.',
+    'back_in_stock.confirm_message' => 'Confirm that you want one e-mail when {product} is available again.',
+    'back_in_stock.confirm_submit' => 'Confirm',
     'shop_now'         => 'Shop Now',
     'ph_from'          => 'from',
     'ph_to'            => 'to',
@@ -1537,6 +1542,9 @@ return [
     'admin.gdpr.note'             => 'Note',
     'admin.gdpr.invalid_customer' => 'Invalid customer.',
     'admin.gdpr.anonymized_ok'    => 'Customer anonymized.',
+    'admin.gdpr.anonymized_summary' => 'Anonymized: {erased} records deleted or scrubbed. {retained} orders keep the name, address and e-mail for the accounting retention period (scrubbed after it).',
+    'admin.gdpr.guest_erased' => 'Anonymized on {date}. Kept for accounting: name, address and e-mail on {count} orders.',
+    'admin.gdpr.guest_new_data' => ' New data since then: {count}.',
     'admin.gdpr.anonymized_failed'=> 'Anonymization failed',
 
     // Customer account portal

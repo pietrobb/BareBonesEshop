@@ -42,6 +42,8 @@ class EmailTemplates {
         'claim_url' => 'https://shop.example.com/?page=account-claim&token=sample', 'valid_hours' => '24',
         'totals' => [['label' => 'Medzisúčet', 'amount' => '56,00 €'], ['label' => 'Doprava', 'amount' => '3,90 €']],
         'refund_amount' => '19,90 €',
+        'product_name' => 'Tričko Basic', 'product_url' => 'https://shop.example.com/p/tricko-basic',
+        'confirm_url' => 'https://shop.example.com/?page=stock-notify&confirm=sample',
     ];
 
     /** Template names that have a default HTML file in any locale. */
@@ -473,7 +475,8 @@ class EmailTemplates {
 
     /**
      * The HTML a reader sees: without comments, <head>/<title>/<style>, and elements hidden by the hidden attribute,
-     * an inline style or a class/id a <style> rule hides (display:none, visibility:hidden, zero size or opacity…).
+     * an inline style or a class/id a <style> rule hides (display:none, visibility:hidden, zero size or opacity…),
+     * and text whose colour cannot be told from its background (EmailLegibility).
      * Visible tags are kept with their attributes, so a link's href="{{x}}" counts.
      */
     private static function visibleHtml(string $html): string {
@@ -495,13 +498,20 @@ class EmailTemplates {
         $void = array_flip(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
         $neverShown = array_flip(['head', 'title', 'style', 'script', 'template']);
         preg_match_all('~<(/?)([a-zA-Z][\w-]*)\b((?:[^>"\']|"[^"]*"|\'[^\']*\')*)>~', $html, $tags, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+        // Text in a colour too close to its background (white on white, <font color>, …) is not seen either; a nested
+        // element can make its own text readable again, so this applies to each run of text, not to the subtree.
+        $legibility = new EmailLegibility($html);
+        $root = $legibility->rootFrames();
+        $rootFrames = array_column($root, 1);
+        $rootUnreadable = $root[1][0];
         $visible = '';
         $stack = [];
         $hidden = 0;
         $pos = 0;
         foreach ($tags as $tag) {
             [$whole, $at] = $tag[0];
-            if ($hidden === 0) $visible .= substr($html, $pos, $at - $pos);
+            $unreadable = $stack ? end($stack)[3] : $rootUnreadable;
+            if ($hidden === 0 && !$unreadable) $visible .= substr($html, $pos, $at - $pos);
             $pos = $at + strlen($whole);
             $name = strtolower($tag[2][0]);
             $attrs = $tag[3][0];
@@ -522,15 +532,21 @@ class EmailTemplates {
                     foreach (preg_split('/\s+/', strtolower($ref[1] . ($ref[2] ?? ''))) ?: [] as $ref1) if (isset($hiddenNames[$ref1])) $hides = true;
                 }
             }
-            // Of the attributes only a link target is seen (a title or alt text is not the information itself).
+            $frame = $stack ? end($stack)[2] : end($rootFrames);
+            $unreadable = $stack ? end($stack)[3] : $rootUnreadable;
             if ($hidden === 0 && !$hides) {
+                [$unreadable, $frame] = $legibility->frame($name, $attrs, [...$rootFrames, ...array_column($stack, 2)]);
+            }
+            // Of the attributes only a link target is seen (a title or alt text is not the information itself), and
+            // only if the link text can be read.
+            if ($hidden === 0 && !$hides && !$unreadable) {
                 $visible .= '<' . $name . (preg_match('~\shref\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)~i', $attrs, $href) ? $href[0] : '') . '>';
             }
             if (isset($void[$name]) || str_ends_with(rtrim($attrs), '/')) continue;
-            $stack[] = [$name, (bool)$hides];
+            $stack[] = [$name, (bool)$hides, $frame, $unreadable];
             if ($hides) $hidden++;
         }
-        if ($hidden === 0) $visible .= substr($html, $pos);
+        if ($hidden === 0 && !($stack ? end($stack)[3] : $rootUnreadable)) $visible .= substr($html, $pos);
         return $visible;
     }
 
