@@ -179,6 +179,17 @@ final class PaymentLink {
         return array_values(array_unique(array_filter(array_map(static fn(array $session): string => trim((string)$session['provider_ref']), self::sessions($orderId)))));
     }
 
+    /**
+     * A "pay again" is opening a new gateway session for the order right now: its attempt is claimed (start()) and the
+     * claim is younger than CLAIM_LEASE. The expiry sweep does not cancel the order under it (R15).
+     */
+    public static function attemptInFlight(int $orderId): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM checkout_sessions WHERE provider = 'pay_restart' AND order_id = :order AND session_id = :attempt AND created_at >= :since LIMIT 1");
+        $attempts = Db::tableExists('payment_transactions') ? count(self::sessions($orderId)) : 0;
+        $stmt->execute([':order' => $orderId, ':attempt' => $orderId . ':' . $attempts, ':since' => gmdate('Y-m-d H:i:s', time() - self::CLAIM_LEASE)]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return list<array<string,mixed>> the order's gateway sessions, newest first */
     private static function sessions(int $orderId): array {
         $stmt = Db::get()->prepare("SELECT id, provider_ref, amount, currency, raw_response FROM payment_transactions

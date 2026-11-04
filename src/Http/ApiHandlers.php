@@ -1286,7 +1286,7 @@ function applyStripeDisputeCreated(array $dispute, string $paymentIntent, int $o
 
 function apiWebhookPayment(): array {
     $provider = Security::clean($_GET['provider'] ?? '');
-    if (!$provider || !preg_match('/^[a-z0-9_]+$/', $provider)) {
+    if (!$provider || !preg_match('/^[a-z0-9][a-z0-9_-]{1,39}$/D', $provider)) {
         http_response_code(400);
         return ['error' => 'Invalid provider'];
     }

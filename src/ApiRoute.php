@@ -40,7 +40,8 @@ class ApiRoute {
             return ['action' => $action, 'get' => []];
         }
         if (preg_match('#^/options/([a-z_]+)$#D', $rest, $m)) return ['action' => 'bbf_' . $m[1], 'get' => []];
-        if (preg_match('#^/webhooks/payment/([a-z0-9_]+)$#D', $rest, $m)) {
+        // R15: the provider code shape Adapters accepts (extension codes such as acme-pay), not only [a-z0-9_].
+        if (preg_match('#^/webhooks/payment/([a-z0-9][a-z0-9_-]{1,39})$#D', $rest, $m)) {
             return ['action' => 'webhook_payment', 'get' => ['provider' => $m[1]]];
         }
         // Same carrier code shape as apiWebhookShipping accepts (e.g. the default http-carrier).

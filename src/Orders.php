@@ -771,7 +771,7 @@ class Orders {
                 }
                 // One order that cannot be released (e.g. broken reservation) must not stall every later one.
                 try {
-                    if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
+                    if (self::expireClaimed($order, $cutoff($ttl), $online, $attempts)) $expired++;
                 } catch (\Throwable $e) {
                     // The poisoned order fails again on every cron run: one incident (and log line) a day, not one per run.
                     if (!IncidentMonitor::reportedForOrder('order.expiry_failed', (int)$order['id'])) {
@@ -786,8 +786,13 @@ class Orders {
         return $expired;
     }
 
-    /** Atomically cancel one still-pending order older than $cutoffSql and release its stock. */
-    private static function expireClaimed(array $order, string $cutoffSql, bool $online): bool {
+    /**
+     * Atomically cancel one still-pending order older than $cutoffSql and release its stock. $checkedAttempts are the
+     * payment attempts the provider reported unpaid: R15 a "pay again" that opened a new session since (or is opening
+     * one right now) kept its session open on a cancelled order, and the customer paid the cancelled order.
+     * @param list<string> $checkedAttempts
+     */
+    private static function expireClaimed(array $order, string $cutoffSql, bool $online, array $checkedAttempts = []): bool {
         $db = Db::get();
         $orderId = (int)$order['id'];
         $note = $online ? 'Expired unpaid online checkout' : 'Expired unpaid offline order';
@@ -796,9 +801,10 @@ class Orders {
             $claim = $db->prepare("UPDATE orders
                 SET status = 'cancelled', payment_status = 'cancelled', updated_at = " . Db::now() . "
                 WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status IN ('pending', 'failed')
-                  AND created_at <= {$cutoffSql}");
-            $claim->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
-            if ($claim->rowCount() !== 1) {
+                  AND created_at <= {$cutoffSql} AND COALESCE(payment_id, '') = :payment_id");
+            $claim->execute([':id' => $orderId, ':store' => StoreContext::current()->id(), ':payment_id' => trim((string)($order['payment_id'] ?? ''))]);
+            if ($claim->rowCount() !== 1 || ($online && (PaymentLink::attemptInFlight($orderId)
+                    || array_diff(PaymentLink::sessionRefs($orderId), $checkedAttempts) !== []))) {
                 $db->rollBack();
                 return false;
             }
