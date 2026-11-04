@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Extensions and developer documentation** (review round 15). A broken extension class (for example a provider
+  missing an interface method) ended every request with a fatal error, although the documentation promises that a
+  broken extension is skipped. Such an extension is now quarantined after the request that hit the error and skipped
+  until one of its PHP files changes (`extension.quarantined`, shown by the doctor). `docs/EXTENSIONS.md` documents
+  the payment, shipping and tracking adapter contracts (when `getRates()` is called, which events and statuses the
+  core acts on); a carrier with its own notification format implements `TrackingWebhookAdapter` instead of being
+  bypassed. New `docs/THEMES.md` (theme authoring) and `CONTRIBUTING.md`. The README test steps work on a fresh
+  clone (`--recurse-submodules`, `config.php`), and `cli/test.php` names what is missing instead of aborting
+  midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11.
 - **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
   many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
   0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.
