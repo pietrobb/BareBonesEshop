@@ -189,3 +189,60 @@ try {
 } finally {
     $r15oRemove($r15uBase);
 }
+// Medium: the order_item_digital backfill ran one UPDATE over the whole table (156 s at 4 million lines, deadlocks with
+// checkout writes), and cli/migrate.php applied it against the live shop.
+try {
+    $r15mStatementRows = [];
+    $r15mDb = new class('sqlite::memory:') extends PDO {
+        public array $rows = [];
+        public function exec(string $statement): int|false {
+            $n = parent::exec($statement);
+            if (stripos(ltrim($statement), 'UPDATE') === 0) $this->rows[] = (int)$n;
+            return $n;
+        }
+    };
+    $r15mDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $r15mDb->setAttribute(PDO::ATTR_STATEMENT_CLASS, [R15MigrationStatement::class, [$r15mDb]]);
+    $r15mDb->exec('CREATE TABLE products (id INTEGER PRIMARY KEY, product_type TEXT)');
+    $r15mDb->exec('CREATE TABLE variants (id INTEGER PRIMARY KEY, digital INTEGER)');
+    $r15mDb->exec('CREATE TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER, variant_id INTEGER, attrs TEXT)');
+    $r15mDb->exec("INSERT INTO products (id, product_type) VALUES (1, 'physical'), (2, 'digital')");
+    $r15mDb->exec('INSERT INTO variants (id, digital) VALUES (10, 0), (11, 1)');
+    $r15mInsert = $r15mDb->prepare('INSERT INTO order_items (id, product_id, variant_id, attrs) VALUES (?, ?, ?, ?)');
+    $r15mDb->beginTransaction();
+    for ($i = 1; $i <= 12000; $i++) $r15mInsert->execute([$i, 1, 10, '{}']);
+    // One line of each kind in the last, partial range; ids with a gap before it.
+    $r15mInsert->execute([17001, 2, null, '{}']);
+    $r15mInsert->execute([17002, 1, 11, '{}']);
+    $r15mInsert->execute([17003, 1, 11, json_encode(['_inventory_allocations' => [['warehouse_id' => 1, 'quantity' => 1]]])]);
+    $r15mDb->commit();
+    $r15mDb->rows = [];
+    $r15mMigration = require dirname(__DIR__, 3) . '/migrations/20261103090000_order_item_digital.php';
+    $r15mMigration->up($r15mDb, true);
+    assert_true($r15mDb->rows !== [] && max($r15mDb->rows) <= 5000,
+        'R15 medium: the order_item_digital backfill changes at most one batch of lines per statement (largest: ' . max($r15mDb->rows ?: [0]) . ')');
+    $r15mDigital = $r15mDb->query('SELECT id, digital FROM order_items WHERE id >= 11999 ORDER BY id')->fetchAll(PDO::FETCH_KEY_PAIR);
+    assert_equals([11999 => 0, 12000 => 0, 17001 => 1, 17002 => 1, 17003 => 0], array_map('intval', $r15mDigital),
+        'R15 medium: the batched backfill gives every line the same digital flag as before, across id gaps and the last partial batch');
+    assert_equals(0, (int)$r15mDb->query('SELECT COUNT(*) FROM order_items WHERE digital IS NULL')->fetchColumn(),
+        'R15 medium: no line is left without its digital flag');
+    $r15mDb->exec('UPDATE order_items SET digital = NULL WHERE id = 17002');
+    $r15mMigration->up($r15mDb, true);
+    assert_equals(1, (int)$r15mDb->query('SELECT digital FROM order_items WHERE id = 17002')->fetchColumn(),
+        'R15 medium: re-running the backfill (after an interrupted run) completes the lines still unset');
+} catch (Throwable $e) {
+    $r15oFail('batched order_item_digital backfill', $e);
+}
+$r15mCli = (string)file_get_contents(dirname(__DIR__, 2) . '/migrate.php');
+assert_true(preg_match('/MaintenanceMode::enter\(\$root.*finally \{\s*if \(\$ownMaintenance\) MaintenanceMode::leave\(\$root\);/s', $r15mCli) === 1,
+    'R15 medium: cli/migrate.php apply puts the shop into maintenance while migrations run and always leaves it afterwards');
+
+/** Records how many rows each executed UPDATE changed. */
+class R15MigrationStatement extends PDOStatement {
+    protected function __construct(private PDO $owner) {}
+    public function execute(?array $params = null): bool {
+        $ok = parent::execute($params);
+        if (stripos(ltrim($this->queryString), 'UPDATE') === 0 && property_exists($this->owner, 'rows')) $this->owner->rows[] = $this->rowCount();
+        return $ok;
+    }
+}

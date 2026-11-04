@@ -86,15 +86,29 @@ try {
         case 'apply':
             echo "Applying pending migrations...\n";
             // Core first, then each enabled extension's migrations; at most one pre-migration backup.
+            // R15: with pending migrations the shop is in maintenance (web 503, the worker waits) as during an update:
+            // a long migration otherwise ran against live checkout writes (deadlocks, half-migrated reads). The
+            // updater's own window (marker already there) is left to the updater.
+            $root = dirname(__DIR__);
+            $ownMaintenance = false;
             $backupTaken = false;
-            $backupOnce = $preApplyHook === null ? null : static function (array $names, callable $log) use (&$backupTaken, $preApplyHook): void {
-                if ($backupTaken) return;
+            $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, $preApplyHook, $root): void {
+                if (!$ownMaintenance && !MaintenanceMode::active($root)) {
+                    MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
+                    $ownMaintenance = true;
+                    $log('  [maintenance] the shop answers 503 until the migrations finish');
+                }
+                if ($backupTaken || $preApplyHook === null) return;
                 $preApplyHook($names, $log);
                 $backupTaken = true;
             };
-            $applied = $migrator->apply($logger, $backupOnce);
-            foreach (Extensions::migrators() as $code => $extensionMigrator) {
-                $applied = array_merge($applied, $extensionMigrator->apply($logger, $backupOnce));
+            try {
+                $applied = $migrator->apply($logger, $beforeFirst);
+                foreach (Extensions::migrators() as $code => $extensionMigrator) {
+                    $applied = array_merge($applied, $extensionMigrator->apply($logger, $beforeFirst));
+                }
+            } finally {
+                if ($ownMaintenance) MaintenanceMode::leave($root);
             }
             $n = count($applied);
             echo $n === 0 ? "Nothing to apply.\n" : "Applied {$n} migration(s).\n";

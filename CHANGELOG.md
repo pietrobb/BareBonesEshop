@@ -11,7 +11,9 @@
   prints for release notes. The release checklist signs (`git tag -s`) and verifies tags, and the bootstrap runbook
   verifies the tag before exporting it. An update rollback now also counts the invoices, credit notes and refunds it
   discards, and raises the restored invoice/credit note counters back past the numbers already issued, so no number
-  is issued twice.
+  is issued twice. The `order_item_digital` backfill runs in id ranges of 5,000 lines instead of one UPDATE of the
+  whole table (156 s and deadlocks at 4 million lines), and `php cli/migrate.php apply` puts the shop into
+  maintenance (503) while migrations run, as `update.php` does.
 - **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
   many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
   0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.
