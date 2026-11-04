@@ -81,7 +81,8 @@ try {
 
     // The key is checked again under the order lock, so two calls for one manual refund issue one credit note.
     $r14cSourceCode = (string)file_get_contents(dirname(__DIR__, 3) . '/src/InvoiceService.php');
-    $r14cBody = substr($r14cSourceCode, (int)strpos($r14cSourceCode, 'public static function creditRefund('), 4000);
+    // creditRefund() and the cancellation credit note (R15) share rateCredit().
+    $r14cBody = substr($r14cSourceCode, (int)strpos($r14cSourceCode, 'private static function rateCredit('), 4000);
     $r14cLock = strpos($r14cBody, 'Orders::lockWithin(');
     assert_true($r14cLock !== false && strpos($r14cBody, 'refundCreditByKey(', $r14cLock) !== false && strpos($r14cBody, 'self::uncredited(', $r14cLock) !== false,
         'R14 #2: the refund credit note checks its key and the uncredited balance under the order lock');

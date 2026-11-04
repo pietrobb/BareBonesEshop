@@ -60,6 +60,7 @@ $handlers = [
     'payment_refund'    => [WorkerJobs::class, 'handlePaymentRefund'],
     'payment_cancel'    => [WorkerJobs::class, 'handlePaymentCancel'],
     'refund_credit_note' => static fn(array $payload): ?array => InvoiceService::creditBookedRefund((int)($payload['order_id'] ?? 0), (string)($payload['refund_key'] ?? ''), (int)($payload['deferrals'] ?? 0)),
+    'closure_credit_note' => static fn(array $payload): ?array => InvoiceService::creditClosure((int)($payload['order_id'] ?? 0)),
     'erp_order_push'    => [WorkerJobs::class, 'handleErpOrderPush'],
     'erp_order_update'  => [WorkerJobs::class, 'handleErpOrderUpdate'],
     'cart_abandonment'  => [WorkerJobs::class, 'handleCartAbandonment'],
