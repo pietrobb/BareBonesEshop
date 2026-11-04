@@ -10,6 +10,11 @@
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently. When the counters still cannot
   be raised, the rollback notice no longer also claims the discarded invoice numbers are not issued again.
+  tracked as an unknown number of discarded rows instead of skipping them silently.
+- **Labels for shipping.json orders** (review round 16, high). An order shipped by a `shipping.json` method
+  ("Standard Delivery", "Express Delivery") showed "standard: carrier API not connected" and no label form, although
+  Packeta and GLS were connected: the method's code was taken as its carrier. Such a method names a delivery speed,
+  not a carrier, so its orders are offered every connected label carrier except in-store pickup.
 - **Low findings** (review round 15). An admin amount typed as `1,299` was read as 1,30 EUR (the comma taken as the
   decimal separator, the rest rounded away); an amount with more decimals than the currency has is now refused with
   a message instead of being rounded. A checkout form that failed validation or was reloaded kept nothing: the
