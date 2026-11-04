@@ -46,6 +46,24 @@ final class UpgradeChecks
         return $conf === false ? null : self::nginxConfHasPhpFallback($conf);
     }
 
+    /**
+     * The sender MailService uses (MAIL_FROM) and how it fares: 'ok'; 'warn' when unset (the fallback
+     * MailService::DEFAULT_FROM, which receiving servers reject or file as spam) or on a reserved domain no
+     * mailbox can exist on; 'fail' when it is not an address at all (MailService skips every e-mail).
+     * @return array{0: 'ok'|'warn'|'fail', 1: string}
+     */
+    public static function mailSender(): array
+    {
+        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: '')));
+        if ($from === '') return ['warn', 'MAIL_FROM is not set: e-mails go out from ' . MailService::DEFAULT_FROM . ', which receiving servers reject or file as spam.'];
+        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) return ['fail', "MAIL_FROM ({$from}) is not a valid e-mail address: no e-mail is sent."];
+        $domain = substr($from, strrpos($from, '@') + 1);
+        if (preg_match('/(^|\.)(invalid|localhost|local|test|example|example\.(com|net|org))$/', $domain)) {
+            return ['warn', "MAIL_FROM ({$from}) uses a reserved domain (still the example value?): receiving servers reject it."];
+        }
+        return ['ok', "E-mails are sent from {$from}."];
+    }
+
     /** @return bool|null null when the config has no `location ~ \.php$` block */
     public static function nginxConfHasPhpFallback(string $conf): ?bool
     {

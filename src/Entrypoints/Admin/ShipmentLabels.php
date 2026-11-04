@@ -48,7 +48,7 @@ function renderShipmentCod(array $order, int $shipmentId): void {
  */
 function renderShipmentLabelForm(array $order, array $shipment, array $labels, array $carriers, string $action): void {
     foreach ($labels as $label): ?>
-    <p class="muted" data-shipment-label="<?= esc((string)$label['awb']) ?>"><?= esc(I18n::t('admin.shipment.label')) ?>: <?= esc((string)$label['carrier'] . ' ' . (string)$label['awb']) ?> —
+    <p class="muted" data-shipment-label="<?= esc((string)$label['awb']) ?>"><?= esc(I18n::t('admin.shipment.label')) ?>: <?= esc(MethodLabels::carrier((string)$label['carrier']) . ' ' . (string)$label['awb']) ?> —
         <?= (int)($label['cod_amount'] ?? 0) > 0
             ? esc(I18n::format('admin.shipment.label_cod', ['amount' => I18n::price((int)$label['cod_amount'], (string)$order['currency'])]))
             : esc(I18n::t('admin.shipment.label_prepaid')) ?></p>
@@ -58,14 +58,14 @@ function renderShipmentLabelForm(array $order, array $shipment, array $labels, a
     $ready = array_keys(array_filter($carriers, static fn(?string $reason): bool => $reason === null));
     ?>
     <?php foreach (array_diff_key($carriers, array_flip($ready)) as $carrier => $reason): ?>
-    <p class="muted" data-label-unavailable="<?= esc((string)$carrier) ?>"><?= esc(I18n::format('admin.shipment.label_not_connected', ['carrier' => (string)$carrier])) ?></p>
+    <p class="muted" data-label-unavailable="<?= esc((string)$carrier) ?>"><?= esc(I18n::format('admin.shipment.label_not_connected', ['carrier' => MethodLabels::carrier((string)$carrier)])) ?></p>
     <?php endforeach; ?>
     <?php if ($ready): $cod = ShippingService::parcelCodAmount($order, (int)$shipment['id']) ?? 0; ?>
     <form method="post" action="<?= $action ?>" style="margin-top:.25rem" data-shipment-label-form>
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
         <input type="hidden" name="shipment_id" value="<?= (int)$shipment['id'] ?>">
         <select name="label_carrier" aria-label="<?= esc(I18n::t('admin.shipment.carrier')) ?>">
-            <?php foreach ($ready as $carrier): ?><option value="<?= esc((string)$carrier) ?>"><?= esc((string)$carrier) ?></option><?php endforeach; ?>
+            <?php foreach ($ready as $carrier): ?><option value="<?= esc((string)$carrier) ?>"><?= esc(MethodLabels::carrier((string)$carrier)) ?></option><?php endforeach; ?>
         </select>
         <span class="muted"><?= $cod > 0 ? esc(I18n::format('admin.shipment.label_cod', ['amount' => I18n::price($cod, (string)$order['currency'])])) : esc(I18n::t('admin.shipment.label_prepaid')) ?></span>
         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.label_create')) ?></button>

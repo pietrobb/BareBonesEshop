@@ -396,6 +396,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'methods.payment.bank_transfer_desc' => 'Transferencia a nuestra cuenta después de realizar el pedido.',
     'methods.payment.cod' => 'Contra reembolso',
     'methods.payment.cod_desc' => 'Pago a la entrega si el transportista elegido lo admite.',
+    'methods.payment.invoice' => 'Compra con factura',
+    'methods.payment.invoice_desc' => 'Para cuentas de empresa aprobadas: pago de la factura en el plazo acordado.',
     'powered_by' => 'Funciona con BareBones E-shop', 'added_to_cart' => 'Añadido ✓',
     'select_variant' => 'Seleccione una variante.', 'cart_error' => 'No se pudo añadir el artículo.', 'variant_required' => 'Seleccione una variante.',
     'variant_invalid' => 'La variante seleccionada no es válida.', 'product_invalid' => 'El producto no está disponible.', 'product_unavailable' => 'Esta selección no está disponible.',

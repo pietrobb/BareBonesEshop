@@ -17,12 +17,18 @@ final class StorefrontViewModel
             $variants[$index]['selected'] = false;
             if (!$availability['purchasable'] && $variant['availability']['purchasable']) $availability = $variant['availability'];
         }
-        foreach ($variants as $index => $variant) {
-            if ($variant['availability']['purchasable']) {
-                $variants[$index]['selected'] = true;
-                $availability = $variant['availability'];
-                break;
-            }
+        // ?variant=<id> (the merchant feeds link each variant so) opens the page on that variant, at its price.
+        $requested = is_string($_GET['variant'] ?? null) && ctype_digit($_GET['variant']) ? (int)$_GET['variant'] : 0;
+        $price = self::price($source);
+        $purchasable = array_keys(array_filter($variants, static fn(array $v): bool => $v['availability']['purchasable']));
+        $chosen = array_values(array_filter($purchasable, static fn(int $i): bool => $variants[$i]['id'] === $requested))[0] ?? null;
+        if ($chosen !== null) {
+            $price = self::price(['price' => $variants[$chosen]['price_amount_minor'], 'currency' => strtolower($variants[$chosen]['currency'])]);
+        }
+        $chosen ??= $purchasable[0] ?? null;
+        if ($chosen !== null) {
+            $variants[$chosen]['selected'] = true;
+            $availability = $variants[$chosen]['availability'];
         }
         $images = self::images($source);
         $url = self::productUrl((string)$source['slug']);
@@ -67,7 +73,7 @@ final class StorefrontViewModel
             'description_html' => Security::sanitizeRichHtml((string)($source['description'] ?? '')),
             'url' => $url,
             'currency' => $currency,
-            'price' => self::price($source),
+            'price' => $price,
             'availability' => $availability,
             'images' => $images,
             'categories' => $categories,
@@ -357,7 +363,8 @@ final class StorefrontViewModel
         ];
     }
 
-    private static function variant(array $product, array $variant): array
+    /** A variant of an enriched product as the product page offers it: its own price and availability (also the feed's). */
+    public static function variant(array $product, array $variant): array
     {
         $variantProduct = $product;
         $variantProduct['stock'] = (int)($variant['stock'] ?? 0);
@@ -388,6 +395,7 @@ final class StorefrontViewModel
             'price_delta_minor' => $delta,
             'price_amount_minor' => max(0, $amount),
             'price_formatted' => I18n::price(max(0, $amount), $currency),
+            'currency' => strtoupper($currency),
             'digital' => $digital,
             'availability' => self::availability($variantProduct, (int)$variant['id']),
         ];
