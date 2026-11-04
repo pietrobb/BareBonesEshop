@@ -56,8 +56,34 @@ Template syntax (`src/Template.php`):
 | `{{#each items}}…{{else}}…{{/each}}` | loop; `this`, `@index`, `@key`, `@first`, `@last`, `../` for the outer context |
 | `{{#block name}}default{{/block}}` | slot that a layout fills |
 
-There is no PHP in a theme. Translated texts and URLs are already in the view model, so a block
-works in every store language; never write store URLs by hand (stores may live under `/cs/`).
+There is no PHP in a theme. URLs and the core's translated texts are already in the view model, so a
+block works in every store language; never write store URLs by hand (stores may live under `/cs/`).
+
+## Texts and languages
+
+Every block gets the UI texts as `t`: `{{t.cart}}`, `{{t.add_to_cart}}`, `{{t.search}}` are the core's texts
+from `lang/<locale>.php` in the language of the page. Use those where they fit. Do not add keys to `lang/`:
+those files belong to the core, and an update replaces them.
+
+Texts of your own go in the theme, one JSON file per language:
+
+```
+themes/acme/lang/en.json   {"acme.tagline": "Hand-made since 1990", "acme.newsletter": "Get our news"}
+themes/acme/lang/sk.json   {"acme.tagline": "Ručná výroba od roku 1990", "acme.newsletter": "Odoberajte novinky"}
+```
+
+A block reads them like core texts: `{{t.acme.tagline}}`. Rules:
+
+- Keys must start with the theme's folder name and a dot (`acme.`); other keys are ignored, so a theme
+  cannot change the core's texts (checkout, the order button, legal wording).
+- A language without its own file uses `en.json`; a key missing there shows as the key itself.
+- A child theme also gets its parents' texts (`bookshop.` keys in a child of `bookshop`).
+- A file that is not valid JSON stops the storefront with an error, and `php cli/theme-check.php`
+  reports it, so run the check after editing.
+
+The shipped `bookshop` theme predates theme texts and keeps its `bookshop.` keys in the core's `lang/` files.
+Texts the merchant edits (homepage headings, banners) belong in the section `content` in `layouts.json` or in
+the admin, not in either file.
 
 ## Layouts and homepage sections
 
@@ -69,6 +95,11 @@ providers `core.latest-products`, `core.category-products`, `core.tagged-product
 `core.curated-products`, `core.featured-categories`, `core.specification-values` and `core.banner`.
 See `themes/bookshop/layouts.json`.
 
+A section `type` must be a key of `sections` in `theme.json` (yours or a parent's). A type that is not
+registered there renders nothing on the page, only `<!-- unregistered section: <type> -->` in the HTML
+source, and `php cli/theme-check.php` lists it as a `[WARN]`. A typo in `layouts.json` or a new block
+without its `sections` entry is the usual cause.
+
 ## Checks
 
 ```bash
@@ -76,6 +107,12 @@ php cli/theme-check.php --theme=acme   # renders checkout with the theme on a fi
 php cli/quality-gates.php              # byte budgets, WCAG 2.2 AA invariants, asset paths
 php cli/test.php                       # the full suite, theme contract tests included
 ```
+
+Without `--theme` or `--store` the check covers every theme in `themes/` and every store in the
+`stores.json` the shop runs on: after `php cli/setup.php install` that is the copy in the data directory
+(`private_runtime_dir`), not `stores.example.json`. The output names the file it used (`Stores: …`);
+`--stores-file=<path>` checks another one. `[FAIL]` lines make the check fail (exit 1); `[WARN]` lines
+(unregistered sections) do not.
 
 The checkout form is a contract: field names, the CSRF token and the consent checkboxes must stay
 as in the default theme's `storefront/checkout` block, or the theme check fails. `cli/update.php`

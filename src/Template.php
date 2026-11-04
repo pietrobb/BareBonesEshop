@@ -10,6 +10,7 @@ class Template {
     private static array $cache = [];
     private static array $manifestCache = [];
     private static array $layoutsCache = [];
+    private static array $textsCache = [];
     private static ?string $store = null;
     private static ?string $theme = null;
 
@@ -495,7 +496,7 @@ class Template {
     private static function renderSection(array $section, array $data): string {
         $alias = (string)($section['block'] ?? $section['type'] ?? '');
         $block = self::sectionBlocks()[$alias] ?? '';
-        if ($block === '') return '';
+        if ($block === '') return '<!-- unregistered section: ' . esc($alias) . ' -->';
         // shop_name: what a hero without its own heading shows (the store's name, not a sample shop's slogan).
         $sectionData = array_replace(['shop_name' => (string)self::branding()['name']], $data, $section, ['section' => $section]);
         return self::render($block, $sectionData);
@@ -521,6 +522,44 @@ class Template {
             $blocks = array_replace($blocks, (array)(self::manifest($theme)['sections'] ?? []));
         }
         return $blocks;
+    }
+
+    /**
+     * Section types the merged layouts.json pages use but no theme.json in the chain maps to a block ("home: author-list").
+     * Such a section renders as an HTML comment only; theme-check lists them as warnings.
+     */
+    public static function unregisteredSections(): array {
+        $blocks = self::sectionBlocks();
+        $missing = [];
+        foreach ((array)(self::loadLayouts()['pages'] ?? []) as $page => $definition) {
+            foreach ((array)($definition['sections'] ?? []) as $section) {
+                $alias = (string)($section['block'] ?? $section['type'] ?? '');
+                if (!isset($blocks[$alias])) $missing[] = $page . ': ' . ($alias === '' ? '(no type)' : $alias);
+            }
+        }
+        return array_values(array_unique($missing));
+    }
+
+    /**
+     * Texts a theme ships in lang/<locale>.json (else lang/en.json), parent themes first. Only keys under the theme's
+     * own name count ("acme.tagline" in theme acme), so a theme adds texts but never changes the core's (checkout, legal).
+     */
+    public static function themeTexts(string $locale): array {
+        if (self::$theme === null) return []; // CLI, worker, admin: no storefront theme active
+        $key = self::$theme . ':' . $locale;
+        if (isset(self::$textsCache[$key])) return self::$textsCache[$key];
+        $texts = [];
+        foreach (array_reverse(self::themeChain()) as $theme) {
+            $dir = self::$themesDir . '/' . $theme . '/lang/';
+            $file = preg_match('/^[a-z]{2}$/D', $locale) && is_file($dir . $locale . '.json') ? $dir . $locale . '.json' : $dir . 'en.json';
+            if (!is_file($file)) continue;
+            $values = json_decode((string)file_get_contents($file), true, 4, JSON_THROW_ON_ERROR);
+            if (!is_array($values)) throw new RuntimeException("Invalid theme texts: {$theme}/lang/" . basename($file));
+            foreach ($values as $name => $text) {
+                if (is_string($text) && str_starts_with((string)$name, $theme . '.')) $texts[(string)$name] = $text;
+            }
+        }
+        return self::$textsCache[$key] = $texts;
     }
 
     private static function readLayoutFile(string $file): array {
@@ -560,5 +599,6 @@ class Template {
     public static function clearCache(): void {
         self::$cache = [];
         self::$layoutsCache = [];
+        self::$textsCache = [];
     }
 }

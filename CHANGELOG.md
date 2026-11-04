@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Theme texts, unregistered sections, theme-check on an installed shop** (review round 16, medium). A theme had
+  nowhere to keep its own texts but the core's `lang/` files, which an update replaces: it now ships
+  `themes/<name>/lang/<locale>.json` with keys under its own name (`{{t.acme.tagline}}`), falling back to `en.json`;
+  it cannot change the core's texts. A homepage section whose type no `theme.json` registers rendered nothing without
+  a trace; it leaves `<!-- unregistered section: <type> -->` in the page source and `php cli/theme-check.php` lists
+  it as a warning. After `setup.php install`, theme-check checked the stores of `stores.example.json` instead of the
+  installed `stores.json` in the data directory; it reads the installed one and names the file it used.
+  `docs/THEMES.md`, `docs/EXTENSIONS.md` and `CONTRIBUTING.md` describe texts, section registration and the check.
 - **Rollback numbering on MySQL/MariaDB** (review round 16, high). After an update rollback on MySQL or MariaDB the
   invoice and credit note counters were not raised past the numbers issued during the update, so those numbers were
   issued a second time: the counter update bound one named placeholder twice, which native prepares reject (HY093;
