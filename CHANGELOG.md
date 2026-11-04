@@ -8,6 +8,13 @@
   queue ran the job again, and SQLite stayed write-locked for the whole pass (up to 300 s). The pass now rolls that
   transaction back first (`web_worker.request_transaction_rolled_back`), or skips and leaves the slot free when it
   cannot. `cli/worker.php --once` now handles every ready job (within its 55 s budget), not only the first five.
+- **Credit notes per VAT rate and on cancellation** (review round 15, high 3 and 4). After a refund credit note (a
+  share of every VAT rate) the item credit note of a returned product credited its full price at its rate again:
+  negative VAT at that rate. Item credit notes are now capped, per VAT rate, at what the invoice still has uncredited
+  there. The issued invoice of an unpaid order closed without its money (a purchase on invoice cancelled, a refused
+  cash-on-delivery parcel returned) stayed issued and due and in the VAT and OSS reports; such an order now gets a
+  cancellation credit note (job `closure_credit_note`): the whole invoice when nothing was delivered, after a partial
+  shipment the goods that never shipped.
 
 - **Manual orders and unverified accounts** (review round 15, high 2). An order entered in the admin joined any
   active account with the buyer's e-mail, verified or not: signing up with someone else's address showed their

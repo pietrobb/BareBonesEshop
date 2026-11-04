@@ -316,6 +316,57 @@ final class InvoiceService
         return ['rates' => $rates, 'gross' => max(0, min($left, array_sum(array_column($rates, 'gross'))))];
     }
 
+    /**
+     * R15 high 3: item credit lines capped, per VAT breakdown key, at what $source still has uncredited at that key
+     * (uncredited()['rates']). A refund credit note took a share of every rate, so the full price of a returned item
+     * could credit more at its rate than the invoice has left there: negative VAT at that rate. The lines of a capped
+     * key are scaled down together (gross in proportion, the last line takes the remainder; net in proportion, capped
+     * at the uncredited base). Keys the invoice never had are left as they are.
+     * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
+     */
+    private static function capToUncredited(array $lines, array $rates, array $source): array {
+        $sourceKeys = array_map('strval', array_keys(json_decode((string)$source['vat_breakdown'], true) ?: []));
+        $byKey = [];
+        foreach ($lines as $index => $line) {
+            $byKey[VatService::breakdownKey((int)$line['rate_basis_points'], (string)($line['country'] ?? ''), (string)($line['supply'] ?? ''))][] = $index;
+        }
+        foreach ($byKey as $key => $indexes) {
+            $key = (string)$key;
+            if (!isset($rates[$key]) && !in_array($key, $sourceKeys, true)) continue;
+            $allowedGross = (int)($rates[$key]['gross'] ?? 0);
+            $allowedNet = (int)($rates[$key]['net'] ?? 0);
+            $gross = array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['gross'], $indexes));
+            if ($gross > $allowedGross) {
+                $left = $allowedGross;
+                foreach ($indexes as $position => $i) {
+                    $lineGross = (int)$lines[$i]['gross'];
+                    $capped = $position === count($indexes) - 1 ? $left : intdiv($lineGross * $allowedGross, max(1, $gross));
+                    $left -= $capped;
+                    $lines[$i]['net'] = $lineGross > 0 ? (int)round((int)$lines[$i]['net'] * $capped / $lineGross) : 0;
+                    $lines[$i]['gross'] = $capped;
+                }
+            }
+            $net = array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['net'], $indexes));
+            for ($p = count($indexes) - 1; $net > $allowedNet && $p >= 0; $p--) {
+                $cut = min($net - $allowedNet, (int)$lines[$indexes[$p]]['net']);
+                $lines[$indexes[$p]]['net'] -= $cut;
+                $net -= $cut;
+            }
+            foreach ($indexes as $i) $lines[$i]['vat'] = (int)$lines[$i]['gross'] - (int)$lines[$i]['net'];
+        }
+        $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
+        $breakdown = [];
+        foreach ($lines as $line) {
+            foreach (['gross', 'net', 'vat'] as $part) $totals[$part] += (int)$line[$part];
+            $supply = self::supplyOf($line);
+            $key = VatService::breakdownKey((int)$line['rate_basis_points'], $supply['country'] ?? '', $supply['supply'] ?? '');
+            $breakdown[$key] ??= ['net' => 0, 'vat' => 0] + $supply;
+            $breakdown[$key]['net'] -= (int)$line['net'];
+            $breakdown[$key]['vat'] -= (int)$line['vat'];
+        }
+        return [$lines, $totals, $breakdown];
+    }
+
     /** The refund credit note issued under $refundKey, if any. */
     private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {
         $stmt = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' AND credit_snapshot LIKE :key");
@@ -418,8 +469,6 @@ final class InvoiceService
         foreach ($orderItems as $position => $orderItem) $componentByItem[(int)$orderItem['id']] = $components[$position];
 
         $lines = [];
-        $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
-        $breakdown = [];
         foreach ($quantities as $rmaItemId => $quantity) {
             $rmaItemId = (int)$rmaItemId;
             $quantity = (int)$quantity;
@@ -457,22 +506,11 @@ final class InvoiceService
                 'gross' => $gross, 'net' => $net, 'vat' => $vat, 'rate_basis_points' => $rate,
             ] + $supply;
             $lines[] = $line;
-            foreach (['gross', 'net', 'vat'] as $key) $totals[$key] += $line[$key];
-            $rateKey = VatService::breakdownKey($rate, $supply['country'] ?? '', $supply['supply'] ?? '');
-            if (!isset($breakdown[$rateKey])) $breakdown[$rateKey] = ['net' => 0, 'vat' => 0] + $supply;
-            $breakdown[$rateKey]['net'] -= $net;
-            $breakdown[$rateKey]['vat'] -= $vat;
         }
+        [$lines, $totals, $breakdown] = self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
-        $creditData = [
-            'version' => 1, 'source_invoice_id' => $sourceInvoiceId,
-            'source_fingerprint' => (string)($snapshot['fingerprint'] ?? ''),
-            'rounding' => 'source_component_prefix_allocation', 'currency' => (string)$source['currency'],
-            'lines' => $lines, 'totals' => $totals,
-        ];
-        $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
         // The credit note continues the source invoice's seller (its series and snapshot), not the order's current store.
         [$sellerCode, $store] = self::creditSeller($source, $order);
         $issuedAt = ShopTime::dateIn('Y-m-d', StoreContext::timezoneFor($store));
@@ -490,7 +528,17 @@ final class InvoiceService
             // check above ran outside it, so a refund committed since could leave this credit note plus it over the paid sum.
             Orders::lockWithin((int)$order['id']);
             $lockedOrder = Orders::byId((int)$order['id']) ?: $order;
+            // R15 high 3: under the lock again, each VAT rate capped at what the invoice still has uncredited at that rate.
+            [$lines, $totals, $breakdown] = self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source);
+            if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
+            $creditData = [
+                'version' => 1, 'source_invoice_id' => $sourceInvoiceId,
+                'source_fingerprint' => (string)($snapshot['fingerprint'] ?? ''),
+                'rounding' => 'source_component_prefix_allocation', 'currency' => (string)$source['currency'],
+                'lines' => $lines, 'totals' => $totals,
+            ];
+            $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
             // R14 #2: all credit notes on one invoice together never exceed it.
             if ($totals['gross'] > self::uncredited($db, $source)['gross']) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             // Take the RMA lock an exchange takes (MySQL row lock; SQLite's writer lock), then check the quantities again:
@@ -589,6 +637,93 @@ final class InvoiceService
     public static function creditRefund(int $orderId, int $amount, string $refundKey, string $reason = ''): ?array
     {
         if ($amount <= 0 || $refundKey === '') throw new InvalidArgumentException('A refund credit note needs an amount and the refund key');
+        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($amount): array {
+            if ($amount > $uncredited) throw new LogicException('The refund exceeds what the invoice still has uncredited');
+            // Shares of the uncredited VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
+            $sourceGross = array_sum(array_column($rates, 'gross'));
+            $parts = [];
+            $left = $amount;
+            $keys = array_keys($rates);
+            foreach ($keys as $i => $key) {
+                $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
+                $left -= $gross;
+                $parts[(string)$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
+            }
+            return $parts;
+        });
+    }
+
+    /**
+     * R15 high 4: the invoice of an order closed without its money (a purchase on invoice cancelled, a cash-on-delivery
+     * parcel refused and returned) stayed issued and due, and in the VAT and OSS reports. It gets a cancellation credit
+     * note for what the customer no longer owes: everything still uncredited when nothing was delivered (returned, or
+     * cancelled before anything shipped); after a partial shipment the goods that never shipped, at their own rates
+     * (shipping and fees stay charged, as for a paid order). Null when there is nothing to credit. Idempotent per order.
+     */
+    public static function creditClosure(int $orderId): ?array
+    {
+        $order = Orders::byId($orderId);
+        if (!$order || !in_array((string)$order['status'], ['cancelled', 'returned'], true)) return null;
+        // Money that came in goes back through the refund ledger, whose bookings get their own credit notes.
+        if (in_array((string)($order['payment_status'] ?? ''), ['paid', 'partially_refunded', 'refunded', 'refund_pending', 'disputed'], true)) return null;
+        $unshipped = (string)$order['status'] === 'cancelled' ? self::unshippedParts($order) : null;
+        return self::rateCredit($orderId, 'closure_' . $orderId, 'cancellation', (string)$order['status'],
+            static function (array $rates, int $uncredited) use ($unshipped): array {
+                $parts = [];
+                foreach ($unshipped ?? $rates as $key => $part) {
+                    if (!isset($rates[$key])) continue;
+                    $gross = min($part['gross'], $rates[$key]['gross']);
+                    $parts[$key] = ['gross' => $gross, 'net' => min($part['net'], $rates[$key]['net'], $gross)];
+                }
+                // Never more than the invoice has left in all (its credit notes may have rounded differently per rate).
+                $excess = array_sum(array_column($parts, 'gross')) - $uncredited;
+                foreach (array_reverse(array_keys($parts)) as $key) {
+                    if ($excess <= 0) break;
+                    $cut = min($excess, $parts[$key]['gross']);
+                    $parts[$key]['gross'] -= $cut;
+                    $parts[$key]['net'] = min($parts[$key]['net'], $parts[$key]['gross']);
+                    $excess -= $cut;
+                }
+                return $parts;
+            });
+    }
+
+    /**
+     * Per VAT breakdown key, the gross and net of the order's goods that never shipped (financial snapshot slices, as
+     * Fulfillment::unshippedGross()), or null when nothing shipped (then nothing of the order was delivered).
+     * @return array<string, array{gross: int, net: int}>|null
+     */
+    private static function unshippedParts(array $order): ?array
+    {
+        if (Fulfillment::unshippedGross((int)$order['id']) === null) return null;
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $components = is_array($snapshot) ? array_values(array_filter((array)($snapshot['components'] ?? []),
+            static fn($component): bool => is_array($component) && ($component['type'] ?? '') === 'product')) : [];
+        $items = Orders::items((int)$order['id']);
+        if (count($components) !== count($items)) throw new RuntimeException('Order snapshot does not match order items');
+        $parts = [];
+        foreach ($items as $position => $item) {
+            $component = $components[$position];
+            $ordered = max(1, (int)$item['quantity']);
+            $shipped = min($ordered, Fulfillment::shippedUnits($item));
+            if ($shipped >= $ordered) continue;
+            $supply = isset($component['rate_country']) ? ['country' => strtoupper((string)$component['rate_country']), 'supply' => (string)($component['supply'] ?? 'oss')] : [];
+            $key = VatService::breakdownKey((int)$component['rate_basis_points'], $supply['country'] ?? '', $supply['supply'] ?? '');
+            $parts[$key] ??= ['gross' => 0, 'net' => 0];
+            $parts[$key]['gross'] += self::proportionalSegment((int)$component['gross'], $shipped, $ordered - $shipped, $ordered);
+            $parts[$key]['net'] += self::proportionalSegment((int)$component['net'], $shipped, $ordered - $shipped, $ordered);
+        }
+        return $parts;
+    }
+
+    /**
+     * A credit note of whole VAT rates (no item lines) on the order's issued invoice, under $refundKey: $split gets the
+     * invoice's uncredited rates and gross under the order lock and returns gross and net per breakdown key. Kind
+     * 'refund' (money returned) or 'cancellation' (an unpaid order closed) names its rows.
+     * @param callable(array<string, array{gross: int, net: int, supply: array}>, int): array<string, array{gross: int, net: int}> $split
+     */
+    private static function rateCredit(int $orderId, string $refundKey, string $kind, string $reason, callable $split): ?array
+    {
         $db = Db::get();
         if ($row = self::refundCreditByKey($db, $orderId, $refundKey)) return $row;
         $source = self::byOrderId($orderId);
@@ -608,24 +743,24 @@ final class InvoiceService
                 return $row;
             }
             ['rates' => $rates, 'gross' => $uncredited] = self::uncredited($db, $source);
-            if ($amount > $uncredited) throw new LogicException('The refund exceeds what the invoice still has uncredited');
-
-            // Shares of the uncredited VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
-            $sourceGross = array_sum(array_column($rates, 'gross'));
             $lines = [];
             $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
             $breakdown = [];
-            $left = $amount;
-            $keys = array_keys($rates);
-            foreach ($keys as $i => $key) {
-                $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
-                $left -= $gross;
-                $net = (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross']);
+            foreach ($split($rates, $uncredited) as $key => $part) {
+                $key = (string)$key;
+                $gross = (int)$part['gross'];
+                if ($gross <= 0 || !isset($rates[$key])) continue;
+                $net = max(0, min((int)$part['net'], $gross));
                 $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $rates[$key]['supply'];
-                foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $part => $value) $totals[$part] += $value;
+                foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $name => $value) $totals[$name] += $value;
                 $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $rates[$key]['supply'];
             }
-            $creditData = ['version' => 1, 'kind' => 'refund', 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
+            if ($totals['gross'] > $uncredited) throw new LogicException('The credit exceeds what the invoice still has uncredited');
+            if ($totals['gross'] <= 0) {
+                if ($ownTransaction) $db->commit();
+                return null;
+            }
+            $creditData = ['version' => 1, 'kind' => $kind, 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
                 'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals];
             $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, self::numberPrefix($store['legal'] ?? [], 'credit_note'));
             $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
@@ -649,14 +784,14 @@ final class InvoiceService
             ]);
             $invoiceId = (int)$db->lastInsertId();
             self::recordSeller($db, $invoiceId, $sellerCode);
-            AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey, 'gross' => $totals['gross']], 'Refund credit issued');
+            AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey, 'gross' => $totals['gross']], $kind === 'cancellation' ? 'Cancellation credit issued' : 'Refund credit issued');
             if ($ownTransaction) $db->commit();
         } catch (Throwable $e) {
             if ($ownTransaction && $db->inTransaction()) $db->rollBack();
             throw $e;
         }
         $invoice = self::byId($invoiceId);
-        $rows = array_map(static fn(array $line): array => ['label' => 'refund', 'rate' => $line['rate'], 'net' => -$line['net'], 'gross' => -$line['gross']] + self::supplyOf($line), $lines);
+        $rows = array_map(static fn(array $line): array => ['label' => $kind === 'cancellation' ? 'cancellation' : 'refund', 'rate' => $line['rate'], 'net' => -$line['net'], 'gross' => -$line['gross']] + self::supplyOf($line), $lines);
         $pdf = self::renderPdf($invoice, $rows, json_decode((string)$source['seller_snapshot'], true) ?: [], json_decode((string)$source['customer_snapshot'], true) ?: [],
             ['rates' => $breakdown, 'vat_total' => -$totals['vat'], 'services_only' => self::servicesOnly($order)]);
         self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
@@ -1984,7 +2119,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný doklad k faktúre č.', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby',
+                'refers_to' => 'Opravný doklad k faktúre č.', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby', 'cancellation' => 'Storno faktúry',
                 'discount' => 'Zľava',
                 'payment_fee' => 'Poplatok za platbu',
                 'rounding' => 'Zaokrúhlenie',
@@ -2006,7 +2141,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby',
+                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby', 'cancellation' => 'Storno faktury',
                 'discount' => 'Sleva',
                 'payment_fee' => 'Poplatek za platbu',
                 'rounding' => 'Zaokrouhlení',
@@ -2028,7 +2163,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
-                'refers_to' => 'Korekta faktury nr', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności',
+                'refers_to' => 'Korekta faktury nr', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności', 'cancellation' => 'Anulowanie faktury',
                 'discount' => 'Rabat',
                 'payment_fee' => 'Opłata za płatność',
                 'rounding' => 'Zaokrąglenie',
@@ -2050,7 +2185,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
-                'refers_to' => 'Az alábbi számla helyesbítése:', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés',
+                'refers_to' => 'Az alábbi számla helyesbítése:', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés', 'cancellation' => 'Számla sztornó',
                 'discount' => 'Kedvezmény',
                 'payment_fee' => 'Fizetési díj',
                 'rounding' => 'Kerekítés',
@@ -2072,7 +2207,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Rechnungskorrektur Nr.',
-                'refers_to' => 'Korrektur zur Rechnung Nr.', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung',
+                'refers_to' => 'Korrektur zur Rechnung Nr.', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung', 'cancellation' => 'Rechnungsstorno',
                 'discount' => 'Rabatt',
                 'payment_fee' => 'Zahlungsgebühr',
                 'rounding' => 'Rundung',
@@ -2093,7 +2228,7 @@ final class InvoiceService
                 'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
                 'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
-                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'discount' => 'Descuento',
+                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'cancellation' => 'Anulación de factura', 'discount' => 'Descuento',
                 'payment_fee' => 'Comisión de pago', 'rounding' => 'Redondeo', 'col_unit_net' => 'Precio unit. sin IVA', 'col_net_total' => 'Sin IVA',
             ],
             'en' => [
@@ -2110,7 +2245,7 @@ final class InvoiceService
                 'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
                 'reverse_charge_services_note' => 'Reverse charge — VAT to be accounted for by the recipient (Article 196 of Directive 2006/112/EC)',
                 'credit_title' => 'Credit note No.',
-                'refers_to' => 'Corrects invoice No.', 'credit_total' => 'Total credited', 'refund' => 'Refund',
+                'refers_to' => 'Corrects invoice No.', 'credit_total' => 'Total credited', 'refund' => 'Refund', 'cancellation' => 'Invoice cancellation',
                 'discount' => 'Discount',
                 'payment_fee' => 'Payment fee',
                 'rounding' => 'Rounding',

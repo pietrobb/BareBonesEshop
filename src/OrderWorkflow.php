@@ -269,6 +269,8 @@ class OrderWorkflow {
                 'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
+            // R15 high 4: an unpaid order's issued invoice (purchase on invoice) gets its cancellation credit note.
+            ['closure_credit_note', ['order_id' => $order['id']], 3],
         ], PaymentService::cancellationJobsWithin((int)$order['id'], Fulfillment::unshippedGross((int)$order['id'])));
     }
 
@@ -333,7 +335,8 @@ class OrderWorkflow {
      */
     private static function handleReturn(array $order): array {
         Orders::restoreStock($order['id'], 'return');
-        return [];
+        // R15 high 4: a refused cash-on-delivery parcel came back unpaid: its invoice gets a cancellation credit note.
+        return [['closure_credit_note', ['order_id' => $order['id']], 3]];
     }
 
     /**
