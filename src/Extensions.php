@@ -82,7 +82,9 @@ final class Extensions
     {
         $error = error_get_last();
         if ($error === null || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return;
-        if (preg_match('/^(Allowed memory size|Maximum execution time)/', (string)$error['message'])) return;
+        // R16: "Uncaught ..." is an exception the code could have caught (a page throwing on bad input), not a broken
+        // extension: quarantining it let one anonymous request disable the extension and its providers for good.
+        if (preg_match('/^(Allowed memory size|Maximum execution time|Uncaught )/', (string)$error['message'])) return;
         $file = self::normalize((string)$error['file']);
         foreach (self::$guarded as $code => $roots) {
             foreach ($roots as $root) {
@@ -128,16 +130,25 @@ final class Extensions
     }
 
     /**
-     * Render the extension page for a storefront ?page= value, or null when no extension owns it.
+     * Render the extension page for a storefront ?page= value, or null when no extension owns it. A handler that
+     * throws (bad input, a failing service) answers 500 with a neutral page and is logged; it never ends the request
+     * as a fatal error (R16).
      * @return array{title:string, content:string}|null
      */
     public static function page(string $route): ?array
     {
         self::boot();
         if (!isset(self::$pages[$route])) return null;
-        $result = (self::$pages[$route])($_GET);
-        if (!is_array($result) || !is_string($result['title'] ?? null) || !is_string($result['content'] ?? null)) {
-            throw new UnexpectedValueException("extension page {$route} must return ['title' => string, 'content' => string]");
+        try {
+            $result = (self::$pages[$route])($_GET);
+            if (!is_array($result) || !is_string($result['title'] ?? null) || !is_string($result['content'] ?? null)) {
+                throw new UnexpectedValueException("extension page {$route} must return ['title' => string, 'content' => string]");
+            }
+        } catch (Throwable $e) {
+            Logger::exception('extension.page_failed', $e, ['page' => $route]);
+            http_response_code(500);
+            $message = I18n::t('account.page_unavailable');
+            return ['title' => $message, 'content' => Template::render('storefront/status-message', ['message' => $message])];
         }
         return ['title' => $result['title'], 'content' => $result['content']];
     }

@@ -9,6 +9,12 @@
   placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently.
+- **Extension quarantine only for real fatal errors** (review round 16). One anonymous request could disable an
+  extension, payment provider included, until a developer changed its files: a page throwing on bad input ended the
+  request as "Uncaught ..." and the fatal-error guard quarantined the extension. An uncaught exception no longer
+  quarantines, and a throwing extension page answers HTTP 500 with a neutral "temporarily unavailable" page and
+  logs `extension.page_failed`. Errors PHP cannot catch (a class missing interface methods, a class declared twice)
+  still quarantine as before.
 - **Low findings** (review round 15). An admin amount typed as `1,299` was read as 1,30 EUR (the comma taken as the
   decimal separator, the rest rounded away); an amount with more decimals than the currency has is now refused with
   a message instead of being rounded. A checkout form that failed validation or was reloaded kept nothing: the
