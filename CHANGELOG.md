@@ -10,7 +10,6 @@
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently. When the counters still cannot
   be raised, the rollback notice no longer also claims the discarded invoice numbers are not issued again.
-  tracked as an unknown number of discarded rows instead of skipping them silently.
 - **Labels for shipping.json orders** (review round 16, high). An order shipped by a `shipping.json` method
   ("Standard Delivery", "Express Delivery") showed "standard: carrier API not connected" and no label form, although
   Packeta and GLS were connected: the method's code was taken as its carrier. Such a method names a delivery speed,
