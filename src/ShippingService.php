@@ -373,12 +373,24 @@ class ShippingService
         return $carriers;
     }
 
-    /** The carrier the customer chose for the order (its frozen rate), or null when the order has no rate snapshot. */
+    /**
+     * The carrier the customer chose for the order (its frozen rate), or null when the order names none: no rate
+     * snapshot, or a shipping.json method (provider "legacy": "standard", "express"), which is a delivery speed
+     * the merchant ships with any carrier, not a carrier (R16: it was taken as an unconnected carrier "standard").
+     */
     public static function orderCarrier(array $order): ?string
     {
+        if (self::isLegacyDeliveryOrder($order)) return null;
         $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $carrier = is_array($snapshot) ? trim((string)($snapshot['carrier'] ?? '')) : '';
         return $carrier !== '' ? $carrier : null;
+    }
+
+    /** The order ships by a shipping.json delivery method ("standard", "express"): delivered by a carrier it does not name. */
+    public static function isLegacyDeliveryOrder(array $order): bool
+    {
+        $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
+        return is_array($snapshot) && ($snapshot['provider'] ?? null) === 'legacy';
     }
 
     /** Labels of an order (newest first), with the shipment they belong to when known. */

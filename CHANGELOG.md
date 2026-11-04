@@ -16,6 +16,10 @@
   credited all of it). "Request refund" on a payment returned by hand (bank transfer, cash on delivery) set the
   payment to "Refund in progress" with nothing to execute it; such an order now offers only "Record manual refund",
   and a request left from before shows the amount to pay back and record.
+- **Labels for shipping.json orders** (review round 16, high). An order shipped by a `shipping.json` method
+  ("Standard Delivery", "Express Delivery") showed "standard: carrier API not connected" and no label form, although
+  Packeta and GLS were connected: the method's code was taken as its carrier. Such a method names a delivery speed,
+  not a carrier, so its orders are offered every connected label carrier except in-store pickup.
 - **Low findings** (review round 15). An admin amount typed as `1,299` was read as 1,30 EUR (the comma taken as the
   decimal separator, the rest rounded away); an amount with more decimals than the currency has is now refused with
   a message instead of being rounded. A checkout form that failed validation or was reloaded kept nothing: the
