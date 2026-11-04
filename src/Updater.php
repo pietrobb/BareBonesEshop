@@ -13,7 +13,9 @@ final class Updater
     /** Tables whose MAX(id) at snapshot time shows what a database rollback throws away. */
     // R15: invoices (credit notes are invoices of type credit_note) and refunds are counted too: a rollback discarding
     // them must say so, and their numbers must not be issued again (see numberingHighWater()).
-    private const HIGH_WATER_TABLES = ['orders', 'payment_transactions', 'invoices', 'order_refunds'];
+    // R16: customers too (accounts registered during the update vanish with the rollback). Each snapshot records the
+    // list it tracked (high_water_tables), so a table an older snapshot never tracked is reported unknown, not skipped.
+    private const HIGH_WATER_TABLES = ['orders', 'payment_transactions', 'invoices', 'order_refunds', 'customers'];
     /** Document number series: the current one, and the legacy one the migration window still numbers from. */
     private const NUMBERING_TABLES = [
         'invoice_number_counters' => ['store_id', 'type', 'year', 'prefix'],
@@ -605,6 +607,7 @@ final class Updater
                     throw new RuntimeException('Database migration snapshot was not created');
                 }
                 $metadata['database']['high_water'] = $highWater;
+                $metadata['database']['high_water_tables'] = self::HIGH_WATER_TABLES;
             }
             $this->writeJsonAtomic($snapshotDirectory . DIRECTORY_SEPARATOR . 'snapshot.json', $metadata);
             return $metadata;
@@ -1040,10 +1043,11 @@ final class Updater
             return $marks;
         }
         foreach (self::HIGH_WATER_TABLES as $table) {
+            if (!self::tableExists($this->database, $table)) continue; // not created yet on this installation
             try {
                 $marks[$table] = (int)$this->database->query("SELECT COALESCE(MAX(id), 0) FROM {$table}")->fetchColumn();
             } catch (Throwable $e) {
-                // Table not created yet on this installation.
+                $marks[$table] = null; // exists but unreadable: unknown, never zero
             }
         }
         return $marks;
@@ -1061,10 +1065,16 @@ final class Updater
             return null;
         }
         $marks = $snapshot['database']['high_water'] ?? null;
+        $tracked = $snapshot['database']['high_water_tables'] ?? null;
         $counts = [];
         foreach (self::HIGH_WATER_TABLES as $table) {
             if (is_array($marks) && !array_key_exists($table, $marks)) {
-                continue; // the table did not exist when the snapshot was taken
+                // Tracked by the snapshot but absent: the table did not exist then. Not tracked (a snapshot taken by
+                // v2.1.0 or older): its rows written since are unknown, unless the table does not exist now either.
+                if (is_array($tracked) && in_array($table, $tracked, true)) continue;
+                if (!self::tableExists($this->database, $table)) continue;
+                $counts[$table] = null;
+                continue;
             }
             $mark = is_array($marks) ? $marks[$table] : null;
             if (!is_int($mark)) {
@@ -1152,7 +1162,8 @@ final class Updater
             if ($key === null || !self::tableExists($database, $table)) continue;
             $where = implode(' AND ', array_map(static fn(string $column): string => "{$column} = :{$column}", $key));
             $current = $database->prepare("SELECT MAX(last_number) FROM {$table} WHERE {$where}");
-            $update = $database->prepare("UPDATE {$table} SET last_number = :n WHERE {$where} AND last_number < :n");
+            // R16: each named placeholder once; MySQL native prepares (Db.php) reject a repeated one with HY093.
+            $update = $database->prepare("UPDATE {$table} SET last_number = :n WHERE {$where} AND last_number < :below");
             $insert = $database->prepare("INSERT INTO {$table} (" . implode(', ', $key) . ', last_number) VALUES (:'
                 . implode(', :', $key) . ', :n)');
             foreach ($rows as $row) {
@@ -1162,7 +1173,9 @@ final class Updater
                 $restored = $current->fetchColumn();
                 $issued = (int)$row['last_number'];
                 if ($restored !== null && $restored !== false && (int)$restored >= $issued) continue;
-                ($restored === null || $restored === false ? $insert : $update)->execute($params + [':n' => $issued]);
+                $restored === null || $restored === false
+                    ? $insert->execute($params + [':n' => $issued])
+                    : $update->execute($params + [':n' => $issued, ':below' => $issued]);
                 $raised++;
             }
         }
@@ -1199,7 +1212,7 @@ final class Updater
         }
         if ($unknown !== []) $parts[] = 'an unknown number of ' . implode('/', $unknown) . ' rows';
         $notice = "{$context} discarded " . implode(' and ', $parts) . ' written after the update snapshot;'
-            . ' recover them from the pre-update data (orders, payments, payment provider records) before reopening the shop'
+            . ' recover them from the pre-update data (orders, customers, payments, payment provider records) before reopening the shop'
             . (($known['invoices'] ?? 0) > 0 || in_array('invoices', $unknown, true)
                 ? '; discarded invoices and credit notes were already issued: their numbers are not issued again, re-enter them from the sent PDFs'
                 : '')
