@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 2.1.1 — 2026-11-04
+
+**Security and correctness hotfix of 2.1.0** (review round 15, high 1–8). Update every 2.1.0 shop: among others a
+manual order no longer exposes a buyer's data to an unverified account with their e-mail, and the web worker no
+longer runs jobs inside a failed request's transaction.
+
+Signed with the same update key as 2.1.0; `php cli/update.php fingerprint` on the shop prints
+
+    ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
+
+The tag `v2.1.1` is the first signed tag (SSH key `SHA256:+6NmgAQLsyy8akzFUqhZuzHqgHZ7cR/Yrz1VbRpyEik`, listed in
+`releases/allowed_signers`): `git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag v2.1.1`.
+The GitHub release `v2.1.1` carries `update-2.1.0-2.1.1` (installed 2.1.0: `php cli/update.php apply
+--package=...`), `update-2.0.0-2.1.1` and `update-1.8.0-2.1.1` (run from the trusted 2.1.1 tree with
+`--installed=<shop root>`, see `docs/AI_UPDATE_RUNBOOK.md`; a v1.8.0 shop now upgrades its `stores.json`).
+
 - **Release process and upgrade** (review round 15, high 7). A v1.8.0 shop adopted exactly per the runbook answered
   503 on `/readyz` and the admin: its `stores.json` (main store keyed `sk`, no `default_store`, no channels) stayed as
   it was, while every migrated row belongs to the store `default`. `update.php apply` and `setup.php apply` now write
