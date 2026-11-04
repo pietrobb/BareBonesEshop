@@ -591,3 +591,67 @@ try {
     Db::init($r15mSavedDb, $r15mSavedDriver);
     @unlink($r15mLock);
 }
+
+// InvoiceService::paymentTermsDays: only a purchase on invoice keeps its own terms (and only when it has some); every
+// other order, and a seller without terms, falls back to the seller's terms or 14 days.
+try {
+    $r15mTerms = static fn(array $snapshot, array $legal): int => InvoiceService::paymentTermsDays(['payment_method_snapshot' => json_encode($snapshot)], $legal);
+    assert_equals([30, 14, 21, 14, 14, 14], [
+            $r15mTerms(['service_type' => 'invoice', 'payment_terms_days' => 30], ['payment_terms_days' => 14]),
+            $r15mTerms(['service_type' => 'online_card', 'payment_terms_days' => 30], ['payment_terms_days' => 14]),
+            $r15mTerms([], ['payment_terms_days' => 21]),
+            $r15mTerms(['service_type' => 'invoice', 'payment_terms_days' => 0], ['payment_terms_days' => 14]),
+            $r15mTerms(['service_type' => 'online_card'], ['payment_terms_days' => 14]),
+            $r15mTerms(['service_type' => 'online_card'], []),
+        ], 'R15 mutants: invoice terms apply only to a purchase on invoice with terms; other orders and a seller without terms get the default (and raise no warning)');
+    assert_equals([false, false, true], [
+            InvoiceService::isReverseCharge([], ['country' => 'CZ', 'ic_dph' => 'CZ12345678']),
+            InvoiceService::isReverseCharge(['country' => 'SK'], ['ic_dph' => 'CZ12345678']),
+            InvoiceService::isReverseCharge(['country' => 'SK'], ['country' => 'CZ', 'ic_dph' => 'CZ12345678']),
+        ], 'R15 mutants: reverse charge needs both countries (a snapshot without one raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('invoice terms and reverse charge', $e);
+}
+
+// InvoiceService::capToUncredited: a key the invoice never had is left as it is, a key it had but has fully credited
+// is capped to 0, a capped key's lines are scaled with the last line taking the remainder (a line of 0 included), and
+// the net is cut from the last line down to the uncredited base but never raised to it.
+try {
+    $r15mCap = new ReflectionMethod(InvoiceService::class, 'capToUncredited');
+    $r15mLine = static fn(int $bps, int $gross, int $net): array => ['rate_basis_points' => $bps, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net];
+    $r15mCapped = static function (array $lines, array $rates, array $sourceKeys) use ($r15mCap): array {
+        [$out] = $r15mCap->invoke(null, $lines, $rates, ['vat_breakdown' => json_encode(array_fill_keys($sourceKeys, ['net' => 1, 'vat' => 0]))]);
+        return array_map(static fn(array $line): array => [(int)$line['gross'], (int)$line['net'], (int)$line['vat']], $out);
+    };
+    assert_equals([[120, 100, 20]], $r15mCapped([$r15mLine(2000, 120, 100)], ['23' => ['gross' => 1230, 'net' => 1000]], ['23']),
+        'R15 mutants: a credit line at a rate the invoice never had is not capped');
+    assert_equals([[0, 0, 0], [615, 500, 115]], $r15mCapped([$r15mLine(1000, 110, 100), $r15mLine(2300, 615, 500)], ['23' => ['gross' => 1230, 'net' => 1000]], ['23', '10']),
+        'R15 mutants: a rate the invoice has fully credited is capped to 0, and a line under the uncredited base keeps its net (and raises no warning)');
+    assert_equals([[50, 41, 9], [0, 0, 0], [51, 41, 10]], $r15mCapped([$r15mLine(2300, 100, 81), $r15mLine(2300, 0, 0), $r15mLine(2300, 100, 81)], ['23' => ['gross' => 101, 'net' => 82]], ['23']),
+        'R15 mutants: capped lines are scaled in proportion, the last one takes the remainder, and a line of 0 stays 0');
+    assert_equals([[1230, 900, 330]], $r15mCapped([$r15mLine(2300, 1230, 1000)], ['23' => ['gross' => 1230, 'net' => 900]], ['23']),
+        'R15 mutants: a net above the uncredited base is cut down to it, on the first line too (and raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('credit cap', $e);
+}
+
+// InvoiceService::uncredited: a credit note line at a rate the invoice never had is skipped (no warning) and still
+// counts against the remaining gross.
+try {
+    $r15mMemDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    (new Migrator($r15mMemDb, TEST_CLI_DIR . '/../migrations', $r15mLock))->apply(static fn($m) => null);
+    Db::init($r15mMemDb, 'sqlite');
+    $r15mMemDb->prepare("INSERT INTO invoices (order_id, number, issued_at, pdf_path, total_gross, vat_breakdown, download_token, type, refers_to_invoice_id, store_id, status)
+        VALUES (1, 'R15M-CN-1', '2026-11-04', '', -725, ?, 'r15m-cn-1', 'credit_note', 777, ?, 'issued')")
+        ->execute([json_encode(['10' => ['net' => -100, 'vat' => -10], '23' => ['net' => -500, 'vat' => -115]]), StoreContext::current()->id()]);
+    $r15mLeft = (new ReflectionMethod(InvoiceService::class, 'uncredited'))->invoke(null, $r15mMemDb,
+        ['id' => 777, 'total_gross' => 1230, 'vat_breakdown' => json_encode(['23' => ['net' => 1000, 'vat' => 230]])]);
+    assert_equals(['rates' => ['23' => ['gross' => 615, 'net' => 500, 'supply' => []]], 'gross' => 505], $r15mLeft,
+        'R15 mutants: a credited rate the invoice never had is skipped but counts against the remaining gross (and raises no warning)');
+} catch (Throwable $e) {
+    $r15mFail('uncredited', $e);
+} finally {
+    if (Db::get()->inTransaction()) Db::get()->rollBack();
+    Db::init($r15mSavedDb, $r15mSavedDriver);
+    @unlink($r15mLock);
+}
