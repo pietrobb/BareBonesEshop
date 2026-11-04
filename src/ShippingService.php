@@ -626,6 +626,7 @@ class ShippingService
         // R15: a carrier adapter that reads its own notification format gets the verified body.
         $parser = self::trackingWebhookParser($carrierId);
         if ($parser !== null) {
+            /** @var array<string, mixed> $parsed third-party adapter output; validated below */
             $parsed = $parser->parseTrackingWebhook($payload, $rawPayload);
             $awb = is_string($parsed['awb'] ?? null) ? trim($parsed['awb']) : '';
             $status = strtolower(trim(is_string($parsed['status'] ?? null) ? $parsed['status'] : ''));
