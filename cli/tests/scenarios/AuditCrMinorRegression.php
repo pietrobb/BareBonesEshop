@@ -30,7 +30,7 @@ mkdir($crdRoot . '/worker/src', 0700, true);
 mkdir($crdRoot . '/worker/jobs', 0700, true);
 file_put_contents($crdRoot . '/worker/config.php', '<?php return ' . var_export(['jobs_dir' => $crdRoot . '/worker/jobs', 'queue' => ['backend' => 'file']], true) . ';');
 file_put_contents($crdRoot . '/worker/src/autoload.php', '<?php require ' . var_export(dirname(TEST_CLI_DIR) . '/src/autoload.php', true) . ';'
-    . ' (new ReflectionProperty(JobQueue::class, "forceFile"))->setValue(null, true);');
+    . ' JobQueue::setDir(' . var_export($crdRoot . '/worker/jobs', true) . ');');
 copy(TEST_CLI_DIR . '/cli-only.php', $crdRoot . '/worker/cli/cli-only.php');
 copy(TEST_CLI_DIR . '/worker.php', $crdRoot . '/worker/cli/worker.php');
 $crdLockFile = $crdRoot . '/worker/jobs/worker.lock';

@@ -131,3 +131,12 @@ try {
 } finally {
     $r15dRemove($r15cRoot);
 }
+
+// Parallel runs (a second checkout next to this one, the SQLite and MySQL suites side by side) share the default
+// jobs_dir of config.example.php. The worker took its lock there even when the queue had been pointed elsewhere,
+// so a test's in-process worker backed off with exit(0) and took the whole run (or the fixture) down with it.
+$r15lJobs = test_fixture_path('r15-dev-jobs');
+JobQueue::setDir($r15lJobs);
+assert_true(JobQueue::workerLockFile() === $r15lJobs . '/worker.lock' && is_dir($r15lJobs)
+    && !str_contains((string)file_get_contents(TEST_CLI_DIR . '/worker.php'), '/worker.lock'),
+    'R15 dev: the file worker locks inside the jobs directory the queue actually uses, not the shared default');

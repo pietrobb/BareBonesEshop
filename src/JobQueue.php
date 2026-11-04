@@ -43,6 +43,13 @@ class JobQueue {
         return self::$jobsDir;
     }
 
+    /** The file worker's lock lives in the jobs directory this queue actually uses (setDir or jobs_dir). */
+    public static function workerLockFile(): string {
+        $dir = self::dir();
+        if (!is_dir($dir)) mkdir($dir, 0750, true);
+        return $dir . '/worker.lock';
+    }
+
     public static function setDir(string $dir): void {
         self::$jobsDir = self::validatePrivateDir($dir);
         self::$forceFile = true;

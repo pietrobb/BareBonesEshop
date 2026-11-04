@@ -51,7 +51,7 @@ try {
     foreach (['/worker/cli', '/worker/src', '/worker/jobs'] as $dir) mkdir($r13wBase . $dir, 0777, true);
     file_put_contents($r13wBase . '/worker/config.php', '<?php return ' . var_export(['jobs_dir' => $r13wBase . '/worker/jobs', 'queue' => ['backend' => 'file']], true) . ';');
     file_put_contents($r13wBase . '/worker/src/autoload.php', '<?php require_once ' . var_export($r13wRoot . '/src/autoload.php', true) . ';'
-        . ' (new ReflectionProperty(JobQueue::class, "forceFile"))->setValue(null, true);');
+        . ' JobQueue::setDir(' . var_export($r13wBase . '/worker/jobs', true) . ');');
     copy($r13wRoot . '/cli/cli-only.php', $r13wBase . '/worker/cli/cli-only.php');
     copy($r13wRoot . '/cli/worker.php', $r13wBase . '/worker/cli/worker.php');
     $r13wHeld = fopen($r13wBase . '/worker/jobs/worker.lock', 'c+');

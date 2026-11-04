@@ -10,7 +10,9 @@
   core acts on); a carrier with its own notification format implements `TrackingWebhookAdapter` instead of being
   bypassed. New `docs/THEMES.md` (theme authoring) and `CONTRIBUTING.md`. The README test steps work on a fresh
   clone (`--recurse-submodules`, `config.php`), and `cli/test.php` names what is missing instead of aborting
-  midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11.
+  midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11. The file-queue worker takes its lock
+  in the jobs directory the queue really uses: two suites run side by side (two checkouts sharing the default
+  `jobs_dir`) no longer make a test's worker back off and drop out of the run.
 - **Bookshop package modes and upgrades** (review round 15). The package's zip entries carried no Unix modes, so
   many hosts unpacked the whole shop as 0777 (writable by anyone on a shared host). Folders are now 0755 and files
   0644, including the top folder, and the acceptance run refuses a package with group- or world-writable entries.
