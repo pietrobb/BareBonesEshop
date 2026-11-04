@@ -6,7 +6,7 @@
  * A name the merchant changed is the merchant's and is shown as entered.
  */
 final class MethodLabels {
-    /** Seeded [name, description] per kind and code (migrations 20260425064000 and 20260425071000). */
+    /** Seeded [name, description] per kind and code (migrations 20260425064000, 20260425071000 and 20260801190000). */
     private const SEEDED = [
         'shipping' => [
             'pickup' => ['Osobný odber', null],
@@ -17,18 +17,21 @@ final class MethodLabels {
             'card' => ['Kartou online', 'Online card payment via configured gateway.'],
             'bank_transfer' => ['Bankový prevod', 'Manual bank transfer after order creation.'],
             'cod' => ['Dobierka', 'Cash on delivery where the selected carrier supports COD.'],
+            // Migration 20260801190000 seeds the B2B method with an English name.
+            'invoice' => ['Invoice purchase', 'Approved B2B account with credit limit and payment terms.'],
         ],
     ];
 
     /** Codes of the built-in shipping adapters (Adapters::shipping) that are stored as a shipment's carrier. */
     private const CARRIERS = ['pickup', 'packeta', 'gls'];
 
-    public static function name(string $kind, string $code, string $name): string {
-        return self::translated($kind, $code, $name, 0, '');
+    /** $locale null = the current locale; a document (invoice, e-mail) passes its own language. */
+    public static function name(string $kind, string $code, string $name, ?string $locale = null): string {
+        return self::translated($kind, $code, $name, 0, '', $locale);
     }
 
-    public static function description(string $kind, string $code, string $description): string {
-        return self::translated($kind, $code, $description, 1, '_desc');
+    public static function description(string $kind, string $code, string $description, ?string $locale = null): string {
+        return self::translated($kind, $code, $description, 1, '_desc', $locale);
     }
 
     /**
@@ -44,11 +47,11 @@ final class MethodLabels {
         return $text === $key || $text === '' ? $carrier : $text;
     }
 
-    private static function translated(string $kind, string $code, string $value, int $field, string $suffix): string {
+    private static function translated(string $kind, string $code, string $value, int $field, string $suffix, ?string $locale): string {
         $seeded = self::SEEDED[$kind][$code][$field] ?? null;
         if ($seeded === null || $value !== $seeded) return $value;
         $key = 'methods.' . $kind . '.' . $code . $suffix;
-        $text = I18n::t($key);
+        $text = $locale === null || $locale === '' ? I18n::t($key) : I18n::tIn($key, $locale);
         return $text === $key || $text === '' ? $value : $text;
     }
 }

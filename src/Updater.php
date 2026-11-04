@@ -422,6 +422,8 @@ final class Updater
             }
         }
 
+        [$senderLevel, $senderMessage] = UpgradeChecks::mailSender();
+        $add($senderLevel, 'mail_from', $senderMessage);
         $add(PHP_VERSION_ID >= 80100 ? 'ok' : 'fail', 'php', 'PHP ' . PHP_VERSION . ' (8.1+ required)');
         $add(PHP_SAPI === 'cli' ? 'ok' : 'fail', 'sapi', 'Update command is running under ' . PHP_SAPI);
 

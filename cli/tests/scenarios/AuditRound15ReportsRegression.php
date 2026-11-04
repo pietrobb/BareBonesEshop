@@ -168,3 +168,64 @@ try {
     foreach (glob($r15rRoot . '/*') ?: [] as $r15rFile) @unlink($r15rFile);
     @rmdir($r15rRoot);
 }
+
+// 3. Codes and English where the customer or merchant reads names. The B2B method is seeded as "Invoice purchase" and
+//    that name was frozen into the order, so a Slovak invoice said "Spôsob úhrady: Invoice purchase"; the mails passed
+//    the raw code (bank_transfer); the admin shipment list and label block read "packeta Z123"; and nothing told the
+//    merchant that without MAIL_FROM every e-mail leaves from noreply@localhost.invalid.
+$r15tOrder = static fn(string $label, string $code = 'invoice'): array => ['locale' => 'sk', 'payment_method' => $code,
+    'payment_method_snapshot' => json_encode(['code' => $code, 'label' => $label, 'service_type' => $code], JSON_UNESCAPED_UNICODE)];
+assert_equals(['Nákup na faktúru', 'Purchase on invoice', 'Kauf auf Rechnung', 'Nákup na faktúru', 'Firemný účet 30 dní'], [
+    PaymentService::orderLabel($r15tOrder('Invoice purchase')),
+    PaymentService::orderLabel($r15tOrder('Invoice purchase'), 'en'),
+    PaymentService::orderLabel($r15tOrder('Invoice purchase'), 'de'),
+    PaymentService::orderLabel(['locale' => 'sk', 'payment_method' => 'invoice', 'payment_method_snapshot' => '']),
+    PaymentService::orderLabel($r15tOrder('Firemný účet 30 dní')),
+], 'R15 translations: the seeded B2B method reads in the document\'s language, also on orders that froze the English name; a merchant\'s own name stays');
+assert_equals(['Bankový prevod', 'Bank transfer'], [PaymentService::orderLabel($r15tOrder('', 'bank_transfer')), PaymentService::orderLabel($r15tOrder('', 'bank_transfer'), 'en')],
+    'R15 translations: without a frozen name the method type is translated, not shown as its code');
+foreach (['sk', 'cs', 'pl', 'hu', 'de', 'es', 'en'] as $r15tLocale) {
+    $r15tText = I18n::tIn('methods.payment.invoice', $r15tLocale);
+    assert_true($r15tText !== 'methods.payment.invoice' && $r15tText !== 'Invoice purchase' && I18n::tIn('methods.payment.invoice_desc', $r15tLocale) !== 'methods.payment.invoice_desc',
+        "R15 translations ({$r15tLocale}): the invoice method has a translated name and description");
+}
+
+$r15tLocaleBefore = I18n::locale();
+I18n::setLocale('sk');
+try {
+    require_once TEST_CLI_DIR . '/../src/Entrypoints/Admin/Shipments.php';
+    ob_start();
+    renderShipmentLabelForm(['id' => 0, 'currency' => 'eur'], ['id' => 0], [['carrier' => 'packeta', 'awb' => 'Z123', 'cod_amount' => 0]], ['packeta' => null], '#');
+    renderShipmentLabelForm(['id' => 0, 'currency' => 'eur'], ['id' => 0], [], ['packeta' => 'production API is not connected'], '#');
+    $r15tAdmin = (string)ob_get_clean();
+    assert_true(str_contains($r15tAdmin, 'Packeta (Zásielkovňa) Z123') && str_contains($r15tAdmin, 'Packeta (Zásielkovňa)') && !preg_match('/>[^<]*\bpacketa\b/', $r15tAdmin),
+        'R15 translations: the admin label block names the carrier, not its code');
+    $r15tShipments = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Shipments.php');
+    assert_true(str_contains($r15tShipments, "MethodLabels::carrier((string)\$shipment['carrier'])"), 'R15 translations: the admin shipment list names the carrier, not its code');
+} finally {
+    I18n::setLocale($r15tLocaleBefore);
+}
+
+$r15tFromBefore = getenv('MAIL_FROM');
+$r15tDir = test_fixture_path('r15-mail-from');
+mkdir($r15tDir . '/app', 0777, true);
+mkdir($r15tDir . '/state', 0777, true);
+try {
+    $r15tLevels = [];
+    foreach (['', 'not-an-address', 'noreply@yourshop.example.com', 'shop@mail.invalid', 'obchod@mojobchod.sk'] as $r15tFrom) {
+        putenv($r15tFrom === '' ? 'MAIL_FROM' : 'MAIL_FROM=' . $r15tFrom);
+        $r15tUpdater = array_column((new Updater($r15tDir . '/app', $r15tDir . '/state'))->doctor(null, null, false, [])['checks'], 'level', 'name');
+        $r15tSetup = array_column(Setup::doctor(['db_driver' => 'sqlite', 'private_runtime_dir' => $r15tDir . '/state'], $r15tDir . '/app')['checks'] ?? [], 'status', 'name');
+        $r15tLevels[] = [UpgradeChecks::mailSender()[0], $r15tUpdater['mail_from'] ?? null, $r15tSetup['provider.mail_from'] ?? null];
+    }
+    assert_equals([['warn', 'warn', 'warn'], ['fail', 'fail', 'fail'], ['warn', 'warn', 'warn'], ['warn', 'warn', 'warn'], ['ok', 'ok', 'pass']], $r15tLevels,
+        'R15 translations: update doctor and setup doctor warn while MAIL_FROM is unset (noreply@localhost.invalid) or an example/reserved domain, and fail on an invalid one');
+    putenv('MAIL_FROM');
+    assert_true(str_contains(UpgradeChecks::mailSender()[1], 'noreply@localhost.invalid'), 'R15 translations: the warning names the address the mails would really leave from');
+} finally {
+    putenv($r15tFromBefore === false ? 'MAIL_FROM' : 'MAIL_FROM=' . $r15tFromBefore);
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r15tDir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $r15tFile) {
+        $r15tFile->isDir() ? @rmdir($r15tFile->getPathname()) : @unlink($r15tFile->getPathname());
+    }
+    @rmdir($r15tDir);
+}

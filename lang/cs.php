@@ -1767,6 +1767,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'methods.payment.bank_transfer_desc' => 'Převodem na účet po odeslání objednávky.',
     'methods.payment.cod' => 'Dobírka',
     'methods.payment.cod_desc' => 'Platba při převzetí, pokud ji zvolený dopravce podporuje.',
+    'methods.payment.invoice' => 'Nákup na fakturu',
+    'methods.payment.invoice_desc' => 'Pro schválené firemní účty: úhrada faktury v dohodnuté splatnosti.',
     'powered_by' => 'Pohání BareBones E-shop', 'added_to_cart' => 'Přidáno ✓',
     'select_variant' => 'Vyberte variantu.', 'cart_error' => 'Položku se nepodařilo přidat.', 'variant_required' => 'Vyberte variantu.',
     'variant_invalid' => 'Vybraná varianta není platná.', 'product_invalid' => 'Produkt není dostupný.', 'product_unavailable' => 'Tento výběr není dostupný.',

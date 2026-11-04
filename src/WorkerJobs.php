@@ -59,7 +59,7 @@ final class WorkerJobs
                     'order_total'    => I18n::price((int)$order['total'], $currency),
                     'customer_name'  => $order['customer_name'],
                     'customer_email' => $order['customer_email'],
-                    'payment_method' => $order['payment_method'] ?? '',
+                    'payment_method' => PaymentService::orderLabel($order, $locale !== '' ? $locale : null) ?: (string)($order['payment_method'] ?? ''),
                     'carrier'        => MethodLabels::carrier((string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''), $locale),
                     'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
                     'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),

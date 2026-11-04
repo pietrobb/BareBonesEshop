@@ -1779,6 +1779,8 @@ return [
     'methods.payment.bank_transfer_desc' => 'Transfer to our account after you place the order.',
     'methods.payment.cod' => 'Cash on delivery',
     'methods.payment.cod_desc' => 'Pay on delivery where the selected carrier supports it.',
+    'methods.payment.invoice' => 'Purchase on invoice',
+    'methods.payment.invoice_desc' => 'For approved business accounts: pay the invoice within the agreed payment terms.',
     'powered_by' => 'Powered by BareBones E-shop',
     'added_to_cart' => 'Added ✓',
     'select_variant' => 'Select a variant.',

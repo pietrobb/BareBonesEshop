@@ -1445,15 +1445,17 @@ class PaymentService {
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
         $snapshot = is_array($snapshot) ? $snapshot : [];
         $label = trim((string)(($snapshot['label'] ?? '') ?: ($snapshot['name'] ?? '')));
-        if ($label !== '') return $label;
+        $locale ??= (string)($order['locale'] ?? I18n::locale());
+        // A seeded name frozen at checkout ('Invoice purchase') reads in the document's language; a merchant's name stays.
+        if ($label !== '') return MethodLabels::name('payment', (string)($snapshot['code'] ?? ''), $label, $locale);
         $type = (string)(($snapshot['service_type'] ?? '') ?: ($order['payment_method'] ?? ''));
         if ($type === '') return '';
         $key = match ($type) {
             'free' => 'free',
-            'cod', 'bank_transfer' => 'methods.payment.' . $type,
+            'cod', 'bank_transfer', 'invoice' => 'methods.payment.' . $type,
             default => 'methods.payment.card',
         };
-        return I18n::tIn($key, $locale ?? (string)($order['locale'] ?? I18n::locale()));
+        return I18n::tIn($key, $locale);
     }
 
     /**
