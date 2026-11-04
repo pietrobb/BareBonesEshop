@@ -225,7 +225,8 @@ do {
         }
     }
 
-    if ($once) break;
+    // --once drains what is ready (within $maxRuntime), not only the first batch of five.
+    if ($once && !$claimedAny) break;
     // Every pulled job was in backoff or claimed elsewhere: wait instead of spinning.
     if (!$claimedAny) sleep(2);
 

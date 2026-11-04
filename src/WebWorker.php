@@ -48,6 +48,7 @@ final class WebWorker
     {
         // A response the client cannot see complete (streamed without a length, no FastCGI) would wait for the pass.
         if (self::$ran || !self::enabled($config) || !self::responseCanFinish()) return false;
+        if (!self::releaseRequestTransaction()) return false;
         $now ??= time();
         $interval = max(10, (int)($config['operations']['web_worker_interval'] ?? self::DEFAULT_INTERVAL));
         $dir = (string)($config['jobs_dir'] ?? dirname($root) . '/bareboneseshop-private/jobs');
@@ -70,6 +71,28 @@ final class WebWorker
         self::finishResponse();
         self::runWorker($root);
         return true;
+    }
+
+    /**
+     * The pass shares the request's database connection. A request that died inside a transaction (an exception page,
+     * exit in the middle of a write) leaves it open: every job of the pass would then run inside it, look completed and
+     * vanish when PHP rolls the connection back at exit (a queue claim with it, so a DB queue runs the job again), and on
+     * SQLite the open write would lock the whole database for the length of the pass. Nothing runs after the pass, so that
+     * transaction can never commit: it is rolled back now. When it cannot be, the pass is skipped and the slot stays free.
+     */
+    private static function releaseRequestTransaction(): bool
+    {
+        if (!Db::connected()) return true;
+        $db = Db::get();
+        if (!Db::transactionOpen($db)) return true;
+        try {
+            Db::rollBackOpen($db);
+        } catch (\Throwable $e) {
+            Logger::exception('web_worker.request_transaction_rollback_failed', $e);
+        }
+        $released = !Db::transactionOpen($db);
+        Logger::warning($released ? 'web_worker.request_transaction_rolled_back' : 'web_worker.skipped_open_transaction');
+        return $released;
     }
 
     private static function finishesNatively(): bool
