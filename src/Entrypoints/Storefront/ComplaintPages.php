@@ -26,7 +26,7 @@ function renderComplaint(): string {
                 $refusal = $result['error'];
                 if ($result['ok']) {
                     $view['done'] = $t($result['confirmation'] === 'sent' ? 'complaint.done' : 'complaint.done_no_mail', [
-                        'number' => $result['number'], 'at' => $result['received_at'] . ' UTC', 'email' => (string)$order['customer_email'],
+                        'number' => $result['number'], 'at' => ShopTime::stamp($result['received_at']), 'email' => (string)$order['customer_email'],
                     ]);
                     $view['show_form'] = false;
                 }

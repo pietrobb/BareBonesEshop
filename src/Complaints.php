@@ -115,9 +115,10 @@ class Complaints {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** The date (UTC) by which the merchant has to decide. */
+    /** The day (Y-m-d, on the store's calendar) by which the merchant has to decide. */
     public static function decideBy(array $complaint): string {
-        return gmdate('Y-m-d', (int)strtotime((string)$complaint['received_at'] . ' UTC') + self::DECISION_DAYS * 86400);
+        $received = ShopTime::date('Y-m-d', (int)strtotime((string)$complaint['received_at'] . ' UTC'), (string)($complaint['store_id'] ?? '') ?: null);
+        return ShopTime::addDays($received, self::DECISION_DAYS);
     }
 
     private static function mail(string $template, array $complaint, array $order): string {
@@ -130,8 +131,8 @@ class Complaints {
             'item_name' => (string)$complaint['item_name'],
             'defect' => (string)$complaint['defect'],
             'remedy' => I18n::tIn('complaint.remedy.' . $complaint['remedy'], $locale),
-            'received_at' => (string)$complaint['received_at'] . ' UTC',
-            'decide_by' => self::decideBy($complaint),
+            'received_at' => ShopTime::stamp((string)$complaint['received_at'], $locale, (string)($complaint['store_id'] ?? '') ?: null),
+            'decide_by' => I18n::date(self::decideBy($complaint), $locale !== '' ? $locale : null),
             'status' => I18n::tIn('complaint.status.' . $complaint['status'], $locale),
             'decision_note' => (string)($complaint['decision_note'] ?? ''),
             'seller_name' => (string)($seller['name'] ?? ''),

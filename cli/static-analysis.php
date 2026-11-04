@@ -297,9 +297,9 @@ $architectureBudgets = [
     'src/Entrypoints/Storefront/GuestPages.php' => ['lines' => 138, 'functions' => 7, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
     // R8 withdrawal function: identify → review → confirm; the rules live in Withdrawal.
-    'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 4],
+    'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 5],
     // R8 complaint form: identify → line, defect, remedy; the rules live in Complaints (order lookup shared with Withdrawal).
-    'src/Entrypoints/Storefront/ComplaintPages.php' => ['lines' => 66, 'functions' => 1, 'max_function_lines' => 64, 'coupling' => 7],
+    'src/Entrypoints/Storefront/ComplaintPages.php' => ['lines' => 66, 'functions' => 1, 'max_function_lines' => 64, 'coupling' => 8],
 ];
 $forbiddenDependencies = [
     'src/Entrypoints/Admin/Catalog.php' => ['OrderWorkflow::', 'CheckoutService::', 'ApiHandlers'],

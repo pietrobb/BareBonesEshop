@@ -30,7 +30,7 @@ function pageComplaints(): void {
                 <td><?= nl2br(esc((string)$c['defect'])) ?></td>
                 <td><?= esc(I18n::t('complaint.remedy.' . $c['remedy'])) ?></td>
                 <td><span class="badge badge-<?= esc($c['status']) ?>"><?= esc(I18n::t('complaint.status.' . $c['status'])) ?></span>
-                    <?php if (isset($next[$c['status']])): ?><br><span class="muted"><?= esc(I18n::format('admin.complaints.decide_by', ['date' => Complaints::decideBy($c)])) ?></span><?php endif; ?>
+                    <?php if (isset($next[$c['status']])): ?><br><span class="muted"><?= esc(I18n::format('admin.complaints.decide_by', ['date' => I18n::date(Complaints::decideBy($c))])) ?></span><?php endif; ?>
                     <?php if ((string)($c['decision_note'] ?? '') !== ''): ?><br><span class="muted"><?= esc((string)$c['decision_note']) ?></span><?php endif; ?></td>
                 <td>
                     <?php if (isset($next[$c['status']])): ?>

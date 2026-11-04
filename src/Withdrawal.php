@@ -210,7 +210,7 @@ class Withdrawal {
         $result = MailService::send('withdrawal_received', (string)$order['customer_email'], (string)($order['locale'] ?? ''), [
             'customer_name' => $name !== '' ? $name : (string)$order['customer_name'],
             'order_number' => (string)$order['order_number'],
-            'received_at' => $receivedAt . ' UTC',
+            'received_at' => ShopTime::stamp($receivedAt, (string)($order['locale'] ?? ''), (string)($order['store_id'] ?? '') ?: null),
             'items' => array_map(static fn(array $l): array => ['name' => (string)$l['name'], 'sku' => (string)$l['sku'], 'quantity' => (int)$l['quantity']], array_values($lines)),
             'reason' => $reason,
             'seller_name' => (string)($seller['name'] ?? ''),

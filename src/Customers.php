@@ -123,7 +123,7 @@ class Customers {
         foreach (self::SESSION_AUTH_KEYS as $key) unset($_SESSION[$key]);
         unset($_SESSION['customer_store_logins']);
         // The next person at a shared computer must not inherit the cart, its contact e-mail or a coupon.
-        unset($_SESSION['cart'], $_SESSION['cart_email'], $_SESSION['cart_email_at'], $_SESSION['checkout_coupon']);
+        unset($_SESSION['cart'], $_SESSION['cart_email'], $_SESSION['cart_email_at'], $_SESSION['checkout_coupon'], $_SESSION[CheckoutService::DRAFT_KEY]);
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }

@@ -32,6 +32,18 @@ final class ShopTime {
     }
 
     /**
+     * A stored UTC timestamp ("Y-m-d H:i:s") as the consumer reads it in a confirmation: store $storeId's wall clock in
+     * the format.datetime of $locale ('' = the current one) with the zone ("4. 11. 2026 14:05 CET"); unparsable input
+     * comes back unchanged.
+     */
+    public static function stamp(string $utc, string $locale = '', ?string $storeId = null): string {
+        $ts = strtotime(trim($utc) . ' UTC');
+        if ($ts === false || trim($utc) === '') return $utc;
+        $local = (new DateTimeImmutable('@' . $ts))->setTimezone(self::zone($storeId));
+        return $local->format($locale === '' ? I18n::t('format.datetime') : I18n::tIn('format.datetime', $locale)) . ' ' . $local->format('T');
+    }
+
+    /**
      * The last second (23:59:59 local) of the day $days calendar days after the local day of $ts. A period "of 14 days
      * after delivery" ends when that whole day has passed (Regulation 1182/71 art. 3), not 14 × 24 h after the hour.
      */
