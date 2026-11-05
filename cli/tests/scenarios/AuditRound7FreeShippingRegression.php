@@ -61,7 +61,7 @@ try {
         'stacking' => 'exclusive', 'active' => '1', 'action_type' => 'free_shipping', 'cond_max_uses' => '1']);
     assert_true($r7fsCoupon['ok'], 'R7 free shipping admin: a coupon promotion can give free shipping (' . $r7fsCoupon['message'] . ')');
     $r7fsAuto = PricingAdmin::savePromotion(0, ['name' => 'R7 free shipping from 100', 'code' => 'R7FSAUTO', 'scope' => 'cart', 'stacking' => 'stack',
-        'active' => '1', 'action_type' => 'free_shipping', 'cond_min_subtotal' => '10000']);
+        'active' => '1', 'action_type' => 'free_shipping', 'cond_min_subtotal' => '100.00']);
     assert_true($r7fsAuto['ok'], 'R7 free shipping admin: an automatic cart promotion can give free shipping (' . $r7fsAuto['message'] . ')');
     assert_equals('{"type":"free_shipping"}', (string)$pdo->query("SELECT actions FROM promotions WHERE id = " . (int)$r7fsCoupon['id'])->fetchColumn(),
         'R7 free shipping admin: the action is stored without an amount');

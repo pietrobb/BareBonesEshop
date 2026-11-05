@@ -50,4 +50,23 @@ final class Money {
         }
         return self::round($cents, $currency) === $cents ? $cents : -1;
     }
+
+    /**
+     * R17: an admin money field typed in the currency ("12.90", "-1,50") as cents; null when it is not such an amount.
+     * '' is $empty. Negative only with $signed (a variant surcharge).
+     */
+    public static function adminInput(mixed $raw, string $currency, ?int $empty = 0, bool $signed = false): ?int {
+        if (!is_scalar($raw)) return null;
+        $raw = trim((string)$raw);
+        if ($raw === '') return $empty;
+        $negative = $signed && str_starts_with($raw, '-');
+        $cents = self::parseInput($negative ? ltrim(substr($raw, 1)) : $raw, $currency);
+        if ($cents < 0) return null;
+        return $negative ? -$cents : $cents;
+    }
+
+    /** An amount in cents as an admin field shows it, in the currency ("12.90"); null is ''. */
+    public static function adminValue(?int $cents, string $currency): string {
+        return $cents === null ? '' : self::decimal($cents, $currency);
+    }
 }
