@@ -79,6 +79,18 @@ assert_equals([
     'cardNumber' => '[REDACTED]', 'card_cvc' => '[REDACTED]',
     'prose' => 'migration 20261104120000_back_in_stock, order 1234567890123 EAN 5901234123457 at 20261105101500, Cookie consent given, not Luhn 4111111111111112',
 ], $r16mLogged, 'R16 logs: card numbers, security codes, secrets in escaped JSON and cookies are masked; EANs, timestamps and prose stay');
+// A card number at the end of a sentence, or followed by the CVC/expiry or preceded by another number, is still masked.
+assert_equals([
+    'stop' => 'Charge failed for [REDACTED CARD].', 'dstop' => 'card [REDACTED CARD].', 'astop' => 'amex [REDACTED CARD].',
+    'cvcnext' => 'input [REDACTED CARD] 123', 'expnext' => 'card [REDACTED CARD] 12/26', 'lead' => 'qty 5 [REDACTED CARD] ok',
+    'dec' => 'total 4242424242424242.50', 'dotted' => 'host 10.4242424242424242', 'notluhn' => 'ref 4242424242424241.',
+    'longid' => 'id 42424242424242424242.',
+], Logger::redact([
+    'stop' => 'Charge failed for 4242424242424242.', 'dstop' => 'card 4242-4242-4242-4242.', 'astop' => 'amex 378282246310005.',
+    'cvcnext' => 'input 4242 4242 4242 4242 123', 'expnext' => 'card 4242 4242 4242 4242 12/26', 'lead' => 'qty 5 4242 4242 4242 4242 ok',
+    'dec' => 'total 4242424242424242.50', 'dotted' => 'host 10.4242424242424242', 'notluhn' => 'ref 4242424242424241.',
+    'longid' => 'id 42424242424242424242.',
+]), 'R16 logs: a card number before a full stop, a CVC or an expiry date is masked; decimals and longer ids stay');
 $r16mErrLog = tempnam(sys_get_temp_dir(), 'r16m');
 $r16mSavedErrLog = ini_set('error_log', $r16mErrLog);
 try {
@@ -86,6 +98,11 @@ try {
     $r16mPhp = (string)file_get_contents($r16mErrLog);
     assert_true(!str_contains($r16mPhp, '4242424242424242') && !str_contains($r16mPhp, 'r16msess') && !str_contains($r16mPhp, ': 123') && str_contains($r16mPhp, '[REDACTED CARD]'),
         'R16 logs: the PHP error log masks the same (' . trim($r16mPhp) . ')');
+    file_put_contents($r16mErrLog, '');
+    Logger::phpLog('Charge failed for 4242424242424242.');
+    $r16mPhp = (string)file_get_contents($r16mErrLog);
+    assert_true(!str_contains($r16mPhp, '4242424242424242') && str_contains($r16mPhp, '[REDACTED CARD].'),
+        'R16 logs: the PHP error log masks a card number before a full stop (' . trim($r16mPhp) . ')');
 } finally {
     ini_set('error_log', (string)$r16mSavedErrLog);
     @unlink($r16mErrLog);

@@ -5,8 +5,8 @@
 - **Back in stock, logs, transfer reminders, shipped e-mail** (review round 16, medium). Asking again on the "notify
   me" form mailed a new confirmation link every time, so anyone could flood an address with links: a waiting request
   now gets a new link at most once an hour, and one address at most three links an hour over all products (a fourth
-  request answers "Too many requests"). The logs now mask payment card numbers (Luhn-checked, with spaces or dashes),
-  card security codes (`cvc`, `cvv2`, `security_code`), secrets inside JSON nested in a JSON string (escaped quotes)
+  request answers "Too many requests"). The logs now mask payment card numbers (Luhn-checked, with spaces or dashes,
+  also at the end of a sentence and next to the CVC, the expiry date or another number), card security codes (`cvc`, `cvv2`, `security_code`), secrets inside JSON nested in a JSON string (escaped quotes)
   and `Cookie` / `Set-Cookie` values and session ids. The bank-transfer reminder sweep read the 500 oldest pending
   orders without a reminder; cash-on-delivery orders and overdue transfers never get one, so once 500 of them piled up
   no transfer was reminded again. It now reads only orders inside the payment term, page by page. "Create and ship"

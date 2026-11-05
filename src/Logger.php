@@ -142,10 +142,42 @@ class Logger
             $credentials = is_string($decoded) && str_contains($decoded, ':') && preg_match('//u', $decoded) && !preg_match('/[\x00-\x1F\x7F]/', $decoded);
             return $credentials || preg_match('/[0-9+\/=]/', $m[2]) && strlen($m[2]) >= 8 ? $m[1] . '[REDACTED]' : $m[0];
         }, $text);
-        // Payment card numbers (spaces or dashes allowed, Luhn-valid: isCardNumber), with or without a key.
-        $text = (string)preg_replace_callback('/(?<![\w.])[2-6](?:[ -]?\d){12,18}(?![\w.])/', static fn(array $m): string =>
-            self::isCardNumber((string)preg_replace('/[ -]/', '', $m[0])) ? '[REDACTED CARD]' : $m[0], $text);
+        // Payment card numbers (spaces or dashes allowed, Luhn-valid: isCardNumber), with or without a key. A run of digit
+        // groups may also hold a CVC, an expiry or a quantity next to the card, and may end a sentence (a full stop that
+        // does not start decimals), so whole groups inside the run are tried: maskCardGroups. Possessive, so a long run
+        // of digits cannot exhaust the PCRE stack (preg would return null and the whole value would be lost).
+        $text = (string)preg_replace_callback('/(?<![\w.])\d++(?:[ -]\d++)*+/', static function (array $m) use ($text): string {
+            $next = substr($text, $m[0][1] + strlen($m[0][0]), 2);
+            // The last group glued to a word or the integer part of a decimal is not part of a card number.
+            $glued = preg_match('/^(?:[A-Za-z_]|\.\d)/', $next) === 1;
+            return self::maskCardGroups($m[0][0], $glued);
+        }, $text, flags: PREG_OFFSET_CAPTURE);
         return (string)preg_replace(array_keys(self::SECRET_PATTERNS), array_values(self::SECRET_PATTERNS), $text);
+    }
+
+    /**
+     * Digit groups separated by single spaces/dashes: from each group on, the longest run of whole groups that is a card
+     * number becomes [REDACTED CARD]; separators and the other groups stay. $keepLast: the last group is never part of one.
+     */
+    private static function maskCardGroups(string $run, bool $keepLast): string
+    {
+        $parts = preg_split('/([ -])/', $run, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$run];
+        $tail = $keepLast ? (string)array_pop($parts) : '';
+        $count = count($parts);
+        $out = '';
+        for ($i = 0; $i < $count; $i += 2) {
+            $digits = '';
+            $end = null;
+            for ($j = $i; $j < $count; $j += 2) {
+                $digits .= $parts[$j];
+                if (strlen($digits) > 19) break;
+                if (strlen($digits) >= 14 && self::isCardNumber($digits)) $end = $j;
+            }
+            $out .= $end === null ? $parts[$i] : '[REDACTED CARD]';
+            $i = $end ?? $i;
+            $out .= $parts[$i + 1] ?? '';
+        }
+        return $out . $tail;
     }
 
     /**
