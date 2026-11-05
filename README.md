@@ -110,7 +110,9 @@ database and the eBook files.
 5. Sign in at `/admin.php`. After the install `install.php` answers 404 and changes nothing.
 
 **Upgrading.** The package of a release records that release and `install.php` writes it to the update
-state in the private data folder, so the shop is upgraded like any installation with the signed updater: unpack the next release's update package and run
+state in the private data folder and copies the shipped update key there (`update_public_key` in `config.php` points to
+it; `php cli/update.php fingerprint` prints the fingerprint the release notes give), so the shop is upgraded like any
+installation with the signed updater: unpack the next release's update package and run
 `php cli/update.php apply --package=<folder>` in the shop folder (over SSH, or as a one-off cron job in
 the hosting panel where there is no shell); it keeps `config.php` and the private data folder. Its folders
 unpack as 0755 and files as 0644. A package built from a branch instead of a release tag records no
