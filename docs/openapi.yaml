@@ -469,9 +469,10 @@ components:
       description: |
         Only rows whose updated_at is at or after this UTC time ("2026-11-04 10:00:00", "2026-11-04" or ISO 8601
         with Z or an offset). For an incremental sync, page through with the cursor and keep meta.server_time of
-        the FIRST page; pass it as updated_after on the next run. Allow an overlap of a few minutes (subtract it
-        from server_time), since a change committed by a long transaction can carry an earlier updated_at; rows
-        seen twice are harmless because they are identified by id. Not accepted on lists without updated_at (400).
+        the FIRST page's meta.next_updated_after; pass it as updated_after on the next run. It is server_time less
+        five minutes, since a change committed by a transaction that began before server_time carries an earlier
+        updated_at; rows seen twice are harmless because they are identified by id. A stock change (a sale, a
+        shipment, an adjustment) moves the product's updated_at. Not accepted on lists without updated_at (400).
       schema: { type: string, maxLength: 40 }
     IdempotencyKey:
       name: Idempotency-Key
@@ -550,10 +551,10 @@ components:
         name: { type: string, minLength: 1, maxLength: 191 }
         price: { type: integer, minimum: 0, maximum: 2000000000 }
         compare_price: { type: [integer, 'null'], minimum: 0, maximum: 2000000000 }
-        stock: { type: integer, minimum: 0, maximum: 2000000000, default: 0, description: Available quantity, booked in the default warehouse ledger. }
+        stock: { type: integer, minimum: 0, maximum: 2000000000, default: 0, description: 'Available quantity, booked in the default warehouse ledger.' }
         status: { type: string, enum: [active, draft, archived], default: draft }
         weight_g: { type: integer, minimum: 0, maximum: 2000000000, default: 0 }
-        slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 191, description: Derived from the name when omitted; a slug taken by another product gets a -2, -3… suffix. }
+        slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 191, description: 'Derived from the name when omitted; a slug taken by another product gets a -2, -3… suffix.' }
         category_id: { type: integer, minimum: 1 }
     Address:
       type: object
@@ -563,13 +564,13 @@ components:
         street: { type: [string, 'null'] }
         city: { type: [string, 'null'] }
         zip: { type: [string, 'null'] }
-        country: { type: [string, 'null'], description: ISO 3166-1 alpha-2, upper case. }
+        country: { type: [string, 'null'], description: 'ISO 3166-1 alpha-2, upper case.' }
         ico: { type: [string, 'null'], description: Company registration number (IČO). }
         dic: { type: [string, 'null'], description: Tax number (DIČ). }
         ic_dph: { type: [string, 'null'], description: VAT ID (IČ DPH). }
     OrderItem:
       type: object
-      required: [id, product_id, variant_id, sku, name, quantity, unit_price, total, vat_rate, vat_amount]
+      required: [id, product_id, variant_id, sku, name, quantity, unit_price, total, discount, vat_rate, vat_amount]
       properties:
         id: { type: integer }
         product_id: { type: [integer, 'null'] }
@@ -578,14 +579,15 @@ components:
         name: { type: string, description: Product name at the time of the order. }
         quantity: { type: integer, minimum: 1 }
         unit_price: { type: integer, description: Gross unit price in minor units. }
-        total: { type: integer, description: Gross line total in minor units. }
+        total: { type: integer, description: Gross line total in minor units before the order discount. }
+        discount: { type: integer, minimum: 0, description: The share of the order discount on this line (minor units). }
         vat_rate: { type: [number, 'null'], description: VAT rate in percent. }
-        vat_amount: { type: integer }
+        vat_amount: { type: integer, description: 'VAT of the line after its discount, as on the order and its invoice.' }
     Order:
       type: object
       additionalProperties: false
-      required: [id, number, status, payment_status, customer, totals, created_at, updated_at, locale, address, shipping, payment_method, notes, items]
-      description: Webhook events carry the fields up to updated_at; the API adds the contact, address, shipping, payment and lines. Shipped quantities are in GET /orders/{id}/shipments.
+      required: [id, number, status, payment_status, customer, totals, created_at, updated_at, locale, shipping, payment_method, items]
+      description: Webhook events carry the fields up to updated_at; the API adds the shipping, payment and lines, and for a key granted customers:read the personal data (customer.phone, address, notes). Shipped quantities are in GET /orders/{id}/shipments.
       properties:
         id: { type: integer }
         number: { type: string }
@@ -598,9 +600,9 @@ components:
             id: { type: [integer, 'null'] }
             name: { type: string }
             email: { type: string, format: email }
-            phone: { type: [string, 'null'], description: Present in API responses, not in webhook events. }
+            phone: { type: [string, 'null'], description: 'Only in API responses to a key granted customers:read (personal data); never in webhook events.' }
         locale: { type: [string, 'null'] }
-        address: { $ref: '#/components/schemas/Address' }
+        address: { $ref: '#/components/schemas/Address', description: Only for a key granted customers:read. }
         shipping:
           type: object
           required: [method, pickup_point]
@@ -613,7 +615,7 @@ components:
                 name: { type: [string, 'null'] }
                 address: { type: [string, 'null'] }
         payment_method: { type: [string, 'null'] }
-        notes: { type: [string, 'null'], description: The customer's note to the order. }
+        notes: { type: [string, 'null'], description: "The customer's note to the order; only for a key granted customers:read." }
         items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
         totals:
           type: object
@@ -720,6 +722,7 @@ components:
         limit: { type: integer }
         next_cursor: { type: [string, 'null'] }
         server_time: { type: string, description: 'Database UTC time ("Y-m-d H:i:s") read before the page; only on lists that take updated_after.' }
+        next_updated_after: { type: string, description: 'server_time less five minutes: the updated_after of the next incremental sync (keep the one of the first page).' }
     ProductPage:
       type: object
       required: [data, meta]

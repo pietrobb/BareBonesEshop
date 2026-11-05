@@ -232,11 +232,13 @@ assert_true(str_contains((string)$r8lOld['output'], 'Lehota na odstúpenie od te
 // 3) Order confirmation (art. 8(7)): seller identity, withdrawal period + function + model form, 24-month liability,
 //    ADR body and the terms on a durable medium (attachment); full terms in every shipped locale.
 [$r8lExit, $r8lConf, $r8lNoise] = $r8lRun(['run', 'confirmation', $r8lApp, $r8lDb, $r8lRoot, '{}']);
-$r8lMsg = $r8lConf['sent'][0] ?? ['to' => '', 'subject' => '', 'html' => '', 'text' => '', 'attachments' => []];
+// An installed config.php has admin_email, so the worker also mails the merchant about the queued withdrawals.
+$r8lToGuest = array_values(array_filter($r8lConf['sent'] ?? [], static fn(array $m): bool => $m['to'] === 'r8l.guest@example.test'));
+$r8lMsg = $r8lToGuest[0] ?? ['to' => '', 'subject' => '', 'html' => '', 'text' => '', 'attachments' => []];
 $r8lHtml = html_entity_decode((string)$r8lMsg['html']);
 $r8lNeed = ['Woodle s.r.o.', 'Hlavná 1', 'IČO: 12345678', 'IČ DPH: SK1020304050', 'info@example.sk', 'do 14 dní od prevzatia tovaru',
     '?page=withdrawal&order=R8L-NEW', 'Vzorový formulár na odstúpenie od zmluvy', 'Týmto oznamujem', '24 mesiacov', 'Slovenská obchodná inšpekcia', '?page=terms'];
-assert_true($r8lExit === 0 && count($r8lConf['sent'] ?? []) === 1 && $r8lMsg['to'] === 'r8l.guest@example.test'
+assert_true($r8lExit === 0 && count($r8lToGuest) === 1
     && array_filter($r8lNeed, static fn(string $s): bool => !str_contains($r8lHtml, $s)) === [] && !str_contains($r8lHtml, '{{'),
     'R8 confirmation: the worker\'s order confirmation names the seller, the withdrawal period, function and model form, the 24-month liability, the ADR body and the terms (missing: '
     . json_encode(array_values(array_filter($r8lNeed, static fn(string $s): bool => !str_contains($r8lHtml, $s))), JSON_UNESCAPED_UNICODE) . ' ' . trim($r8lNoise) . ')');

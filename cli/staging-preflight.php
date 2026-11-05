@@ -170,6 +170,12 @@ function runStagingPreflight(array $argvLocal = []): array {
     if ($nginxFallback !== null) {
         $add($nginxFallback ? 'ok' : 'warn', 'nginx_php_fallback', $nginxFallback ? 'nginx sends missing .php scripts to @redirect.' : 'nginx PHP location lacks "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.', 'Copy the location ~ \.php$ block from deploy/nginx.conf into operations.nginx_config and reload nginx.');
     }
+    $nginxMissingDenies = UpgradeChecks::nginxMissingDenies($cfg, $root);
+    if ($nginxMissingDenies !== null) {
+        $add($nginxMissingDenies === [] ? 'ok' : 'warn', 'nginx_denies', $nginxMissingDenies === [] ? 'nginx has every deny rule of deploy/nginx.conf.' : 'nginx lacks deny rule(s) of deploy/nginx.conf, so those files are served: ' . implode(' | ', $nginxMissingDenies), 'Copy the missing "location … { return 403; }" lines from deploy/nginx.conf into operations.nginx_config and reload nginx.');
+    }
+    $timestampDefault = UpgradeChecks::carrierWebhooksTimestampDefault($cfg);
+    $add($timestampDefault === [] ? 'ok' : 'warn', 'shipping_webhook_timestamp', $timestampDefault === [] ? 'Carrier webhook signing: shipping_webhook_require_timestamp is set or no carrier webhook is configured.' : 'shipping_webhook_require_timestamp is not set (default true): webhooks of ' . implode(', ', $timestampDefault) . ' without a signed X-Shipping-Timestamp are refused.', 'Confirm the carrier signs X-Shipping-Timestamp, then set shipping_webhook_require_timestamp explicitly (false only for a body-only carrier).');
 
     $mailAdapter = Setup::mailProvider($cfg);
     $add($mailAdapter === 'log' ? 'warn' : 'ok', 'mail_adapter', "Mail provider: {$mailAdapter}", $mailAdapter === 'log' ? 'For staging email delivery tests, configure smtp or ses; log is safe but does not send.' : '');
