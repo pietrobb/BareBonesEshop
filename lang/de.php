@@ -1639,6 +1639,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.addr_default'        => 'Als Standard festlegen',
     'account.rate_limited'        => 'Zu viele Versuche. Bitte später erneut versuchen.',
     'account.page_not_found'      => 'Seite nicht gefunden.',
+    'account.page_unavailable'    => 'Diese Seite ist vorübergehend nicht verfügbar. Bitte versuchen Sie es später erneut.',
     'account.form_retry' => 'Das Formular konnte nicht gesendet werden. Bitte versuchen Sie es erneut.',
     'account.err_address_invalid' => 'Die Adresse wurde nicht gespeichert. Bitte prüfen Sie die markierten Felder.',
     'account.err_address_required' => 'Dieses Feld ist erforderlich.',

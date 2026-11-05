@@ -109,7 +109,12 @@ return [
   (`extension.quarantined`). The quarantine lives in `<private_runtime_dir>/extension-quarantine.json`
   (without that directory, in the system temp directory) and lifts by itself as soon as one of the
   extension's PHP files changes; deleting the entry retries the unchanged extension. Running out of
-  memory or time does not quarantine.
+  memory or time does not quarantine, and neither does an exception: an uncaught exception is a
+  failed request, not a broken extension, so bad input cannot switch an extension off.
+- **A throwing page is a 500.** When a page handler throws (bad input, a failing service), the
+  shopper gets HTTP 500 with a neutral "temporarily unavailable" page, and the exception is logged
+  (`extension.page_failed`). Validate input and return your own message where the shopper can fix it.
+  A throwing JSON API action answers `{"error": "Internal error"}` with HTTP 500 the same way.
 - Extensions run with the same privileges as core code. Review them like core changes.
 
 ## Provider contracts
