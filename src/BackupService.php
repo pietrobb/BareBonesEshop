@@ -61,7 +61,7 @@ class BackupService
             self::$fileSources = (array)($config['files'] ?? []);
             self::$recoveryDir = (string)($config['recovery_dir'] ?? dirname($storageRoot) . '/restore-recovery');
         } else {
-            $appCfg = require self::$rootDir . '/config.php';
+            $appCfg = require AppConfig::path(self::$rootDir);
             $storageRoot = (string)($appCfg['backup_storage_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/backups');
             $storageClass = (string)($appCfg['backup_storage_adapter'] ?? 'LocalBackupStorage');
             self::$cfg['log_file'] = (string)($appCfg['backup_log_file'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/logs/backup.log');

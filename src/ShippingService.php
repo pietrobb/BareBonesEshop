@@ -617,7 +617,7 @@ class ShippingService
         StoreContext::current()->assertPermission('shipping');
         $envSecret = getenv(self::webhookSecretEnvName($carrierId));
         $secret = is_string($envSecret) ? $envSecret : '';
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         if ($secret === '') {
             $secret = (string)($cfg['shipping_webhook_secrets'][$carrierId] ?? '');
         }

@@ -34,7 +34,7 @@ if (MaintenanceMode::active(dirname(__DIR__))) {
 
 // The file backend needs a process lock; durable backends use per-job atomic leases
 // and intentionally permit multiple workers.
-$cfg = require __DIR__ . '/../config.php';
+$cfg = require AppConfig::path(dirname(__DIR__));
 $lock = null;
 $lockFile = null;
 if (!JobQueue::supportsConcurrentWorkers()) {

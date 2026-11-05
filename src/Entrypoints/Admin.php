@@ -33,7 +33,7 @@ if (!empty($_GET['lang']) && in_array($_GET['lang'], $adminSupportedLocales, tru
 }
 $adminLocale = $_SESSION['admin_locale'] ?? ($storesCfg['default_locale'] ?? 'en');
 I18n::setLocale($adminLocale);
-$adminConfig = require dirname(__DIR__, 2) . '/config.php';
+$adminConfig = require AppConfig::path(dirname(__DIR__, 2));
 $adminAppName = trim((string)($adminConfig['admin_name'] ?? '')) ?: I18n::t('admin.app_name');
 
 // p[]=… / action[]=… arrive as arrays; treat them like unknown pages instead of an array-key TypeError.

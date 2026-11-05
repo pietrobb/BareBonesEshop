@@ -7,6 +7,12 @@
   amounts still took cents ("1290" saved 1 290 €, not 12.90 €). Every admin money field now takes and shows the amount
   in the currency (12.90), with the currency on the label; stored values stay in cents. A new product in a store
   with another currency (HUF) is priced in that currency, not EUR.
+- **Tests isolated from the developer's `config.php`** (review round 17, medium). The suite read the checkout's
+  `config.php`: an enabled extension or an outbound webhook broke core tests, and the suite posted signed events to
+  the developer's real webhook. It now runs on a copy of `config.php` (database, private directories, `app_url` and
+  keys kept) with extensions, outbound webhooks, mail/ERP/carrier providers, integrations, alert recipients and
+  payment gateway keys reset to `config.example.php`; the PHP processes the suite starts use the same copy. Shop code
+  reads its configuration through `AppConfig::path()`.
 - **Feeds and sitemaps after a sale** (review round 17, medium). Since v2.1.2 every sale, shipment or stock
   adjustment moved `products.updated_at`, which is part of the feed and sitemap fingerprint, so a busy shop rebuilt
   them after every order. A stock change now moves the new `products.stock_updated_at` (migration

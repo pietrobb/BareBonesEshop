@@ -5,7 +5,7 @@
 echo "\n--- Audit round 10 (UX 1-5): setup checklist, keyless gateways hidden, pay again, store and legal-text admin ---\n";
 $r10uCfgProp = new ReflectionProperty(Security::class, 'cfg');
 $r10uCfgBefore = $r10uCfgProp->getValue();
-$r10uCfgBase = is_array($r10uCfgBefore) ? $r10uCfgBefore : require dirname(TEST_CLI_DIR) . '/config.php';
+$r10uCfgBase = is_array($r10uCfgBefore) ? $r10uCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR));
 $r10uInstances = new ReflectionProperty(Adapters::class, 'instances');
 $r10uSubstituted = new ReflectionProperty(Adapters::class, 'substituted');
 $r10uInstancesBefore = $r10uInstances->getValue();

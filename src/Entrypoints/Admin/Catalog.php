@@ -347,7 +347,7 @@ function pageProduct(): void {
     <?php
 }
 function pageDigitalAssets(): void {
-    $cfg = require dirname(__DIR__, 3) . '/config.php';
+    $cfg = require AppConfig::path(dirname(__DIR__, 3));
     $baseDir = (string)($cfg['digital_assets_base_dir'] ?? '');
     $assets = CatalogScope::digitalAssets();
     ?>

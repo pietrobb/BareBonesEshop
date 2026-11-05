@@ -52,7 +52,7 @@ file_put_contents($a101Router, '<?php
 require ' . var_export($a101Root . '/src/autoload.php', true) . ';
 Db::init(new PDO(' . var_export('sqlite:' . $testDbPath, true) . ', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]));
 UrlAliases::setRules([]);
-(new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => (string)($_SERVER["HTTP_X_TEST_APP_URL"] ?? "")] + (require ' . var_export($a101Root . '/config.php', true) . '));
+(new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => (string)($_SERVER["HTTP_X_TEST_APP_URL"] ?? "")] + (require ' . var_export(AppConfig::path($a101Root), true) . '));
 $path = (string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
 chdir(' . var_export($a101Root, true) . ');
 if ($path === "/sitemap.xml") require "sitemap.php";

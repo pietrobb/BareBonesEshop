@@ -760,7 +760,7 @@ class VatService implements TaxProvider
      */
     public static function defaultValidator(): VatIdValidator
     {
-        $cfgFile = (self::$rootDir ?: dirname(__DIR__)) . '/config.php';
+        $cfgFile = AppConfig::path(self::$rootDir ?: dirname(__DIR__));
         $cfg = is_file($cfgFile) ? require $cfgFile : [];
         $class = (string)(($cfg['adapters']['vat_validator'] ?? '') ?: 'ViesVatIdValidator');
         if (!class_exists($class) || !is_subclass_of($class, VatIdValidator::class)) {

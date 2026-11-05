@@ -168,7 +168,7 @@ foreach ($entrypointBudgets as $relative => $budget) {
 
 $architectureBudgets = [
     // Loads Shared/Request/StoreScope always and only the route's page modules (Admin/Modules.php).
-    'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 4],
+    'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
     // +2 functions, +10 lines R10: own or owner password/TOTP changes and creating an owner need the actor's current password; the legacy session that creates the first DB account is handed off and ended.
     'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 300, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
     // R14 UX4: every signed-in admin account changes its own password and TOTP (current password, per-session throttle).
@@ -187,7 +187,7 @@ $architectureBudgets = [
     // +3 lines R10 UX10: the product and CMS page editors load the rich-text editor (Catalog.php requires RichText.php).
     // +1 line R14 UX7: the product editor loads the image list script (ImageOrder.php).
     // +14 lines, +1 function, +1 coupling R16 low: product prices are typed in the currency, not in cents (Money).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1317, 'functions' => 26, 'max_function_lines' => 210, 'coupling' => 21],
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1317, 'functions' => 26, 'max_function_lines' => 210, 'coupling' => 22],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
@@ -286,7 +286,7 @@ $architectureBudgets = [
     // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
     // +7 lines, +1 coupling R10 UX8: checkout sign-in link + save address, account offer on a guest order's confirmation (GuestPages, GuestCheckoutAccount).
     // +1 line R11: the page after paying asks PaymentLink::returnStatus() whether a retry is paid but not yet confirmed.
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 267, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 16],
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 267, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 17],
     // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
     'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // R11 H1: ?page=account-claim — the e-mailed link creates the guest's account; the rules live in GuestCheckoutAccount.

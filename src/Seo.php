@@ -6,7 +6,7 @@ class Seo {
         // Store links carry the active further language (Template::storeUrl); canonical and alternates set their own.
         $path = Bootstrap::withoutLang(self::localPath($path));
         $localePaths = array_map(static fn($localePath): string => Bootstrap::withoutLang((string)$localePath), $localePaths);
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         $base = rtrim((string)($cfg['app_url'] ?? ''), '/');
         if ($base !== '' && (!filter_var($base, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($base, PHP_URL_SCHEME)), ['http', 'https'], true))) {
             throw new RuntimeException('app_url must be an absolute HTTP(S) URL');

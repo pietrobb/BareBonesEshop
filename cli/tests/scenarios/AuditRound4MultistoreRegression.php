@@ -45,7 +45,7 @@ if ($action === 'gdpr') {
     $argv = ['gdpr-export.php', ...json_decode($extra, true)];
     require $root . '/cli/gdpr-export.php';
 }
-$config =is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
+$config =is_file($root . '/config.php') ? require AppConfig::path($root) : require $root . '/config.example.php';
 $config = ['app_url' => 'https://shop.example'] + $config;
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, $config);
 Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate.sqlite'));

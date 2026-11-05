@@ -30,7 +30,7 @@ foreach (array_slice($args, 1) as $argument) {
 }
 
 try {
-    $config = require dirname(__DIR__) . '/config.php';
+    $config = require AppConfig::path(dirname(__DIR__));
     $guard = driftGuardFromConfig(is_array($config) ? $config : []);
 
     if ($command === 'record') {

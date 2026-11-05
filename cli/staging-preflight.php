@@ -38,7 +38,7 @@ function preflightFileJson(string $path): array {
 
 function runStagingPreflight(array $argvLocal = []): array {
     $root = realpath(__DIR__ . '/..') ?: dirname(__DIR__);
-    $cfg = require $root . '/config.php';
+    $cfg = require AppConfig::path($root);
     $checks = [];
     $add = static function (string $level, string $name, string $message, string $remediation = '') use (&$checks): void {
         $checks[] = compact('level', 'name', 'message', 'remediation');

@@ -103,7 +103,7 @@ if ($mode === 'legacy_admin') {
     $memory->exec('CREATE TABLE admin_accounts (id INTEGER PRIMARY KEY)');
     Db::init($memory, 'sqlite');
     (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['admin_user' => $email,
-        'admin_password' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 4])] + (require $root . '/config.php'));
+        'admin_password' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 4])] + (require AppConfig::path($root)));
     Security::sessionStart();
     $before = session_id();
     $_SERVER['REQUEST_METHOD'] = 'GET';

@@ -40,7 +40,7 @@ try {
     $r5dShopOnly = $r5dBase . '/plain/public_html/shop';
     mkdir($r5dShopOnly, 0777, true);
     $r5dServed = $r5dBase . '/plain/public_html/bareboneseshop-private';
-    $r5dCfg = array_replace(require $r5dSrc . '/config.php', [
+    $r5dCfg = array_replace(require AppConfig::path($r5dSrc), [
         'db_driver' => 'sqlite', // the SQLite file check applies to SQLite installs; CI's config.php may be MySQL
         'private_runtime_dir' => $r5dServed, 'db_sqlite_path' => $r5dServed . '/db/shop.sqlite', 'private_cache_dir' => $r5dServed . '/cache',
         'jobs_dir' => $r5dServed . '/jobs', 'invoice_storage_dir' => $r5dServed . '/invoices', 'backup_storage_dir' => $r5dServed . '/backups',
