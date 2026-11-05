@@ -20,7 +20,6 @@
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently. When the counters still cannot
   be raised, the rollback notice no longer also claims the discarded invoice numbers are not issued again.
-  tracked as an unknown number of discarded rows instead of skipping them silently.
 - **Extension quarantine only for real fatal errors** (review round 16). One anonymous request could disable an
   extension, payment provider included, until a developer changed its files: a page throwing on bad input ended the
   request as "Uncaught ..." and the fatal-error guard quarantined the extension. An uncaught exception no longer
