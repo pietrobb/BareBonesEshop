@@ -584,5 +584,13 @@
         "crlf": [
             "e0508a5c35c0e70ddda8ae527bbedb3f48729e85eb6a99cb5214bd6b40299cd6"
         ]
+    },
+    "20261105120000_product_stock_updated_at": {
+        "lf": [
+            "9b4ac78d9ebe0d26c5bf64def00c9337193dd390e5d145a3e25fa35059b692f9"
+        ],
+        "crlf": [
+            "22279d8deb4ef9560de2b9f8e2fa72ffc5ba9cd1edffb91e66c4379caf499169"
+        ]
     }
 }

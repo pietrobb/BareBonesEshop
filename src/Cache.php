@@ -233,7 +233,7 @@ class Cache {
         $marker = self::catalogMarker($catalogId);
         $dir = dirname($marker);
         return (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir))
-            && @file_put_contents($marker, (string)time(), LOCK_EX) !== false;
+            && @file_put_contents($marker, time() . ' ' . bin2hex(random_bytes(8)), LOCK_EX) !== false;
     }
 
     private static function inTransaction(): bool {
@@ -260,6 +260,17 @@ class Cache {
         if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker)) return null;
         if (is_file($file) && (int)filemtime($file) <= Pricing::lastScheduledChange()) return null;
         return self::readJson($path, $ttl);
+    }
+
+    /**
+     * R17: a token that changes with every catalogChanged() of the active catalog ('' before the first): a product
+     * or page saved, a price list changed, a product or variant going in or out of stock. Part of the public feed and
+     * sitemap fingerprint, so those are rebuilt then, however soon after they were written.
+     */
+    public static function catalogVersion(): string {
+        self::flushPendingCatalogChanges();
+        $marker = self::catalogMarker(StoreContext::current()->catalogId());
+        return is_file($marker) ? (string)@file_get_contents($marker) : '';
     }
 
     private static function catalogMarker(string $catalogId): string {
