@@ -331,7 +331,7 @@ switch ($action) {
         handleProductSave();
         break;
     case 'product_price_floor':
-        $extra = static fn(): array => ['row' => $productRow('AAC-DEF-1'), 't' => I18n::format('admin.msg.product.price_below_variants', ['min' => 300]),
+        $extra = static fn(): array => ['row' => $productRow('AAC-DEF-1'), 't' => I18n::format('admin.msg.product.price_below_variants', ['min' => Money::decimal(300, $aacCur = strtoupper(trim((string)($productRow('AAC-DEF-1')['currency'] ?? '')) ?: strtoupper(StoreContext::current()->currency()))) . ' ' . $aacCur]),
             'import' => (static function() use ($db): array {
                 $out = [];
                 foreach (['AAC-DEF-1' => '1.00', 'AAC-NEG-1' => '-5'] as $sku => $price) {
