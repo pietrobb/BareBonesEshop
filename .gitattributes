@@ -1,3 +1,6 @@
+# Text is stored and checked out with LF on every platform (also with core.autocrlf=true on Windows):
+# cli/build-update.php refuses CR in release text files, and update hashes must match an LF install.
+* text=auto eol=lf
 # Signed release artifacts must retain their exact bytes on every platform.
 releases/** binary
 # Shell scripts run inside Linux containers.
