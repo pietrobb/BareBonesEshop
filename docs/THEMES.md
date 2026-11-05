@@ -95,6 +95,11 @@ providers `core.latest-products`, `core.category-products`, `core.tagged-product
 `core.curated-products`, `core.featured-categories`, `core.specification-values` and `core.banner`.
 See `themes/bookshop/layouts.json`.
 
+Pages built from sections are `homepage`, `product`, `cms` (and CMS page templates), `account` and `wishlist`. The
+category, search, cart and checkout pages are fixed templates (`themes/default/blocks/storefront/category-page.html`,
+`search-results.html`, `cart.html`, `checkout.html`), overridden by the same path in your theme's `blocks/`;
+`layouts.json` entries for them are not used.
+
 A section `type` must be a key of `sections` in `theme.json` (yours or a parent's). A type that is not
 registered there renders nothing on the page, only `<!-- unregistered section: <type> -->` in the HTML
 source, and `php cli/theme-check.php` lists it as a `[WARN]`. A typo in `layouts.json` or a new block

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Developer docs and carrier data** (review round 17, medium).
+  - The migration example in `docs/EXTENSIONS.md` creates its table with an `id` column; it named no primary-key
+    column, so SQLite got a column called `INTEGER` and MySQL/MariaDB refused it (ERROR 1064). A test runs the
+    example as written on both databases.
+  - `docs/EXTENSIONS.md` documents a payment provider's `signature_header` (without it every notification is
+    answered HTTP 400) and the `payment_methods` and `payment_method_countries` rows that offer it at checkout.
+  - `php cli/theme-check.php` no longer warns 17 times per store: the root `layouts.json` lost its `category`,
+    `cart`, `checkout` and `search` pages, which the storefront renders with fixed templates and never read.
+    `docs/THEMES.md` says which pages are built from sections.
+  - A carrier's `generateLabel()` receives the label fields of the order (`ShippingService::LABEL_ORDER_FIELDS`)
+    instead of the whole row: no IP address, customer account, payment or ERP data.
+
 - **Extension quarantine only for broken code** (review round 17, medium). Input that made an extension fail an
   allocation ("Out of memory") still quarantined it, payment provider included, for good. Only a parse, compile or
   class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never

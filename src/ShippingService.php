@@ -18,6 +18,16 @@ class ShippingService
     /** @var ShippingAdapter[] */
     private static array $adapters = [];
 
+    /**
+     * The order fields a carrier's generateLabel() receives: what a parcel needs (recipient, address, amounts, the
+     * label's parcel and pickup point). Not the whole row (R17): no IP address, customer account, payment or ERP data.
+     */
+    public const LABEL_ORDER_FIELDS = [
+        'id', 'order_number', 'store_id', 'status', 'customer_name', 'customer_email', 'customer_phone', 'shipping_addr',
+        'payment_method', 'subtotal', 'shipping_cost', 'total', 'currency', 'locale', 'shipping_method', 'shipping_zone',
+        'shipping_weight_g', 'created_at', 'pickup_point_id', 'cod_amount', 'label_sequence', 'shipment_id',
+    ];
+
     /** Country names in their own language, so the list reads the same in every storefront locale. */
     private const COUNTRY_NAMES = [
         'AT' => 'Österreich', 'BE' => 'België / Belgique', 'BG' => 'България', 'CH' => 'Schweiz / Suisse', 'CY' => 'Κύπρος',
@@ -228,7 +238,7 @@ class ShippingService
         // T9: the carrier API is called with no transaction open. Inside one, a slow carrier held the order lock (on
         // SQLite the whole database) for its timeout, and a rollback after it answered lost a label that exists.
         if ($db->inTransaction()) throw new \LogicException('ShippingService::generateLabel calls the carrier and must run outside a transaction');
-        $result = $adapter->generateLabel($order);
+        $result = $adapter->generateLabel(array_intersect_key($order, array_flip(self::LABEL_ORDER_FIELDS)));
 
         $db->beginTransaction();
         try {

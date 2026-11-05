@@ -30,7 +30,8 @@ interface ShippingAdapter
     /**
      * Generate a shipping label (AWB) for a confirmed order.
      *
-     * @param array $order Full order row from DB (+ items if needed)
+     * @param array $order The order fields in ShippingService::LABEL_ORDER_FIELDS (recipient, shipping_addr, amounts,
+     *                     cod_amount, pickup_point_id, shipment_id, label_sequence), not the whole order row
      * @return array {
      *   awb        string  Tracking number / AWB
      *   label_data string  Base64-encoded PDF label or URL
