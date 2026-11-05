@@ -555,6 +555,18 @@ class Setup
                 : 'nginx PHP location has no "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.',
                 'Copy the location ~ \.php$ block from deploy/nginx.conf into ' . (string)($config['operations']['nginx_config'] ?? 'the nginx site config') . ' and reload nginx.');
         }
+        $missingDenies = UpgradeChecks::nginxMissingDenies($config, dirname(__DIR__));
+        if ($missingDenies !== null) {
+            $add($missingDenies === [] ? 'pass' : 'warn', 'upgrade.nginx_denies', $missingDenies === []
+                ? 'nginx has every deny rule of deploy/nginx.conf.'
+                : 'nginx lacks ' . count($missingDenies) . ' deny rule(s) of deploy/nginx.conf, so those files are served: ' . implode(' | ', $missingDenies),
+                'Copy the missing "location … { return 403; }" lines from deploy/nginx.conf into ' . (string)($config['operations']['nginx_config'] ?? 'the nginx site config') . ' and reload nginx.');
+        }
+        $bodyOnly = UpgradeChecks::carrierWebhooksTimestampDefault($config);
+        $add($bodyOnly === [] ? 'pass' : 'warn', 'upgrade.shipping_webhook_timestamp', $bodyOnly === []
+            ? 'Carrier webhook signing: shipping_webhook_require_timestamp is set or no carrier webhook is configured.'
+            : 'shipping_webhook_require_timestamp is not set, so it defaults to true: webhooks of ' . implode(', ', $bodyOnly) . ' without a signed X-Shipping-Timestamp are refused.',
+            'Check that the carrier signs "<timestamp>.<body>" with X-Shipping-Timestamp, then set shipping_webhook_require_timestamp => true in config.php; set false only for a carrier that can sign nothing but the body.');
     }
 
     /** The provider MailService really uses: MAIL_ADAPTER wins over provider_defaults.mail. */

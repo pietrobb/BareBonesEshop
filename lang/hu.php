@@ -1639,6 +1639,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.addr_default'        => 'Beállítás alapértelmezettként',
     'account.rate_limited'        => 'Túl sok próbálkozás. Próbálja később.',
     'account.page_not_found'      => 'Az oldal nem található.',
+    'account.page_unavailable'    => 'Ez az oldal átmenetileg nem érhető el. Kérjük, próbálja újra később.',
     'account.form_retry' => 'Az űrlapot nem sikerült elküldeni. Kérjük, próbálja újra.',
     'account.err_address_invalid' => 'A cím nem lett elmentve. Ellenőrizze a megjelölt mezőket.',
     'account.err_address_required' => 'Ez a mező kötelező.',

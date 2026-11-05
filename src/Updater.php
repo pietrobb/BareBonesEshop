@@ -422,6 +422,19 @@ final class Updater
                     : 'stores.json is in the v1.x format (no default_store) and no private_runtime_dir is configured for the upgraded copy;'
                         . ' this release would answer 503: set private_runtime_dir first');
             }
+            // The deny rules and the carrier-webhook default of the release running this doctor (CHANGELOG upgrade notes).
+            $missingDenies = UpgradeChecks::nginxMissingDenies($config, dirname(__DIR__));
+            if ($missingDenies !== null) {
+                $add($missingDenies === [] ? 'ok' : 'warn', 'nginx_denies', $missingDenies === []
+                    ? 'nginx (operations.nginx_config) has every deny rule of deploy/nginx.conf'
+                    : 'nginx (operations.nginx_config) lacks deny rule(s) of deploy/nginx.conf, so those files are served: ' . implode(' | ', $missingDenies)
+                        . '; copy the missing lines and reload nginx');
+            }
+            $bodyOnly = UpgradeChecks::carrierWebhooksTimestampDefault($config);
+            if ($bodyOnly !== []) {
+                $add('warn', 'shipping_webhook_timestamp', 'shipping_webhook_require_timestamp is not set, so it defaults to true: webhooks of '
+                    . implode(', ', $bodyOnly) . ' without a signed X-Shipping-Timestamp are refused; confirm the carrier signs it and set the option explicitly');
+            }
         }
 
         [$senderLevel, $senderMessage] = UpgradeChecks::mailSender();

@@ -253,6 +253,10 @@ Resources and scopes: products (`products:read`, `products:write`), orders
 also needs `refunds:write`), categories (`categories:read`), customers without
 credentials (`customers:read`) and per-warehouse stock with ledger adjustments
 (`inventory:read`, `inventory:write`). Every credential sees only its own store.
+Personal data on orders (the buyer's phone, the delivery address, the note) is
+returned only to a credential that also has `customers:read`. For an incremental
+sync, pass the first page's `meta.next_updated_after` as the next run's
+`updated_after`; a stock change counts as a product change.
 
 The create command prints the token once; only its SHA-256 hash is stored. Never
 put a token in a URL, log, repository, database export, or webhook payload.
@@ -440,6 +444,9 @@ php cli/restore.php <backup.sql> --i-stopped-writers   # MySQL/MariaDB: scratch 
 php cli/restore.php <backup> --files[-only] [--force]  # invoices, uploads, GDPR salt
 ```
 
+`<backup>` is the path `--list` prints, relative to the backup storage
+(`2026/10/16/eshop-20261016-020000.db`); an absolute path to a file inside a
+local backup storage is accepted too, any other path is refused.
 Restores verify the backup's SHA-256 and size and take a `pre-restore-snapshot`
 first. The `.files.tar` archive holds the GDPR salt, the secret behind every
 pseudonymised GDPR record: keep backups on encrypted, access-controlled storage.
