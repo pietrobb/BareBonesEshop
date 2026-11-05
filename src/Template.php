@@ -4,6 +4,9 @@
  * {{}} syntax: variables, partials, blocks, #if/#each, raw output {{{}}}.
  * Block lookup: stores/{store}/ → themes/{theme}/ → base
  */
+// esc() is a global function declared in Security.php; the autoloader only loads it with the Security class.
+require_once __DIR__ . '/Security.php';
+
 class Template {
     private static string $blocksDir = __DIR__ . '/../blocks';
     private static string $themesDir = __DIR__ . '/../themes';
