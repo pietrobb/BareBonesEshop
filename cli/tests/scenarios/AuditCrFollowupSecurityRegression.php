@@ -235,7 +235,7 @@ PHP);
     $crsNow = time();
     $crsForged = (string)json_encode(['csp-report' => ['document-uri' => 'https://shop.example/pokladna', 'effective-directive' => 'form-action', 'blocked-uri' => 'https://evil.example/x']]);
     for ($crsI = 0; $crsI < 4; $crsI++) CspReports::ingest($crsForged, $pdo, $crsNow - $crsI, '203.0.113.7');
-    $crsMetricsConfig = require TEST_CLI_DIR . '/../config.php';
+    $crsMetricsConfig = require AppConfig::path(dirname(TEST_CLI_DIR));
     $crsMetricsConfig['jobs_dir'] = sys_get_temp_dir();
     $crsMetricsConfig['private_cache_dir'] = sys_get_temp_dir();
     $crsMetricsConfig['monitoring'] = [

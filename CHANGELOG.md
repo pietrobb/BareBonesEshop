@@ -9,6 +9,12 @@
   - An e-book whose line was refunded through a return shows "Blocked" in the order detail instead of "Active"; the
     download itself was already refused.
   - A credit note has a variable symbol of its own: "CN-20260007" no longer carries the digits of invoice 20260007.
+- **Tests isolated from the developer's `config.php`** (review round 17, medium). The suite read the checkout's
+  `config.php`: an enabled extension or an outbound webhook broke core tests, and the suite posted signed events to
+  the developer's real webhook. It now runs on a copy of `config.php` (database, private directories, `app_url` and
+  keys kept) with extensions, outbound webhooks, mail/ERP/carrier providers, integrations, alert recipients and
+  payment gateway keys reset to `config.example.php`; the PHP processes the suite starts use the same copy. Shop code
+  reads its configuration through `AppConfig::path()`.
 - **Feeds and sitemaps after a sale** (review round 17, medium). Since v2.1.2 every sale, shipment or stock
   adjustment moved `products.updated_at`, which is part of the feed and sitemap fingerprint, so a busy shop rebuilt
   them after every order. A stock change now moves the new `products.stock_updated_at` (migration

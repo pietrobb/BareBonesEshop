@@ -46,7 +46,7 @@ function apiProducts(): array {
     $priceMin = isset($_GET['price_min']) ? max(0, Security::int($_GET['price_min'])) : null;
     $priceMax = isset($_GET['price_max']) ? max(0, Security::int($_GET['price_max'])) : null;
 
-    $cfg = require dirname(__DIR__, 2) . '/config.php';
+    $cfg = require AppConfig::path(dirname(__DIR__, 2));
     $perPage = $cfg['per_page'] ?? 24;
 
     // Get category
@@ -632,7 +632,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
     // visible (it used to be silently undefined → seller always 'SK', OSS always off,
     // admin notification never sent). Seller identity lives per-store in stores.json.
-    $cfg = $runtimeConfig ?? require dirname(__DIR__, 2) . '/config.php';
+    $cfg = $runtimeConfig ?? require AppConfig::path(dirname(__DIR__, 2));
     $synthetic = SyntheticCheckout::isRequest($cfg);
 
     // Capture email for abandoned cart recovery — only with the shopper's reminder consent.
@@ -1016,7 +1016,7 @@ function shippingCartMetrics(array $items): array {
 function apiWebhookStripe(): array {
     $payload = file_get_contents('php://input');
     $sigHeader = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
-    $cfg = require dirname(__DIR__, 2) . '/config.php';
+    $cfg = require AppConfig::path(dirname(__DIR__, 2));
     $secret = $cfg['stripe_webhook_secret'] ?? '';
 
     if (strlen((string)$secret) < 16 || trim((string)$secret) !== (string)$secret) {
@@ -1309,7 +1309,7 @@ function apiWebhookPayment(): array {
     }
 
     // Resolve the exact registered provider. Mock remains an explicit dev-only bypass.
-    $cfg = require dirname(__DIR__, 2) . '/config.php';
+    $cfg = require AppConfig::path(dirname(__DIR__, 2));
     if ($provider === 'mock'
         && ($cfg['adapters']['payment'] ?? '') !== 'MockPayment'
         && empty($cfg['allow_mock_webhook'])) {

@@ -238,7 +238,7 @@ class Logger
 
     private static function config(): array
     {
-        if (self::$config === null) self::$config = require __DIR__ . '/../config.php';
+        if (self::$config === null) self::$config = require AppConfig::path(dirname(__DIR__));
         return self::$config;
     }
 }

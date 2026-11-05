@@ -11,7 +11,7 @@ class OperationalMetrics
         ?int $now = null
     ): array {
         $root ??= dirname(__DIR__);
-        $config ??= require $root . '/config.php';
+        $config ??= require AppConfig::path($root);
         $db ??= Db::get();
         $storeId ??= StoreContext::current()->id();
         $now ??= time();

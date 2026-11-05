@@ -22,7 +22,7 @@ $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, 'sqlite');
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));
-(new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => $appUrl] + (require $root . '/config.php'));
+(new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => $appUrl] + (require AppConfig::path($root)));
 MailService::useAdapter(new LogMail(['log_file' => $dir . '/emails.log']));
 ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');

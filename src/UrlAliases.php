@@ -23,7 +23,7 @@ final class UrlAliases {
 
     private static function rules(): array {
         if (self::$rules === null) {
-            $cfg = is_file(__DIR__ . '/../config.php') ? require __DIR__ . '/../config.php' : [];
+            $cfg = is_file(AppConfig::path(dirname(__DIR__))) ? require AppConfig::path(dirname(__DIR__)) : [];
             self::$rules = self::compile((array)($cfg['url_aliases'] ?? []));
         }
         return self::$rules;

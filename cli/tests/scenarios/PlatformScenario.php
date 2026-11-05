@@ -707,7 +707,7 @@ Logger::setCorrelationId(null);
 $g5Schema = json_decode((string)file_get_contents(TEST_CLI_DIR . '/../config/config.schema.json'), true);
 assert_true(is_array($g5Schema), 'G5 setup: machine-readable config schema is valid JSON');
 assert_true(!empty($g5Schema['properties']['db_password']['x-secret']), 'G5 setup: config schema marks secrets');
-$g5Doctor = Setup::doctor(require TEST_CLI_DIR . '/../config.php', dirname(TEST_CLI_DIR), $pdo);
+$g5Doctor = Setup::doctor(require AppConfig::path(dirname(TEST_CLI_DIR)), dirname(TEST_CLI_DIR), $pdo);
 assert_equals(1, (int)$g5Doctor['schema_version'], 'G5 setup: doctor output is explicitly versioned');
 assert_true(isset($g5Doctor['counts']['pass'], $g5Doctor['checks']), 'G5 setup: doctor output is machine-readable');
 $g5DoctorJson = json_encode($g5Doctor, JSON_THROW_ON_ERROR);
@@ -733,7 +733,7 @@ assert_equals($g5SetupStateHash, hash_file('sha256', $g5ApplySecond['state_file'
 foreach (['runtime', 'cache', 'jobs', 'invoices', 'backups', 'logs'] as $g5SetupDir) @rmdir($g5SetupRoot . '/' . $g5SetupDir);
 @rmdir($g5SetupRoot);
 
-$g5HealthConfig = (require TEST_CLI_DIR . '/../config.php');
+$g5HealthConfig = (require AppConfig::path(dirname(TEST_CLI_DIR)));
 $g5HealthConfig['jobs_dir'] = sys_get_temp_dir();
 $g5HealthConfig['private_cache_dir'] = sys_get_temp_dir();
 $g5Ready = Health::readiness($g5HealthConfig, dirname(TEST_CLI_DIR), $pdo);
@@ -1227,7 +1227,7 @@ foreach (['checkout-name', 'checkout-email', 'checkout-phone', 'checkout-street'
     assert_true(str_contains($g15CheckoutBlock, 'id="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout control exposes {$g15CheckoutControl}");
 }
 $g15Now = strtotime('2026-08-02T09:00:30+00:00');
-$g15Config = require TEST_CLI_DIR . '/../config.php';
+$g15Config = require AppConfig::path(dirname(TEST_CLI_DIR));
 $g15Config['jobs_dir'] = sys_get_temp_dir();
 $g15Config['private_cache_dir'] = sys_get_temp_dir();
 $g15Config['monitoring'] = [

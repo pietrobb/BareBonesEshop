@@ -12,7 +12,7 @@ class ConsentService {
     public static function definitions(array $context = []): array {
         $cfg = self::$definitionsOverride !== null
             ? ['checkout_consents' => self::$definitionsOverride]
-            : require __DIR__ . '/../config.php';
+            : require AppConfig::path(dirname(__DIR__));
         $definitions = $cfg['checkout_consents'] ?? [];
         // R8: digital content is supplied only with the consumer's express consent and acknowledgement of losing the
         // withdrawal right (Directive 2011/83/EU art. 16(m)). On by default; checkout_consents.digital_delivery

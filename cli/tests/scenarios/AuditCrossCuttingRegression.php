@@ -91,7 +91,7 @@ try {
     (require $xcApp . '/migrations/20261016140000_csp_request_id.php')->up($xcDb, $xcDriver === 'sqlite');
     Db::forgetSchema($xcDb);
     $xcDb->exec('DELETE FROM csp_violations');
-    $xcConfig = require TEST_CLI_DIR . '/../config.php';
+    $xcConfig = require AppConfig::path(dirname(TEST_CLI_DIR));
     $xcConfig['jobs_dir'] = sys_get_temp_dir();
     $xcConfig['private_cache_dir'] = sys_get_temp_dir();
     $xcConfig['trusted_proxies'] = [];

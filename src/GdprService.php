@@ -1393,6 +1393,6 @@ class GdprService {
 
     /** Returns config array. Stored separately so tests can stub. */
     private static function config(): array {
-        return require __DIR__ . '/../config.php';
+        return require AppConfig::path(dirname(__DIR__));
     }
 }

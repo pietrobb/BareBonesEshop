@@ -48,7 +48,7 @@ try {
         $root = $installed;
         Db::useConfig($root . '/config.php');
     }
-    $config = require $root . '/config.php';
+    $config = require AppConfig::path($root);
     if (!is_array($config)) {
         throw new RuntimeException('config.php must return an array');
     }

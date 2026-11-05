@@ -574,6 +574,6 @@ class DigitalDelivery {
     }
 
     private static function config(): array {
-        return self::$configOverride ?? require __DIR__ . '/../config.php';
+        return self::$configOverride ?? require AppConfig::path(dirname(__DIR__));
     }
 }
