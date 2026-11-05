@@ -296,14 +296,15 @@ function pageOrder(): void {
                 <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_payment')) ?></button>
             </form>
             <?php endif; ?>
-            <?php if ($canRefund && $refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
+            <?php $byHandRefund = $canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order); ?>
+            <?php if ($canRefund && $refundableBalance > 0 && !$byHandRefund && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <input name="amount" aria-label="<?= esc(I18n::format('admin.order.amount', ['currency' => strtoupper((string)$order['currency'])])) ?>" inputmode="decimal" value="<?= esc(Money::decimal($refundableBalance, (string)$order['currency'])) ?>" data-amount-input>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.refund_reason')) ?>" placeholder="<?= esc(I18n::t('admin.order.refund_reason')) ?>" required>
                 <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.order.request_refund')) ?></button>
             </form>
-            <?php else: ?>
+            <?php elseif (!$byHandRefund): ?>
             <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.refund_unavailable')) ?></p>
             <?php endif; ?>
             <?php if ($canRefund && ($unexecutedRefund = PaymentService::unexecutedRefundRequest($order)) !== null): ?>
@@ -321,9 +322,10 @@ function pageOrder(): void {
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.confirm_refund')) ?></button>
             </form>
             <?php endif; ?>
-            <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
+            <?php if ($byHandRefund): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <?php if (($requestedByHand = PaymentService::requestedRefundInFlight($order)) > 0): ?><span class="muted" data-manual-refund-pending><?= esc(I18n::format('admin.order.manual_refund_pending_hint', ['amount' => I18n::price($requestedByHand, $order['currency'])])) ?></span><?php endif; ?>
                 <input name="amount" aria-label="<?= esc(I18n::format('admin.order.amount', ['currency' => strtoupper((string)$order['currency'])])) ?>" inputmode="decimal" value="<?= esc(Money::decimal($refundableBalance, (string)$order['currency'])) ?>" data-amount-input>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.manual_refund')) ?></button>

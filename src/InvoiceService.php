@@ -367,6 +367,14 @@ final class InvoiceService
         return [$lines, $totals, $breakdown];
     }
 
+    /** Gross the order's cancellation credit notes (creditClosure()) credited, positive. */
+    private static function cancellationCredited(int $orderId): int {
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(-total_gross), 0) FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note'
+            AND status <> :cancelled AND credit_snapshot LIKE :kind");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':order' => $orderId, ':cancelled' => self::STATUS_CANCELLED, ':kind' => '%"kind":"cancellation"%']);
+        return max(0, (int)$stmt->fetchColumn());
+    }
+
     /** The refund credit note issued under $refundKey, if any. */
     private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {
         $stmt = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' AND credit_snapshot LIKE :key");
@@ -637,8 +645,15 @@ final class InvoiceService
     public static function creditRefund(int $orderId, int $amount, string $refundKey, string $reason = ''): ?array
     {
         if ($amount <= 0 || $refundKey === '') throw new InvalidArgumentException('A refund credit note needs an amount and the refund key');
-        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($amount): array {
-            if ($amount > $uncredited) throw new LogicException('The refund exceeds what the invoice still has uncredited');
+        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($orderId, $amount): array {
+            if ($amount > $uncredited) {
+                // R16: money that came in after a cancellation credit note (a cancelled purchase on invoice paid all the same) goes
+                // back with that part of the invoice already credited: only the rest is credited. Was: refused, and the
+                // refund_credit_note job failed for ever with a critical incident.
+                if ($amount - $uncredited > self::cancellationCredited($orderId)) throw new LogicException('The refund exceeds what the invoice still has uncredited');
+                $amount = $uncredited;
+                if ($amount <= 0) return [];
+            }
             // Shares of the uncredited VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
             $sourceGross = array_sum(array_column($rates, 'gross'));
             $parts = [];
