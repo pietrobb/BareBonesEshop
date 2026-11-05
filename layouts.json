@@ -18,19 +18,6 @@
             ]
         },
 
-        "category": {
-            "layout": "two-column",
-            "sections": [
-                {"block": "global/breadcrumb", "slot": "full"},
-                {"block": "category/category-header", "slot": "full"},
-                {"block": "category/active-filters", "slot": "full"},
-                {"block": "category/category-filters", "slot": "sidebar"},
-                {"block": "category/sort-bar", "slot": "main"},
-                {"block": "product/product-grid", "slot": "main"},
-                {"block": "global/pagination", "slot": "main"}
-            ]
-        },
-
         "product": {
             "layout": "one-column",
             "sections": [
@@ -40,34 +27,6 @@
                 {"block": "product/product-tabs"},
                 {"block": "product/related-products"},
                 {"block": "product/recently-viewed"}
-            ]
-        },
-
-        "cart": {
-            "layout": "two-column",
-            "sections": [
-                {"block": "global/breadcrumb", "slot": "full"},
-                {"block": "cart/cart-items", "slot": "main"},
-                {"block": "cart/cart-summary", "slot": "sidebar"},
-                {"block": "cart/cross-sell", "slot": "full"}
-            ]
-        },
-
-        "checkout": {
-            "layout": "two-column",
-            "sections": [
-                {"block": "checkout/checkout-form", "slot": "main"},
-                {"block": "checkout/order-summary", "slot": "sidebar"}
-            ]
-        },
-
-        "search": {
-            "layout": "one-column",
-            "sections": [
-                {"block": "global/breadcrumb"},
-                {"block": "category/sort-bar"},
-                {"block": "product/product-grid"},
-                {"block": "global/pagination"}
             ]
         },
 
