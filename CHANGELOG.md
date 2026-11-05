@@ -76,7 +76,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   SQLite accepts it). A regression test now scans every SQL string in `src/` and `extensions/` for a repeated named
   placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by an
   older updater it reports the tables that updater never tracked (v2.1.1: customers; v2.1.0 or older: invoices,
-  refunds and customers) as an unknown number of discarded rows instead of skipping them silently.
+  refunds and customers) as an unknown number of discarded rows instead of skipping them silently. When the counters
+  still cannot be raised, the rollback notice no longer also claims the discarded invoice numbers are not issued again.
 - **Refunds after a cancellation credit note, refunds by hand** (review round 16). A cancelled purchase on invoice
   that was paid all the same had its invoice fully credited by the cancellation credit note; refunding that money
   then failed for ever ("the refund exceeds what the invoice still has uncredited"), and its credit-note job raised a
