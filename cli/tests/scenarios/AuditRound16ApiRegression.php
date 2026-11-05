@@ -44,7 +44,7 @@ try {
     $pdo->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', ?, 'R16A-VAR-RED', 6, 0)")->execute([$r16aWarehouse]);
     Warehouse::syncProductStock(['R16A-STOCK', 'R16A-VAR-RED']);
     assert_equals('2020-01-01 00:00:00', (string)Products::byId(9871)['updated_at'], 'R16 API: a stock sync that changes nothing keeps updated_at');
-    $pdo->exec("UPDATE products SET updated_at = '2020-01-01 00:00:00' WHERE id IN (9871, 9872)");
+    $pdo->exec("UPDATE products SET updated_at = '2020-01-01 00:00:00', stock_updated_at = NULL WHERE id IN (9871, 9872)");
 
     $r16aSince = $r16aErp('GET', '/products', ['updated_after' => '2021-01-01', 'limit' => 1])['body']['meta'] ?? [];
     $pdo->beginTransaction();
@@ -53,7 +53,7 @@ try {
     $r16aAfterSale = $r16aChanged($r16aErp, '2021-01-01');
     assert_true(in_array(9871, $r16aAfterSale, true), 'R16 API: a sale (stock reserved) makes the product appear in updated_after (was: updated_at unchanged, the ERP never saw the stock drop)');
     assert_equals(7, (int)Products::byId(9871)['stock'], 'R16 API: the product shows the stock left after the sale');
-    $pdo->exec("UPDATE products SET updated_at = '2020-01-01 00:00:00' WHERE id = 9871");
+    $pdo->exec("UPDATE products SET updated_at = '2020-01-01 00:00:00', stock_updated_at = NULL WHERE id = 9871");
     Warehouse::adjustStock($r16aWarehouse, 'R16A-STOCK', 5, 'adjustment', 'r16a');
     assert_true(in_array(9871, $r16aChanged($r16aErp, '2021-01-01'), true), 'R16 API: a stock adjustment makes the product appear in updated_after');
     $r16aVariant = (int)$pdo->query("SELECT id FROM variants WHERE sku = 'R16A-VAR-RED'")->fetchColumn();
