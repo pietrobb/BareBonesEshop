@@ -946,10 +946,10 @@ function handleProductSave(): void {
                 setFlash('ok', I18n::t('admin.product.unchanged'));
             }
         } else {
-            $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, brand_id, gtin, mpn, seo_title, meta_description, translations, price, compare_price, stock, status, summary, description, images, image_alts, tags, weight_g, stock_low_threshold, stock_critical_threshold, store_id)
-                VALUES (:sku, :name, :slug, :product_type, :category_id, :brand_id, :gtin, :mpn, :seo_title, :meta_description, :translations, :price, :compare_price, :stock, :status, :summary, :description, :images, :image_alts, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold, :catalog)");
-            $db->beginTransaction();
-            $stmt->execute($data + [':catalog' => StoreContext::current()->catalogId()]);
+            $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, brand_id, gtin, mpn, seo_title, meta_description, translations, price, compare_price, stock, status, summary, description, images, image_alts, tags, weight_g, stock_low_threshold, stock_critical_threshold, store_id, currency)
+                VALUES (:sku, :name, :slug, :product_type, :category_id, :brand_id, :gtin, :mpn, :seo_title, :meta_description, :translations, :price, :compare_price, :stock, :status, :summary, :description, :images, :image_alts, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold, :catalog, :currency)");
+            $db->beginTransaction(); // R17: a new product is priced in the store's currency it was typed in, not in 'eur'.
+            $stmt->execute($data + [':catalog' => StoreContext::current()->catalogId(), ':currency' => strtolower($currency)]);
             $id = (int)$db->lastInsertId();
             ProductEditor::save($id, $editor);
             AuditLog::log('product', $id, null, $data, 'Admin create');
