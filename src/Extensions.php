@@ -10,8 +10,9 @@
  * extensions/<code>/extension.php returns ['code' => '<code>', 'name' => ..., 'version' => ...,
  * 'register' => static function (ExtensionApi $api): void { ... }]; classes are autoloaded from
  * extensions/<code>/src/<Class>.php. A broken extension is skipped as a whole and reported by
- * errors(), the log and `cli/setup.php doctor`; the shop and the other extensions keep running. A fatal error PHP
- * cannot catch quarantines the extension that raised it (quarantineOnFatal) until its PHP files change.
+ * errors(), the log and `cli/setup.php doctor`; the shop and the other extensions keep running. A parse, compile or
+ * class-linking error in an extension's file quarantines that extension (quarantineOnFatal, a file in
+ * private_runtime_dir) until its PHP files change; limits and exceptions a request can provoke never do.
  */
 final class Extensions
 {
@@ -48,7 +49,7 @@ final class Extensions
         // R15: an error PHP cannot catch (a provider class missing its interface's methods, a class declared twice)
         // ended every request of the shop. The request that hits one still fails, but the extension whose file raised
         // it is quarantined: later requests skip it like any broken extension until its files change.
-        self::$quarantineFile = self::quarantinePath($config, $directory);
+        self::$quarantineFile = self::quarantinePath($config);
         if (!self::$guardRegistered) {
             register_shutdown_function([self::class, 'quarantineOnFatal']);
             self::$guardRegistered = true;
@@ -81,10 +82,7 @@ final class Extensions
     public static function quarantineOnFatal(): void
     {
         $error = error_get_last();
-        if ($error === null || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return;
-        // R16: "Uncaught ..." is an exception the code could have caught (a page throwing on bad input), not a broken
-        // extension: quarantining it let one anonymous request disable the extension and its providers for good.
-        if (preg_match('/^(Allowed memory size|Maximum execution time|Uncaught )/', (string)$error['message'])) return;
+        if ($error === null || !self::brokenCode((int)$error['type'], (string)$error['message'])) return;
         $file = self::normalize((string)$error['file']);
         foreach (self::$guarded as $code => $roots) {
             foreach ($roots as $root) {
@@ -95,6 +93,18 @@ final class Extensions
                 return;
             }
         }
+    }
+
+    /**
+     * Only an error in the extension's code itself quarantines it: a parse or compile error, or a class that cannot be
+     * linked (a provider missing its interface's methods, an incompatible signature). Everything else a request can
+     * provoke with its input: an uncaught exception (R16), a memory, time or stack limit, "Out of memory" (R17).
+     */
+    private static function brokenCode(int $type, string $message): bool
+    {
+        if (in_array($type, [E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return true;
+        return $type === E_ERROR && preg_match('/abstract methods? and must therefore|must be compatible with|^Cannot (re)?declare |'
+            . 'cannot implement |cannot extend |^Access level to /i', $message) === 1;
     }
 
     /** @return array<string,array{code:string,name:string,version:string}> */
@@ -243,12 +253,14 @@ final class Extensions
         self::$quarantineFile = '';
     }
 
-    /** Quarantine file: in private_runtime_dir, else the temp directory, one per extensions directory. */
-    private static function quarantinePath(array $config, string $directory): string
+    /**
+     * Quarantine file in private_runtime_dir. Without one there is no quarantine (R17): the shared temp directory had a
+     * predictable file name, so another account on the host could plant a quarantine and switch extensions off.
+     */
+    private static function quarantinePath(array $config): string
     {
         $runtimeDir = rtrim((string)($config['private_runtime_dir'] ?? ''), '/\\');
-        if ($runtimeDir !== '' && is_dir($runtimeDir) && is_writable($runtimeDir)) return $runtimeDir . '/extension-quarantine.json';
-        return rtrim(sys_get_temp_dir(), '/\\') . '/bbeshop-' . substr(hash('sha256', self::normalize((string)(realpath($directory) ?: $directory))), 0, 16) . '-extension-quarantine.json';
+        return $runtimeDir !== '' && is_dir($runtimeDir) && is_writable($runtimeDir) ? $runtimeDir . '/extension-quarantine.json' : '';
     }
 
     /** @return array<string,array{error?:string,at?:int,fingerprint?:string}> */
