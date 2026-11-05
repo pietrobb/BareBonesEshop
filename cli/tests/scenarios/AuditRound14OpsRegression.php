@@ -165,6 +165,7 @@ if ($r14oHasMaintenance) {
         $r14oGone = proc_open([PHP_BINARY, '-r', ''], [], $r14oGonePipes);
         $r14oGonePid = (int)proc_get_status($r14oGone)['pid'];
         proc_close($r14oGone);
+        MaintenanceMode::leave($r14oRepo); // R17: the lock of a killed process is gone with it
         file_put_contents($r14oMarker, json_encode(['since' => gmdate('c'), 'reason' => 'r14 test', 'pid' => $r14oGonePid, 'host' => (string)gethostname()]));
         touch($r14oMarker, time() - MaintenanceMode::STALE_AFTER - 60);
         assert_equals([200, 'served'], $r14oGet(), 'R14 T20: a marker left by a killed updater stops blocking after an hour');

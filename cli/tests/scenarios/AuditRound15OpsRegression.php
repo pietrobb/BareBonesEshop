@@ -239,8 +239,8 @@ try {
     $r15oFail('batched order_item_digital backfill', $e);
 }
 $r15mCli = (string)file_get_contents(dirname(__DIR__, 2) . '/migrate.php');
-assert_true(preg_match('/MaintenanceMode::enter\(\$root.*finally \{\s*if \(\$ownMaintenance\) MaintenanceMode::leave\(\$root\);/s', $r15mCli) === 1,
-    'R15 medium: cli/migrate.php apply puts the shop into maintenance while migrations run and always leaves it afterwards');
+assert_true(preg_match('/MaintenanceMode::enter\(\$root.*catch \(Throwable \$migrationError\).*MaintenanceMode::fail\(\$root.*if \(\$ownMaintenance \|\| MaintenanceMode::failed\(\$root, \'cli\/migrate\.php\'\)\) MaintenanceMode::leave\(\$root\);/s', $r15mCli) === 1,
+    'R15 medium: cli/migrate.php apply puts the shop into maintenance while migrations run, leaves it after success and (R17) keeps it after a failure');
 
 /** Records how many rows each executed UPDATE changed. */
 class R15MigrationStatement extends PDOStatement {

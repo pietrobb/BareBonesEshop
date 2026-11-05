@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Maintenance window** (review round 17, medium).
+  - The updater holds a lock on `.maintenance` while it runs: a reused PID no longer keeps the shop on 503 for up to
+    24 h, and an update started from another container (docker compose, shared volume) keeps its window past 1 h.
+    An unlocked marker of a process that still runs counts only with the same process start time.
+  - A failed `php cli/migrate.php apply` (or an update whose automatic rollback fails) leaves the shop in maintenance
+    instead of reopening it on a half-migrated schema; the next successful run lifts it.
 - **Low findings** (review round 16).
   - The admin product form takes the price and the original price in the product's currency ("12.90"), not in
     cents; an amount finer than the currency shows is refused.
