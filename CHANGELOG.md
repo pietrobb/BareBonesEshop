@@ -8,6 +8,10 @@
     An unlocked marker of a process that still runs counts only with the same process start time.
   - A failed `php cli/migrate.php apply` (or an update whose automatic rollback fails) leaves the shop in maintenance
     instead of reopening it on a half-migrated schema; the next successful run lifts it.
+- **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
+  were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
+  could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout
+  (`* text=auto eol=lf`), the update builder also refuses a lone CR, and CI builds an update package from the tree.
 - **Low findings** (review round 16).
   - The admin product form takes the price and the original price in the product's currency ("12.90"), not in
     cents; an amount finer than the currency shows is refused.

@@ -52,6 +52,15 @@ jobs:
           set -e
           git ls-files -z '*.php' | xargs -0 -n1 -P4 php -l > /dev/null
 
+      # R17: one CR in a release text file makes cli/build-update.php refuse the tree, so no release can be built.
+      - name: Release tree builds as an update package (LF line endings only)
+        run: |
+          set -e
+          rel="$(mktemp -d)"
+          mkdir "$rel/empty" "$rel/head"
+          git archive HEAD | tar -x -C "$rel/head"
+          php cli/build-update.php --from="$rel/empty" --to="$rel/head" --version=0.0.0-ci --output="$rel/package"
+
       - name: Prepare runtime directories
         run: |
           mkdir -p db cache logs jobs
