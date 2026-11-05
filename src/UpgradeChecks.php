@@ -53,9 +53,9 @@ final class UpgradeChecks
      * all (MailService skips every e-mail).
      * @return array{0: 'ok'|'warn'|'fail', 1: string}
      */
-    public static function mailSender(): array
+    public static function mailSender(?array $config = null): array
     {
-        $from = MailService::sender();
+        $from = MailService::sender($config);
         if (trim((string)(getenv('MAIL_FROM') ?: '')) === '') {
             return ['warn', $from === MailService::DEFAULT_FROM
                 ? 'MAIL_FROM is not set: e-mails go out from ' . MailService::DEFAULT_FROM . ', which receiving servers reject or file as spam.'

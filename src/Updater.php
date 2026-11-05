@@ -444,7 +444,8 @@ final class Updater
             }
         }
 
-        [$senderLevel, $senderMessage] = UpgradeChecks::mailSender();
+        // The release running this doctor may have no config.php of its own (--installed): read the shop's.
+        [$senderLevel, $senderMessage] = UpgradeChecks::mailSender($config ?? []);
         $add($senderLevel, 'mail_from', $senderMessage);
         $add(PHP_VERSION_ID >= 80100 ? 'ok' : 'fail', 'php', 'PHP ' . PHP_VERSION . ' (8.1+ required)');
         $add(PHP_SAPI === 'cli' ? 'ok' : 'fail', 'sapi', 'Update command is running under ' . PHP_SAPI);

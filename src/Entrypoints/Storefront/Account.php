@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($ok || $err === 'email_taken') {
                 $flash = str_replace('{email}', $email, $t('account.register_check_email'));
-                $flashType = 'success';
+                $flashType = 'ok';
                 $p = 'login';
                 $fieldValues = ['email' => $email];
             } else {

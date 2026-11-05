@@ -90,6 +90,7 @@ register_shutdown_function(static function () use ($mails, $email): void {
     while (ob_get_level() > 0) $out = ob_get_clean() . $out;
     echo "\nR17LRESULT" . json_encode(['code' => http_response_code(), 'flash' => str_replace($email, '{email}', (string)($GLOBALS['flash'] ?? '')),
         'flash_type' => $GLOBALS['flashType'] ?? null, 'page' => $GLOBALS['p'] ?? null, 'taken_text' => str_contains($out, I18n::t('account.err_email_taken')),
+        'shown_as' => str_contains($out, 'flash-error') ? 'error' : (str_contains($out, 'flash-ok') ? 'ok' : 'none'),
         'mails' => $mails()]);
 });
 require $root . '/account.php';
@@ -108,8 +109,9 @@ $r17lRun = static function (string $mode, string $email) use ($r17lRoot, $testDb
 };
 $r17lNew = $r17lRun('register', 'r17-low-new@example.com');
 $r17lTaken = $r17lRun('register', $r17lEmail);
-$r17lView = static fn(array $r): array => array_intersect_key($r, ['code' => 1, 'flash' => 1, 'flash_type' => 1, 'page' => 1, 'taken_text' => 1]);
-assert_true(($r17lNew['flash_type'] ?? null) === 'success' && $r17lView($r17lNew) === $r17lView($r17lTaken),
+$r17lView = static fn(array $r): array => array_intersect_key($r, ['code' => 1, 'flash' => 1, 'flash_type' => 1, 'page' => 1, 'taken_text' => 1, 'shown_as' => 1]);
+// The rendered page shows the confirmation as a success box, never as an error (the bookshop acceptance checks .flash-error).
+assert_true(($r17lNew['shown_as'] ?? null) === 'ok' && $r17lView($r17lNew) === $r17lView($r17lTaken),
     'R17 low: registering a taken address reads exactly like a new account (' . json_encode([$r17lNew, $r17lTaken]) . ')');
 $r17lMailTo = static fn(array $r, string $needle): bool => (bool)array_filter($r['mails'] ?? [], static fn(array $m): bool => str_contains((string)$m['text'], $needle));
 assert_true($r17lMailTo($r17lTaken, 'reset') && !$r17lMailTo($r17lTaken, 'verify_email'),
@@ -151,7 +153,7 @@ $pdo->prepare('UPDATE orders SET payment_id = NULL WHERE id = ? AND payment_id =
 
 // 6. The CLI worker recorded a failed job inside the job's still open transaction (and every later job with it).
 $r17lWorker = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/worker.php');
-assert_true(substr_count($r17lWorker, 'workerRollBack();') >= 2 && str_contains($r17lWorker, 'Job left a database transaction open'),
+assert_true(substr_count($r17lWorker, '$rollBackOpenJob();') >= 2 && str_contains($r17lWorker, 'Job left a database transaction open'),
     'R17 low: the worker rolls a failed job\'s transaction back and refuses a job that leaves one open');
 
 // 7. The API's vat_rate was the int 20 for a line with a VAT component and the float 20.0 without one.

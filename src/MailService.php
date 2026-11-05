@@ -33,12 +33,12 @@ class MailService {
     /**
      * The From address: MAIL_FROM, else noreply@ the configured app_url's domain (R17: a shop on a host where no
      * environment variable can be set sent every e-mail from noreply@localhost.invalid), else DEFAULT_FROM. Never
-     * the request's host name.
+     * the request's host name. $config: the shop's config.php when it is not this tree's (the updater's --installed).
      */
-    public static function sender(): string {
+    public static function sender(?array $config = null): string {
         $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: '')));
         if ($from !== '') return $from;
-        $host = strtolower((string)parse_url((string)(Security::config()['app_url'] ?? ''), PHP_URL_HOST));
+        $host = strtolower((string)parse_url((string)(($config ?? Security::config())['app_url'] ?? ''), PHP_URL_HOST));
         if ($host === '' || !str_contains($host, '.') || filter_var($host, FILTER_VALIDATE_IP) || preg_match(self::RESERVED_DOMAIN, $host)) {
             return self::DEFAULT_FROM;
         }
