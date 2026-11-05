@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Updater respects the doctor** (review round 17, medium). `php cli/update.php check` and `apply` refuse every
+  `config.php` FAIL of `doctor` (a private path such as `jobs_dir` inside the web root, a v1.x `stores.json` without
+  `private_runtime_dir`) and show its warnings; `apply` used to install the package anyway. A MariaDB dump client
+  (`mariadb-dump`, the Debian/Ubuntu default, also as `mysqldump`) against a MySQL server is refused before the dump
+  with the generated columns it would break (`ERROR 3105` on restore) and the settings to change; the runbook says
+  which client to install. A shop that still has `api.php` (before 2.1.0) gets a `payment_webhooks` warning from
+  `doctor` and `check` with the new webhook URLs, also added to the runbook.
 - **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
   were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
   could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout
