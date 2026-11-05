@@ -21,7 +21,7 @@ Db::init($db, 'sqlite');
 JobQueue::setDir($dir . '/jobs');
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));
 $cfg = json_decode($cfgJson, true);
-if ($cfg) (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, $cfg + (require $root . '/config.php'));
+if ($cfg) (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, $cfg + (require AppConfig::path($root)));
 ini_set('session.use_cookies', '0');
 ini_set('session.use_strict_mode', '0');
 ini_set('error_log', $dir . '/php-error.log');
@@ -209,7 +209,7 @@ try {
     try {
         $_SESSION = [];
         Cart::clear();
-        $r10sAppCfg = require dirname(TEST_CLI_DIR) . '/config.php';
+        $r10sAppCfg = require AppConfig::path(dirname(TEST_CLI_DIR));
         $r10sCheckout = static fn(string $ip): string => (string)((function () use ($ip, $r10sAppCfg) {
             $_SERVER['REMOTE_ADDR'] = $ip;
             return checkoutExecute(['name' => 'R10 Buyer', 'email' => 'r10-victim@example.com', 'country' => 'SK', 'payment_method' => 'bank_transfer'], $r10sAppCfg);
@@ -291,7 +291,7 @@ try {
     $r10sPrevCfg = $r10sCfgProp->getValue();
     $r10sPrevAddr = $_SERVER['REMOTE_ADDR'] ?? null;
     try {
-        $r10sCfgProp->setValue(null, ['api_ip_limit' => 5] + (require dirname(TEST_CLI_DIR) . '/config.php'));
+        $r10sCfgProp->setValue(null, ['api_ip_limit' => 5] + (require AppConfig::path(dirname(TEST_CLI_DIR))));
         Security::setRateDbForTesting(new PDO('sqlite::memory:'));
         $_SERVER['REMOTE_ADDR'] = '203.0.113.12';
         $r10sApiAllowed = static fn(string $action): bool => method_exists(Security::class, 'apiAllowed') ? Security::apiAllowed($action) : Security::rateLimit('api_' . $action, 120);

@@ -13,7 +13,7 @@ class Db {
     public static function get(): PDO {
         if (self::$pdo) return self::$pdo;
 
-        $cfg = require self::$configPath ?? __DIR__ . '/../config.php';
+        $cfg = require self::$configPath ?? AppConfig::path(dirname(__DIR__));
         self::$driver = strtolower(trim((string)($cfg['db_driver'] ?? '')));
         if (!in_array(self::$driver, ['sqlite', 'mysql'], true)) {
             throw new RuntimeException('Unsupported db_driver; expected sqlite or mysql');

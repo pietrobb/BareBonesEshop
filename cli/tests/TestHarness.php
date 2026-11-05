@@ -10,6 +10,16 @@ define('TEST_DATA_DIR', sys_get_temp_dir() . '/barebones-suite-data-' . getmypid
 mkdir(TEST_DATA_DIR, 0700, true);
 copy(dirname(TEST_CLI_DIR) . '/' . DataOverrides::STORES_EXAMPLE, TEST_DATA_DIR . '/stores.json');
 DataOverrides::isolateSuiteForTesting(TEST_DATA_DIR);
+// R17: the suite and every process it starts read this copy of config.php (AppConfig::path), with the developer's
+// extensions, outbound webhooks, mail/ERP/carrier providers and gateway keys taken out: an enabled extension broke
+// core tests, and the suite posted signed events to the developer's real webhook.
+(static function (): void {
+    $root = dirname(TEST_CLI_DIR);
+    $example = require $root . '/config.example.php';
+    $developer = require $root . '/config.php';
+    file_put_contents(TEST_DATA_DIR . '/' . AppConfig::SUITE_FILE,
+        '<?php return ' . var_export(AppConfig::suiteConfigForTesting(is_array($developer) ? $developer : [], $example), true) . ";\n");
+})();
 
 function entrypointSource(string $entrypoint): string {
     $root = dirname(TEST_CLI_DIR);

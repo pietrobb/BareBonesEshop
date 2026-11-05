@@ -8,7 +8,7 @@ if (!function_exists('guestAccountOfferView')) require_once dirname(TEST_CLI_DIR
 if (!function_exists('renderOrderDone')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/CheckoutPages.php';
 $r11pCfgProp = new ReflectionProperty(Security::class, 'cfg');
 $r11pCfgBefore = $r11pCfgProp->getValue();
-$r11pCfgBase = is_array($r11pCfgBefore) ? $r11pCfgBefore : require dirname(TEST_CLI_DIR) . '/config.php';
+$r11pCfgBase = is_array($r11pCfgBefore) ? $r11pCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR));
 $r11pInstances = new ReflectionProperty(Adapters::class, 'instances');
 $r11pSubstituted = new ReflectionProperty(Adapters::class, 'substituted');
 $r11pInstancesBefore = $r11pInstances->getValue();

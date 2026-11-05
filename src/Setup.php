@@ -189,7 +189,7 @@ class Setup
     public static function doctor(?array $config = null, ?string $root = null, ?PDO $db = null): array
     {
         $root ??= dirname(__DIR__);
-        $config ??= require $root . '/config.php';
+        $config ??= require AppConfig::path($root);
         $checks = [];
         $add = static function (string $status, string $name, string $message, string $action = '') use (&$checks): void {
             $checks[] = compact('status', 'name', 'message', 'action');
@@ -444,7 +444,7 @@ class Setup
     public static function apply(?array $config = null, ?string $root = null): array
     {
         $root ??= dirname(__DIR__);
-        $config ??= require $root . '/config.php';
+        $config ??= require AppConfig::path($root);
         $changes = [];
         // Same rule as doctor: nothing private is created where the web server serves it (install stops here,
         // before the database exists).

@@ -135,7 +135,7 @@ try {
             && !isset($a161View['broken-throws']) && !isset($a161View['disabled-one']) && !StorefrontViewModelRegistry::has('product', 'broken-throws'),
             'A16.1 storefront: the real product view model gets extensions.acme-loyalty.points; core reviews stay; failed/disabled extensions add nothing');
 
-        $a161Doctor = Setup::doctor(['extensions' => $a161Config['extensions']] + (require dirname(TEST_CLI_DIR) . '/config.php'), dirname(TEST_CLI_DIR), Db::get());
+        $a161Doctor = Setup::doctor(['extensions' => $a161Config['extensions']] + (require AppConfig::path(dirname(TEST_CLI_DIR))), dirname(TEST_CLI_DIR), Db::get());
         $a161Check = array_values(array_filter($a161Doctor['checks'] ?? [], static fn(array $c): bool => $c['name'] === 'extensions'))[0] ?? [];
         assert_true(($a161Check['status'] ?? '') === 'fail' && str_contains((string)$a161Check['message'], 'broken-class: ') && str_contains((string)$a161Check['message'], 'boom from register'),
             'A16.1 doctor: setup doctor fails the extensions check and names each broken extension (' . substr((string)($a161Check['message'] ?? 'no check'), 0, 120) . ')');

@@ -1658,7 +1658,7 @@ final class InvoiceService
     {
         if (self::$storageDir !== null) return self::$storageDir;
 
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         $dir = (string)($cfg['invoice_storage_dir'] ?? dirname(self::baseDir()) . '/bareboneseshop-private/invoices');
         if (!self::isAbsolutePath($dir)) {
             throw new \RuntimeException('invoice_storage_dir must be an absolute path outside the application root');

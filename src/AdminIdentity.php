@@ -457,7 +457,7 @@ class AdminIdentity {
     }
 
     private static function secretKey(): string {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         $value = trim((string)(getenv('BBE_ADMIN_IDENTITY_KEY') ?: ($cfg['admin_identity_key'] ?? '')));
         $key = preg_match('/^[a-f0-9]{64}$/i', $value) ? hex2bin($value) : base64_decode($value, true);
         if (!is_string($key) || strlen($key) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
@@ -467,7 +467,7 @@ class AdminIdentity {
     }
 
     private static function configInt(string $key, int $default, int $min, int $max): int {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         return max($min, min($max, (int)($cfg[$key] ?? $default)));
     }
 

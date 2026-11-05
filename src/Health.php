@@ -10,7 +10,7 @@ class Health
     public static function readiness(?array $config = null, ?string $root = null, ?PDO $db = null): array
     {
         $root ??= dirname(__DIR__);
-        $config ??= require $root . '/config.php';
+        $config ??= require AppConfig::path($root);
         $checks = [];
         try {
             $db ??= Db::get();

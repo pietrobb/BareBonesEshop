@@ -6,7 +6,7 @@
 echo "\n--- P0 layer 4: payment funnel alarm, CSP metrics, synthetic orders ---\n";
 
 $pmNow = strtotime('2031-03-01T12:00:00+00:00');
-$pmConfig = require TEST_CLI_DIR . '/../config.php';
+$pmConfig = require AppConfig::path(dirname(TEST_CLI_DIR));
 $pmConfig['jobs_dir'] = sys_get_temp_dir();
 $pmConfig['private_cache_dir'] = sys_get_temp_dir();
 $pmConfig['monitoring'] = [
