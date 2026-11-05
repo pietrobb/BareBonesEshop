@@ -123,6 +123,9 @@ try {
     $r16rNotice = (string)(new ReflectionMethod(Updater::class, 'reportDiscardedWrites'))->invoke($r16rUpdater, $r16rOld, 'manual rollback', 0);
     assert_true(str_contains($r16rNotice, 'an unknown number of invoices/order_refunds/customers rows') && str_contains($r16rNotice, 'their numbers are not issued again'),
         'R16 medium: the rollback of a v2.1.0 snapshot warns that invoices may have been discarded');
+    $r16rUnraised = (string)(new ReflectionMethod(Updater::class, 'reportDiscardedWrites'))->invoke($r16rUpdater, $r16rNow, 'manual rollback', 'SQLSTATE[HY093]: Invalid parameter number');
+    assert_true(str_contains($r16rUnraised, 'could not be raised') && str_contains($r16rUnraised, 'HY093') && !str_contains($r16rUnraised, 'not issued again'),
+        'R16 high 1: when the counters could not be raised the notice says so and does not claim the discarded numbers are not issued again');
     // A table the snapshot tracked but that did not exist then (created by the update) stays out of the count.
     $r16rNew = $r16rDiscarded->invoke($r16rUpdater, ['database' => ['high_water' => ['orders' => 2, 'payment_transactions' => 2, 'invoices' => 2, 'order_refunds' => 2],
         'high_water_tables' => ['orders', 'payment_transactions', 'invoices', 'order_refunds', 'customers']]]);

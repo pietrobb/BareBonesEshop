@@ -1227,7 +1227,8 @@ final class Updater
         $notice = "{$context} discarded " . implode(' and ', $parts) . ' written after the update snapshot;'
             . ' recover them from the pre-update data (orders, customers, payments, payment provider records) before reopening the shop'
             . (($known['invoices'] ?? 0) > 0 || in_array('invoices', $unknown, true)
-                ? '; discarded invoices and credit notes were already issued: their numbers are not issued again, re-enter them from the sent PDFs'
+                ? '; discarded invoices and credit notes were already issued' . ($numberingNotice === '' ? ': their numbers are not issued again' : '')
+                    . ', re-enter them from the sent PDFs'
                 : '')
             . $numberingNotice;
         if (class_exists('IncidentMonitor')) {
