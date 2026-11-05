@@ -9,6 +9,11 @@
   - An e-book whose line was refunded through a return shows "Blocked" in the order detail instead of "Active"; the
     download itself was already refused.
   - A credit note has a variable symbol of its own: "CN-20260007" no longer carries the digits of invoice 20260007.
+- **Extension quarantine only for broken code** (review round 17, medium). Input that made an extension fail an
+  allocation ("Out of memory") still quarantined it, payment provider included, for good. Only a parse, compile or
+  class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never
+  do. Without a writable `private_runtime_dir` there is no quarantine: the fallback file in the shared temp
+  directory had a predictable name, so another account on the host could plant one.
 - **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
   were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
   could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout
