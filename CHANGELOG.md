@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Tests on an installed shop, doctor, restore** (review round 16, medium). After `php cli/setup.php install` the test
+  suite stopped midway: it read the installed shop's stores.json and legal texts from `private_runtime_dir` (the
+  sample stores are hidden there, so a storefront test answered 404 and ended the run). The suite now runs on its own
+  copy of `stores.example.json` in a temporary data directory and never reads or writes the installed shop's data.
+  `php cli/setup.php doctor`, `php cli/update.php doctor` and `cli/staging-preflight.php` warn when the nginx site
+  config (`operations.nginx_config`) lacks deny rules of the shipped `deploy/nginx.conf` (for example `*.lock` and
+  `*.tmp`) and name them, and when carrier webhook secrets are set but `shipping_webhook_require_timestamp` is not
+  (it defaults to true, so a carrier that signs only the body has its webhooks refused). `cli/restore.php` takes the
+  backup path as `--list` prints it, relative to the backup storage, and now also an absolute path to a file in a
+  local backup storage; any other path is refused with what it takes (was: "path must be relative").
 - **Rollback numbering on MySQL/MariaDB** (review round 16, high). After an update rollback on MySQL or MariaDB the
   invoice and credit note counters were not raised past the numbers issued during the update, so those numbers were
   issued a second time: the counter update bound one named placeholder twice, which native prepares reject (HY093;

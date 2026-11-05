@@ -5,7 +5,8 @@ require_once __DIR__ . '/cli-only.php';
  * BareBones Shop — Restore the database (SQLite or MySQL/MariaDB) and stored files from a backup
  *
  * Usage:
- *   php cli/restore.php <remote_path>            Restore from backup at remote_path
+ *   php cli/restore.php <remote_path>            Restore from backup at remote_path (relative to the backup storage, as
+ *                                                --list prints it; an absolute path to a file in it is accepted too)
  *   php cli/restore.php --latest                 Restore from newest backup (never a pre-restore-snapshot)
  *   php cli/restore.php --list                   List available backups (newest first)
  *   php cli/restore.php <path> --skip-snapshot   Don't take a pre-restore-snapshot (DANGEROUS; SQLite only)
@@ -90,6 +91,12 @@ if (isset($flags['latest'])) {
 
 if (!$remotePath) {
     fwrite(STDERR, "Usage: php cli/restore.php <remote_path>|--latest|--list [--skip-snapshot] [--quiet] [--yes] [--i-stopped-writers] [--files|--files-only] [--force]\n");
+    exit(1);
+}
+try {
+    $remotePath = BackupService::storagePath($remotePath);
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'REFUSED: ' . $e->getMessage() . "\n");
     exit(1);
 }
 $isMysqlDump = preg_match('/\.sql(?:\.gz)?$/', $remotePath) === 1;
