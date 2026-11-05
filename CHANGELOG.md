@@ -19,6 +19,13 @@
   placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently.
+- **Refunds after a cancellation credit note, refunds by hand** (review round 16). A cancelled purchase on invoice
+  that was paid all the same had its invoice fully credited by the cancellation credit note; refunding that money
+  then failed for ever ("the refund exceeds what the invoice still has uncredited"), and its credit-note job raised a
+  critical incident. The refund now credits only what the invoice still has left (nothing, when the cancellation
+  credited all of it). "Request refund" on a payment returned by hand (bank transfer, cash on delivery) set the
+  payment to "Refund in progress" with nothing to execute it; such an order now offers only "Record manual refund",
+  and a request left from before shows the amount to pay back and record.
 - **Extension quarantine only for real fatal errors** (review round 16). One anonymous request could disable an
   extension, payment provider included, until a developer changed its files: a page throwing on bad input ended the
   request as "Uncaught ..." and the fatal-error guard quarantined the extension. An uncaught exception no longer
