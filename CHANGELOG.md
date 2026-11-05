@@ -7,6 +7,10 @@
   class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never
   do. Without a writable `private_runtime_dir` there is no quarantine: the fallback file in the shared temp
   directory had a predictable name, so another account on the host could plant one.
+- **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
+  were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
+  could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout
+  (`* text=auto eol=lf`), the update builder also refuses a lone CR, and CI builds an update package from the tree.
 - **Low findings** (review round 16).
   - The admin product form takes the price and the original price in the product's currency ("12.90"), not in
     cents; an amount finer than the currency shows is refused.
