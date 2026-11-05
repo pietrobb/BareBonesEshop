@@ -54,7 +54,10 @@ final class ProductEditor {
             return I18n::format('admin.msg.product.sku_change_blocked', ['sku' => $old['sku'], 'reason' => $pinned]);
         }
         $minPrice = $id ? ProductVariants::minBasePrice($id) : 0;
-        if (Security::int($form['price']) < $minPrice) return I18n::format('admin.msg.product.price_below_variants', ['min' => $minPrice]);
+        if (Security::int($form['price']) < $minPrice) {
+            $currency = strtoupper(trim((string)($old['currency'] ?? ''))) ?: strtoupper(StoreContext::current()->currency());
+            return I18n::format('admin.msg.product.price_below_variants', ['min' => Money::decimal($minPrice, $currency) . ' ' . $currency]);
+        }
         $images = self::parseImages((string)$form['images']);
         if (is_string($images)) return $images;
         [$imageUrls, $imageAlts] = $images;

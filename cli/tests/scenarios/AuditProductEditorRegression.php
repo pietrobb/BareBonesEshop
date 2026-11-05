@@ -158,7 +158,7 @@ $full = static fn(array $overrides = []): array => $post(array_replace([
     'extra_category_ids'=>[(string)$category('2', $own)],
     'tr'=>['en'=>['name'=>'Yellow Shirt', 'slug'=>'', 'summary'=>'EN summary', 'description'=>'<p>EN body</p><script>alert(1)</script>', 'seo_title'=>'EN SEO title', 'meta_description'=>'EN meta']],
 ], $overrides));
-$edit = static fn(array $overrides = []): array => $post(array_replace(['sku'=>"A121X-{$own}", 'name'=>"A121X-{$own}-NAME", 'slug'=>"a121x-{$own}", 'stock'=>'5', 'price'=>'1000',
+$edit = static fn(array $overrides = []): array => $post(array_replace(['sku'=>"A121X-{$own}", 'name'=>"A121X-{$own}-NAME", 'slug'=>"a121x-{$own}", 'stock'=>'5', 'price'=>'10.00',
     'summary'=>'Base summary', 'brand_id'=>(string)$brand($own), 'gtin'=>'96385074', 'mpn'=>"A121M-{$own}", 'extra_category_ids'=>[(string)$category('2', $own)],
     'images'=>"/uploads/products/a122-own-{$own}.jpg | SEED-ALT-{$own}\n/uploads/products/a122-shared.jpg\nhttps://cdn.example/a122.jpg"], $overrides));
 // The posted variant table as the editor renders it, with per-SKU field overrides and extra rows ('new' or foreign ids).
@@ -195,7 +195,7 @@ match ($action) {
     'create_translation_slug_is_base_slug' => [$_POST = $full(['tr'=>['en'=>['name'=>'Taken', 'slug'=>"a121x-{$own}"]]]), handleProductSave()],
     'create_unknown_locale' => [$_POST = $full(['tr'=>['xx'=>['name'=>'Unknown']]]), handleProductSave()],
     'edit_page' => [$_GET = ['id'=>$existing], pageProduct()],
-    'edit_clear_translation' => [$_GET = ['id'=>$existing], $_POST = $post(['sku'=>"A121X-{$own}", 'name'=>"A121X-{$own}-NAME", 'slug'=>"a121x-{$own}", 'stock'=>'5', 'price'=>'1000',
+    'edit_clear_translation' => [$_GET = ['id'=>$existing], $_POST = $post(['sku'=>"A121X-{$own}", 'name'=>"A121X-{$own}-NAME", 'slug'=>"a121x-{$own}", 'stock'=>'5', 'price'=>'10.00',
         'summary'=>'Base summary', 'brand_id'=>(string)$brand($own), 'gtin'=>'96385074', 'mpn'=>"A121M-{$own}", 'extra_category_ids'=>[], 'tr'=>['en'=>['name'=>'', 'slug'=>'', 'seo_title'=>'', 'meta_description'=>'']]]), handleProductSave()],
     // The untouched editor form as rendered for the seeded product (EN translation with its own slug).
     'edit_unchanged' => [$_GET = ['id'=>$existing], $_POST = $edit(['tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",

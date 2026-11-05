@@ -161,6 +161,11 @@ if ($r14oHasMaintenance) {
         assert_true($r14oDown[0] === 503 && !str_contains($r14oDown[1], 'served'), 'R14 T20: during an update a web request gets 503 (' . json_encode($r14oDown) . ')');
         $r14oWorker = $r14oCli(['cli/worker.php', '--once', '--verbose']);
         assert_true($r14oWorker['code'] === 0 && str_contains($r14oWorker['out'], 'maintenance'), 'R14 T20: the worker skips its run during an update (' . trim($r14oWorker['out']) . ')');
+        // A killed updater: its process is gone (R16 keeps the window of one still running past the hour).
+        $r14oGone = proc_open([PHP_BINARY, '-r', ''], [], $r14oGonePipes);
+        $r14oGonePid = (int)proc_get_status($r14oGone)['pid'];
+        proc_close($r14oGone);
+        file_put_contents($r14oMarker, json_encode(['since' => gmdate('c'), 'reason' => 'r14 test', 'pid' => $r14oGonePid, 'host' => (string)gethostname()]));
         touch($r14oMarker, time() - MaintenanceMode::STALE_AFTER - 60);
         assert_equals([200, 'served'], $r14oGet(), 'R14 T20: a marker left by a killed updater stops blocking after an hour');
     } finally {

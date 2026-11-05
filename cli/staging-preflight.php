@@ -10,7 +10,8 @@ require_once __DIR__ . '/cli-only.php';
  * Usage:
  *   php cli/staging-preflight.php
  *   php cli/staging-preflight.php --json
- *   php cli/staging-preflight.php --strict
+ *
+ * Exits 1 when any check fails (NO-GO). --strict is still accepted; it is the default now.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -215,7 +216,6 @@ function runStagingPreflight(array $argvLocal = []): array {
 if (realpath((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
     $args = $argv ?? [];
     $json = in_array('--json', $args, true);
-    $strict = in_array('--strict', $args, true);
     $result = runStagingPreflight($args);
 
     if ($json) {
@@ -233,5 +233,5 @@ if (realpath((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
         echo "\nResult: {$result['status']} ({$result['counts']['ok']} ok, {$result['counts']['warn']} warn, {$result['counts']['fail']} fail)\n";
     }
 
-    exit(($strict && $result['status'] !== 'GO') ? 1 : 0);
+    exit($result['status'] !== 'GO' ? 1 : 0);
 }

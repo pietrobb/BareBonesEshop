@@ -20,7 +20,8 @@ if ($command === 'install') {
         fwrite($json ? STDERR : STDOUT, $line . "\n");
     };
     // Child output is returned, not echoed: JSON is parsed and the owner's TOTP secret is printed once.
-    $run = static function (array $args, string $label, bool $echo = false) use ($root, $log): string {
+    // $doctorReport: the child is setup.php doctor, whose exit 1 with a checklist means "not ready yet", not a failure.
+    $run = static function (array $args, string $label, bool $echo = false, bool $doctorReport = false) use ($root, $log): string {
         $errFile = tempnam(sys_get_temp_dir(), 'bbe-setup');
         $process = proc_open(array_merge([PHP_BINARY], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $errFile, 'w']], $pipes, $root);
         if (!is_resource($process)) throw new RuntimeException("Cannot start {$label}");
@@ -30,6 +31,7 @@ if ($command === 'install') {
         $code = proc_close($process);
         $err = (string)@file_get_contents($errFile);
         @unlink($errFile);
+        if ($doctorReport && $code === 1 && is_array(json_decode($out, true)['checks'] ?? null)) $code = 0;
         foreach (preg_split('/\R/', rtrim(($echo || $code !== 0 ? $out : '') . $err)) ?: [] as $line) if ($line !== '') $log('  ' . $line);
         if ($code !== 0) throw new RuntimeException("{$label} failed (exit {$code})");
         return $out;
@@ -69,7 +71,7 @@ if ($command === 'install') {
         // A fresh config.php over an existing database carries a new admin_identity_key that cannot open the existing
         // admins' MFA secrets: undo, do not lock them out.
         if ($steps['config']['action'] === 'created') {
-            $keyCheck = array_values(array_filter(json_decode($run(['cli/setup.php', 'doctor', '--json'], 'setup doctor'), true)['checks'] ?? [], static fn(array $c): bool => $c['name'] === 'admin.mfa_key'))[0] ?? null;
+            $keyCheck = array_values(array_filter(json_decode($run(['cli/setup.php', 'doctor', '--json'], 'setup doctor', false, true), true)['checks'] ?? [], static fn(array $c): bool => $c['name'] === 'admin.mfa_key'))[0] ?? null;
             if (($keyCheck['status'] ?? 'pass') === 'fail') {
                 @unlink($root . '/config.php');
                 $steps['config']['action'] = 'removed';
@@ -96,7 +98,7 @@ if ($command === 'install') {
             $log('[4/4] first owner account: skipped (BBE_ADMIN_PASSWORD=... php cli/setup.php install --admin-username=NAME, or php cli/admin-user.php create)');
             $steps['admin'] = 'skipped';
         }
-        $doctor = json_decode($run(['cli/setup.php', 'doctor', '--json'], 'setup doctor'), true);
+        $doctor = json_decode($run(['cli/setup.php', 'doctor', '--json'], 'setup doctor', false, true), true);
     } catch (Throwable $e) {
         if ($json) echo json_encode(['status' => 'error', 'message' => $e->getMessage(), 'steps' => $steps], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
         else fwrite(STDERR, 'Install failed: ' . $e->getMessage() . "\n");
@@ -160,8 +162,10 @@ try {
         }
         echo "Result: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
     }
+    // A doctor that is not ready exits 1, so a deploy script stops on it (R16). apply reports what it changed: it fails
+    // on an unready shop only with --strict, as install does.
     $doctor = $command === 'doctor' ? $result : $result['doctor'];
-    exit($strict && $doctor['status'] !== 'ready' ? 1 : 0);
+    exit(($command === 'doctor' || $strict) && $doctor['status'] !== 'ready' ? 1 : 0);
 } catch (Throwable $e) {
     $error = ['status' => 'error', 'message' => $e->getMessage()];
     if ($json) echo json_encode($error, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";

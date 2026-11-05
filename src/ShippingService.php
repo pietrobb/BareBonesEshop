@@ -48,8 +48,15 @@ class ShippingService
         $codes = array_unique($codes) ?: ['SK', 'CZ', 'DE', 'AT', 'HU', 'PL'];
         sort($codes);
         $countries = [];
-        foreach ($codes as $code) $countries[$code] = self::COUNTRY_NAMES[$code] ?? $code;
+        foreach ($codes as $code) $countries[$code] = self::countryName($code);
         return $countries;
+    }
+
+    /** A country's name in its own language ("Slovensko"); an unlisted code stays the code. */
+    public static function countryName(string $code): string
+    {
+        $code = strtoupper(trim($code));
+        return self::COUNTRY_NAMES[$code] ?? $code;
     }
 
     /** Override adapters for testing */
