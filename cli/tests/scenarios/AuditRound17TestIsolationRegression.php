@@ -67,3 +67,19 @@ foreach ($r17iSources as $r17iFile) {
     }
 }
 assert_equals([], $r17iDirect, 'R17 isolation: shop code reads config.php only through AppConfig::path()');
+
+// 4b. Nor does a test or a process it generates (php -S routers, fixtures): reading the app root's config.php there hands
+// the developer's extensions, outbound webhooks and gateway keys to the child. Only TestHarness.php reads it, to build the suite copy.
+$r17iTestDirect = [];
+$r17iTestFiles = array_merge(glob($r17iRoot . '/cli/tests/*.php') ?: [], glob($r17iRoot . '/cli/tests/*/*.php') ?: [], glob($r17iRoot . '/cli/tests/*/*/*.php') ?: []);
+foreach ($r17iTestFiles as $r17iFile) {
+    $r17iRelative = substr(str_replace('\\', '/', $r17iFile), strlen(str_replace('\\', '/', $r17iRoot)) + 1);
+    if ($r17iRelative === 'cli/tests/TestHarness.php') continue;
+    $r17iSource = (string)file_get_contents($r17iFile);
+    preg_match_all('~(\$\w+)\s*=\s*dirname\(TEST_CLI_DIR\);~', $r17iSource, $r17iVars);
+    $r17iAlternatives = array_merge(['dirname\(TEST_CLI_DIR\)'], array_map(static fn(string $v): string => preg_quote($v, '~'), array_unique($r17iVars[1])));
+    if (preg_match_all("~(?:" . implode('|', $r17iAlternatives) . ")\s*\.\s*'/config\.php'~", $r17iSource, $r17iMatches) > 0) {
+        $r17iTestDirect[] = $r17iRelative . ': ' . implode(' | ', $r17iMatches[0]);
+    }
+}
+assert_equals([], $r17iTestDirect, 'R17 isolation: tests and the processes they start read the app config only through AppConfig::path()');
