@@ -8,6 +8,11 @@
     An unlocked marker of a process that still runs counts only with the same process start time.
   - A failed `php cli/migrate.php apply` (or an update whose automatic rollback fails) leaves the shop in maintenance
     instead of reopening it on a half-migrated schema; the next successful run lifts it.
+- **Extension quarantine only for broken code** (review round 17, medium). Input that made an extension fail an
+  allocation ("Out of memory") still quarantined it, payment provider included, for good. Only a parse, compile or
+  class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never
+  do. Without a writable `private_runtime_dir` there is no quarantine: the fallback file in the shared temp
+  directory had a predictable name, so another account on the host could plant one.
 - **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
   were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
   could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout

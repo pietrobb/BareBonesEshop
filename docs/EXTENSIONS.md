@@ -107,9 +107,10 @@ return [
   quarantined: the following requests, workers and CLI commands skip it like any broken extension,
   and the reason (message, file, line) is in `Extensions::errors()`, the doctor and the log
   (`extension.quarantined`). The quarantine lives in `<private_runtime_dir>/extension-quarantine.json`
-  (without that directory, in the system temp directory) and lifts by itself as soon as one of the
-  extension's PHP files changes; deleting the entry retries the unchanged extension. Running out of
-  memory or time does not quarantine, and neither does an exception: an uncaught exception is a
+  (without a writable `private_runtime_dir` there is no quarantine) and lifts by itself as soon as one
+  of the extension's PHP files changes; deleting the entry retries the unchanged extension. Only a
+  parse, compile or class-linking error quarantines. Running out of memory ("Allowed memory size",
+  "Out of memory"), time or stack does not, and neither does an exception: an uncaught exception is a
   failed request, not a broken extension, so bad input cannot switch an extension off.
 - **A throwing page is a 500.** When a page handler throws (bad input, a failing service), the
   shopper gets HTTP 500 with a neutral "temporarily unavailable" page, and the exception is logged
