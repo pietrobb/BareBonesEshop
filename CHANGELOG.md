@@ -14,6 +14,14 @@
     runs on that host, for at most a day; a marker left by a killed updater still stops blocking after an hour.
   - Tests now cover the content of `<style>`, `<script>` and the other elements rich text removes, and a `<style>`
     in the body of a mail's HTML (mutants SEC12 and MAIL2).
+- **Theme texts, unregistered sections, theme-check on an installed shop** (review round 16, medium). A theme had
+  nowhere to keep its own texts but the core's `lang/` files, which an update replaces: it now ships
+  `themes/<name>/lang/<locale>.json` with keys under its own name (`{{t.acme.tagline}}`), falling back to `en.json`;
+  it cannot change the core's texts. A homepage section whose type no `theme.json` registers rendered nothing without
+  a trace; it leaves `<!-- unregistered section: <type> -->` in the page source and `php cli/theme-check.php` lists
+  it as a warning. After `setup.php install`, theme-check checked the stores of `stores.example.json` instead of the
+  installed `stores.json` in the data directory; it reads the installed one and names the file it used.
+  `docs/THEMES.md`, `docs/EXTENSIONS.md` and `CONTRIBUTING.md` describe texts, section registration and the check.
 - **Back in stock, logs, transfer reminders, shipped e-mail** (review round 16, medium). Asking again on the "notify
   me" form mailed a new confirmation link every time, so anyone could flood an address with links: a waiting request
   now gets a new link at most once an hour, and one address at most three links an hour over all products (a fourth

@@ -21,6 +21,10 @@ submodule run `git submodule update --init`. For the browser checks install Node
 - Add a line to `CHANGELOG.md` under `## Unreleased` describing what changes for a shop owner.
 - Shop-specific code belongs in `extensions/<code>/` (see `docs/EXTENSIONS.md`), a storefront design in a theme
   (`docs/THEMES.md`), not in core files.
+- A new core UI text gets its key in every `lang/<locale>.php` (`php cli/i18n-parity.php` checks it). Texts of a
+  theme go in `themes/<name>/lang/<locale>.json`, texts of an extension in the extension's folder.
+- A theme change is checked with `php cli/theme-check.php`; on a shop installed with `cli/setup.php install`
+  it reads the installed `stores.json` from the data directory, so run it in a clean clone to check the example.
 - Released migrations are immutable (their checksums are pinned in `cli/tests/fixtures/`); change data with a
   new migration.
 

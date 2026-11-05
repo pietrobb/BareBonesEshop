@@ -49,7 +49,9 @@ if (realpath((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
     if (in_array('--json', $argv, true)) echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
     else {
         echo "Theme checkout compatibility: {$result['status']} ({$result['checks']} checks)\n";
+        if (isset($result['stores_file'])) echo "Stores: {$result['stores_file']}\n";
         foreach ($result['failures'] as $failure) echo "[FAIL] {$failure}\n";
+        foreach ($result['warnings'] ?? [] as $warning) echo "[WARN] {$warning}\n";
         echo "Read-only: in-memory test database; no orders, emails or payment requests. Not a full browser/payment test.\n";
     }
     exit($result['status'] === 'GO' ? 0 : 1);

@@ -256,6 +256,8 @@ $r9lKept = [
     'useMysqlDumper', 'useMysqlDatabase', 'lastCaptured', 'clearCaptured',
     // adapter contracts an external implementation fulfils
     'reindexAll', 'pushCustomer', 'pushProduct',
+    // read by cli/tests/ThemeContractProbe.php, which theme-check and the theme update gate run in production
+    'unregisteredSections',
     // domain calls covered by tests that have no screen yet (RMA exchange/return label) or are the tested contract of a flow
     'verifyResetToken', 'webhookProcessed', 'isReverseCharge', 'createExchange', 'recordLabel', 'openForOrder', 'refundById',
 ];
