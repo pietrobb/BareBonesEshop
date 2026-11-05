@@ -20,7 +20,7 @@ class EmailTemplates {
         ],
         'bank_transfer' => true, 'bank_beneficiary' => 'BareBones s.r.o.', 'bank_iban' => 'SK31 1200 0000 1987 4263 7541',
         'bank_amount' => '59,90 €', 'bank_vs' => '2026000123', 'bank_message' => 'SK-2026-000123', 'bank_due_date' => '2026-10-27',
-        'carrier' => 'Packeta', 'tracking_number' => 'Z 123 4567 890', 'tracking_url' => 'https://tracking.example.com/Z1234567890',
+        'carrier' => 'Packeta', 'without_carrier' => false, 'tracking_number' => 'Z 123 4567 890', 'tracking_url' => 'https://tracking.example.com/Z1234567890',
         'invoice_number' => '2026000045', 'issued_at' => '2026-10-13', 'due_date' => '2026-10-27', 'total_gross_formatted' => '59,90 €',
         'invoice_download_url' => 'https://shop.example.com/account.php?p=invoice&id=45', 'seller_name' => 'BareBones s.r.o.',
         'verify_url' => 'https://shop.example.com/account.php?p=verify&token=sample', 'reset_url' => 'https://shop.example.com/account.php?p=reset&token=sample',
