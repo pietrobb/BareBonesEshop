@@ -781,6 +781,7 @@ return [
     'admin.rma.status_failed' => 'The return status could not be changed: {error}',
     'admin.entitlement.status.active' => 'Active',
     'admin.entitlement.status.revoked' => 'Revoked',
+    'admin.entitlement.status.blocked' => 'Blocked (refunded or unpaid)',
     'admin.rma.status.requested' => 'Requested',
     'admin.rma.status.approved' => 'Approved',
     'admin.rma.status.received' => 'Received',

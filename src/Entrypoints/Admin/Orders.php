@@ -372,7 +372,7 @@ function pageOrder(): void {
             <tr>
                 <td><?= esc($entitlement['sku']) ?></td>
                 <td><?= esc($entitlement['label'] ?: $entitlement['download_name']) ?></td>
-                <td><span class="badge badge-<?= esc($entitlement['status']) ?>"><?= esc(adminCodeLabel('admin.entitlement.status.', (string)$entitlement['status'])) ?></span></td>
+                <td><?php $entitlementStatus = $entitlement['download_blocked'] ? 'blocked' : (string)$entitlement['status']; ?><span class="badge badge-<?= esc($entitlement['download_blocked'] ? 'revoked' : $entitlementStatus) ?>"><?= esc(adminCodeLabel('admin.entitlement.status.', $entitlementStatus)) ?></span></td>
                 <td><?= (int)$entitlement['download_count'] ?> / <?= $entitlement['download_limit'] === null ? '∞' : (int)$entitlement['download_limit'] ?></td>
                 <td><?= $entitlement['expires_at'] === null ? '—' : esc(I18n::dateTime(gmdate('Y-m-d H:i:s', (int)$entitlement['expires_at']))) ?></td>
                 <td><?= esc(I18n::dateTime((string)($entitlement['delivered_at'] ?? '')) ?: '—') ?></td>
@@ -701,6 +701,28 @@ function adminManualPaymentTransitions(array $order): array {
             && ($to !== 'cancelled' || $orderCancelled)
     ));
 }
+/**
+ * A payment status set by hand on the order detail. Money recorded as paid pays a pending order like a gateway
+ * capture (R17: after a failed card the order stayed Pending until a second status change). Returns true when the
+ * order was cancelled: the money is then flagged for a manual refund instead.
+ */
+function adminRecordPayment(array $order, string $newStatus, int $amount, string $note, string $actor): bool {
+    $orderId = (int)$order['id'];
+    $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
+    PaymentService::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
+        'actor' => $actor,
+        'note' => $note,
+    ]);
+    if ($newStatus !== 'paid') return false;
+    if ((string)$order['status'] === 'cancelled') {
+        // No gateway session captured it, so the recorded amount (the order total when none was entered) is
+        // flagged for a manual refund with an incident.
+        PaymentService::settleAdminPaymentOnCancelled($orderId, $amount > 0 ? $amount : (int)$order['total'], 'Admin payment: ' . $note);
+        return true;
+    }
+    PaymentService::settleCapture($orderId, 'Admin payment' . ($note !== '' ? ': ' . $note : ''));
+    return false;
+}
 function handleOrderPaymentTransition(): void {
     Security::adminRequire('orders.payments');
     $orderId = Security::int($_GET['id'] ?? 0);
@@ -727,15 +749,7 @@ function handleOrderPaymentTransition(): void {
     }
 
     try {
-        $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
-        PaymentService::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
-            'actor' => Security::adminUser(),
-            'note' => $note,
-        ]);
-        if ($newStatus === 'paid' && (string)$order['status'] === 'cancelled') {
-            // Money recorded by hand for a cancelled order: no gateway session captured it, so the recorded
-            // amount (the order total when none was entered) is flagged for a manual refund with an incident.
-            PaymentService::settleAdminPaymentOnCancelled($orderId, $amount > 0 ? $amount : (int)$order['total'], 'Admin payment: ' . $note);
+        if (adminRecordPayment($order, $newStatus, $amount, $note, Security::adminUser())) {
             setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
         } else {
             setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));

@@ -786,6 +786,7 @@ return [
     'admin.rma.status_failed' => 'Stav vrátenia sa nepodarilo zmeniť: {error}',
     'admin.entitlement.status.active' => 'Aktívne',
     'admin.entitlement.status.revoked' => 'Zrušené',
+    'admin.entitlement.status.blocked' => 'Zablokované (vrátené alebo nezaplatené)',
     'admin.rma.status.requested' => 'Požiadané',
     'admin.rma.status.approved' => 'Schválené',
     'admin.rma.status.received' => 'Prijaté',
