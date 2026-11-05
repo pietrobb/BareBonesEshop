@@ -142,8 +142,17 @@ try {
         assert_true(preg_match('/^ {4}([0-9a-f]{64})\r?$/m', $r16oSection, $m) === 1 && $m[1] === $r16oFingerprint,
             "R16 ops notes: {$r16oVersion} gives the fingerprint update.php fingerprint prints for the shipped key");
     }
-    assert_true(str_starts_with(substr($r16oNotes, (int)strpos($r16oNotes, '## Unreleased')), "## Unreleased\n\n## 2.1.2 "),
-        'R16 ops notes: nothing released is left under Unreleased');
+    // Later work adds entries under Unreleased; what matters is that no entry released in 2.1.2 is still listed there.
+    $r16oUnreleasedAt = strpos($r16oNotes, "\n## Unreleased\n");
+    $r16oReleasedAt = strpos($r16oNotes, "\n## 2.1.2 ");
+    assert_true($r16oUnreleasedAt !== false && $r16oReleasedAt !== false && $r16oUnreleasedAt < $r16oReleasedAt,
+        'R16 ops notes: Unreleased comes before 2.1.2');
+    $r16oReleasedEnd = $r16oReleasedAt === false ? false : strpos($r16oNotes, "\n## ", $r16oReleasedAt + 4);
+    $r16oReleased = $r16oReleasedAt === false ? '' : substr($r16oNotes, $r16oReleasedAt, ($r16oReleasedEnd ?: strlen($r16oNotes)) - $r16oReleasedAt);
+    $r16oUnreleased = ($r16oUnreleasedAt === false || $r16oReleasedAt === false) ? '' : substr($r16oNotes, $r16oUnreleasedAt, $r16oReleasedAt - $r16oUnreleasedAt);
+    preg_match_all('/^- \*\*(.+?)\*\*/m', $r16oUnreleased, $r16oTitles);
+    assert_equals([], array_values(array_filter($r16oTitles[1], static fn(string $t): bool => str_contains($r16oReleased, "**{$t}**"))),
+        'R16 ops notes: nothing released in 2.1.2 is left under Unreleased');
 } catch (Throwable $e) {
     $r16oFail('release notes', $e);
 }
