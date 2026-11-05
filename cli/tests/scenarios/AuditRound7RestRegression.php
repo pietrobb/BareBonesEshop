@@ -115,7 +115,7 @@ $pdo->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer
 $r7rList = (int)$pdo->lastInsertId();
 $r7rSave = PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 5.00"]);
 $r7rRows = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM price_list_prices WHERE price_list_id = {$r7rList}")->fetchColumn();
-assert_true(empty($r7rSave['ok']) && $r7rRows() === 0 && str_contains((string)($r7rSave['message'] ?? ''), '800'),
+assert_true(empty($r7rSave['ok']) && $r7rRows() === 0 && str_contains((string)($r7rSave['message'] ?? ''), '8.00'),
     'R7 variant price: a product price-list row below the variant floor (8.00 €) is refused (was saved, variant −3.00 €) (' . json_encode($r7rSave) . ')');
 assert_true(!empty(PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 8.00"])['ok']) && $r7rRows() === 1,
     'R7 variant price: a product price-list row at the floor is saved');
