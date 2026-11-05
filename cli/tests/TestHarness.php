@@ -4,6 +4,13 @@ define('TEST_CLI_DIR', dirname(__DIR__));
 
 require_once TEST_CLI_DIR . '/../src/autoload.php';
 
+// R16: after `setup.php install` the shop's stores.json and legal texts live in private_runtime_dir; the suite runs on
+// its own copy of the shipped stores.example.json there instead (and never writes into the installed shop's data).
+define('TEST_DATA_DIR', sys_get_temp_dir() . '/barebones-suite-data-' . getmypid() . '-' . bin2hex(random_bytes(4)));
+mkdir(TEST_DATA_DIR, 0700, true);
+copy(dirname(TEST_CLI_DIR) . '/' . DataOverrides::STORES_EXAMPLE, TEST_DATA_DIR . '/stores.json');
+DataOverrides::isolateSuiteForTesting(TEST_DATA_DIR);
+
 function entrypointSource(string $entrypoint): string {
     $root = dirname(TEST_CLI_DIR);
     $implementations = [

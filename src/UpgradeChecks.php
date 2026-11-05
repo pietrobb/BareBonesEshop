@@ -64,6 +64,49 @@ final class UpgradeChecks
         return ['ok', "E-mails are sent from {$from}."];
     }
 
+    /**
+     * Deny rules of the shipped deploy/nginx.conf (each `location … { return 403; }`) the live nginx site config
+     * (operations.nginx_config) lacks: a release that adds one (e.g. *.lock and *.tmp) leaves those files served by an
+     * nginx copied from an older sample. Null when not determinable (no path configured, the file is unreadable).
+     * @return list<string>|null the missing location patterns
+     */
+    public static function nginxMissingDenies(array $config, string $appRoot): ?array
+    {
+        $path = trim((string)(((array)($config['operations'] ?? []))['nginx_config'] ?? ''));
+        if ($path === '' || !is_file($path) || !is_readable($path)) return null;
+        $live = file_get_contents($path);
+        $shipped = @file_get_contents($appRoot . '/deploy/nginx.conf');
+        return $live === false || $shipped === false ? null : self::nginxConfMissingDenies($live, $shipped);
+    }
+
+    /** @return list<string> deny location patterns of $shipped that $live does not have (comments and spacing ignored) */
+    public static function nginxConfMissingDenies(string $live, string $shipped): array
+    {
+        $denies = static function (string $conf): array {
+            $conf = (string)preg_replace('/#[^\n]*/', '', $conf);
+            preg_match_all('/location\s+((?:~\*?|=|\^~)\s+\S+)\s*\{\s*return\s+403\s*;\s*\}/', $conf, $m);
+            return array_values(array_unique(array_map(static fn(string $l): string => (string)preg_replace('/\s+/', ' ', $l), $m[1])));
+        };
+        return array_values(array_diff($denies($shipped), $denies($live)));
+    }
+
+    /**
+     * Carrier webhook secrets configured while shipping_webhook_require_timestamp is not set: the default is now true,
+     * so a carrier that signs only the body (no signed X-Shipping-Timestamp) has its tracking webhooks refused.
+     * @return list<string> carrier codes with a secret
+     */
+    public static function carrierWebhooksTimestampDefault(array $config): array
+    {
+        if (array_key_exists('shipping_webhook_require_timestamp', $config)) return [];
+        $configured = (array)($config['shipping_webhook_secrets'] ?? []);
+        $carriers = [];
+        foreach (array_unique(array_merge(['packeta', 'gls'], array_map('strval', array_keys($configured)))) as $carrier) {
+            $secret = (string)(getenv(ShippingService::webhookSecretEnvName($carrier)) ?: ($configured[$carrier] ?? ''));
+            if (trim($secret) !== '') $carriers[] = $carrier;
+        }
+        return $carriers;
+    }
+
     /** @return bool|null null when the config has no `location ~ \.php$` block */
     public static function nginxConfHasPhpFallback(string $conf): ?bool
     {

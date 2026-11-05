@@ -196,6 +196,24 @@ class BackupService
         return self::$storage;
     }
 
+    /**
+     * The backup path restore() takes: relative to the backup storage, as list() prints it. An absolute path to a file
+     * in a local backup storage is accepted as well and made relative; any other absolute path is refused by name.
+     */
+    public static function storagePath(string $given): string
+    {
+        if (!preg_match('~^(?:/|\\\\|[A-Za-z]:)~', $given)) return $given;
+        $storage = self::storage();
+        $root = $storage instanceof LocalBackupStorage ? realpath($storage->root()) : false;
+        $file = realpath($given);
+        $prefix = $root === false ? '' : rtrim($root, '/\\') . DIRECTORY_SEPARATOR;
+        if ($root === false || $file === false || !is_file($file) || !str_starts_with($file, $prefix)) {
+            throw new RuntimeException("{$given} is not a backup in the backup storage" . ($root === false ? '' : " ({$root})")
+                . '; give the path as `php cli/restore.php --list` prints it, relative to the storage');
+        }
+        return str_replace('\\', '/', substr($file, strlen($prefix)));
+    }
+
     public static function livePath(): ?string
     {
         return self::$livePath;

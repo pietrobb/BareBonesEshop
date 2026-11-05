@@ -11,17 +11,42 @@ final class DataOverrides
     public const STORES_EXAMPLE = 'stores.example.json';
 
     private static ?string $testDir = null;
+    private static ?string $suiteDir = null;
 
-    /** Test hook: another data directory (null = config private_runtime_dir). */
+    /** Test hook: another data directory (null = back to the suite's directory, else config private_runtime_dir). */
     public static function setDirForTesting(?string $dir): void
     {
         self::$testDir = $dir;
     }
 
+    /**
+     * Test suite: its own data directory for the whole run, so the suite never reads (or writes) the stores.json and
+     * legal texts of a shop installed in this checkout (`setup.php install` puts them in private_runtime_dir).
+     * The environment carries it to the PHP processes the suite starts (php -S servers, fixtures).
+     */
+    public static function isolateSuiteForTesting(string $dir): void
+    {
+        self::$suiteDir = $dir;
+        putenv('BBE_SUITE_DATA_DIR=' . $dir);
+        putenv('BBE_SUITE_APP_ROOT=' . (string)realpath(dirname(__DIR__)));
+    }
+
+    /** The suite's data directory in this process, or inherited from the suite for this same application root. */
+    private static function suiteDir(): ?string
+    {
+        if (self::$suiteDir !== null) return self::$suiteDir;
+        $dir = getenv('BBE_SUITE_DATA_DIR');
+        $root = getenv('BBE_SUITE_APP_ROOT');
+        if (!is_string($dir) || $dir === '' || !is_string($root) || $root === '') return null;
+        return realpath(dirname(__DIR__)) === $root ? $dir : null;
+    }
+
     /** The writable data directory, or null when none is configured. */
     public static function dir(?array $config = null): ?string
     {
-        if (self::$testDir !== null) return rtrim(str_replace('\\', '/', self::$testDir), '/');
+        // The suite's directory stands in for config.php's private_runtime_dir, not for a config a caller passes.
+        $test = self::$testDir ?? ($config === null ? self::suiteDir() : null);
+        if ($test !== null) return rtrim(str_replace('\\', '/', $test), '/');
         // Before install (no config.php yet) there is no data directory, only the shipped files.
         if ($config === null && !is_file(dirname(__DIR__) . '/config.php')) return null;
         $config ??= Security::config();
