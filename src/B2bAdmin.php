@@ -95,7 +95,8 @@ final class B2bAdmin {
                 // A different VAT ID has not been validated yet.
                 'vat_validated_at' => $old && $vatId !== '' && $vatId === (string)$old['vat_id'] ? $old['vat_validated_at'] : null,
                 'approval_status' => $approval,
-                'credit_limit' => self::int($fields['credit_limit'] === '' ? '0' : $fields['credit_limit'], 0, self::MAX_INT, I18n::t('admin.msg.b2b.credit_limit')),
+                // R17: typed in the store's currency ("5000", "1 250.50"), stored in cents.
+                'credit_limit' => self::creditLimit($fields['credit_limit']),
                 'payment_terms_days' => $terms, 'invoice_purchase' => $invoice, 'active' => self::flag($fields['active']),
             ];
         } catch (DomainException $e) {
@@ -206,6 +207,13 @@ final class B2bAdmin {
     public static function bpsToPercent(int $bps): string {
         $fraction = rtrim(sprintf('%02d', $bps % 100), '0');
         return intdiv($bps, 100) . ($fraction === '' ? '' : ',' . $fraction);
+    }
+
+    /** Credit limit typed in the store's currency as cents, '' = 0 (no limit). @throws DomainException */
+    private static function creditLimit(string $value): int {
+        $cents = Money::adminInput($value, StoreContext::current()->currency());
+        if ($cents === null || $cents > self::MAX_INT) self::fail(I18n::t('admin.msg.b2b.credit_limit'));
+        return $cents;
     }
 
     /** @throws DomainException */

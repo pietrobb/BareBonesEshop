@@ -46,6 +46,7 @@ function productEditorExtrasHtml(array $categories, ?array $product): string {
 function productVariantsHtml(array $product): string {
     $variants = ProductVariants::forEditor((int)$product['id']);
     $variants[] = ProductVariants::blank(count($variants));
+    $currency = ProductVariants::currency($product);
     $select = static function(string $name, array $options, string $value, string $label): string {
         $html = '<select name="' . esc($name) . '" aria-label="' . esc($label) . '">';
         foreach ($options as $option) $html .= '<option value="' . esc($option) . '"' . ($option === $value ? ' selected' : '') . '>' . esc($option) . '</option>';
@@ -66,8 +67,8 @@ function productVariantsHtml(array $product): string {
                         <td><input name="<?= esc("{$p}[sku]") ?>" value="<?= esc((string)$v['sku']) ?>" maxlength="100" aria-label="SKU <?= esc($label) ?>"<?= $key === 'new' ? ' placeholder="' . esc($label) . '"' : ' required' ?>></td>
                         <td><input name="<?= esc("{$p}[name]") ?>" value="<?= esc((string)$v['name']) ?>" maxlength="255" aria-label="<?= esc(I18n::t('admin.th.name') . ' ' . $label) ?>"></td>
                         <td><textarea name="<?= esc("{$p}[attrs]") ?>" rows="2" aria-label="<?= esc(I18n::t('admin.title.attributes') . ' ' . $label) ?>"><?= esc((string)$v['attrs_text']) ?></textarea></td>
-                        <td><input name="<?= esc("{$p}[price_absolute]") ?>" value="<?= esc($v['price_absolute'] === null ? '' : (string)$v['price_absolute']) ?>" inputmode="numeric" aria-label="<?= esc(I18n::t('admin.th.price') . ' ' . $label) ?>"></td>
-                        <td><input name="<?= esc("{$p}[price_delta]") ?>" value="<?= (int)$v['price_delta'] ?>" inputmode="numeric" aria-label="<?= esc(I18n::t('admin.variant.delta') . ' ' . $label) ?>"></td>
+                        <td><input name="<?= esc("{$p}[price_absolute]") ?>" value="<?= esc(Money::adminValue($v['price_absolute'] === null ? null : (int)$v['price_absolute'], $currency)) ?>" inputmode="decimal" aria-label="<?= esc(I18n::t('admin.th.price') . ' ' . $label) ?>"></td>
+                        <td><input name="<?= esc("{$p}[price_delta]") ?>" value="<?= esc(Money::adminValue((int)$v['price_delta'], $currency)) ?>" inputmode="decimal" aria-label="<?= esc(I18n::t('admin.variant.delta') . ' ' . $label) ?>"></td>
                         <td><input name="<?= esc("{$p}[stock]") ?>" value="<?= (int)$v['stock'] ?>" inputmode="numeric" aria-label="<?= esc(I18n::t('admin.th.stock') . ' ' . $label) ?>"><?php if ($key !== 'new'): ?><input type="hidden" name="<?= esc("{$p}[stock_loaded]") ?>" value="<?= (int)($v['stock_loaded'] ?? $v['stock']) ?>"><?php endif; ?></td>
                         <td><?= $select("{$p}[availability]", ProductVariants::availabilities(), (string)$v['availability'], I18n::t('admin.variant.availability') . ' ' . $label) ?></td>
                         <td><?= $select("{$p}[inventory_policy]", ProductVariants::POLICIES, (string)$v['inventory_policy'], I18n::t('admin.variant.policy') . ' ' . $label) ?></td>
