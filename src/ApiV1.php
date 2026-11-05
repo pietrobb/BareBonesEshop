@@ -2,6 +2,8 @@
 /** Stable, additive-first external API v1 contract. */
 class ApiV1 {
     private const MAX_INT = Warehouse::MAX_QTY;
+    /** How far before server_time meta.next_updated_after resumes an incremental sync (longer than any shop transaction). */
+    public const SYNC_OVERLAP_SECONDS = 300;
     /** @return array{status:int,body:array,headers?:array<string,string>} */
     public static function dispatch(
         string $method,
@@ -42,13 +44,13 @@ class ApiV1 {
             ApiAuth::requireScope($client, 'orders:read');
             $page = self::page('orders', '*', $store->id(), $query, static fn(array $row): array => $row, true);
             $items = self::orderItems(array_map(static fn(array $row): int => (int)$row['id'], $page['data']));
-            $page['data'] = array_map(static fn(array $row): array => self::orderResource($row, $items[(int)$row['id']] ?? []), $page['data']);
+            $page['data'] = array_map(static fn(array $row): array => self::orderResource($row, $items[(int)$row['id']] ?? [], self::personalData($client)), $page['data']);
             return self::ok($page);
         }
         if ($method === 'GET' && preg_match('#^/orders/(\d+)$#', $path, $m)) {
             ApiAuth::requireScope($client, 'orders:read');
             $order = Orders::byId((int)$m[1]);
-            return $order ? self::ok(['data' => self::orderResource($order, self::orderItems([(int)$order['id']])[(int)$order['id']] ?? [])])
+            return $order ? self::ok(['data' => self::orderResource($order, self::orderItems([(int)$order['id']])[(int)$order['id']] ?? [], self::personalData($client))])
                 : self::notFound('Order not found');
         }
         if ($method === 'POST' && preg_match('#^/orders/(\d+)/status$#', $path, $m)) {
@@ -117,8 +119,9 @@ class ApiV1 {
     /**
      * Cursor page over a store-owned table in stable id order; $table and $columns are code constants. With
      * $changeFilter the page takes updated_after (rows with updated_at at or after it) and meta.server_time is the
-     * database clock read before the rows: an incremental sync passes the server_time of its first page as the next
-     * run's updated_after, so a change made while it was paging is fetched again rather than missed.
+     * database clock read before the rows: an incremental sync passes meta.next_updated_after of its first page (server_time
+     * less SYNC_OVERLAP_SECONDS) as the next run's updated_after, so a change made while it was paging, or committed
+     * late by a transaction that began earlier, is fetched again rather than missed.
      */
     private static function page(string $table, string $columns, string $storeId, array $query, callable $dto, bool $changeFilter = false): array {
         $limit = self::limit($query['limit'] ?? 25);
@@ -137,7 +140,13 @@ class ApiV1 {
         $hasMore = count($rows) > $limit;
         if ($hasMore) array_pop($rows);
         $meta = ['limit' => $limit, 'next_cursor' => $hasMore ? self::encodeCursor((int)end($rows)['id']) : null];
-        if ($serverTime !== null) $meta['server_time'] = $serverTime;
+        if ($serverTime !== null) {
+            $meta['server_time'] = $serverTime;
+            // R16: a change committed after this read by a transaction that began earlier carries an updated_at before
+            // server_time, so a sync resuming at server_time missed it. The next run resumes SYNC_OVERLAP_SECONDS earlier.
+            $meta['next_updated_after'] = (new DateTimeImmutable($serverTime, new DateTimeZone('UTC')))
+                ->modify('-' . self::SYNC_OVERLAP_SECONDS . ' seconds')->format('Y-m-d H:i:s');
+        }
         return ['data' => array_map($dto, $rows), 'meta' => $meta];
     }
 
@@ -345,17 +354,25 @@ class ApiV1 {
         return $items;
     }
 
-    /** The API's order: the event representation (orderDto) plus contact, address, shipping, payment and lines. */
-    private static function orderResource(array $row, array $items): array {
+    /**
+     * The API's order: the event representation (orderDto) plus shipping, payment and lines, and with $personal (a key
+     * granted customers:read) the phone, delivery address and buyer note. R16: v2.1.1 gave those personal data to every
+     * orders:read key without notice. A line's VAT and discount come from the order's financial snapshot (the figures
+     * of the order and its invoice): the stored line VAT is before the order discount.
+     */
+    private static function orderResource(array $row, array $items, bool $personal): array {
         $address = json_decode((string)($row['shipping_addr'] ?? ''), true);
         $address = is_array($address) ? $address : [];
         $text = static fn(string $key): ?string => is_scalar($address[$key] ?? null) && trim((string)$address[$key]) !== '' ? trim((string)$address[$key]) : null;
         $shipping = json_decode((string)($row['shipping_rate_snapshot'] ?? ''), true);
         $point = is_array($shipping) && is_array($shipping['pickup_point'] ?? null) ? $shipping['pickup_point'] : null;
+        $snapshot = json_decode((string)($row['financial_snapshot'] ?? ''), true);
+        $components = is_array($snapshot) ? array_values(array_filter((array)($snapshot['components'] ?? []),
+            static fn($component): bool => is_array($component) && ($component['type'] ?? '') === 'product')) : [];
+        if (count($components) !== count($items)) $components = array_fill(0, count($items), null);
         $dto = self::orderDto($row);
-        $dto['customer']['phone'] = trim((string)($row['customer_phone'] ?? '')) === '' ? null : trim((string)$row['customer_phone']);
-        return $dto + [
-            'locale' => trim((string)($row['locale'] ?? '')) === '' ? null : (string)$row['locale'],
+        if ($personal) $dto['customer']['phone'] = trim((string)($row['customer_phone'] ?? '')) === '' ? null : trim((string)$row['customer_phone']);
+        $personalData = !$personal ? [] : [
             'address' => [
                 'company' => $text('company'),
                 'street' => $text('street') ?? $text('address'),
@@ -366,6 +383,11 @@ class ApiV1 {
                 'dic' => $text('dic'),
                 'ic_dph' => $text('ic_dph'),
             ],
+            'notes' => trim((string)($row['notes'] ?? '')) === '' ? null : (string)$row['notes'],
+        ];
+        return $dto + [
+            'locale' => trim((string)($row['locale'] ?? '')) === '' ? null : (string)$row['locale'],
+        ] + $personalData + [
             'shipping' => [
                 'method' => trim((string)($row['shipping_method'] ?? '')) === '' ? null : (string)$row['shipping_method'],
                 'pickup_point' => $point === null ? null : [
@@ -375,8 +397,7 @@ class ApiV1 {
                 ],
             ],
             'payment_method' => trim((string)($row['payment_method'] ?? '')) === '' ? null : (string)$row['payment_method'],
-            'notes' => trim((string)($row['notes'] ?? '')) === '' ? null : (string)$row['notes'],
-            'items' => array_map(static fn(array $item): array => [
+            'items' => array_map(static fn(array $item, ?array $component): array => [
                 'id' => (int)$item['id'],
                 'product_id' => $item['product_id'] === null ? null : (int)$item['product_id'],
                 'variant_id' => ($item['variant_id'] ?? null) === null ? null : (int)$item['variant_id'],
@@ -385,9 +406,11 @@ class ApiV1 {
                 'quantity' => (int)$item['quantity'],
                 'unit_price' => (int)$item['unit_price'],
                 'total' => (int)$item['total'],
-                'vat_rate' => ($item['vat_rate'] ?? null) === null ? null : (float)$item['vat_rate'],
-                'vat_amount' => (int)($item['vat_amount'] ?? 0),
-            ], $items),
+                'discount' => $component === null ? 0 : (int)($component['discount'] ?? 0),
+                'vat_rate' => $component !== null ? (int)$component['rate_basis_points'] / 100
+                    : (($item['vat_rate'] ?? null) === null ? null : (float)$item['vat_rate']),
+                'vat_amount' => $component !== null ? (int)$component['vat'] : (int)($item['vat_amount'] ?? 0),
+            ], $items, $components),
         ];
     }
 
@@ -441,7 +464,7 @@ class ApiV1 {
             }
             return [
                 'status' => 200,
-                'body' => ['data' => self::orderResource(Orders::byId($orderId), self::orderItems([$orderId])[$orderId] ?? []),
+                'body' => ['data' => self::orderResource(Orders::byId($orderId), self::orderItems([$orderId])[$orderId] ?? [], self::personalData($client)),
                     'meta' => ['idempotent_replay' => false]],
                 'after' => static fn() => OrderWorkflow::pushDeferredJobs($jobs),
             ];
@@ -489,6 +512,11 @@ class ApiV1 {
                 ['sku' => $sku, 'available' => $after, 'warehouse' => (string)$warehouse['code'], 'delta' => $delta], $note);
             return ['status' => 200, 'body' => ['data' => self::inventoryDto($sku), 'meta' => ['idempotent_replay' => false]]];
         });
+    }
+
+    /** Whether the key may read customers' personal data on orders (phone, address, note): customers:read or *. */
+    private static function personalData(array $client): bool {
+        return (bool)array_intersect(['customers:read', '*'], $client['scopes'] ?? []);
     }
 
     /** Owning product id of a product or variant SKU in the active catalog, null for other catalogs. */

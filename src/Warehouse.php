@@ -574,19 +574,19 @@ class Warehouse {
     public static function syncProductStock(array $skus = []): void {
         $db = Db::get();
         $before = $skus ? self::inStockState($skus) : null;
+        // R16: a stock change (a sale, a shipment, an adjustment) moves updated_at, so API v1 updated_after fetches it. updated_at
+        // is assigned first: MySQL evaluates SET left to right, so it still compares the old stock.
+        $total = static fn(string $sku): string => "COALESCE((SELECT SUM(qty - reserved) FROM warehouse_stock
+                WHERE warehouse_stock.sku = {$sku} AND warehouse_stock.store_id = products.store_id), 0)";
         if (empty($skus)) {
             // Sync all
-            $db->exec("UPDATE products SET stock = COALESCE((
-                SELECT SUM(qty - reserved) FROM warehouse_stock
-                WHERE warehouse_stock.sku = products.sku AND warehouse_stock.store_id = products.store_id
-            ), 0)");
+            $db->exec("UPDATE products SET updated_at = CASE WHEN stock = " . $total('products.sku') . " THEN updated_at ELSE " . Db::now() . " END,
+                stock = " . $total('products.sku'));
         } else {
-            $stmt = $db->prepare("UPDATE products SET stock = COALESCE((
-                SELECT SUM(qty - reserved) FROM warehouse_stock
-                WHERE warehouse_stock.sku = :sku AND warehouse_stock.store_id = products.store_id
-            ), 0) WHERE sku = :sku2 AND store_id = :store");
+            $stmt = $db->prepare("UPDATE products SET updated_at = CASE WHEN stock = " . $total(':sku') . " THEN updated_at ELSE " . Db::now() . " END,
+                stock = " . $total(':sku2') . " WHERE sku = :sku3 AND store_id = :store");
             foreach ($skus as $sku) {
-                $stmt->execute([':sku' => $sku, ':sku2' => $sku, ':store' => StoreContext::current()->catalogId()]);
+                $stmt->execute([':sku' => $sku, ':sku2' => $sku, ':sku3' => $sku, ':store' => StoreContext::current()->catalogId()]);
             }
         }
         self::syncVariantStock($skus);
@@ -618,12 +618,22 @@ class Warehouse {
             WHERE EXISTS (SELECT 1 FROM warehouse_stock w2 WHERE w2.sku = variants.sku AND w2.store_id = :store2)
               AND product_id IN (SELECT id FROM products WHERE store_id = :catalog)";
         $params = [':store' => StoreContext::current()->catalogId(), ':store2' => StoreContext::current()->catalogId(), ':catalog' => StoreContext::current()->catalogId()];
+        // R16: the product of a variant whose stock changes moves its updated_at (API v1 updated_after), before the variant is updated.
+        $touch = "UPDATE products SET updated_at = " . Db::now() . " WHERE store_id = :tcatalog AND id IN (SELECT v.product_id FROM variants v
+            WHERE v.stock <> (SELECT COALESCE(SUM(ws.qty - ws.reserved), 0) FROM warehouse_stock ws WHERE ws.sku = v.sku AND ws.store_id = :tstore)
+              AND EXISTS (SELECT 1 FROM warehouse_stock w2 WHERE w2.sku = v.sku AND w2.store_id = :tstore2)";
+        $touchParams = [':tcatalog' => StoreContext::current()->catalogId(), ':tstore' => StoreContext::current()->catalogId(), ':tstore2' => StoreContext::current()->catalogId()];
         if (empty($skus)) {
+            Db::get()->prepare($touch . ')')->execute($touchParams);
             Db::get()->prepare($sql)->execute($params);
             return;
         }
+        $touchOne = Db::get()->prepare($touch . ' AND v.sku = :tsku)');
         $stmt = Db::get()->prepare($sql . ' AND sku = :sku');
-        foreach ($skus as $sku) $stmt->execute($params + [':sku' => $sku]);
+        foreach ($skus as $sku) {
+            $touchOne->execute($touchParams + [':tsku' => $sku]);
+            $stmt->execute($params + [':sku' => $sku]);
+        }
     }
 
     private static function stockRow(int $warehouseId, string $sku, bool $required = true): ?array {

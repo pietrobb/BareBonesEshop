@@ -10,6 +10,16 @@
   it as a warning. After `setup.php install`, theme-check checked the stores of `stores.example.json` instead of the
   installed `stores.json` in the data directory; it reads the installed one and names the file it used.
   `docs/THEMES.md`, `docs/EXTENSIONS.md` and `CONTRIBUTING.md` describe texts, section registration and the check.
+- **Tests on an installed shop, doctor, restore** (review round 16, medium). After `php cli/setup.php install` the test
+  suite stopped midway: it read the installed shop's stores.json and legal texts from `private_runtime_dir` (the
+  sample stores are hidden there, so a storefront test answered 404 and ended the run). The suite now runs on its own
+  copy of `stores.example.json` in a temporary data directory and never reads or writes the installed shop's data.
+  `php cli/setup.php doctor`, `php cli/update.php doctor` and `cli/staging-preflight.php` warn when the nginx site
+  config (`operations.nginx_config`) lacks deny rules of the shipped `deploy/nginx.conf` (for example `*.lock` and
+  `*.tmp`) and name them, and when carrier webhook secrets are set but `shipping_webhook_require_timestamp` is not
+  (it defaults to true, so a carrier that signs only the body has its webhooks refused). `cli/restore.php` takes the
+  backup path as `--list` prints it, relative to the backup storage, and now also an absolute path to a file in a
+  local backup storage; any other path is refused with what it takes (was: "path must be relative").
 - **Rollback numbering on MySQL/MariaDB** (review round 16, high). After an update rollback on MySQL or MariaDB the
   invoice and credit note counters were not raised past the numbers issued during the update, so those numbers were
   issued a second time: the counter update bound one named placeholder twice, which native prepares reject (HY093;
@@ -69,6 +79,16 @@
   midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11. The file-queue worker takes its lock
   in the jobs directory the queue really uses: two suites run side by side (two checkouts sharing the default
   `jobs_dir`) no longer make a test's worker back off and drop out of the run.
+- **ERP API sync, line VAT and personal data** (review round 16, medium). A sale, shipment or stock adjustment left
+  the product's `updated_at` as it was, so `updated_after` never returned a stock change; it now moves `updated_at`
+  of the product (and of the product of a variant). Resuming at `meta.server_time` lost a change committed by a
+  transaction that began earlier: lists now return `meta.next_updated_after` (server_time less five minutes) to pass
+  as the next run's `updated_after`. Under an order discount the lines' `vat_amount` was that of the undiscounted
+  line and did not add up to the order's or the invoice's VAT (248 of 658 orders in the review); a line now carries
+  its `discount` share and the VAT of the order's financial snapshot. `docs/openapi.yaml` misparsed: four unquoted
+  descriptions with a comma inside a flow mapping became stray keys; they are quoted, and CI now lints the file with
+  a strict YAML parser (`npm run lint:openapi`). Upgrade note: the order's phone, delivery address and note are
+  returned only to a credential with `customers:read` as well as `orders:read`; grant it to an ERP that needs them.
 - **ERP API** (review round 15, medium). An ERP could neither create a product, nor sync incrementally, nor book or
   ship an order from the API alone. `POST /api/v1/products` (scope `products:write`, `Idempotency-Key`) creates a
   simple product the way the CSV import does: unique slug, price history, stock booked in the default warehouse
