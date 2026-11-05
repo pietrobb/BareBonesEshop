@@ -56,6 +56,14 @@ After this adoption, the deployment has private version state and future updates
 
 **v2.0.0 shops** use the same adoption once (steps 2, 3 and 5–9 with `--version=2.0.0` and the `update-2.0.0-X.Y.Z` package): the v2.0.0 updater's own `doctor` reports NOT_READY ("no migration runner is configured") for every package with migrations and does not record the core drift baseline.
 
+### Payment webhooks when upgrading from before 2.1.0
+
+2.1.0 removed `api.php`. While it is still installed, `doctor` and `check` warn (`payment_webhooks`). When you
+deploy, change the webhook URL in the Stripe portal (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`,
+the Comgate push URL to `<app_url>/api/v1/webhooks/payment/comgate`, and every carrier webhook to
+`<app_url>/api/v1/webhooks/shipping/<carrier>`. The old URL answers 404, so a gateway still calling it leaves its
+payments pending until the worker's pending-order sweep asks the provider (GoPay, ThePay, Comgate, PayU).
+
 ## Customised e-mail templates from v2.0.0
 
 In v2.0.0 a shop customised its e-mails by editing `templates/emails/<locale>/*` in place. Since then the files are core defaults, and per-store customisations live in the database (admin → E-mail templates). An edited template file is a locally modified core file, so `check` reports it as a conflict and stops. Move the customisations once:
@@ -92,7 +100,8 @@ php cli/update.php doctor --package="$PACKAGE" --json
 
 The result must be `READY`. Archive the JSON with the deployment log.
 
-4. **Inspect preflight**:
+4. **Inspect preflight** (`check` and `apply` also refuse every `config.php` FAIL of `doctor`, such as a private
+   path inside the web root, so they cannot be applied past a failed doctor):
 
 ```bash
 php cli/update.php check --package="$PACKAGE"
@@ -240,6 +249,12 @@ The updater refuses:
 - a probe schema that already exists;
 - non-InnoDB base tables, because `--single-transaction` cannot guarantee their consistency;
 - missing dump/client binaries or insufficient privileges;
+- a MariaDB dump client (`mariadb-dump`, also installed as `mysqldump` by the Debian/Ubuntu `mariadb-client`
+  package) against a MySQL server when the schema has generated columns (`categories.parent_id_uniq`, the invoice
+  uniqueness column): it writes their values into the dump and MySQL refuses them on restore (`ERROR 3105`), so no
+  snapshot could ever be restored. `doctor`, `check` and `apply` name the client and the columns. Install the MySQL
+  8.x client (`mysqldump` and `mysql`, e.g. from the MySQL APT repository or the official `mysql` image) and point
+  `update_mysql_dump_binary` and `update_mysql_client_binary` at them. Against a MariaDB server the MariaDB client is right;
 - a schema that changes while the dump runs (the live schema inventory is read before and after the dump and must be identical);
 - a dump whose disposable restore differs from the live schema (tables, columns, indexes, constraints, triggers, routines, events) or from the rows the dump itself carries (row count per table, counted from its `INSERT` statements).
 
