@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Extension quarantine only for broken code** (review round 17, medium). Input that made an extension fail an
+  allocation ("Out of memory") still quarantined it, payment provider included, for good. Only a parse, compile or
+  class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never
+  do. Without a writable `private_runtime_dir` there is no quarantine: the fallback file in the shared temp
+  directory had a predictable name, so another account on the host could plant one.
 - **Low findings** (review round 16).
   - The admin product form takes the price and the original price in the product's currency ("12.90"), not in
     cents; an amount finer than the currency shows is refused.
