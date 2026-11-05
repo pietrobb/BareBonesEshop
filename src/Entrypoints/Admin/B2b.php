@@ -66,7 +66,7 @@ function pageCompanies(): void {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="form-row"><label for="co-credit"><?= esc(I18n::t('admin.b2b.credit_limit_hint')) ?></label><input id="co-credit" type="number" min="0" name="credit_limit" value="<?= $value('credit_limit', '0') ?>"></div>
+                <div class="form-row"><label for="co-credit"><?= esc(I18n::t('admin.b2b.credit_limit_hint')) ?></label><input id="co-credit" inputmode="decimal" name="credit_limit" value="<?= esc(Money::adminValue((int)($edit['credit_limit'] ?? 0), StoreContext::current()->currency())) ?>"></div>
                 <div class="form-row"><label for="co-terms"><?= esc(I18n::t('admin.b2b.payment_terms')) ?></label><input id="co-terms" type="number" min="0" max="365" name="payment_terms_days" value="<?= $value('payment_terms_days', '0') ?>"></div>
                 <div class="form-row"><label><input type="checkbox" name="invoice_purchase" value="1" <?= !empty($edit['invoice_purchase']) ? 'checked' : '' ?>> <?= esc(I18n::t('admin.b2b.invoice_purchase')) ?></label>
                     <label><input type="checkbox" name="active" value="1" <?= !$edit || !empty($edit['active']) ? 'checked' : '' ?>> <?= esc(I18n::t('admin.common.active_f')) ?></label></div>

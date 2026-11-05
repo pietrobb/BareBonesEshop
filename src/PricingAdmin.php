@@ -39,6 +39,9 @@ final class PricingAdmin {
         $a = self::json($row['actions'] ?? '{}');
         $type = (string)($a['type'] ?? 'discount_percent');
         $int = static fn(array $source, string $key): string => isset($source[$key]) ? (string)(int)$source[$key] : '';
+        // R17: amounts are shown and typed in the store's currency ("12.90"), stored in cents.
+        $currency = strtoupper(StoreContext::current()->currency());
+        $money = static fn(array $source, string $key): string => isset($source[$key]) ? Money::adminValue((int)$source[$key], $currency) : '';
         $ids = static fn(string $key): array => is_array($c[$key] ?? null) ? array_map('intval', $c[$key]) : [];
         return [
             'code' => (string)($row['code'] ?? ''),
@@ -53,8 +56,8 @@ final class PricingAdmin {
             'action_type' => $type,
             'action_value' => match ($type) {
                 'discount_percent' => self::bpsToPercent((int)($a['bps'] ?? 0)),
-                'discount_fixed' => $int($a, 'amount'),
-                'fixed_price' => $int($a, 'price'),
+                'discount_fixed' => $money($a, 'amount'),
+                'fixed_price' => $money($a, 'price'),
                 default => '',
             },
             'action_sku' => isset($a['product_id']) ? self::skuOf((int)$a['product_id'], isset($a['variant_id']) ? (int)$a['variant_id'] : null) : '',
@@ -64,7 +67,7 @@ final class PricingAdmin {
             'cond_category_ids' => $ids('category_ids'),
             'cond_brand_ids' => $ids('brand_ids'),
             'cond_customer_group_ids' => $ids('customer_group_ids'),
-            'cond_min_subtotal' => $int($c, 'min_subtotal'),
+            'cond_min_subtotal' => $money($c, 'min_subtotal'),
             'cond_buy_sku' => isset($c['buy_product_id']) ? self::skuOf((int)$c['buy_product_id'], null) : '',
             'cond_buy_qty' => $int($c, 'buy_qty'),
             'cond_max_uses' => $int($c, 'max_uses'),
@@ -222,10 +225,11 @@ final class PricingAdmin {
         return self::result(true, 0, I18n::format('admin.msg.pricelist.deleted', ['count' => count($prices)]));
     }
 
-    /** The list's prices as editor lines "SKU | min. quantity | price | original price". */
+    /** The list's prices as editor lines "SKU | min. quantity | price | original price", amounts in the list's currency (R17). */
     public static function priceLines(int $listId): string {
-        return implode("\n", array_map(static fn(array $r): string => implode(' | ', array_filter([$r['sku'], (string)$r['min_qty'], (string)$r['price'],
-            $r['compare_price'] === null ? null : (string)$r['compare_price']], static fn(?string $v): bool => $v !== null)), self::priceRows($listId)));
+        $currency = (string)(self::priceList($listId)['currency'] ?? StoreContext::current()->currency());
+        return implode("\n", array_map(static fn(array $r): string => implode(' | ', array_filter([$r['sku'], (string)$r['min_qty'], Money::adminValue($r['price'], $currency),
+            $r['compare_price'] === null ? null : Money::adminValue($r['compare_price'], $currency)], static fn(?string $v): bool => $v !== null)), self::priceRows($listId)));
     }
 
     /** Replace all prices of a list from the editor lines; every SKU must be a product or variant of the store's catalog. */
@@ -245,11 +249,11 @@ final class PricingAdmin {
                 if (count($parts) < 3 || count($parts) > 4) self::fail(I18n::format('admin.msg.pricelist.line_format', ['line' => $label]));
                 $target = self::skuTarget($parts[0], true, $label);
                 $minQty = self::int($parts[1], 1, 1000000, I18n::format('admin.msg.min_qty_line', ['line' => $label]));
-                $price = self::int($parts[2], 0, self::MAX_INT, I18n::format('admin.msg.pricelist.price', ['line' => $label]));
-                $compare = ($parts[3] ?? '') === '' ? null : self::int($parts[3], $price, self::MAX_INT, I18n::format('admin.msg.pricelist.compare', ['line' => $label]));
+                $price = self::money($parts[2], (string)$list['currency'], 0, I18n::format('admin.msg.pricelist.price', ['line' => $label]));
+                $compare = ($parts[3] ?? '') === '' ? null : self::money($parts[3], (string)$list['currency'], $price, I18n::format('admin.msg.pricelist.compare', ['line' => $label]));
                 // A product-level row is the base of variants priced by a surcharge: a negative surcharge must not end below zero.
                 $floor = ($target['variant_id'] ?? null) === null ? ProductVariants::minBasePrice((int)$target['product_id']) : 0;
-                if ($price < $floor) self::fail(I18n::format('admin.msg.pricelist.variant_floor', ['line' => $label, 'sku' => $parts[0], 'min' => $floor]));
+                if ($price < $floor) self::fail(I18n::format('admin.msg.pricelist.variant_floor', ['line' => $label, 'sku' => $parts[0], 'min' => Money::decimal($floor, (string)$list['currency']) . ' ' . strtoupper((string)$list['currency'])]));
                 $key = $target['product_id'] . ':' . ($target['variant_id'] ?? '-') . ':' . $minQty;
                 if (isset($rows[$key])) self::fail(I18n::format('admin.msg.pricelist.duplicate', ['line' => $label, 'sku' => $parts[0], 'qty' => $minQty]));
                 $rows[$key] = ['product_id' => $target['product_id'], 'variant_id' => $target['variant_id'] ?? null, 'min_qty' => $minQty, 'price' => $price, 'compare_price' => $compare];
@@ -308,8 +312,8 @@ final class PricingAdmin {
         }
         $actions = ['type' => $type] + match ($type) {
             'discount_percent' => ['bps' => self::percentBps($f['action_value'])],
-            'discount_fixed' => ['amount' => self::int($f['action_value'], 1, self::MAX_INT, I18n::t('admin.msg.promo.discount_fixed'))],
-            'fixed_price' => ['price' => self::int($f['action_value'], 0, self::MAX_INT, I18n::t('admin.msg.promo.fixed_price'))],
+            'discount_fixed' => ['amount' => self::money($f['action_value'], StoreContext::current()->currency(), 1, I18n::t('admin.msg.promo.discount_fixed'))],
+            'fixed_price' => ['price' => self::money($f['action_value'], StoreContext::current()->currency(), 0, I18n::t('admin.msg.promo.fixed_price'))],
             'free_shipping' => [],
             'buy_x_get_y', 'gift' => self::skuTarget($f['action_sku'], $type === 'gift', I18n::t($type === 'gift' ? 'admin.msg.promo.label_gift' : 'admin.msg.promo.label_free_product'))
                 + ['qty' => self::int($f['action_qty'] === '' ? '1' : $f['action_qty'], 1, 1000, I18n::t('admin.msg.promo.free_qty'))],
@@ -332,7 +336,7 @@ final class PricingAdmin {
             if ($filled('cond_min_qty', 'cond_product_skus') || $lists['cond_category_ids'] || $lists['cond_brand_ids']) {
                 self::fail(I18n::t('admin.msg.promo.cart_product_conditions'));
             }
-            if ($filled('cond_min_subtotal')) $conditions['min_subtotal'] = self::int($f['cond_min_subtotal'], 1, self::MAX_INT, I18n::t('admin.msg.promo.min_subtotal'));
+            if ($filled('cond_min_subtotal')) $conditions['min_subtotal'] = self::money($f['cond_min_subtotal'], StoreContext::current()->currency(), 1, I18n::t('admin.msg.promo.min_subtotal'));
             if ($type === 'buy_x_get_y') {
                 $conditions['buy_product_id'] = self::skuTarget($f['cond_buy_sku'], false, I18n::t('admin.msg.promo.label_bought_product'))['product_id'];
                 $conditions['buy_qty'] = self::int($f['cond_buy_qty'] === '' ? '1' : $f['cond_buy_qty'], 1, 1000, I18n::t('admin.msg.promo.buy_qty'));
@@ -461,6 +465,13 @@ final class PricingAdmin {
     private static function bpsToPercent(int $bps): string {
         $fraction = rtrim(sprintf('%02d', $bps % 100), '0');
         return intdiv($bps, 100) . ($fraction === '' ? '' : ',' . $fraction);
+    }
+
+    /** An amount typed in the currency ("12.90") as cents, at least $min (R17). @throws DomainException */
+    private static function money(string $value, string $currency, int $min, string $message): int {
+        $cents = trim($value) === '' ? null : Money::adminInput($value, $currency);
+        if ($cents === null || $cents < $min || $cents > self::MAX_INT) self::fail($message);
+        return $cents;
     }
 
     /** @throws DomainException */

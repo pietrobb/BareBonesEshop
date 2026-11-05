@@ -44,6 +44,11 @@ final class ProductVariants {
         return $listed === null || $listed === false ? $basePrice : min($basePrice, (int)$listed);
     }
 
+    /** The currency a product's (and its variants') prices are typed in: its own, else the store's. */
+    public static function currency(?array $product): string {
+        return strtoupper(trim((string)($product['currency'] ?? ''))) ?: strtoupper(StoreContext::current()->currency());
+    }
+
     /** The empty "add a variant" row of the editor. */
     public static function blank(int $sortOrder): array {
         return ['id' => 'new', 'sku' => '', 'name' => '', 'attrs_text' => '', 'price_absolute' => null, 'price_delta' => 0, 'stock' => 0,
@@ -84,6 +89,7 @@ final class ProductVariants {
         $delete = [];
         $skus = [];
         $floor = self::lowestProductPrice($productId, (int)$product['price']);
+        $currency = self::currency($product);
         $bundle = Db::get()->prepare('SELECT 1 FROM bundle_components WHERE bundle_product_id = :id');
         $bundle->execute([':id' => $productId]);
         $isBundle = $bundle->fetchColumn() !== false;
@@ -113,23 +119,24 @@ final class ProductVariants {
             if (mb_strlen($name) > 255) return I18n::format('admin.msg.variant.name_long', ['sku' => $sku]);
             $attrs = self::parseAttrs((string)($fields['attrs'] ?? ''));
             if (is_string($attrs)) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => $attrs]);
-            $absolute = trim((string)($fields['price_absolute'] ?? ''));
-            $delta = trim((string)($fields['price_delta'] ?? '0')) ?: '0';
+            // R17: the price and the surcharge are typed in the product's currency ("12.90", "-1.50"), like its price.
+            $absolute = Money::adminInput($fields['price_absolute'] ?? '', $currency, null);
+            $delta = Money::adminInput($fields['price_delta'] ?? '', $currency, 0, true);
             $stock = trim((string)($fields['stock'] ?? '0')) ?: '0';
             $sort = trim((string)($fields['sort_order'] ?? '0')) ?: '0';
             $loaded = $old === null ? '' : trim((string)($fields['stock_loaded'] ?? ''));
-            if (($absolute !== '' && !ctype_digit($absolute)) || !preg_match('/^-?\d+$/', $delta) || !ctype_digit($stock) || !preg_match('/^-?\d+$/', $sort)
+            if (($absolute === null && trim((string)($fields['price_absolute'] ?? '')) !== '') || $delta === null || !ctype_digit($stock) || !preg_match('/^-?\d+$/', $sort)
                 || ($loaded !== '' && !ctype_digit($loaded))) {
                 return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.numbers')]);
             }
-            if ($absolute === '' && $floor + (int)$delta < 0) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.negative_price')]);
+            if ($absolute === null && $floor + $delta < 0) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.negative_price')]);
             $availability = (string)($fields['availability'] ?? VariantAvailability::ACTIVE);
             $policy = (string)($fields['inventory_policy'] ?? 'inherit');
             if (!in_array($availability, VariantAvailability::statuses(), true) || !in_array($policy, self::POLICIES, true)) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.availability')]);
             // A download reserves no stock: a bundle's components would never be reserved or shipped (Inventory::assertDigitalLine).
             if (!empty($fields['digital']) && $isBundle) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.digital_bundle')]);
             $rows[] = ['id' => $id, 'sku' => $sku, 'name' => $name, 'attrs' => $attrs ? json_encode($attrs, JSON_UNESCAPED_UNICODE) : '{}',
-                'price_absolute' => $absolute === '' ? null : (int)$absolute, 'price_delta' => (int)$delta, 'stock' => (int)$stock,
+                'price_absolute' => $absolute, 'price_delta' => $delta, 'stock' => (int)$stock,
                 'stock_loaded' => $loaded === '' ? null : (int)$loaded,
                 'availability' => $availability, 'inventory_policy' => $policy, 'sort_order' => (int)$sort,
                 'digital' => !empty($fields['digital']) ? 1 : 0];

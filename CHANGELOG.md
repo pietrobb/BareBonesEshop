@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **One money unit in the admin** (review round 17, medium). The product price was typed in euros, but variant
+  prices, price lists, promotions and coupons, the B2B credit limit, supplier purchase prices and shipping and payment
+  amounts still took cents ("1290" saved 1 290 €, not 12.90 €). Every admin money field now takes and shows the amount
+  in the currency (12.90), with the currency on the label; stored values stay in cents. A new product in a store
+  with another currency (HUF) is priced in that currency, not EUR.
 - **Tests isolated from the developer's `config.php`** (review round 17, medium). The suite read the checkout's
   `config.php`: an enabled extension or an outbound webhook broke core tests, and the suite posted signed events to
   the developer's real webhook. It now runs on a copy of `config.php` (database, private directories, `app_url` and
