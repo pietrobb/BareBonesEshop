@@ -25,6 +25,14 @@ an `allowed_signers` copy you already trust. The GitHub release `v2.1.2` carries
 
 Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup.php doctor` after it.
 
+- **Rolling this update back:** the snapshot is taken by the shop's own 2.1.1 (or 2.1.0) updater, which does not
+  record customers, so `php cli/update.php rollback` of this update always reports `customers=unknown` and a critical
+  `update.rollback_discarded_writes` incident, even when nobody registered. Before rolling back, list the customers
+  registered since the update (`created_at` after the snapshot time in `php cli/update.php list`) to re-create them
+  afterwards; a SQLite rollback keeps no copy of the replaced database (MySQL/MariaDB with
+  `update_mysql_probe_database` keep a `pre-rollback-*.sql` dump in the snapshot directory). With none, close the
+  incident.
+
 - **Migration** `20261104120000_back_in_stock_double_opt_in`: "Notify me when back in stock" is double opt-in. Requests
   stored before the update were never confirmed; they lapse 48 hours after the update unless confirmed, so a
   customer who wants the notice signs up again.
@@ -66,9 +74,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   invoice and credit note counters were not raised past the numbers issued during the update, so those numbers were
   issued a second time: the counter update bound one named placeholder twice, which native prepares reject (HY093;
   SQLite accepts it). A regression test now scans every SQL string in `src/` and `extensions/` for a repeated named
-  placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by
-  v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
-  tracked as an unknown number of discarded rows instead of skipping them silently.
+  placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by an
+  older updater it reports the tables that updater never tracked (v2.1.1: customers; v2.1.0 or older: invoices,
+  refunds and customers) as an unknown number of discarded rows instead of skipping them silently.
 - **Refunds after a cancellation credit note, refunds by hand** (review round 16). A cancelled purchase on invoice
   that was paid all the same had its invoice fully credited by the cancellation credit note; refunding that money
   then failed for ever ("the refund exceeds what the invoice still has uncredited"), and its credit-note job raised a
