@@ -45,7 +45,7 @@ assert_equals('424242', (string)stream_get_contents($crdHeld), 'CR-D worker lock
 flock($crdHeld, LOCK_UN);
 fclose($crdHeld);
 [$crdExit, $crdOut] = $crdRun([$crdRoot . '/worker/cli/worker.php', '--once', '--verbose']);
-assert_true($crdExit === 0 && str_contains($crdOut, 'Worker done'), 'CR-D worker lock: the worker runs once the lock is free');
+assert_true($crdExit === 0 && str_contains($crdOut, 'Worker done'), 'CR-D worker lock: the worker runs once the lock is free (exit ' . $crdExit . ': ' . substr(trim($crdOut), -600) . ')');
 assert_true(is_file($crdLockFile), 'CR-D worker lock: the lock file is kept (unlinking it lets two workers hold "the" lock)');
 $crdProbe = fopen($crdLockFile, 'c+');
 assert_true(flock($crdProbe, LOCK_EX | LOCK_NB), 'CR-D worker lock: the finished worker released the lock');

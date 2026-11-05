@@ -151,8 +151,13 @@ StoreContext::activate($monitorStore);
 
 /** A failed job's open transaction is rolled back before its failure is recorded and the next job starts (R17). */
 $rollBackOpenJob = static function (): void {
-    $db = Db::get();
-    if ($db->inTransaction()) $db->rollBack();
+    // Never connects (a job that failed to connect has nothing to roll back) and never masks the job's own failure.
+    if (!Db::connected()) return;
+    try {
+        if (Db::get()->inTransaction()) Db::get()->rollBack();
+    } catch (\Throwable $rollbackError) {
+        Logger::warning('worker.job_rollback_failed', ['error' => $rollbackError->getMessage()]);
+    }
 };
 
 // Process loop
@@ -207,7 +212,7 @@ do {
             }
             // R17: a handler that returns inside its own transaction would have the completion (and every later job
             // of this loop) written into it.
-            if (Db::get()->inTransaction()) throw new \RuntimeException("Job left a database transaction open: {$type}");
+            if (Db::connected() && Db::get()->inTransaction()) throw new \RuntimeException("Job left a database transaction open: {$type}");
 
             JobQueue::complete($procFile);
             $processed++;
