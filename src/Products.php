@@ -779,7 +779,7 @@ class Products {
 
         // Fallback: direct update (no warehouses configured)
         $db = Db::get();
-        $stmt = $db->prepare("UPDATE products SET stock = :qty, updated_at = " . Db::now() . " WHERE sku = :sku AND store_id = :store");
+        $stmt = $db->prepare("UPDATE products SET stock = :qty, stock_updated_at = " . Db::now() . " WHERE sku = :sku AND store_id = :store");
         $updated = 0;
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
