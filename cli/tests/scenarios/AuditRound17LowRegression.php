@@ -170,13 +170,13 @@ $r17lFromBefore = getenv('MAIL_FROM');
 try {
     putenv('MAIL_FROM');
     $r17lSenders = [];
-    foreach (['https://www.mojobchod.sk/shop', 'http://localhost:8000', 'http://127.0.0.1', 'https://shop.example.com', ''] as $r17lUrl) {
+    foreach (['https://www.mojobchod.sk/shop', 'http://localhost:8000', 'http://127.0.0.1', 'https://shop.example.com', 'http://eshop:8080', ''] as $r17lUrl) {
         $r17lCfg->setValue(null, ['app_url' => $r17lUrl] + (array)$r17lCfgBefore);
         $r17lSenders[] = MailService::sender();
     }
     putenv('MAIL_FROM=Obchod@Mojobchod.sk');
     $r17lSenders[] = MailService::sender();
-    assert_equals(['noreply@mojobchod.sk', MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, 'obchod@mojobchod.sk'], $r17lSenders,
+    assert_equals(['noreply@mojobchod.sk', MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, MailService::DEFAULT_FROM, 'obchod@mojobchod.sk'], $r17lSenders,
         'R17 low: without MAIL_FROM mail leaves from noreply@ the shop\'s public domain, never a reserved or local one');
 } finally {
     $r17lCfg->setValue(null, $r17lCfgBefore);
