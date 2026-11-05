@@ -170,13 +170,13 @@ $vtable = static function(array $overrides = [], array $extraRows = []) use ($ex
     }
     return ['variants' => $table + $extraRows];
 };
-$newVariant = static fn(string $sku): array => ['new' => ['sku'=>$sku, 'name'=>'New', 'attrs'=>'size=XL', 'price_absolute'=>'', 'price_delta'=>'250', 'stock'=>'2', 'availability'=>'active', 'inventory_policy'=>'inherit', 'sort_order'=>'4']];
+$newVariant = static fn(string $sku): array => ['new' => ['sku'=>$sku, 'name'=>'New', 'attrs'=>'size=XL', 'price_absolute'=>'', 'price_delta'=>'2.50', 'stock'=>'2', 'availability'=>'active', 'inventory_policy'=>'inherit', 'sort_order'=>'4']];
 match ($action) {
     'variants_page' => [$_GET = ['id'=>$existing], pageProduct()],
     'variants_edit' => [$_GET = ['id'=>$existing], $extra = static function() use ($existing, $own): array {
         $new = (int)(array_column(Products::variants($existing), 'id', 'sku')["A123N-{$own}"] ?? 0);
         return ['purchasable' => [$new > 0 && VariantAvailability::isPurchasable($existing, $new)], 'storefront' => array_column(Products::variants($existing), 'sku')];
-    }, $_POST = $vtable(["A123V1-{$own}" => ['name'=>'Red L', 'attrs'=>"color=red\nsize = L", 'price_absolute'=>'1200', 'stock'=>'7'], "A123V3-{$own}" => ['stock'=>'10']], $newVariant("A123N-{$own}")), handleProductVariantsSave()],
+    }, $_POST = $vtable(["A123V1-{$own}" => ['name'=>'Red L', 'attrs'=>"color=red\nsize = L", 'price_absolute'=>'12.00', 'stock'=>'7'], "A123V3-{$own}" => ['stock'=>'10']], $newVariant("A123N-{$own}")), handleProductVariantsSave()],
     'variants_delete' => [$_GET = ['id'=>$existing], $_POST = $vtable(["A123V4-{$own}" => ['delete'=>'1']]), handleProductVariantsSave()],
     'variants_delete_ordered' => [$_GET = ['id'=>$existing], $_POST = $vtable(["A123V2-{$own}" => ['delete'=>'1']]), handleProductVariantsSave()],
     'variants_rename_ordered' => [$_GET = ['id'=>$existing], $_POST = $vtable(["A123V2-{$own}" => ['sku'=>"A123V2B-{$own}"]]), handleProductVariantsSave()],
