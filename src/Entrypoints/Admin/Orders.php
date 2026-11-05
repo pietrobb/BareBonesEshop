@@ -701,28 +701,6 @@ function adminManualPaymentTransitions(array $order): array {
             && ($to !== 'cancelled' || $orderCancelled)
     ));
 }
-/**
- * A payment status set by hand on the order detail. Money recorded as paid pays a pending order like a gateway
- * capture (R17: after a failed card the order stayed Pending until a second status change). Returns true when the
- * order was cancelled: the money is then flagged for a manual refund instead.
- */
-function adminRecordPayment(array $order, string $newStatus, int $amount, string $note, string $actor): bool {
-    $orderId = (int)$order['id'];
-    $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
-    PaymentService::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
-        'actor' => $actor,
-        'note' => $note,
-    ]);
-    if ($newStatus !== 'paid') return false;
-    if ((string)$order['status'] === 'cancelled') {
-        // No gateway session captured it, so the recorded amount (the order total when none was entered) is
-        // flagged for a manual refund with an incident.
-        PaymentService::settleAdminPaymentOnCancelled($orderId, $amount > 0 ? $amount : (int)$order['total'], 'Admin payment: ' . $note);
-        return true;
-    }
-    PaymentService::settleCapture($orderId, 'Admin payment' . ($note !== '' ? ': ' . $note : ''));
-    return false;
-}
 function handleOrderPaymentTransition(): void {
     Security::adminRequire('orders.payments');
     $orderId = Security::int($_GET['id'] ?? 0);
@@ -749,7 +727,7 @@ function handleOrderPaymentTransition(): void {
     }
 
     try {
-        if (adminRecordPayment($order, $newStatus, $amount, $note, Security::adminUser())) {
+        if (PaymentService::recordAdminPayment($order, $newStatus, $amount, $note, Security::adminUser())) {
             setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
         } else {
             setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));

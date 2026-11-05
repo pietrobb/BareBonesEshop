@@ -7,10 +7,7 @@ echo "\n--- Audit round 17: manual payment, refunded e-book in the admin, credit
 
 Bootstrap::initStoreContext('/', '', 'default');
 JobQueue::setDir(test_fixture_path('r17a-jobs'));
-if (!function_exists('adminRecordPayment')) {
-    if (!function_exists('adminFieldErrors')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php';
-    require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Orders.php';
-}
+if (!function_exists('adminCodeLabel')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php';
 $r17aProduct = (int)$pdo->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn();
 $r17aOrder = static function (string $tag, string $status, string $paymentStatus, string $method) use ($pdo, $r17aProduct): array {
     $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount,
@@ -27,19 +24,19 @@ $r17aState = static fn(int $orderId): array => array_values($pdo->query("SELECT 
 // 1. "Paid" recorded by hand (a bank transfer after the card failed) pays the order like a gateway capture.
 try {
     $r17aFailed = $r17aOrder('failed-card', 'pending', 'failed', 'card');
-    $r17aCancelledFlag = adminRecordPayment(Orders::byId($r17aFailed['id']), 'paid', 0, 'R17A bank transfer', 'r17a-admin');
+    $r17aCancelledFlag = PaymentService::recordAdminPayment(Orders::byId($r17aFailed['id']), 'paid', 0, 'R17A bank transfer', 'r17a-admin');
     assert_equals([false, ['paid', 'paid']], [$r17aCancelledFlag, $r17aState($r17aFailed['id'])],
         'R17 acceptance: a manual Paid after a failed card moves the order from Pending to Paid (was: payment Paid, order still Pending)');
     $r17aPending = $r17aOrder('pending-transfer', 'pending', 'pending', 'bank_transfer');
-    adminRecordPayment(Orders::byId($r17aPending['id']), 'paid', 0, '', 'r17a-admin');
+    PaymentService::recordAdminPayment(Orders::byId($r17aPending['id']), 'paid', 0, '', 'r17a-admin');
     assert_equals(['paid', 'paid'], $r17aState($r17aPending['id']), 'R17 acceptance: a bank transfer recorded as Paid by hand pays the pending order');
     // Money after the goods (cash on delivery): the delivered order keeps its status, only the payment is recorded.
     $r17aCod = $r17aOrder('cod-delivered', 'delivered', 'pending', 'cod');
-    adminRecordPayment(Orders::byId($r17aCod['id']), 'paid', 0, 'R17A collected', 'r17a-admin');
+    PaymentService::recordAdminPayment(Orders::byId($r17aCod['id']), 'paid', 0, 'R17A collected', 'r17a-admin');
     assert_equals(['delivered', 'paid'], $r17aState($r17aCod['id']), 'R17 acceptance: cash collected on a delivered order records the payment and leaves the order Delivered');
     // A cancelled order: the money is flagged for a manual refund, the order stays cancelled.
     $r17aCancelled = $r17aOrder('cancelled', 'cancelled', 'cancelled', 'bank_transfer');
-    assert_equals([true, 'cancelled'], [adminRecordPayment(Orders::byId($r17aCancelled['id']), 'paid', 0, 'R17A late', 'r17a-admin'), $r17aState($r17aCancelled['id'])[0] ?? null],
+    assert_equals([true, 'cancelled'], [PaymentService::recordAdminPayment(Orders::byId($r17aCancelled['id']), 'paid', 0, 'R17A late', 'r17a-admin'), $r17aState($r17aCancelled['id'])[0] ?? null],
         'R17 acceptance: money recorded on a cancelled order still goes to a manual refund and the order stays Cancelled');
 } catch (Throwable $e) {
     assert_true(false, 'R17 acceptance manual payment (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
