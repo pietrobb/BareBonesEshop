@@ -57,7 +57,7 @@ function pagePromotions(): void {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <?php $input('action_value', I18n::t('admin.promo.action_value'), $f['action_value']); ?>
+                <?php $input('action_value', I18n::t('admin.promo.action_value'), $f['action_value'], 'inputmode="decimal"'); ?>
                 <?php $input('action_sku', I18n::t('admin.promo.action_sku'), $f['action_sku'], 'maxlength="191"'); ?>
                 <?php $input('action_qty', I18n::t('admin.promo.action_qty'), $f['action_qty'], 'type="number" min="1"'); ?>
             </div>
@@ -67,7 +67,7 @@ function pagePromotions(): void {
                 <?php $input('cond_product_skus', I18n::t('admin.promo.cond_product_skus'), $f['cond_product_skus']); ?>
                 <?php $multi('cond_category_ids', I18n::t('admin.promo.cond_category_ids'), array_column($categories, 'path', 'id'), $f['cond_category_ids']); ?>
                 <?php $multi('cond_brand_ids', I18n::t('admin.promo.cond_brand_ids'), array_column($brands, 'name', 'id'), $f['cond_brand_ids']); ?>
-                <?php $input('cond_min_subtotal', I18n::t('admin.promo.cond_min_subtotal'), $f['cond_min_subtotal'], 'type="number" min="1"'); ?>
+                <?php $input('cond_min_subtotal', I18n::t('admin.promo.cond_min_subtotal'), $f['cond_min_subtotal'], 'inputmode="decimal"'); ?>
                 <?php $input('cond_buy_sku', I18n::t('admin.promo.cond_buy_sku'), $f['cond_buy_sku'], 'maxlength="191"'); ?>
                 <?php $input('cond_buy_qty', I18n::t('admin.promo.cond_buy_qty'), $f['cond_buy_qty'], 'type="number" min="1"'); ?>
                 <?php $input('cond_max_uses', I18n::t('admin.promo.cond_max_uses'), $f['cond_max_uses'], 'type="number" min="1"'); ?>

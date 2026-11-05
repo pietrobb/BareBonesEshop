@@ -85,9 +85,10 @@ final class SupplierAdmin {
         return self::result(true, 0, I18n::t('admin.msg.supplier.deleted'));
     }
 
-    /** Offer lines "SKU | supplier code | purchase price | min. quantity | pack size | lead time". */
+    /** Offer lines "SKU | supplier code | purchase price | min. quantity | pack size | lead time", the price in the store's currency (R17). */
     public static function offerLines(int $supplierId): string {
-        return implode("\n", array_map(static fn(array $r): string => implode(' | ', [$r['sku'], (string)($r['supplier_sku'] ?? ''), (string)$r['cost_price'],
+        $currency = StoreContext::current()->currency();
+        return implode("\n", array_map(static fn(array $r): string => implode(' | ', [$r['sku'], (string)($r['supplier_sku'] ?? ''), Money::adminValue((int)$r['cost_price'], $currency),
             (string)$r['min_order_qty'], (string)$r['pack_size'], (string)$r['lead_time_days']]), self::offerRows($supplierId)));
     }
 
@@ -109,7 +110,7 @@ final class SupplierAdmin {
                 if (isset($rows[$sku])) self::fail(I18n::format('admin.msg.supplier.offer_duplicate', ['line' => $label, 'sku' => $sku]));
                 $rows[$sku] = [
                     'sku' => $sku, 'supplier_sku' => $p[1] === '' ? null : self::text($p[1], false, I18n::format('admin.msg.supplier.code_label', ['line' => $label])),
-                    'cost_price' => self::int($p[2], 0, self::MAX_INT, I18n::format('admin.msg.supplier.cost', ['line' => $label])),
+                    'cost_price' => self::money($p[2], I18n::format('admin.msg.supplier.cost', ['line' => $label])),
                     'min_order_qty' => self::int(($p[3] ?? '') === '' ? '1' : $p[3], 1, 1000000, I18n::format('admin.msg.min_qty_line', ['line' => $label])),
                     'pack_size' => self::int(($p[4] ?? '') === '' ? '1' : $p[4], 1, 1000000, I18n::format('admin.msg.supplier.pack', ['line' => $label])),
                     'lead_time_days' => self::int(($p[5] ?? '') === '' ? '0' : $p[5], 0, 365, I18n::format('admin.msg.supplier.lead_time', ['line' => $label])),
@@ -183,7 +184,7 @@ final class SupplierAdmin {
                 if ($qty < (int)$offer['min_order_qty'] || $qty % max(1, (int)$offer['pack_size']) !== 0) {
                     self::fail(I18n::format('admin.msg.po.pack_rule', ['line' => $label, 'sku' => $p[0], 'min' => $offer['min_order_qty'], 'pack' => $offer['pack_size']]));
                 }
-                $items[] = ['sku' => $p[0], 'quantity' => $qty] + (($p[2] ?? '') === '' ? [] : ['unit_cost' => self::int($p[2], 0, self::MAX_INT, I18n::format('admin.msg.supplier.cost', ['line' => $label]))]);
+                $items[] = ['sku' => $p[0], 'quantity' => $qty] + (($p[2] ?? '') === '' ? [] : ['unit_cost' => self::money($p[2], I18n::format('admin.msg.supplier.cost', ['line' => $label]))]);
             }
             if (!$items) self::fail(I18n::t('admin.msg.po.no_items'));
         } catch (DomainException $e) {
@@ -272,6 +273,13 @@ final class SupplierAdmin {
         $stmt = Db::get()->prepare($sql);
         $stmt->execute($params + [':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** A purchase price typed in the store's currency ("4.20") as cents (R17). @throws DomainException */
+    private static function money(string $value, string $message): int {
+        $cents = trim($value) === '' ? null : Money::adminInput($value, StoreContext::current()->currency());
+        if ($cents === null || $cents > self::MAX_INT) self::fail($message);
+        return $cents;
     }
 
     /** @throws DomainException */

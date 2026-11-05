@@ -397,7 +397,7 @@ try {
         ['Neue Gruppe', 'Rabatt in % (z. B. 7,5)', 'Code (leer = aus dem Namen)', 'Gruppe löschen?', 'Rabatt', 'aktiv', 'A157 Gruppe', 'Speichern']);
     $a157Check('A15.7 de: customer group edit is German', $a154Run(['p' => 'customer_groups', 'id' => $a157Group]), ['Bearbeiten: A157 Gruppe', 'Neue Gruppe']);
     $a157Check('A15.7 de: companies page is German', $a154Run(['p' => 'companies']),
-        ['Neue Firma', 'Firmenname', 'Freigabe', 'wartet auf Freigabe', 'Kreditlimit (Cent, 0 = ohne Limit)', 'Zahlungsziel (Tage)', 'Kauf auf Rechnung',
+        ['Neue Firma', 'Firmenname', 'Freigabe', 'wartet auf Freigabe', 'Kreditlimit (0 = ohne Limit)', 'Zahlungsziel (Tage)', 'Kauf auf Rechnung',
             'ja, 14 Tage', 'ohne Limit', 'Limit / unbezahlt', 'Firma löschen?', 'A157 GmbH']);
     $a157Check('A15.7 de: promotions page is German', $a154Run(['p' => 'promotions']),
         ['Neue Aktion', 'Bereich', 'Katalog (Produktpreis)', 'Warenkorb (Bestellrabatt)', 'Kombinierbarkeit', 'Exklusiv (keine weiteren gelten)',
@@ -452,12 +452,12 @@ try {
     $a157Flash('A15.7 de: coupon on a catalog promotion flash is German', ['p' => 'promotions', 'action' => 'save'], $a157Promo,
         ['p' => 'promotions'], ['Nur eine Warenkorbaktion kann einen Gutscheincode haben.']);
     $a157Flash('A15.7 de: refused cart action flash is German', ['p' => 'promotions', 'action' => 'save'], ['scope' => 'cart', 'action_type' => 'fixed_price'] + $a157Promo,
-        ['p' => 'promotions'], ['Die Aktion Festpreis (Cent) ist für einen Gutschein nicht erlaubt (erlaubt: Rabatt in %, Rabatt um Betrag (Cent), Kostenloser Versand (Warenkorb oder Gutschein)).']);
+        ['p' => 'promotions'], ['Die Aktion Festpreis ist für einen Gutschein nicht erlaubt (erlaubt: Rabatt in %, Rabatt um Betrag, Kostenloser Versand (Warenkorb oder Gutschein)).']);
     $a157Flash('A15.7 de: promotion date flash is German', ['p' => 'promotions', 'action' => 'save'], ['coupon_code' => '', 'valid_from' => 'gestern'] + $a157Promo,
         ['p' => 'promotions'], ['Gültig ab: ungültiges Datum (JJJJ-MM-TT HH:MM, UTC).']);
     $a157Lists = ['p' => 'price_lists', 'id' => $a157List];
     $a157Flash('A15.7 de: price line format flash is German', $a157Lists + ['action' => 'prices'], ['prices' => 'A155-P | 1'],
-        $a157Lists, ['Zeile 1: geben Sie SKU | Mindestmenge | Preis in Cent [| ursprünglicher Preis] ein.']);
+        $a157Lists, ['Zeile 1: geben Sie SKU | Mindestmenge | Preis [| ursprünglicher Preis] ein, Preise in der Währung der Preisliste.']);
     $a157Flash('A15.7 de: prices saved flash is German', $a157Lists + ['action' => 'prices'], ['prices' => 'A155-P | 1 | 900'],
         $a157Lists, ['Preise der Preisliste gespeichert (1).']);
     $a157Suppliers = ['p' => 'suppliers', 'id' => $a157Supplier];

@@ -113,11 +113,11 @@ $pdo->prepare("INSERT INTO variants (product_id, sku, name, stock, price_absolut
 $r7rVariant = (int)$pdo->lastInsertId();
 $pdo->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active) VALUES (?, 'r7r-list', 'R7R list', 'eur', NULL, 0, 1)")->execute([$r7rStore]);
 $r7rList = (int)$pdo->lastInsertId();
-$r7rSave = PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 500"]);
+$r7rSave = PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 5.00"]);
 $r7rRows = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM price_list_prices WHERE price_list_id = {$r7rList}")->fetchColumn();
-assert_true(empty($r7rSave['ok']) && $r7rRows() === 0 && str_contains((string)($r7rSave['message'] ?? ''), '800'),
+assert_true(empty($r7rSave['ok']) && $r7rRows() === 0 && str_contains((string)($r7rSave['message'] ?? ''), '8.00'),
     'R7 variant price: a product price-list row below the variant floor (8.00 €) is refused (was saved, variant −3.00 €) (' . json_encode($r7rSave) . ')');
-assert_true(!empty(PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 800"])['ok']) && $r7rRows() === 1,
+assert_true(!empty(PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 8.00"])['ok']) && $r7rRows() === 1,
     'R7 variant price: a product price-list row at the floor is saved');
 // Rows written before the check (or a variant saved afterwards) never price the variant below zero.
 $pdo->exec("UPDATE price_list_prices SET price = 500 WHERE price_list_id = {$r7rList}");
@@ -386,11 +386,11 @@ foreach (['re-dated to run again' => 'redate', 'switched off' => 'off', 'deleted
 foreach (['deleted' => 'delete', 're-dated' => 'redate', 'repriced' => 'reprice', 'switched off' => 'off'] as $r7rLabel => $r7rHow) {
     $r7rRunsReset();
     $r7rList = $r7rOk(PricingAdmin::savePriceList(0, $r7rListForm($r7rAgo(18), $r7rAgo(10))));
-    $r7rOk(PricingAdmin::savePrices($r7rList, ['prices' => 'R7R-OMNI-97734 | 1 | 9000']));
+    $r7rOk(PricingAdmin::savePrices($r7rList, ['prices' => 'R7R-OMNI-97734 | 1 | 90.00']));
     match ($r7rHow) {
         'delete' => $r7rOk(PricingAdmin::deletePriceList($r7rList)),
         'redate' => $r7rOk(PricingAdmin::savePriceList($r7rList, $r7rListForm($r7rAgo(400), $r7rAgo(390)))),
-        'reprice' => $r7rOk(PricingAdmin::savePrices($r7rList, ['prices' => 'R7R-OMNI-97734 | 1 | 9900'])),
+        'reprice' => $r7rOk(PricingAdmin::savePrices($r7rList, ['prices' => 'R7R-OMNI-97734 | 1 | 99.00'])),
         'off' => $r7rOk(PricingAdmin::savePriceList($r7rList, $r7rListForm($r7rAgo(18), $r7rAgo(10), '0'))),
     };
     $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-2', $r7rHour, '')));
