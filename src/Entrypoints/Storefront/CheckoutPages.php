@@ -172,7 +172,7 @@ function processCheckout(): array {
     $input['consents'] = array_map(static fn($value): bool => $value === '1', is_array($input['consents'] ?? null) ? $input['consents'] : []);
     $paymentInput = $input['payment'] ?? 'cod';
     $input['payment_method'] = Security::clean(is_string($paymentInput) ? $paymentInput : 'cod');
-    $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
+    $result = CheckoutService::execute($input, require AppConfig::path(dirname(__DIR__, 3)));
     if (!empty($result['success'])) {
         CheckoutService::rememberCoupon(''); // used by this order; the next checkout starts without it
         $customerId = (int)($_SESSION['customer_id'] ?? 0);

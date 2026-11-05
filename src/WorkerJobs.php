@@ -20,7 +20,7 @@ final class WorkerJobs
     }
 
     public static function handleCacheRebuild(array $payload, array $job): void {
-        CacheRebuild::run($payload, require dirname(__DIR__) . '/config.php');
+        CacheRebuild::run($payload, require AppConfig::path(dirname(__DIR__)));
     }
 
     public static function handleEmailSend(array $payload, array $job): void {
@@ -337,7 +337,7 @@ final class WorkerJobs
     }
 
     public static function handleCartAbandonment(array $payload, array $job): void {
-        $cfg = require dirname(__DIR__) . '/config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         $options = (array)($cfg['cart_reminder'] ?? []);
         if (($options['enabled'] ?? false) !== true) return;
         if (isset($payload['hours'])) $options['delay_hours'] = (int)$payload['hours'];
@@ -353,7 +353,7 @@ final class WorkerJobs
     }
 
     public static function handleCleanup(array $payload, array $job): void {
-        $cfg = require dirname(__DIR__) . '/config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         JobQueue::heartbeat(true); // a fresh lease for the retention sweep
         $deleted = RetentionCleanup::run(['jobs_dir' => self::workerJobsDir($cfg)]);
         Logger::info('worker.retention_cleanup', $deleted);

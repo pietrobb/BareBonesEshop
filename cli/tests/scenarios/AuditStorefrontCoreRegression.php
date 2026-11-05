@@ -49,7 +49,7 @@ $db = new PDO("sqlite:" . $sfaDir . "/shop.sqlite", null, null, [PDO::ATTR_ERRMO
 Db::init($db, "sqlite");
 Cache::setDir($sfaDir . "/cache");
 JobQueue::setDir($sfaDir . "/jobs");
-$config = require $sfaApp . "/config.php";
+$config = require ' . var_export(AppConfig::path($sfaApp), true) . ';
 (new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => "http://127.0.0.1:' . $sfaPort . '"] + $config);
 Security::setRateDbForTesting(new PDO("sqlite:" . $sfaDir . "/rate.sqlite"));
 (new ReflectionProperty(InvoiceService::class, "storageDir"))->setValue(null, $sfaDir . "/invoices");

@@ -23,7 +23,7 @@ class JobQueue {
         if (self::$forceFile) return null;
         if (self::$backendOverride !== null) return self::$backendOverride;
         if (self::$configuredBackend !== null) return self::$configuredBackend;
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         $queue = is_array($cfg['queue'] ?? null) ? $cfg['queue'] : [];
         $name = strtolower((string)($queue['backend'] ?? 'file'));
         self::$configuredBackend = match ($name) {
@@ -37,7 +37,7 @@ class JobQueue {
 
     private static function dir(): string {
         if (!self::$jobsDir) {
-            $cfg = require __DIR__ . '/../config.php';
+            $cfg = require AppConfig::path(dirname(__DIR__));
             self::$jobsDir = self::validatePrivateDir((string)($cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs'));
         }
         return self::$jobsDir;

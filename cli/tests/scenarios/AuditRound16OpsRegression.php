@@ -13,7 +13,7 @@ $r16oFail = static function (string $what, Throwable $e): void {
 };
 
 // The suite runs on its own data directory: never the installed shop's stores.json and legal texts (private_runtime_dir).
-$r16oInstalled = (string)((require $r16oApp . '/config.php')['private_runtime_dir'] ?? '');
+$r16oInstalled = (string)((require AppConfig::path($r16oApp))['private_runtime_dir'] ?? '');
 assert_true(DataOverrides::dir() === str_replace('\\', '/', TEST_DATA_DIR) && DataOverrides::dir() !== rtrim(str_replace('\\', '/', $r16oInstalled), '/'),
     'R16 ops tests: the suite reads its own data directory, not config.php\'s private_runtime_dir (was: the installed stores.json hid every sample store)');
 assert_equals((string)file_get_contents($r16oApp . '/stores.example.json'), (string)file_get_contents(DataOverrides::storesPath()),
@@ -85,7 +85,7 @@ try {
     assert_equals([], UpgradeChecks::carrierWebhooksTimestampDefault($r16oHooks + ['shipping_webhook_require_timestamp' => false]), 'R16 ops doctor: an explicit false (body-only carrier) passes');
     assert_equals([], UpgradeChecks::carrierWebhooksTimestampDefault(['shipping_webhook_secrets' => []]), 'R16 ops doctor: no carrier webhook, nothing to report');
 
-    $r16oBase = require $r16oApp . '/config.php';
+    $r16oBase = require AppConfig::path($r16oApp);
     unset($r16oBase['shipping_webhook_require_timestamp']);
     $r16oDoctor = static function (array $config) use ($r16oApp): array {
         $checks = [];

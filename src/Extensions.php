@@ -368,7 +368,7 @@ final class Extensions
 
     private static function config(): array
     {
-        $file = dirname(__DIR__) . '/config.php';
+        $file = AppConfig::path(dirname(__DIR__));
         $config = is_file($file) ? require $file : [];
         return is_array($config) ? $config : [];
     }

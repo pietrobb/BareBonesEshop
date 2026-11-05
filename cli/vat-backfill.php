@@ -82,7 +82,7 @@ function vatBackfillOrder(array $order, array $items, array $seller): array
 
 if (defined('BB_TEST_LOAD_VAT_BACKFILL_ONLY')) return;
 
-require __DIR__ . '/../config.php';
+require AppConfig::path(dirname(__DIR__));
 
 $argv = $_SERVER['argv'] ?? [];
 $args = array_slice($argv, 1);

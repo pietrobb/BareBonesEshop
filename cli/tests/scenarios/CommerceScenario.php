@@ -454,7 +454,7 @@ assert_true(!empty($read['categories']), 'Cache warmed: categories');
 
 // Warm a category listing
 $tricka = Categories::bySlug('tricka');
-$cfg = require TEST_CLI_DIR . '/../config.php';
+$cfg = require AppConfig::path(dirname(TEST_CLI_DIR));
 $listing = Products::byCategory($tricka['id'], 1, $cfg['per_page'] ?? 24, 'price_asc');
 $listing['products'] = array_map(fn($p) => Products::enrich(I18n::product($p)), $listing['products']);
 Cache::writeJson(Cache::localePath('sk', "cat/tricka/page-1.json"), $listing);

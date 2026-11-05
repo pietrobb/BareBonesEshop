@@ -10,7 +10,7 @@ $r10lServer = array_intersect_key($_SERVER, array_flip(['REQUEST_METHOD', 'REMOT
 $r10lPost = $_POST;
 $r10lCfgProp = new ReflectionProperty(Security::class, 'cfg');
 $r10lCfgBefore = $r10lCfgProp->getValue();
-$r10lCfgBase = is_array($r10lCfgBefore) ? $r10lCfgBefore : require dirname(TEST_CLI_DIR) . '/config.php';
+$r10lCfgBase = is_array($r10lCfgBefore) ? $r10lCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR));
 $r10lFail = static fn(string $what, Throwable $e) => assert_true(false, "R10 low {$what} (" . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 $r10lNow = static fn(int $daysAgo): string => gmdate('Y-m-d H:i:s', time() - $daysAgo * 86400);
 // The suite database has no attribute, withdrawal or complaint tables before the files sorted after this one create them.
