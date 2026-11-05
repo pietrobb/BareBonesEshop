@@ -252,14 +252,22 @@ class Cache {
      * never served past the end of the sale (nor the regular price after its start) for the rest of the TTL.
      */
     public static function readCatalogJson(string $path, int $ttl): ?array {
-        self::flushPendingCatalogChanges();
         $file = self::path($path);
+        if (self::catalogChangedSince($file)) return null;
+        if (is_file($file) && (int)filemtime($file) <= Pricing::lastScheduledChange()) return null;
+        return self::readJson($path, $ttl);
+    }
+
+    /**
+     * Whether catalogChanged() of the active catalog ran in or after the second $file (an absolute entry path) was
+     * written: a product or page saved, a price list changed, or a product or variant went in or out of stock.
+     */
+    public static function catalogChangedSince(string $file): bool {
+        self::flushPendingCatalogChanges();
         $marker = self::catalogMarker(StoreContext::current()->catalogId());
         clearstatcache(true, $file);
         clearstatcache(true, $marker);
-        if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker)) return null;
-        if (is_file($file) && (int)filemtime($file) <= Pricing::lastScheduledChange()) return null;
-        return self::readJson($path, $ttl);
+        return is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker);
     }
 
     private static function catalogMarker(string $catalogId): string {

@@ -1,10 +1,13 @@
 <?php
 /**
  * Cached public catalog artifacts (sitemap parts, merchant feeds) in the active store's cache
- * namespace. An entry is rebuilt when its TTL lapses, after Cache::flush(), or as soon as the
+ * namespace. An entry is rebuilt when its TTL lapses, after Cache::flush(), as soon as the
  * catalog fingerprint changes (a product/category/CMS page is added, removed or saved — every
- * product and page write bumps updated_at; categories are checksummed). Price-list, promotion and stock changes do not touch
- * the fingerprint and are picked up within the TTL.
+ * product and page write bumps updated_at; categories are checksummed), or after Cache::catalogChanged()
+ * of the store's catalog (a product or variant going in or out of stock, a price-list change).
+ * R17: a sale that leaves a product in stock changes neither: it moves products.stock_updated_at, not
+ * updated_at, so feeds and sitemaps are not rebuilt after every order. Promotions and other stock
+ * changes are picked up within the TTL.
  */
 final class PublicFeedCache
 {
@@ -47,7 +50,7 @@ final class PublicFeedCache
     private static function current(string $key, int $ttl, string $fingerprint): ?string
     {
         $file = Cache::freshFile($key, $ttl);
-        return $file !== null && Cache::read($key . '.sig') === $fingerprint ? $file : null;
+        return $file !== null && Cache::read($key . '.sig') === $fingerprint && !Cache::catalogChangedSince($file) ? $file : null;
     }
 
     /** @param callable(resource): void $writer */
