@@ -189,15 +189,23 @@ class DigitalDelivery {
         return $stmt->rowCount();
     }
 
+    /**
+     * Entitlements of an order. download_blocked: an active entitlement the order no longer pays for (its line
+     * refunded through a return, the order cancelled or unpaid), so the download is refused (R17: the admin showed
+     * it as Active).
+     */
     public static function forOrder(int $orderId): array {
         $stmt = Db::get()->prepare("SELECT de.id, de.order_item_id, de.status, de.download_count,
                 de.download_limit, de.expires_at, de.delivered_at, de.revoked_at,
-                de.revoked_reason, da.sku, da.asset_key, da.label, da.download_name
+                de.revoked_reason, da.sku, da.asset_key, da.label, da.download_name,
+                o.status AS order_status, o.payment_status
             FROM digital_entitlements de
             JOIN digital_assets da ON da.id = de.asset_id
+            JOIN orders o ON o.id = de.order_id
             WHERE de.order_id = :order_id ORDER BY de.id");
         $stmt->execute([':order_id' => $orderId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(static fn(array $row): array => $row + ['download_blocked' => $row['status'] === 'active' && !self::orderCoversDownload($row)],
+            $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /** Active entitlements of a customer's orders in the current store, newest first (account downloads page). */

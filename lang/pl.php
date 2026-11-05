@@ -781,6 +781,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.status_failed' => 'Nie udało się zmienić statusu zwrotu: {error}',
     'admin.entitlement.status.active' => 'Aktywne',
     'admin.entitlement.status.revoked' => 'Cofnięte',
+    'admin.entitlement.status.blocked' => 'Zablokowane (zwrócone lub nieopłacone)',
     'admin.rma.status.requested' => 'Zgłoszony',
     'admin.rma.status.approved' => 'Zatwierdzony',
     'admin.rma.status.received' => 'Przyjęty',

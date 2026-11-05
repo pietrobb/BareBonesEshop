@@ -781,6 +781,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.status_failed' => 'Stav vrácení se nepodařilo změnit: {error}',
     'admin.entitlement.status.active' => 'Aktivní',
     'admin.entitlement.status.revoked' => 'Zrušeno',
+    'admin.entitlement.status.blocked' => 'Zablokováno (vráceno nebo nezaplaceno)',
     'admin.rma.status.requested' => 'Požádáno',
     'admin.rma.status.approved' => 'Schváleno',
     'admin.rma.status.received' => 'Přijato',

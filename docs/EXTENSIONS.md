@@ -125,6 +125,18 @@ examples. Amounts are always integers in minor units (cents) of the order's curr
 
 ### Payment (`PaymentAdapter`)
 
+- **Registering.** A provider with signed notifications names the request header that carries the
+  signature, in PHP's `$_SERVER` form (`HTTP_` + upper case, `-` as `_`):
+  `$api->provider('payment', 'acme-pay', AcmePay::class, ['checkout', 'status', 'webhook', 'refund'],
+  ['signature_header' => 'HTTP_X_ACME_SIGNATURE'])` for an `X-Acme-Signature` header. Without a
+  `signature_header` matching `HTTP_[A-Z0-9_]+`, every notification to the provider is answered HTTP 400.
+- **Offering it at checkout.** Registering a provider does not add a payment method. Checkout lists the
+  rows of `payment_methods` for the store (`store_id`) that are `active` and have a
+  `payment_method_countries` row (same `store_id`, `method_code` = the method's `code`) for the delivery
+  country. An online method sets `provider` to your provider code, `service_type` to `online_card` and
+  `requires_online` to 1; `min_amount`, `max_amount`, `fixed_fee` and `free_above` are minor units of the
+  store's currency, `percent_fee_bps` is in basis points. Create the rows in Admin → Payments (methods
+  and countries), or from your extension's migration with `INSERT` statements that skip existing codes.
 - `createSession(array $order): array` is called when the customer submits the checkout and from
   "pay again" / admin payment links. `$order` has `order_id`, `order_number`, `total`, `currency`
   (lowercase), `customer_email`, `customer_name`, `locale`, `items`, `shipping_cost`, `success_url`,
@@ -164,7 +176,9 @@ examples. Amounts are always integers in minor units (cents) of the order's curr
   `$params` and return shape are documented in `adapters/ShippingAdapter.php`; a throwing carrier is
   skipped (logged) and the others are still offered.
 - `generateLabel(array $order)` runs from the admin order detail ("Labels"), offered for the carrier
-  of the order's shipping method; return `['awb', 'label_data', 'carrier']`.
+  of the order's shipping method; return `['awb', 'label_data', 'carrier']`. `$order` holds only the fields
+  in `ShippingService::LABEL_ORDER_FIELDS` (recipient, `shipping_addr`, amounts, `cod_amount`, `pickup_point_id`,
+  `shipment_id`, `label_sequence`), not the whole order row: no IP address, customer account, payment or ERP data.
   `ShippingLifecycleAdapter` adds pickup points and `cancelLabel()`.
 - `trackShipment($awb)` is **not polled** by the core: parcel status reaches the shop only through
   tracking webhooks (below). `ShippingService::trackShipment($carrier, $awb)` calls it on demand,
@@ -200,8 +214,8 @@ in the core format:
 // extensions/acme-loyalty/migrations/20261014130000_points.php
 return new class {
     public function up(PDO $db, bool $isSqlite): void {
-        $id = $isSqlite ? 'INTEGER PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTO_INCREMENT';
-        $db->exec("CREATE TABLE IF NOT EXISTS ext_acme_loyalty_points ({$id}, customer_id INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0)");
+        $id = $isSqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT AUTO_INCREMENT PRIMARY KEY';
+        $db->exec("CREATE TABLE IF NOT EXISTS ext_acme_loyalty_points (id {$id}, customer_id INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0)");
     }
 };
 ```

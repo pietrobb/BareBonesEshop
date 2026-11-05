@@ -781,6 +781,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.status_failed' => 'A visszaküldés állapotát nem sikerült módosítani: {error}',
     'admin.entitlement.status.active' => 'Aktív',
     'admin.entitlement.status.revoked' => 'Visszavonva',
+    'admin.entitlement.status.blocked' => 'Letiltva (visszatérítve vagy kifizetetlen)',
     'admin.rma.status.requested' => 'Kérelmezve',
     'admin.rma.status.approved' => 'Jóváhagyva',
     'admin.rma.status.received' => 'Beérkezett',

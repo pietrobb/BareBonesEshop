@@ -28,6 +28,8 @@ final class Updater
     private $migrationRunner;
     private ?UpdateDatabaseBackup $databaseBackup;
     private ?ThemeUpgradeGate $themeGate;
+    /** config.php of the installation; check() and apply() refuse what doctor() reports as FAIL in it (R17). */
+    private ?array $config;
     private $lockHandle = null;
 
     public function __construct(
@@ -36,7 +38,8 @@ final class Updater
         ?PDO $database = null,
         ?callable $migrationRunner = null,
         ?UpdateDatabaseBackup $databaseBackup = null,
-        ?ThemeUpgradeGate $themeGate = null
+        ?ThemeUpgradeGate $themeGate = null,
+        ?array $config = null
     ) {
         $realRoot = realpath($root);
         if ($realRoot === false || !is_dir($realRoot) || is_link($realRoot)) {
@@ -57,6 +60,7 @@ final class Updater
         $this->migrationRunner = $migrationRunner;
         $this->databaseBackup = $databaseBackup;
         $this->themeGate = $themeGate;
+        $this->config = $config;
     }
 
     public static function isProtectedPath(string $path): bool
@@ -131,7 +135,16 @@ final class Updater
                 if ($this->migrationRunner === null) {
                     $blockers[] = 'Package contains migrations but no migration runner is configured';
                 }
+                $dumpProblem = $driver === 'mysql' && $this->databaseBackup instanceof MysqlUpdateDatabaseBackup ? $this->databaseBackup->dumpClientProblem() : null;
+                if ($dumpProblem !== null) $blockers[] = $dumpProblem;
             }
+        }
+
+        // R17: what doctor reports as FAIL in config.php (private paths in the web root, a v1.x stores.json without
+        // private_runtime_dir) blocks check and apply too; its warnings are shown with them.
+        foreach ($this->config === null ? [] : $this->configChecks($this->config) as $configCheck) {
+            if ($configCheck['level'] === 'fail') $blockers[] = 'Doctor FAIL (' . $configCheck['name'] . '): ' . $configCheck['message'];
+            elseif ($configCheck['level'] === 'warn') $warnings[] = $configCheck['message'];
         }
 
         // New core + installed themes/stores.json/store overrides, rendered before anything changes.
@@ -410,38 +423,8 @@ final class Updater
             $checks[] = compact('level', 'name', 'message');
         };
 
-        if ($config !== null) {
-            $inside = [];
-            foreach (self::PRIVATE_PATH_SETTINGS as $setting) {
-                $path = trim((string)($config[$setting] ?? ''));
-                if ($path !== '' && $this->isInsideRoot($path)) $inside[] = "{$setting} ({$path})";
-            }
-            $add($inside === [] ? 'ok' : 'fail', 'config', $inside === []
-                ? 'config.php keeps private runtime paths outside the application root'
-                : 'config.php points ' . implode(', ', $inside) . ' inside the application root (or uses a relative path), which this release refuses'
-                    . ' (the admin, workers and cron fail); move them outside the web root (default: ../bareboneseshop-private/…)'
-                    . ' and move their contents before the update');
-            if (DataOverrides::storesNeedUpgrade($this->root, $config)) {
-                $hasDataDirectory = DataOverrides::dir($config) !== null;
-                $add($hasDataDirectory ? 'warn' : 'fail', 'stores', $hasDataDirectory
-                    ? 'stores.json is in the v1.x format (no default_store); apply writes the upgraded copy to private_runtime_dir/stores.json'
-                        . ' (the main store becomes "default") and keeps the old file for a rollback'
-                    : 'stores.json is in the v1.x format (no default_store) and no private_runtime_dir is configured for the upgraded copy;'
-                        . ' this release would answer 503: set private_runtime_dir first');
-            }
-            // The deny rules and the carrier-webhook default of the release running this doctor (CHANGELOG upgrade notes).
-            $missingDenies = UpgradeChecks::nginxMissingDenies($config, dirname(__DIR__));
-            if ($missingDenies !== null) {
-                $add($missingDenies === [] ? 'ok' : 'warn', 'nginx_denies', $missingDenies === []
-                    ? 'nginx (operations.nginx_config) has every deny rule of deploy/nginx.conf'
-                    : 'nginx (operations.nginx_config) lacks deny rule(s) of deploy/nginx.conf, so those files are served: ' . implode(' | ', $missingDenies)
-                        . '; copy the missing lines and reload nginx');
-            }
-            $bodyOnly = UpgradeChecks::carrierWebhooksTimestampDefault($config);
-            if ($bodyOnly !== []) {
-                $add('warn', 'shipping_webhook_timestamp', 'shipping_webhook_require_timestamp is not set, so it defaults to true: webhooks of '
-                    . implode(', ', $bodyOnly) . ' without a signed X-Shipping-Timestamp are refused; confirm the carrier signs it and set the option explicitly');
-            }
+        foreach (($config ?? $this->config) === null ? [] : $this->configChecks($config ?? $this->config) as $configCheck) {
+            $add($configCheck['level'], $configCheck['name'], $configCheck['message']);
         }
 
         // The release running this doctor may have no config.php of its own (--installed): read the shop's.
@@ -548,6 +531,56 @@ final class Updater
             'checks' => $checks,
             'package_preflight' => $preflight,
         ];
+    }
+
+    /**
+     * The config.php checks of doctor() (R17: shared with check(), which refuses their FAILs).
+     * @return list<array{level: string, name: string, message: string}>
+     */
+    private function configChecks(array $config): array
+    {
+        $checks = [];
+        $add = static function (string $level, string $name, string $message) use (&$checks): void {
+            $checks[] = compact('level', 'name', 'message');
+        };
+        $inside = [];
+        foreach (self::PRIVATE_PATH_SETTINGS as $setting) {
+            $path = trim((string)($config[$setting] ?? ''));
+            if ($path !== '' && $this->isInsideRoot($path)) $inside[] = "{$setting} ({$path})";
+        }
+        $add($inside === [] ? 'ok' : 'fail', 'config', $inside === []
+            ? 'config.php keeps private runtime paths outside the application root'
+            : 'config.php points ' . implode(', ', $inside) . ' inside the application root (or uses a relative path), which this release refuses'
+                . ' (the admin, workers and cron fail); move them outside the web root (default: ../bareboneseshop-private/…)'
+                . ' and move their contents before the update');
+        if (DataOverrides::storesNeedUpgrade($this->root, $config)) {
+            $hasDataDirectory = DataOverrides::dir($config) !== null;
+            $add($hasDataDirectory ? 'warn' : 'fail', 'stores', $hasDataDirectory
+                ? 'stores.json is in the v1.x format (no default_store); apply writes the upgraded copy to private_runtime_dir/stores.json'
+                    . ' (the main store becomes "default") and keeps the old file for a rollback'
+                : 'stores.json is in the v1.x format (no default_store) and no private_runtime_dir is configured for the upgraded copy;'
+                    . ' this release would answer 503: set private_runtime_dir first');
+        }
+        // The deny rules and the carrier-webhook default of the release running this doctor (CHANGELOG upgrade notes).
+        $missingDenies = UpgradeChecks::nginxMissingDenies($config, dirname(__DIR__));
+        if ($missingDenies !== null) {
+            $add($missingDenies === [] ? 'ok' : 'warn', 'nginx_denies', $missingDenies === []
+                ? 'nginx (operations.nginx_config) has every deny rule of deploy/nginx.conf'
+                : 'nginx (operations.nginx_config) lacks deny rule(s) of deploy/nginx.conf, so those files are served: ' . implode(' | ', $missingDenies)
+                    . '; copy the missing lines and reload nginx');
+        }
+        $bodyOnly = UpgradeChecks::carrierWebhooksTimestampDefault($config);
+        if ($bodyOnly !== []) {
+            $add('warn', 'shipping_webhook_timestamp', 'shipping_webhook_require_timestamp is not set, so it defaults to true: webhooks of '
+                . implode(', ', $bodyOnly) . ' without a signed X-Shipping-Timestamp are refused; confirm the carrier signs it and set the option explicitly');
+        }
+        // R17: 2.1.0 removed api.php; a gateway still posting to it gets a 404 and its payments stay pending.
+        if (is_file($this->root . '/api.php')) {
+            $add('warn', 'payment_webhooks', 'api.php is still installed (a release before 2.1.0): this update removes it, so payment and carrier'
+                . ' webhooks must move to /api/v1/webhooks/payment/<provider> and /api/v1/webhooks/shipping/<carrier>. Change the URL in the'
+                . ' Stripe (Developers → Webhooks) and Comgate portals and in every carrier webhook when you deploy (CHANGELOG 2.1.0 upgrade notes)');
+        }
+        return $checks;
     }
 
     /** Mirrors the runtime checks (JobQueue::validatePrivateDir): a relative path is refused as well. */

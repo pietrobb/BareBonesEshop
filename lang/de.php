@@ -781,6 +781,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.status_failed' => 'Der Rücksendestatus konnte nicht geändert werden: {error}',
     'admin.entitlement.status.active' => 'Aktiv',
     'admin.entitlement.status.revoked' => 'Widerrufen',
+    'admin.entitlement.status.blocked' => 'Gesperrt (erstattet oder unbezahlt)',
     'admin.rma.status.requested' => 'Angefragt',
     'admin.rma.status.approved' => 'Genehmigt',
     'admin.rma.status.received' => 'Eingegangen',

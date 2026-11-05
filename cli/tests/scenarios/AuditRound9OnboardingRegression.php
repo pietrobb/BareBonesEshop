@@ -30,7 +30,7 @@ assert_equals($r9oText, $r9oDecoded, 'R9 PDF: the text drawn with the font encod
 $r9oInvoice = ['type' => 'invoice', 'order_id' => 4711, 'number' => '2026000042'];
 $r9oCredit = ['type' => 'credit_note', 'order_id' => 4711, 'number' => 'CN-2026000007'];
 assert_equals(BankTransferInstructions::variableSymbol(['id' => 4711]), InvoiceService::variableSymbol($r9oInvoice), 'R9 VS: the invoice repeats the variable symbol of the order\'s transfer instructions');
-assert_true(InvoiceService::variableSymbol($r9oCredit) === '2026000007' && InvoiceService::variableSymbol($r9oCredit) !== InvoiceService::variableSymbol($r9oInvoice),
+assert_true(InvoiceService::variableSymbol($r9oCredit) === '9026000007' && InvoiceService::variableSymbol($r9oCredit) !== InvoiceService::variableSymbol($r9oInvoice),
     'R9 VS: a credit note has the symbol of its own number, not the invoice\'s');
 
 // --- Order confirmation for card payments arrives with the payment -----------------------------------------------

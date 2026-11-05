@@ -2092,12 +2092,14 @@ final class InvoiceService
 
     /**
      * Variable symbol printed on the document: an invoice repeats the order's bank-transfer symbol (the
-     * customer pays by it); a credit note has its own from its own number series, never one of an invoice.
+     * customer pays by it); a credit note has its own from its own number series, never one of an invoice: the digits
+     * of "CN-20260007" are those of invoice 20260007 (R17), so it is "9" + the last nine digits of its number. Invoice
+     * numbers start with their year and invoice symbols are order IDs, so neither starts with 9 in practice.
      */
     public static function variableSymbol(array $invoice): string
     {
         if (($invoice['type'] ?? 'invoice') === 'credit_note') {
-            return substr((string)preg_replace('/\D/', '', (string)$invoice['number']), -10);
+            return '9' . substr((string)preg_replace('/\D/', '', (string)$invoice['number']), -9);
         }
         return BankTransferInstructions::variableSymbol(['id' => (int)$invoice['order_id']]);
     }
