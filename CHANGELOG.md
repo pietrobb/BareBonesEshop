@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Admin order acceptance fixes** (review round 17, medium).
+  - Recording a payment as Paid by hand (for example after a failed card payment, or a bank transfer) moves a pending
+    order to Paid, as a gateway capture does; the order used to stay Pending. Delivered cash-on-delivery orders stay
+    Delivered; money recorded on a cancelled order still goes to a manual refund.
+  - An e-book whose line was refunded through a return shows "Blocked" in the order detail instead of "Active"; the
+    download itself was already refused.
+  - A credit note has a variable symbol of its own: "CN-20260007" no longer carries the digits of invoice 20260007.
 - **Updater respects the doctor** (review round 17, medium). `php cli/update.php check` and `apply` refuse every
   `config.php` FAIL of `doctor` (a private path such as `jobs_dir` inside the web root, a v1.x `stores.json` without
   `private_runtime_dir`) and show its warnings; `apply` used to install the package anyway. A MariaDB dump client

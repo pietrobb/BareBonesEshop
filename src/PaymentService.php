@@ -764,6 +764,29 @@ class PaymentService {
     }
 
     /**
+     * A payment status set by hand on the order detail. Money recorded as paid pays a pending order like a gateway
+     * capture (R17: after a failed card the order stayed Pending until a second status change). Returns true when the
+     * order was cancelled: the money is then flagged for a manual refund instead.
+     */
+    public static function recordAdminPayment(array $order, string $newStatus, int $amount, string $note, string $actor): bool {
+        $orderId = (int)$order['id'];
+        $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
+        self::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
+            'actor' => $actor,
+            'note' => $note,
+        ]);
+        if ($newStatus !== 'paid') return false;
+        if ((string)$order['status'] === 'cancelled') {
+            // No gateway session captured it, so the recorded amount (the order total when none was entered) is
+            // flagged for a manual refund with an incident.
+            self::settleAdminPaymentOnCancelled($orderId, $amount > 0 ? $amount : (int)$order['total'], 'Admin payment: ' . $note);
+            return true;
+        }
+        self::settleCapture($orderId, 'Admin payment' . ($note !== '' ? ': ' . $note : ''));
+        return false;
+    }
+
+    /**
      * Money an admin recorded by hand on a cancelled order. No provider session captured it, so no
      * gateway refund is attempted: the recorded amount is flagged for a manual refund and a critical
      * incident raised. Captures reported by a gateway go through settleCapture().
