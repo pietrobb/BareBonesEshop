@@ -53,14 +53,16 @@ if (is_dir('/proc/self') || function_exists('posix_kill')) {
         $r16lLong = MaintenanceMode::active($r16lRoot);
         touch($r16lMarker, time() - MaintenanceMode::MAX_AGE - 60);
         $r16lDay = MaintenanceMode::active($r16lRoot);
+        MaintenanceMode::leave($r16lRoot); // R17: from here on no process holds the marker's lock
         file_put_contents($r16lMarker, json_encode(['since' => gmdate('c'), 'reason' => 'v2.1.1 marker']));
         touch($r16lMarker, time() - MaintenanceMode::STALE_AFTER - 600);
         $r16lOld = MaintenanceMode::active($r16lRoot);
         file_put_contents($r16lMarker, json_encode(['since' => gmdate('c'), 'reason' => 'r16', 'pid' => getmypid(), 'host' => 'r16-other-host.invalid']));
         touch($r16lMarker, time() - MaintenanceMode::STALE_AFTER - 600);
         $r16lHost = MaintenanceMode::active($r16lRoot);
-        assert_equals([true, false, false, false], [$r16lLong, $r16lDay, $r16lOld, $r16lHost],
-            'R16 low: an update still running after an hour keeps the shop in maintenance; after a day, without a PID, or from another host it does not');
+        // R17: the updater holds the marker's lock, so its window lasts as long as it runs, also past a day.
+        assert_equals([true, true, false, false], [$r16lLong, $r16lDay, $r16lOld, $r16lHost],
+            'R16 low: an update still running after an hour (R17: or a day) keeps the shop in maintenance; an unlocked marker without a PID or from another host does not');
     } finally {
         @unlink(MaintenanceMode::path($r16lRoot));
         @rmdir($r16lRoot);

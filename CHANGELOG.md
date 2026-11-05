@@ -14,6 +14,12 @@
   - A carrier's `generateLabel()` receives the label fields of the order (`ShippingService::LABEL_ORDER_FIELDS`)
     instead of the whole row: no IP address, customer account, payment or ERP data.
 
+- **Maintenance window** (review round 17, medium).
+  - The updater holds a lock on `.maintenance` while it runs: a reused PID no longer keeps the shop on 503 for up to
+    24 h, and an update started from another container (docker compose, shared volume) keeps its window past 1 h.
+    An unlocked marker of a process that still runs counts only with the same process start time.
+  - A failed `php cli/migrate.php apply` (or an update whose automatic rollback fails) leaves the shop in maintenance
+    instead of reopening it on a half-migrated schema; the next successful run lifts it.
 - **Extension quarantine only for broken code** (review round 17, medium). Input that made an extension fail an
   allocation ("Out of memory") still quarantined it, payment provider included, for good. Only a parse, compile or
   class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never
