@@ -127,28 +127,40 @@ final class BankTransferInstructions {
     /**
      * Queue one bank_transfer_reminder e-mail for each unpaid transfer order of the active store whose reminder day has
      * come and which is not yet due to be cancelled. The order row is claimed first, so a reminder is sent at most once.
+     * Pending cash-on-delivery orders and transfers past their due date never get a reminder and keep matching the
+     * query, so only orders still inside the payment term are read, page by page: they cannot crowd out the transfers.
      */
     public static function remindDue(?int $ttl = null, int $limit = 50): int {
         $db = Db::get();
         // Migration window: the code is deployed before 20261101120000_order_payment_reminder has run.
         if (!Db::hasColumn('orders', 'payment_reminder_sent_at', $db)) return 0;
+        $ttl ??= self::payWithinSeconds();
+        $now = ShopTime::now();
+        $page = 200;
+        // Due at the end of the day the term ends on the shop's calendar: two days of slack cover that and the time zone.
         $stmt = $db->prepare("SELECT * FROM orders WHERE store_id = :store AND status = 'pending' AND payment_status = 'pending'
-            AND payment_reminder_sent_at IS NULL AND (payment_id IS NULL OR payment_id = '') ORDER BY id ASC LIMIT 500");
-        $stmt->execute([':store' => StoreContext::current()->id()]);
+            AND payment_reminder_sent_at IS NULL AND (payment_id IS NULL OR payment_id = '') AND created_at >= :oldest AND id > :after
+            ORDER BY id ASC LIMIT {$page}");
         $claim = $db->prepare("UPDATE orders SET payment_reminder_sent_at = :now WHERE id = :id AND payment_reminder_sent_at IS NULL
             AND status = 'pending' AND payment_status = 'pending'");
-        $now = ShopTime::now();
+        $params = [':store' => StoreContext::current()->id(), ':oldest' => gmdate('Y-m-d H:i:s', $now - $ttl - 2 * 86400)];
+        $after = 0;
         $sent = 0;
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) {
-            if ($sent >= $limit) break;
-            if (!self::isBankTransfer($order) || trim((string)($order['customer_email'] ?? '')) === '') continue;
-            if ($now < self::remindFrom($order, $ttl) || $now > self::dueAt($order, $ttl)) continue;
-            $claim->execute([':now' => gmdate('Y-m-d H:i:s', $now), ':id' => (int)$order['id']]);
-            if ($claim->rowCount() !== 1) continue;
-            JobQueue::push('email_send', ['template' => 'bank_transfer_reminder', 'to' => (string)$order['customer_email'],
-                'locale' => (string)($order['locale'] ?? ''), 'order_id' => (int)$order['id']], 5);
-            $sent++;
-        }
+        do {
+            $stmt->execute($params + [':after' => $after]);
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($orders as $order) {
+                if ($sent >= $limit) return $sent;
+                $after = (int)$order['id'];
+                if (!self::isBankTransfer($order) || trim((string)($order['customer_email'] ?? '')) === '') continue;
+                if ($now < self::remindFrom($order, $ttl) || $now > self::dueAt($order, $ttl)) continue;
+                $claim->execute([':now' => gmdate('Y-m-d H:i:s', $now), ':id' => (int)$order['id']]);
+                if ($claim->rowCount() !== 1) continue;
+                JobQueue::push('email_send', ['template' => 'bank_transfer_reminder', 'to' => (string)$order['customer_email'],
+                    'locale' => (string)($order['locale'] ?? ''), 'order_id' => (int)$order['id']], 5);
+                $sent++;
+            }
+        } while (count($orders) === $page);
         return $sent;
     }
 

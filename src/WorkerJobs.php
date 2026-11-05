@@ -53,6 +53,7 @@ final class WorkerJobs
                 $currency = $order['currency'] ?? null;
                 // Admin shipments carry the carrier and tracking; the legacy order columns are the fallback.
                 $tracking = Fulfillment::latestTracking((int)$orderId);
+                $carrier = trim(MethodLabels::carrier((string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''), $locale));
                 $vars = array_merge($vars, [
                     'order_number'   => $order['order_number'],
                     'order_status'   => OrderStatusLabels::order((string)$order['status'], $locale),
@@ -60,7 +61,9 @@ final class WorkerJobs
                     'customer_name'  => $order['customer_name'],
                     'customer_email' => $order['customer_email'],
                     'payment_method' => PaymentService::orderLabel($order, $locale !== '' ? $locale : null) ?: (string)($order['payment_method'] ?? ''),
-                    'carrier'        => MethodLabels::carrier((string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''), $locale),
+                    'carrier'        => $carrier,
+                    // Shipped by the merchant's own delivery ("Create and ship" without a carrier): the e-mail names none.
+                    'without_carrier'=> $carrier === '',
                     'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
                     'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
                 ]);
