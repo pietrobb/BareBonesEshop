@@ -18,7 +18,7 @@ DataOverrides::isolateSuiteForTesting(TEST_DATA_DIR);
     $example = require $root . '/config.example.php';
     $developer = require $root . '/config.php';
     file_put_contents(TEST_DATA_DIR . '/' . AppConfig::SUITE_FILE,
-        '<?php return ' . var_export(AppConfig::forSuite(is_array($developer) ? $developer : [], $example), true) . ";\n");
+        '<?php return ' . var_export(AppConfig::suiteConfigForTesting(is_array($developer) ? $developer : [], $example), true) . ";\n");
 })();
 
 function entrypointSource(string $entrypoint): string {

@@ -2,7 +2,7 @@
 
 // Review round 17, medium: the suite read the developer's config.php. An enabled extension or an outbound webhook
 // broke 3–5 core tests, and the suite posted 32 signed events to the developer's real webhook. The suite now runs on
-// a copy without the outbound integrations (AppConfig::forSuite), and so does every process it starts.
+// a copy without the outbound integrations (AppConfig::suiteConfigForTesting), and so does every process it starts.
 echo "\n--- Audit round 17: tests isolated from the developer's config.php ---\n";
 
 $r17iRoot = dirname(TEST_CLI_DIR);
@@ -31,7 +31,7 @@ $r17iDeveloper = array_replace($r17iExample, [
     'stripe_secret_key' => 'sk_live_dev', 'stripe_webhook_secret' => 'whsec_dev', 'gopay_client_secret' => 'gp', 'payu_second_key' => 'pu',
     'comgate_secret' => 'cg', 'thepay_password' => 'tp', 'shipping_webhook_secrets' => ['packeta' => 'p', 'gls' => 'g'],
 ]);
-$r17iSuite = AppConfig::forSuite($r17iDeveloper, $r17iExample);
+$r17iSuite = AppConfig::suiteConfigForTesting($r17iDeveloper, $r17iExample);
 assert_equals(['mysql', 'db.local', 'dev_shop', 'dev-pass', '/srv/dev-private', '/srv/dev-private/jobs', 'https://dev.example', 'dev-key', true, 'MockPayment', 'mock'],
     [$r17iSuite['db_driver'], $r17iSuite['db_host'], $r17iSuite['db_name'], $r17iSuite['db_password'], $r17iSuite['private_runtime_dir'],
         $r17iSuite['jobs_dir'], $r17iSuite['app_url'], $r17iSuite['admin_identity_key'], $r17iSuite['allow_mock_webhook'],
@@ -62,7 +62,7 @@ $r17iSources = array_merge(glob($r17iRoot . '/src/*.php') ?: [], glob($r17iRoot 
 foreach ($r17iSources as $r17iFile) {
     $r17iRelative = substr(str_replace('\\', '/', $r17iFile), strlen(str_replace('\\', '/', $r17iRoot)) + 1);
     if (in_array($r17iRelative, ['src/WebInstaller.php', 'cli/setup.php', 'cli/smoke-checkout.php', 'cli/benchmark.php'], true)) continue;
-    if (preg_match_all("~(?:require|include)(?:_once)?[^;]*config\\.php'~", (string)file_get_contents($r17iFile), $r17iMatches) > 0) {
+    if (preg_match_all("~\\b(?:require|include)(?:_once)?\\b[^;]*config\\.php'~", (string)file_get_contents($r17iFile), $r17iMatches) > 0) {
         $r17iDirect[] = $r17iRelative . ': ' . implode(' | ', $r17iMatches[0]);
     }
 }

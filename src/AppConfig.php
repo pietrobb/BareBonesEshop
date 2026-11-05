@@ -29,7 +29,7 @@ final class AppConfig
      * The suite's config: the developer's config (database, private directories, app_url, keys stay, the suite runs
      * in this environment) with everything that reaches outside the machine reset to config.example.php.
      */
-    public static function forSuite(array $config, array $example): array
+    public static function suiteConfigForTesting(array $config, array $example): array
     {
         foreach (self::SUITE_RESET as $key) {
             if (array_key_exists($key, $example)) {
