@@ -62,7 +62,7 @@ $r17iSources = array_merge(glob($r17iRoot . '/src/*.php') ?: [], glob($r17iRoot 
 foreach ($r17iSources as $r17iFile) {
     $r17iRelative = substr(str_replace('\\', '/', $r17iFile), strlen(str_replace('\\', '/', $r17iRoot)) + 1);
     if (in_array($r17iRelative, ['src/WebInstaller.php', 'cli/setup.php', 'cli/smoke-checkout.php', 'cli/benchmark.php'], true)) continue;
-    if (preg_match_all("~\\b(?:require|include)(?:_once)?\\b[^;]*config\\.php'~", (string)file_get_contents($r17iFile), $r17iMatches) > 0) {
+    if (preg_match_all("~\\b(?:require|include)(?:_once)?\\b[^;]*config\\.php[\"']~", (string)file_get_contents($r17iFile), $r17iMatches) > 0) {
         $r17iDirect[] = $r17iRelative . ': ' . implode(' | ', $r17iMatches[0]);
     }
 }
@@ -78,7 +78,7 @@ foreach ($r17iTestFiles as $r17iFile) {
     $r17iSource = (string)file_get_contents($r17iFile);
     preg_match_all('~(\$\w+)\s*=\s*dirname\(TEST_CLI_DIR\);~', $r17iSource, $r17iVars);
     $r17iAlternatives = array_merge(['dirname\(TEST_CLI_DIR\)'], array_map(static fn(string $v): string => preg_quote($v, '~'), array_unique($r17iVars[1])));
-    if (preg_match_all("~(?:" . implode('|', $r17iAlternatives) . ")\s*\.\s*'/config\.php'~", $r17iSource, $r17iMatches) > 0) {
+    if (preg_match_all("~(?:" . implode('|', $r17iAlternatives) . ")\s*\.\s*[\"']/config\.php[\"']~", $r17iSource, $r17iMatches) > 0) {
         $r17iTestDirect[] = $r17iRelative . ': ' . implode(' | ', $r17iMatches[0]);
     }
 }

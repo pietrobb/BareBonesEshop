@@ -55,7 +55,7 @@ $db = new PDO("sqlite:" . $r4Dir . "/shop.sqlite", null, null, [PDO::ATTR_ERRMOD
 Db::init($db, "sqlite");
 Cache::setDir($r4Dir . "/cache");
 JobQueue::setDir($r4Dir . "/jobs");
-$config = require $r4App . "/config.php";
+$config = require ' . var_export(AppConfig::path($r4App), true) . ';
 (new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => "http://127.0.0.1:' . $r4Port . '"] + $config);
 DigitalDelivery::setConfigForTesting(["app_url" => ""] + $config);
 Security::setRateDbForTesting(new PDO("sqlite:" . $r4Dir . "/rate.sqlite"));
