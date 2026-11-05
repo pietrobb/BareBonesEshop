@@ -62,16 +62,18 @@
         {
             "name": "price",
             "type": "number",
-            "label": "Cena (centy)",
+            "label": "Cena",
             "required": true,
             "min": 0,
+            "step": 0.01,
             "size": "half"
         },
         {
             "name": "compare_price",
             "type": "number",
-            "label": "Pôvodná cena (centy)",
+            "label": "Pôvodná cena",
             "min": 0,
+            "step": 0.01,
             "size": "half"
         },
         {

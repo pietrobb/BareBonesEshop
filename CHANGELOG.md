@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Low findings** (review round 16).
+  - The admin product form takes the price and the original price in the product's currency ("12.90"), not in
+    cents; an amount finer than the currency shows is refused.
+  - A homepage hero without an image is a text block instead of an empty grey 16:5 box.
+  - The delivery note names the country ("Slovensko") and the shipping method as chosen at checkout, not their codes.
+  - `php cli/setup.php doctor` exits 1 until the shop is ready and `php cli/staging-preflight.php` exits 1 on NO-GO,
+    so a deploy script stops; `--strict` is still accepted. `install` and `apply` still exit 0 unless `--strict`.
+  - A feed variant link in a store's second language is `?lang=xx&variant=N` (was `?lang=xx?variant=N`).
+  - An update running longer than an hour (a big migration) keeps the shop in maintenance while its process still
+    runs on that host, for at most a day; a marker left by a killed updater still stops blocking after an hour.
+  - Tests now cover the content of `<style>`, `<script>` and the other elements rich text removes, and a `<style>`
+    in the body of a mail's HTML (mutants SEC12 and MAIL2).
 - **Theme texts, unregistered sections, theme-check on an installed shop** (review round 16, medium). A theme had
   nowhere to keep its own texts but the core's `lang/` files, which an update replaces: it now ships
   `themes/<name>/lang/<locale>.json` with keys under its own name (`{{t.acme.tagline}}`), falling back to `en.json`;

@@ -103,7 +103,16 @@ if ($phase === 'feed') {
         $product = StorefrontViewModel::product($tee)['product'];
         return [$product['price']['formatted'], array_values(array_column(array_filter($product['variants'], static fn(array $v): bool => $v['selected']), 'sku'))];
     };
-    echo json_encode(['items' => $items, 'meta' => $metaRows, 'page' => [$page(null), $page('62'), $page('63'), $page('x')]], JSON_UNESCAPED_UNICODE);
+    $pages = [$page(null), $page('62'), $page('63'), $page('x')];
+    // R16 low: in a store's second language the product link already has ?lang=, so the variant goes after "&".
+    StoreContext::activate(StoreContext::resolve(Bootstrap::stores(), '/', '', 'us'));
+    I18n::setLocale('es');
+    $esLinks = [];
+    foreach (simplexml_load_string(MarketingFeed::google('https://r15f.example.test', 'es'))->channel->item as $item) {
+        $g = $item->children('http://base.google.com/ns/1.0');
+        if (str_starts_with((string)$g->id, 'R15F-TEE-')) $esLinks[(string)$g->id] = (string)$g->link;
+    }
+    echo json_encode(['items' => $items, 'meta' => $metaRows, 'page' => $pages, 'es_links' => $esLinks], JSON_UNESCAPED_UNICODE);
     exit(0);
 }
 $top = SalesReport::topProducts('default', gmdate('Y-m-d H:i:s', time() - 86400));
@@ -160,6 +169,10 @@ try {
                 $r15rFeed['meta'] ?? null, "R15 feed {$r15rDriver}: the Meta catalog CSV carries the same items with sale_price and item_group_id");
             assert_equals([['12,00 €', ['R15F-TEE-S']], ['15,00 €', ['R15F-TEE-L']], ['12,00 €', ['R15F-TEE-S']], ['12,00 €', ['R15F-TEE-S']]], $r15rFeed['page'] ?? null,
                 "R15 feed {$r15rDriver}: the variant link opens the product page on that variant at its price; a sold-out or unknown variant falls back to the default");
+            $r15rEsLinks = $r15rFeed['es_links'] ?? [];
+            assert_true(count($r15rEsLinks) === 3 && array_filter($r15rEsLinks, static fn(string $l, string $sku): bool
+                    => preg_match('#^https://r15f\.example\.test/[^?]*/product/r15f-tee\?lang=es&variant=' . ['S' => 61, 'L' => 62, 'XL' => 63][substr($sku, 9)] . '$#', $l) !== 1, ARRAY_FILTER_USE_BOTH) === [],
+                "R16 low feed {$r15rDriver}: a variant link in a store's second language is ?lang=es&variant=N, not ?lang=es?variant=N (" . json_encode($r15rEsLinks) . ')');
         } finally {
             if ($r15rDriver === 'mysql') $r15rRun([$r15rDriver, 'teardown', $r15rApp, $r15rTarget]);
         }

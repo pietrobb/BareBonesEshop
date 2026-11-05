@@ -29,7 +29,7 @@ test('admin product form opens filled and saves stock and alert thresholds', asy
   await expect(form).toHaveAttribute('action', new RegExp(`admin\\.php\\?p=product&action=save&id=${before.row.id}$`));
   await expect(form.locator('#field-sku')).toHaveValue(before.sku);
   await expect(form.locator('#field-name')).toHaveValue(before.row.name);
-  await expect(form.locator('#field-price')).toHaveValue(String(before.row.price));
+  await expect(form.locator('#field-price')).toHaveValue((before.row.price / 100).toFixed(2)); // typed in EUR, stored in cents
   await expect(form.locator('#field-stock')).toHaveValue(String(before.row.stock));
   await expect(form.locator('#field-status')).toHaveValue(before.row.status);
   await expect(form.locator('#field-category_id')).toHaveValue(String(before.row.category_id ?? ''));

@@ -138,7 +138,7 @@ class MarketingFeed {
             $items[] = [
                 'id' => $variant['sku'],
                 'title' => (string)$product['name'] . ($variant['name'] !== '' ? ' — ' . $variant['name'] : ''),
-                'link' => $base['link'] . '?variant=' . $variant['id'],
+                'link' => $base['link'] . (str_contains($base['link'], '?') ? '&' : '?') . 'variant=' . $variant['id'],
                 'availability' => $availability,
                 'availability_date' => $availability === 'preorder'
                     ? self::isoDate((string)(($row['available_from'] ?? '') ?: ($product['available_from'] ?? '') ?: ($product['preorder_at'] ?? ''))) : '',

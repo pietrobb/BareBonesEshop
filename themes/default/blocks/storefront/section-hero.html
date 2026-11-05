@@ -1,4 +1,4 @@
-<section class="hero hero--{{settings.variant}}" id="{{id}}">
+<section class="hero hero--{{settings.variant}}{{#if content.media.image_url}}{{else}}{{#if data.item.image_url}}{{else}} hero--text{{/if}}{{/if}}" id="{{id}}">
   {{#if content.media.image_url}}<img src="{{content.media.image_url}}" alt="{{content.media.alt}}" width="1920" height="600">{{else}}{{#if data.item.image_url}}<img src="{{data.item.image_url}}" alt="{{data.item.title}}" width="1920" height="600">{{/if}}{{/if}}
   <div class="hero-overlay">
     {{#if content.heading}}<h1>{{content.heading}}</h1>{{else}}{{#if data.item.title}}<h1>{{data.item.title}}</h1>{{else}}<h1>{{shop_name}}</h1>{{/if}}{{/if}}

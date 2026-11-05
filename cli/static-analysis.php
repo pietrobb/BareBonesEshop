@@ -186,7 +186,8 @@ $architectureBudgets = [
     // +12 lines, +1 function, +1 coupling R10 UX10: "Duplicate" in the product editor; the copy rules live in ProductDuplicator.
     // +3 lines R10 UX10: the product and CMS page editors load the rich-text editor (Catalog.php requires RichText.php).
     // +1 line R14 UX7: the product editor loads the image list script (ImageOrder.php).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1303, 'functions' => 25, 'max_function_lines' => 210, 'coupling' => 20],
+    // +14 lines, +1 function, +1 coupling R16 low: product prices are typed in the currency, not in cents (Money).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1317, 'functions' => 26, 'max_function_lines' => 210, 'coupling' => 21],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],

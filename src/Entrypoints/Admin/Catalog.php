@@ -106,9 +106,14 @@ function pageProducts(): void {
     </div>
     <?php
 }
+/** The currency a product's price is typed in: its own, else the store's. */
+function adminProductCurrency(?array $row): string {
+    return strtoupper(trim((string)($row['currency'] ?? ''))) ?: strtoupper(StoreContext::current()->currency());
+}
+
 /**
  * Stored record (null = new) → values of the admin form's fields, shown on edit and given to the save's validation
- * (prices in cents, product lists one per line / comma-separated).
+ * (prices in the currency, product lists one per line / comma-separated).
  */
 function adminFormValues(string $formId, ?array $row): array {
     return match ($formId) {
@@ -123,8 +128,9 @@ function adminFormValues(string $formId, ?array $row): array {
             'seo_title'     => (string)($row['seo_title'] ?? ''),
             'meta_description' => (string)($row['meta_description'] ?? ''),
             'product_type'  => $row['product_type'] ?? 'simple',
-            'price'         => (string)(int)($row['price'] ?? 0),
-            'compare_price' => isset($row['compare_price']) ? (string)(int)$row['compare_price'] : '',
+            // R16 low: prices are typed in the store's currency ("12.90"), stored in cents.
+            'price'         => Money::decimal((int)($row['price'] ?? 0), adminProductCurrency($row)),
+            'compare_price' => isset($row['compare_price']) ? Money::decimal((int)$row['compare_price'], adminProductCurrency($row)) : '',
             'stock'         => (string)(int)($row['stock'] ?? 0),
             'status'        => $row['status'] ?? 'active',
             'summary'       => $row['summary'] ?? '',
@@ -845,8 +851,16 @@ function handleProductSave(): void {
     // BBF checks required fields, numbers, the select lists (a stored value outside today's lists survives an
     // unchanged save) and the uploaded image's size, extension and content.
     $form = AdminForm::validate('admin-product', $old ? adminFormValues('admin-product', $old) : []);
+    // The prices are typed in the currency (R16 low); a finer amount than it shows ("12.5" HUF, "1.299") is refused.
+    $currency = adminProductCurrency($old);
+    $price = $form === null ? -1 : Money::parseInput($form['price'], $currency);
+    $comparePrice = $form === null || trim($form['compare_price']) === '' ? 0 : Money::parseInput($form['compare_price'], $currency);
     // Brand, GTIN/MPN, SEO, extra categories and translations are checked against the active catalog first.
-    $editor = $form === null ? AdminForm::firstError() : ProductEditor::validate($form, $_POST, $id, $old);
+    $editor = match (true) {
+        $form === null => AdminForm::firstError(),
+        $price < 0 || $comparePrice < 0 => I18n::format('admin.msg.product.price_format', ['example' => Money::decimal(1290, $currency) . ' ' . $currency]),
+        default => ProductEditor::validate(['price' => (string)$price] + $form, $_POST, $id, $old),
+    };
     // A new product goes back to the (prefilled) new-product form, not to an "id=0" record.
     $back = 'Location: admin.php?p=product' . ($id ? "&id={$id}" : '');
     if (is_string($editor)) {
@@ -862,8 +876,8 @@ function handleProductSave(): void {
         ':name'          => $form['name'],
         ':product_type'  => $form['product_type'] !== '' ? $form['product_type'] : 'simple',
         ':category_id'   => Security::int($form['category_id']),
-        ':price'         => Security::int($form['price']),
-        ':compare_price' => Security::int($form['compare_price']) ?: null,
+        ':price'         => $price,
+        ':compare_price' => $comparePrice ?: null,
         ':stock'         => Security::int($form['stock']),
         ':status'        => $form['status'] !== '' ? $form['status'] : 'active',
         ':summary'       => $form['summary'],
