@@ -1640,6 +1640,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.addr_default'        => 'Nastavit jako výchozí',
     'account.rate_limited'        => 'Příliš mnoho pokusů. Zkuste to později.',
     'account.page_not_found'      => 'Stránka nenalezena.',
+    'account.page_unavailable'    => 'Tato stránka je dočasně nedostupná. Zkuste to později.',
     'account.form_retry' => 'Formulář se nepodařilo odeslat. Zkuste to prosím znovu.',
     'account.err_address_invalid' => 'Adresa nebyla uložena. Zkontrolujte označená pole.',
     'account.err_address_required' => 'Toto pole je povinné.',

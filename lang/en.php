@@ -1640,6 +1640,7 @@ return [
     'account.addr_default'        => 'Set as default',
     'account.rate_limited'        => 'Too many attempts, please try again later.',
     'account.page_not_found'      => 'Page not found.',
+    'account.page_unavailable'    => 'This page is temporarily unavailable. Please try again later.',
     'account.form_retry' => 'The form could not be submitted. Please try again.',
     'account.err_address_invalid' => 'The address was not saved. Please check the marked fields.',
     'account.err_address_required' => 'This field is required.',

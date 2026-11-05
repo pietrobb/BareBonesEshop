@@ -16,6 +16,12 @@
   credited all of it). "Request refund" on a payment returned by hand (bank transfer, cash on delivery) set the
   payment to "Refund in progress" with nothing to execute it; such an order now offers only "Record manual refund",
   and a request left from before shows the amount to pay back and record.
+- **Extension quarantine only for real fatal errors** (review round 16). One anonymous request could disable an
+  extension, payment provider included, until a developer changed its files: a page throwing on bad input ended the
+  request as "Uncaught ..." and the fatal-error guard quarantined the extension. An uncaught exception no longer
+  quarantines, and a throwing extension page answers HTTP 500 with a neutral "temporarily unavailable" page and
+  logs `extension.page_failed`. Errors PHP cannot catch (a class missing interface methods, a class declared twice)
+  still quarantine as before.
 - **Labels for shipping.json orders** (review round 16, high). An order shipped by a `shipping.json` method
   ("Standard Delivery", "Express Delivery") showed "standard: carrier API not connected" and no label form, although
   Packeta and GLS were connected: the method's code was taken as its carrier. Such a method names a delivery speed,
