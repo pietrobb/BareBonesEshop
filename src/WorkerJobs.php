@@ -51,8 +51,10 @@ final class WorkerJobs
                 // Prefer locale from order row, then payload, then default.
                 if ($locale === '') $locale = (string)($order['locale'] ?? '');
                 $currency = $order['currency'] ?? null;
-                // Admin shipments carry the carrier and tracking; the legacy order columns are the fallback.
-                $tracking = Fulfillment::latestTracking((int)$orderId);
+                // Admin shipments carry the carrier and tracking; the legacy order columns are the fallback. A partial
+                // shipment's e-mail names its parcel: that parcel's tracking or none, never another parcel's.
+                $parcelId = isset($payload['shipment_id']) ? (int)$payload['shipment_id'] : null;
+                $tracking = Fulfillment::latestTracking((int)$orderId, $parcelId);
                 $carrier = trim(MethodLabels::carrier((string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''), $locale));
                 $vars = array_merge($vars, [
                     'order_number'   => $order['order_number'],
@@ -64,7 +66,7 @@ final class WorkerJobs
                     'carrier'        => $carrier,
                     // Shipped by the merchant's own delivery ("Create and ship" without a carrier): the e-mail names none.
                     'without_carrier'=> $carrier === '',
-                    'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
+                    'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: ($parcelId === null ? (string)($order['tracking_number'] ?? '') : ''),
                     'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
                 ]);
                 if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order), ConsumerNotice::mailVars($order));

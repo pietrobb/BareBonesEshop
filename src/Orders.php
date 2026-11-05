@@ -576,7 +576,7 @@ class Orders {
      * Set payment ID (after Stripe charge)
      */
     public static function setPaymentId(int $orderId, string $paymentId): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id AND store_id = :store");
+        $stmt = Db::get()->prepare("UPDATE orders SET payment_id = :pid, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
         $stmt->execute([':pid' => $paymentId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 

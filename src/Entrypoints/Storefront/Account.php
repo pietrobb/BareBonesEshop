@@ -92,16 +92,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'shop_name'     => (string)Template::branding()['name'],
                 ], null);
                 Customers::requestEmailVerification((int)$id, $locale, Security::config());
-                // Auto-login
-                Customers::login($email, $password);
-                header('Location: ' . Template::storeUrl('/account.php'));
-                exit;
+            } elseif ($err === 'email_taken') {
+                // R17: the form does not tell whether an address has an account. Its owner gets a sign-in (reset) link
+                // instead, at most 3 an hour, and the page reads the same as for a new account.
+                Customers::forgotPassword($email, $locale, Security::config());
             }
-            $fieldErrors[$err] = true;
-            $flash = $t('account.err_' . $err) ?: $err;
-            $flashType = 'error';
+            if ($ok || $err === 'email_taken') {
+                $flash = str_replace('{email}', $email, $t('account.register_check_email'));
+                $flashType = 'ok';
+                $p = 'login';
+                $fieldValues = ['email' => $email];
+            } else {
+                $fieldErrors[$err] = true;
+                $flash = $t('account.err_' . $err) ?: $err;
+                $flashType = 'error';
+            }
         }
-        $p = 'register';
+        if ($p !== 'login') $p = 'register';
     }
 
     elseif ($action === 'login') {

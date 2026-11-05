@@ -149,6 +149,17 @@ foreach (Bootstrap::stores()['stores'] ?? [] as $monitorStoreCode => $_) {
 }
 StoreContext::activate($monitorStore);
 
+/** A failed job's open transaction is rolled back before its failure is recorded and the next job starts (R17). */
+$rollBackOpenJob = static function (): void {
+    // Never connects (a job that failed to connect has nothing to roll back) and never masks the job's own failure.
+    if (!Db::connected()) return;
+    try {
+        if (Db::get()->inTransaction()) Db::get()->rollBack();
+    } catch (\Throwable $rollbackError) {
+        Logger::warning('worker.job_rollback_failed', ['error' => $rollbackError->getMessage()]);
+    }
+};
+
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
 $startTime = time();
@@ -199,6 +210,9 @@ do {
             } else {
                 throw new \RuntimeException("Unknown job type: {$type}");
             }
+            // R17: a handler that returns inside its own transaction would have the completion (and every later job
+            // of this loop) written into it.
+            if (Db::connected() && Db::get()->inTransaction()) throw new \RuntimeException("Job left a database transaction open: {$type}");
 
             JobQueue::complete($procFile);
             $processed++;
@@ -206,10 +220,12 @@ do {
             if ($verbose) echo "    [OK]\n";
 
         } catch (JobLeaseLost $e) {
+            $rollBackOpenJob();
             // The job now belongs to another worker: neither complete nor fail this stale claim.
             Logger::warning('worker.job_lease_lost', ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
             if ($verbose) echo "    [ABORTED] lease lost\n";
         } catch (\Throwable $e) {
+            $rollBackOpenJob();
             try {
                 JobQueue::fail($procFile, $job, 'worker.job_failed');
             } catch (Throwable $retryError) {

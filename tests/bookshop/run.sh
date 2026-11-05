@@ -42,4 +42,9 @@ docker exec "$NAME" sh -c 'test ! -e /var/www/html/install-key.php && test ! -e 
 # php:apache links /var/log/apache2/error.log to /dev/stderr (tail would block on it); its log is `docker logs`.
 docker exec "$NAME" ls /srv/bookshop-data/bareboneseshop-private/jobs || true
 docker logs --tail 5 "$NAME" 2>&1 || true
-echo "Package: $OUT/bareboneseshop-bookshop.zip  Screenshots: $OUT/screenshots"
+# R17: the screenshots release asset is packed here, every entry 0644 (the hand-packed v2.1.2 asset unpacked as 0777).
+php -r '$z = new ZipArchive; if ($z->open($argv[2], ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) exit(1);
+  foreach (glob($argv[1] . "/*.png") as $f) { $n = "bookshop-screenshots/" . basename($f); $z->addFile($f, $n);
+    $z->setExternalAttributesName($n, ZipArchive::OPSYS_UNIX, (0100644 << 16)); }
+  if (!$z->close()) exit(1);' "$OUT/screenshots" "$OUT/bookshop-screenshots.zip"
+echo "Package: $OUT/bareboneseshop-bookshop.zip  Screenshots: $OUT/screenshots, $OUT/bookshop-screenshots.zip"

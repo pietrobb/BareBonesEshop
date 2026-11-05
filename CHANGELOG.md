@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Small fixes** (review round 17, low).
+  - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
+    API v1 `updated_after` sees them.
+  - The logger masks an XML `<password>`, a password after an escaped quote, and URL- or form-encoded card numbers.
+  - Registration and the guest account offer no longer tell whether an e-mail address already has an account.
+  - A refund credit note is found by its exact key; a partial shipment's e-mail shows that parcel's own tracking.
+  - The worker rolls back only a transaction that is still open; API v1 `vat_rate` is always a number.
+  - The bookshop run packs `bookshop-screenshots.zip` with 0644 entries.
+  - Without `MAIL_FROM` the sender is `noreply@` the configured `app_url` domain instead of
+    `noreply@localhost.invalid`.
+  - UX: the admin order history shows actions in words, one skip link per page, the checkout no longer runs a
+    method's name into its price ("Platba kartouZdarma"), and the breadcrumb is laid out as one separated line.
+
 - **Developer docs and carrier data** (review round 17, medium).
   - The migration example in `docs/EXTENSIONS.md` creates its table with an `id` column; it named no primary-key
     column, so SQLite got a column called `INTEGER` and MySQL/MariaDB refused it (ERROR 1064). A test runs the

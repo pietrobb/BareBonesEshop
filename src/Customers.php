@@ -110,8 +110,7 @@ class Customers {
         $_SESSION['customer_email'] = $c['email'];
         $_SESSION['customer_auth_hash'] = hash('sha256', (string)$c['password_hash']);
         $_SESSION['customer_last_seen'] = time();
-        $db->prepare("UPDATE customers SET last_login_at = " .
-            (Db::isSqlite() ? "datetime('now')" : "NOW()") . " WHERE id = ? AND store_id = ?")
+        $db->prepare("UPDATE customers SET last_login_at = " . Db::now() . ", updated_at = " . Db::now() . " WHERE id = ? AND store_id = ?")
            ->execute([$c['id'], StoreContext::current()->id()]);
         unset($c['password_hash']);
         return [true, $c, null];
@@ -446,7 +445,7 @@ class Customers {
                 $db->rollBack();
                 return null;
             }
-            $db->prepare('UPDATE customers SET email_verified_at = ? WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
+            $db->prepare('UPDATE customers SET email_verified_at = ?, updated_at = ' . Db::now() . ' WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
                ->execute([$now, $cid, StoreContext::current()->id()]);
             self::attachGuestOrders($cid);
             $db->commit();

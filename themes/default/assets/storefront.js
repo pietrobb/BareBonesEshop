@@ -202,7 +202,7 @@
       const label = document.createElement('label');
       label.className = 'payment-option';
       const fee = parseInt(method.fee || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}${method.description ? `<small>${escapeHtml(method.description)}</small>` : ''}</span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}${method.description ? `<small>${escapeHtml(method.description)}</small>` : ''}</span> <strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
       label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(methodShipping(method), fee, subtotal));
       box.appendChild(label);
     });
@@ -274,7 +274,7 @@
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span><strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span> <strong>${formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
       box.appendChild(label);
     });

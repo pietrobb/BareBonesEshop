@@ -410,7 +410,8 @@ class ApiV1 {
                 'unit_price' => (int)$item['unit_price'],
                 'total' => (int)$item['total'],
                 'discount' => $component === null ? 0 : (int)($component['discount'] ?? 0),
-                'vat_rate' => $component !== null ? (int)$component['rate_basis_points'] / 100
+                // Always a float (R17: 2000 / 100 was the int 20 while a line without a component gave 20.0).
+                'vat_rate' => $component !== null ? (int)$component['rate_basis_points'] / 100.0
                     : (($item['vat_rate'] ?? null) === null ? null : (float)$item['vat_rate']),
                 'vat_amount' => $component !== null ? (int)$component['vat'] : (int)($item['vat_amount'] ?? 0),
             ], $items, $components),

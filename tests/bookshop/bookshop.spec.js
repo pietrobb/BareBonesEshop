@@ -152,6 +152,12 @@ test('a customer buys an eBook, a paperback (cash on delivery) and a hardcover (
   await expect(page.locator('.flash-error')).toHaveCount(0);
   await expect(page.locator('#account-register-email')).toHaveCount(0);
   await expect(page.locator('body')).toContainText(CUSTOMER.email);
+  // Sign-up no longer signs in (it must read the same for a taken address): the new customer signs in with the password.
+  await expect(page.locator('#account-login-email')).toHaveValue(CUSTOMER.email);
+  await page.locator('#account-login-password').fill(CUSTOMER.password);
+  await page.locator('#account-login-password').locator('xpath=ancestor::form').locator('button').click();
+  await expect(page.locator('.flash-error')).toHaveCount(0);
+  await expect(page.locator('#account-login-password')).toHaveCount(0);
 
   await addFormat(page, 'Moby-Dick', 'eBook');
   await shot(page, '04-product');

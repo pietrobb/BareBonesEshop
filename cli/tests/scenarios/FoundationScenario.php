@@ -251,9 +251,10 @@ if ($mysqlDsn) {
         $a074vMigrationMysql->up($my, false);
         $a074vMigrationMysql->up($my, false);
         $a074vColumns = $my->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customers'")->fetchAll(PDO::FETCH_COLUMN);
-        foreach (['email' => 'VARCHAR(191) NULL', 'name' => 'VARCHAR(191) NULL', 'status' => "VARCHAR(16) NOT NULL DEFAULT 'active'", 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'email_verified_at' => 'DATETIME NULL'] as $a074vColumn => $a074vDef) {
+        foreach (['email' => 'VARCHAR(191) NULL', 'name' => 'VARCHAR(191) NULL', 'status' => "VARCHAR(16) NOT NULL DEFAULT 'active'", 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'email_verified_at' => 'DATETIME NULL', 'updated_at' => 'DATETIME NULL'] as $a074vColumn => $a074vDef) {
             if (!in_array($a074vColumn, $a074vColumns, true)) $my->exec("ALTER TABLE customers ADD COLUMN {$a074vColumn} {$a074vDef}");
         }
+        // Verifying bumps customers.updated_at for the API's updated_after sync (R17), so the probe customers table needs it too.
         // R13 UX5: verifying the address attaches the guest orders placed with it (and bumps updated_at for the API sync, R15),
         // so the bare probe orders table needs those columns.
         $a074vOrderColumns = $my->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders'")->fetchAll(PDO::FETCH_COLUMN);

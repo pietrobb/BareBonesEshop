@@ -20,7 +20,7 @@ function checkoutAccountView(int $customerId, bool $digital, bool $noSavedAddres
  * the account is created from the link e-mailed to the order's address. $outcome is the result of a posted request.
  */
 function guestAccountOfferView(array $order, array $outcome): ?array {
-    if (!GuestCheckoutAccount::offered($order)) return null;
+    if (!GuestCheckoutAccount::shown($order)) return null;
     $t = static fn(string $key): string => I18n::t($key);
     $email = (string)$order['customer_email'];
     return [
@@ -39,7 +39,6 @@ function requestGuestAccount(array $order): array {
     return match (GuestCheckoutAccount::sendLink($order, I18n::locale())) {
         'sent' => ['sent' => true],
         'throttled' => ['error' => $t('account.rate_limited')],
-        'not_offered' => ['error' => $t('account.err_email_taken')],
         default => ['error' => $t('order_done.account_failed')],
     };
 }

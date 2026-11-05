@@ -273,7 +273,7 @@ $architectureBudgets = [
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
     // +8 lines, +1 coupling R10 UX3: the order detail's "Pay" button starts a payment for the unpaid order (PaymentLink).
-    /* R14 #1: the verification link verifies only with the account's sign-in (+6) */ 'src/Entrypoints/Storefront/Account.php' => ['lines' => 464, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 17],
+    /* R14 #1: the verification link verifies only with the account's sign-in (+6); R17: registering a taken address reads like a new account (+7) */ 'src/Entrypoints/Storefront/Account.php' => ['lines' => 471, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 17],
     // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing; +1 coupling R8: legal pages render through ConsumerNotice, shared with the confirmation attachment */ 'coupling' => 9],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).

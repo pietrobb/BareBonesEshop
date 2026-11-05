@@ -375,13 +375,18 @@ final class InvoiceService
         return max(0, (int)$stmt->fetchColumn());
     }
 
-    /** The refund credit note issued under $refundKey, if any. */
+    /**
+     * The refund credit note issued under $refundKey, if any. Compared exactly on the decoded snapshot: in a LIKE
+     * pattern "%" and "_" of a key matched other keys, so a refund could take another refund's credit note.
+     */
     private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {
-        $stmt = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' AND credit_snapshot LIKE :key");
-        $stmt->execute([':store' => StoreContext::current()->id(), ':order' => $orderId, ':key' => '%"refund_key":' . json_encode($refundKey) . '%']);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        $stmt->closeCursor();
-        return $row ?: null;
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' ORDER BY id");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':order' => $orderId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $snapshot = json_decode((string)($row['credit_snapshot'] ?? ''), true);
+            if (is_array($snapshot) && ($snapshot['refund_key'] ?? null) === $refundKey) return $row;
+        }
+        return null;
     }
 
     /** Credit notes already issued on this RMA, whatever their refund outcome. */
