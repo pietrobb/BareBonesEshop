@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Tests isolated from the developer's `config.php`** (review round 17, medium). The suite read the checkout's
+  `config.php`: an enabled extension or an outbound webhook broke core tests, and the suite posted signed events to
+  the developer's real webhook. It now runs on a copy of `config.php` (database, private directories, `app_url` and
+  keys kept) with extensions, outbound webhooks, mail/ERP/carrier providers, integrations, alert recipients and
+  payment gateway keys reset to `config.example.php`; the PHP processes the suite starts use the same copy. Shop code
+  reads its configuration through `AppConfig::path()`.
 - **Low findings** (review round 16).
   - The admin product form takes the price and the original price in the product's currency ("12.90"), not in
     cents; an amount finer than the currency shows is refused.

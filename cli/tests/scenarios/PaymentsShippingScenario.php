@@ -523,7 +523,7 @@ $_POST = [
     'payment_method' => 'card',
 ];
 $_SERVER['HTTP_HOST'] = 'attacker.example';
-$onlineCheckoutCfg = require TEST_CLI_DIR . '/../config.php';
+$onlineCheckoutCfg = require AppConfig::path(dirname(TEST_CLI_DIR));
 $onlineCheckoutCfg['app_url'] = 'https://shop.example';
 $onlineCheckout = apiCheckout($onlineCheckoutCfg);
 assert_true(!empty($onlineCheckout['success']), 'Payment UX: online checkout succeeds');

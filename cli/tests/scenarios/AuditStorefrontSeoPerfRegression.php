@@ -64,7 +64,7 @@ if ($phase === 'setup') {
     exit(0);
 }
 
-$config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
+$config = is_file($root . '/config.php') ? require AppConfig::path($root) : require $root . '/config.example.php';
 $rawAppUrl = rtrim((string)($config['app_url'] ?? ''), '/');
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => (string)($options['app_url'] ?? '')] + $config);
 Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate.sqlite'));
