@@ -227,6 +227,7 @@ final class Updater
         $snapshot = null;
         $staged = [];
         $mutated = false;
+        $halfDone = null;
         try {
             $report = $this->check($package);
             $this->assertApplicable($report);
@@ -302,6 +303,7 @@ final class Updater
                     $restored = $this->restoreSnapshot($snapshot['id'], true, $numbering);
                     $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage(), $discarded);
                 } catch (Throwable $rollbackError) {
+                    $halfDone = "update {$package->version()} failed and its automatic rollback failed; run php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss";
                     throw new RuntimeException(
                         'Update failed: ' . $e->getMessage() . '; automatic rollback also failed: ' . $rollbackError->getMessage()
                             . "; once that is resolved run: php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss",
@@ -316,7 +318,12 @@ final class Updater
             }
             throw $e;
         } finally {
-            MaintenanceMode::leave($this->root);
+            // R17: files or schema left half-way keep the shop closed until a rollback or update succeeds.
+            if ($halfDone !== null) {
+                MaintenanceMode::fail($this->root, $halfDone);
+            } else {
+                MaintenanceMode::leave($this->root);
+            }
             $this->unlock();
         }
     }

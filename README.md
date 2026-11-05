@@ -502,6 +502,12 @@ automation. Packages are Ed25519-verified and unsigned packages are refused
 unless the operator supplies `--allow-unsigned` explicitly. While `apply` or
 `rollback` runs, the shop is in maintenance (the `.maintenance` file in the
 application root): web requests get 503 and the worker and feed sync skip their run.
+The updater holds a lock on that file for as long as it runs, so the window also
+holds when the shop checks it from another container on the same volume, and it
+ends when that process ends. `php cli/migrate.php apply` uses the same window; a
+migration that fails, or an update whose automatic rollback fails, leaves the shop
+in maintenance (the file says what to run) until the next successful
+`migrate.php apply`, update or rollback.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The
