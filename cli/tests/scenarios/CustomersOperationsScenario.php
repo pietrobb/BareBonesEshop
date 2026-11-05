@@ -473,7 +473,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS wishlist_items (
 )");
 
 
-$wlProd = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
+$wlProd = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
 $wlProd2 = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1 OFFSET 1")->fetchColumn() ?: 0);
 assert_true($wlProd > 0, 'Wishlist: a product exists to save');
 

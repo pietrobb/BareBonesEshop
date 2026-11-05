@@ -9,6 +9,12 @@
   - An e-book whose line was refunded through a return shows "Blocked" in the order detail instead of "Active"; the
     download itself was already refused.
   - A credit note has a variable symbol of its own: "CN-20260007" no longer carries the digits of invoice 20260007.
+- **Feeds and sitemaps after a sale** (review round 17, medium). Since v2.1.2 every sale, shipment or stock
+  adjustment moved `products.updated_at`, which is part of the feed and sitemap fingerprint, so a busy shop rebuilt
+  them after every order. A stock change now moves the new `products.stock_updated_at` (migration
+  `20261105120000_product_stock_updated_at`); a product or variant going in or out of stock still rebuilds them,
+  through a per-change catalog token instead of a same-second file time check. API v1 `updated_after` matches
+  either column, so an integration still sees the stock change.
 - **Maintenance window** (review round 17, medium).
   - The updater holds a lock on `.maintenance` while it runs: a reused PID no longer keeps the shop on 503 for up to
     24 h, and an update started from another container (docker compose, shared volume) keeps its window past 1 h.
