@@ -26,7 +26,7 @@ final class PublicFeedCache
     {
         if (!preg_match('/^[a-z0-9][a-z0-9._-]{0,120}$/', $name)) throw new InvalidArgumentException('Invalid feed cache name');
         $key = 'public/' . $name;
-        $fingerprint = hash('sha256', $variant . "\n" . self::catalogFingerprint());
+        $fingerprint = hash('sha256', $variant . "\n" . self::catalogFingerprint() . "\n" . Cache::catalogVersion());
         $file = self::current($key, $ttl, $fingerprint);
         if ($file === null) {
             $lock = self::lock($key);
@@ -50,7 +50,7 @@ final class PublicFeedCache
     private static function current(string $key, int $ttl, string $fingerprint): ?string
     {
         $file = Cache::freshFile($key, $ttl);
-        return $file !== null && Cache::read($key . '.sig') === $fingerprint && !Cache::catalogChangedSince($file) ? $file : null;
+        return $file !== null && Cache::read($key . '.sig') === $fingerprint ? $file : null;
     }
 
     /** @param callable(resource): void $writer */

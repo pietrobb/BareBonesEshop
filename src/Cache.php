@@ -233,7 +233,7 @@ class Cache {
         $marker = self::catalogMarker($catalogId);
         $dir = dirname($marker);
         return (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir))
-            && @file_put_contents($marker, (string)time(), LOCK_EX) !== false;
+            && @file_put_contents($marker, time() . ' ' . bin2hex(random_bytes(8)), LOCK_EX) !== false;
     }
 
     private static function inTransaction(): bool {
@@ -252,22 +252,25 @@ class Cache {
      * never served past the end of the sale (nor the regular price after its start) for the rest of the TTL.
      */
     public static function readCatalogJson(string $path, int $ttl): ?array {
+        self::flushPendingCatalogChanges();
         $file = self::path($path);
-        if (self::catalogChangedSince($file)) return null;
+        $marker = self::catalogMarker(StoreContext::current()->catalogId());
+        clearstatcache(true, $file);
+        clearstatcache(true, $marker);
+        if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker)) return null;
         if (is_file($file) && (int)filemtime($file) <= Pricing::lastScheduledChange()) return null;
         return self::readJson($path, $ttl);
     }
 
     /**
-     * Whether catalogChanged() of the active catalog ran in or after the second $file (an absolute entry path) was
-     * written: a product or page saved, a price list changed, or a product or variant went in or out of stock.
+     * R17: a token that changes with every catalogChanged() of the active catalog ('' before the first): a product
+     * or page saved, a price list changed, a product or variant going in or out of stock. Part of the public feed and
+     * sitemap fingerprint, so those are rebuilt then, however soon after they were written.
      */
-    public static function catalogChangedSince(string $file): bool {
+    public static function catalogVersion(): string {
         self::flushPendingCatalogChanges();
         $marker = self::catalogMarker(StoreContext::current()->catalogId());
-        clearstatcache(true, $file);
-        clearstatcache(true, $marker);
-        return is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker);
+        return is_file($marker) ? (string)@file_get_contents($marker) : '';
     }
 
     private static function catalogMarker(string $catalogId): string {
