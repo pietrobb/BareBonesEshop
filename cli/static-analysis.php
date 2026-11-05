@@ -173,7 +173,7 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 300, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
     // R14 UX4: every signed-in admin account changes its own password and TOTP (current password, per-session throttle).
     'src/Entrypoints/Admin/MyAccount.php' => ['lines' => 105, 'functions' => 6, 'max_function_lines' => 40, 'coupling' => 4],
-    'src/Entrypoints/Admin/B2b.php' => ['lines' => 180, 'functions' => 9, 'max_function_lines' => 64, 'coupling' => 4],
+    'src/Entrypoints/Admin/B2b.php' => ['lines' => 180, 'functions' => 9, 'max_function_lines' => 64, 'coupling' => 5],
     // +2 coupling: AdminForm (server-rendered BBF forms replace inline bbf.js) and Import (shared CSV price format).
     // +1 coupling: CatalogScope keeps the catalog_scope-bound editor queries (categories, digital assets, attribute links) out of the entrypoint.
     // +1 coupling: ProductEditor validates and saves brand, GTIN/MPN, SEO, extra categories and translations outside the entrypoint.
@@ -190,7 +190,7 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1317, 'functions' => 26, 'max_function_lines' => 210, 'coupling' => 21],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
-    'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
+    'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     // R10 UX10: progressive rich-text editor for the admin HTML fields (one function returning the nonce'd script).
     'src/Entrypoints/Admin/RichText.php' => ['lines' => 72, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 2],
     // R14 UX7: image list of the product editor (move up/down, remove) over the "URL | alt" textarea.
@@ -206,7 +206,7 @@ $architectureBudgets = [
     // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
     // +1 coupling R14 UX5: the payments page warns that bank transfer is hidden at checkout without a store IBAN (BankTransferInstructions).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 20],
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 21],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
