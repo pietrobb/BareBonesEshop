@@ -644,6 +644,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.request_refund' => 'Požádat o refundaci',
     'admin.order.manual_refund' => 'Zaznamenat ruční refundaci',
     'admin.order.manual_refund_note' => 'Jak byly peníze vráceny (povinné)',
+    'admin.order.manual_refund_pending_hint' => 'Bylo vyžádáno vrácení {amount}, tato platba se však vrací ručně: peníze vraťte a zaznamenejte to níže.',
     'admin.order.retry_refund' => 'Zopakovat refundaci',
     'admin.order.retry_refund_hint' => 'Refundace {amount} byla vyžádána, ale nikdy neodeslána poskytovateli platby.',
     'admin.order.confirm_refund' => 'Potvrdit vyplacenou refundaci',

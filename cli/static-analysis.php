@@ -218,7 +218,8 @@ $architectureBudgets = [
     // +3 lines R11 H8: the order detail explains that accepting a purchase on invoice issues its invoice due on the terms.
     // +4 lines, +1 coupling R11: payment and refund amounts are typed in the order currency, not in cents (Money).
     // +2 lines R15: the status select starts on an empty "choose" option (it preselected Cancelled for some orders).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 935, 'functions' => 16, 'max_function_lines' => 314, 'coupling' => 23],
+    // +2 lines R16: a payment returned by hand offers no "Request refund" (nothing executes it) and its manual refund form names a request left in flight.
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 937, 'functions' => 16, 'max_function_lines' => 316, 'coupling' => 23],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
