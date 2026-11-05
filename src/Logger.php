@@ -119,6 +119,13 @@ class Logger
         '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s/?\#]+@#i' => '$1[REDACTED]@',
         // Whatever credentials an Authorization header carries, however short.
         '/(\bAuthorization["\']?\s*[:=]\s*["\']?(?:Basic|Bearer|Digest|Token|NTLM|Negotiate)\s+)(?!\[REDACTED)[^\s"\',;]+/i' => '$1[REDACTED]',
+        // JSON inside a JSON string: the quotes are escaped ({\"password\":\"x y\"}), the value runs to the next escaped quote.
+        '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*\\\\+["\']\s*[=:]\s*)(\\\\+["\'])(?!\[REDACTED).*?\2/is' => '$1$2[REDACTED]$2',
+        // Card security codes, keyed (cvc=123, "cvv2": "1234", card_cvc, security_code), escaped quotes included.
+        '/((?<![a-z0-9])(?:cvc|cvv2?|cvn|csc|security[_-]?code)(?:\\\\*["\'])?\s*[=:]\s*(?:\\\\*["\'])?)\d{3,4}(?!\d)/i' => '$1[REDACTED]',
+        // Cookie headers and session ids: the whole cookie string up to the line end or the closing quote.
+        '/(\b(?:Set-)?Cookie(?:\\\\*["\'])?\s*[=:]\s*(?:\\\\*["\'])?)(?!\[REDACTED)[^\r\n"\'\\\\]+/i' => '$1[REDACTED]',
+        '/\b((?:PHPSESSID|bbe_install)=)(?!\[REDACTED)[^\s;"\'&,\\\\]+/i' => '$1[REDACTED]',
         // A quoted value is masked up to its closing quote, spaces included ("password": "correct horse battery").
         '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*["\']?\s*[=:]\s*)(["\'])(?!\[REDACTED)(?:(?!\2)[^\\\\]|\\\\.)*\2/i' => '$1$2[REDACTED]$2',
         // An unquoted password may contain spaces: it runs on until the next "key=" / "key:" or a separator.
@@ -135,7 +142,25 @@ class Logger
             $credentials = is_string($decoded) && str_contains($decoded, ':') && preg_match('//u', $decoded) && !preg_match('/[\x00-\x1F\x7F]/', $decoded);
             return $credentials || preg_match('/[0-9+\/=]/', $m[2]) && strlen($m[2]) >= 8 ? $m[1] . '[REDACTED]' : $m[0];
         }, $text);
+        // Payment card numbers (spaces or dashes allowed, Luhn-valid: isCardNumber), with or without a key.
+        $text = (string)preg_replace_callback('/(?<![\w.])[2-6](?:[ -]?\d){12,18}(?![\w.])/', static fn(array $m): string =>
+            self::isCardNumber((string)preg_replace('/[ -]/', '', $m[0])) ? '[REDACTED CARD]' : $m[0], $text);
         return (string)preg_replace(array_keys(self::SECRET_PATTERNS), array_values(self::SECRET_PATTERNS), $text);
+    }
+
+    /**
+     * 15–19 digits of a card scheme range (first digit 2–6), or 14 starting with 3 (Diners), passing the Luhn check.
+     * 13-digit EANs and 14-digit YYYYMMDDhhmmss timestamps are not card numbers.
+     */
+    private static function isCardNumber(string $digits): bool
+    {
+        if (!preg_match('/^(?:[2-6]\d{14,18}|3\d{13})$/D', $digits)) return false;
+        $sum = 0;
+        foreach (array_reverse(str_split($digits)) as $i => $digit) {
+            $d = (int)$digit * ($i % 2 === 1 ? 2 : 1);
+            $sum += $d > 9 ? $d - 9 : $d;
+        }
+        return $sum % 10 === 0;
     }
 
     /**
@@ -153,8 +178,10 @@ class Logger
     public static function redact(array $value): array
     {
         foreach ($value as $key => &$item) {
-            if (preg_match('/(?:secret|token|password|authorization|api[_-]?key|credential|cookie|payload|post|message|errors|(?:^|_)(?:name|email|address|ip|session|card|pan|cvv)(?:$|_))/i', (string)$key)) {
+            if (preg_match('/(?:secret|token|password|authorization|api[_-]?key|credential|cookie|payload|post|message|errors|card_?number|cc_?number|security_?code|(?:^|_)(?:name|email|address|ip|session|card|pan|cvv|cvv2|cvc|cvn|csc)(?:$|_))/i', (string)$key)) {
                 $item = '[REDACTED]';
+            } elseif (is_int($item) && self::isCardNumber((string)$item)) {
+                $item = '[REDACTED CARD]';
             } elseif (is_array($item)) {
                 $item = self::redact($item);
             } elseif (is_string($item)) {

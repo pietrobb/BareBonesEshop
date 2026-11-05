@@ -14,6 +14,17 @@
     runs on that host, for at most a day; a marker left by a killed updater still stops blocking after an hour.
   - Tests now cover the content of `<style>`, `<script>` and the other elements rich text removes, and a `<style>`
     in the body of a mail's HTML (mutants SEC12 and MAIL2).
+- **Back in stock, logs, transfer reminders, shipped e-mail** (review round 16, medium). Asking again on the "notify
+  me" form mailed a new confirmation link every time, so anyone could flood an address with links: a waiting request
+  now gets a new link at most once an hour, and one address at most three links an hour over all products (a fourth
+  request answers "Too many requests"). The logs now mask payment card numbers (Luhn-checked, with spaces or dashes),
+  card security codes (`cvc`, `cvv2`, `security_code`), secrets inside JSON nested in a JSON string (escaped quotes)
+  and `Cookie` / `Set-Cookie` values and session ids. The bank-transfer reminder sweep read the 500 oldest pending
+  orders without a reminder; cash-on-delivery orders and overdue transfers never get one, so once 500 of them piled up
+  no transfer was reminded again. It now reads only orders inside the payment term, page by page. "Create and ship"
+  without a carrier mailed "Order X was handed to ."; the shipped e-mail now says the order has been shipped and names
+  the carrier only when there is one (`without_carrier` in `order_shipped`; an edited copy of that template keeps its
+  own text).
 - **Shops installed with `install.php` can be updated** (review round 16, high 2). The web installer left
   `update_public_key` empty, so the signed updater refused every package ("Signed update package requires an Ed25519
   public key") and the bookshop package could not be upgraded as the README says. The installer now copies the
