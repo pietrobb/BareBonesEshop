@@ -20,7 +20,6 @@
   v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
   tracked as an unknown number of discarded rows instead of skipping them silently. When the counters still cannot
   be raised, the rollback notice no longer also claims the discarded invoice numbers are not issued again.
-  tracked as an unknown number of discarded rows instead of skipping them silently.
 - **Refunds after a cancellation credit note, refunds by hand** (review round 16). A cancelled purchase on invoice
   that was paid all the same had its invoice fully credited by the cancellation credit note; refunding that money
   then failed for ever ("the refund exceeds what the invoice still has uncredited"), and its credit-note job raised a
