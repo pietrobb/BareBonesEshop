@@ -61,7 +61,7 @@ $r15aForeign = $r15aCall('POST', '/products', [], ['sku' => 'R15A-X5', 'name' =>
 assert_equals([422, false], [$r15aForeign['status'], (bool)Products::bySku('R15A-X5')], 'R15 API: an unknown category_id is a 422 and creates nothing');
 
 // updated_after: an incremental sync sees only what changed since the previous run's server_time.
-$pdo->exec("UPDATE products SET updated_at = '2020-01-01 00:00:00' WHERE store_id = 'default'");
+$pdo->exec("UPDATE products SET updated_at = '2020-01-01 00:00:00', stock_updated_at = NULL WHERE store_id = 'default'");
 $r15aSince = $r15aCall('GET', '/products', ['updated_after' => '2026-01-01T00:00:00Z', 'limit' => 100]);
 assert_equals([200, []], [$r15aSince['status'], $r15aSince['body']['data'] ?? null], 'R15 API: nothing changed since updated_after → empty page');
 $r15aServerTime = (string)($r15aSince['body']['meta']['server_time'] ?? '');

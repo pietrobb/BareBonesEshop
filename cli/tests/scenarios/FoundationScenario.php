@@ -350,6 +350,10 @@ if ($mysqlDsn) {
         $variantDigitalMigrationMysql->up($my, false);
         $variantDigitalMigrationMysql->up($my, false);
         assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='variants' AND COLUMN_NAME='digital'")->fetchColumn(), 'MySQL live: Bookshop variants.digital migration is applied idempotently');
+        $stockUpdatedAtMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261105120000_product_stock_updated_at.php';
+        $stockUpdatedAtMigrationMysql->up($my, false);
+        $stockUpdatedAtMigrationMysql->up($my, false);
+        assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME='stock_updated_at'")->fetchColumn(), 'MySQL live: R17 products.stock_updated_at migration is applied idempotently');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -696,6 +700,10 @@ $orderItemDigitalMigration = require TEST_CLI_DIR . '/../migrations/202611030900
 $orderItemDigitalMigration->up($pdo, true);
 $orderItemDigitalMigration->up($pdo, true);
 assert_true(in_array('digital', array_column($pdo->query('PRAGMA table_info(order_items)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'R12 order line digital migration: the column exists idempotently');
+$stockUpdatedAtMigration = require TEST_CLI_DIR . '/../migrations/20261105120000_product_stock_updated_at.php';
+$stockUpdatedAtMigration->up($pdo, true);
+$stockUpdatedAtMigration->up($pdo, true);
+assert_true(in_array('stock_updated_at', array_column($pdo->query('PRAGMA table_info(products)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'R17 products.stock_updated_at migration: the column exists idempotently');
 
 // ============================================================
 // TEST 3: CSV Import

@@ -25,7 +25,8 @@ class ApiV1 {
         if ($method === 'GET' && $path === '/products') {
             ApiAuth::requireScope($client, 'products:read');
             return self::ok(self::page('products', 'id, sku, slug, name, product_type, price, compare_price,
-                currency, stock, status, weight_g, created_at, updated_at', $store->catalogId(), $query, [self::class, 'productDto'], true));
+                currency, stock, status, weight_g, created_at, updated_at, stock_updated_at', $store->catalogId(), $query, [self::class, 'productDto'], true,
+                ['updated_at', 'stock_updated_at']));
         }
         if ($method === 'POST' && $path === '/products') {
             ApiAuth::requireScope($client, 'products:write');
@@ -123,17 +124,19 @@ class ApiV1 {
      * less SYNC_OVERLAP_SECONDS) as the next run's updated_after, so a change made while it was paging, or committed
      * late by a transaction that began earlier, is fetched again rather than missed.
      */
-    private static function page(string $table, string $columns, string $storeId, array $query, callable $dto, bool $changeFilter = false): array {
+    private static function page(string $table, string $columns, string $storeId, array $query, callable $dto, bool $changeFilter = false,
+        array $changeColumns = ['updated_at']): array {
         $limit = self::limit($query['limit'] ?? 25);
         $afterId = self::decodeCursor((string)($query['cursor'] ?? ''));
         $updatedAfter = self::updatedAfter($query['updated_after'] ?? null, $changeFilter);
         $db = Db::get();
         $serverTime = $changeFilter ? (string)$db->query('SELECT ' . Db::now())->fetchColumn() : null;
         $stmt = $db->prepare("SELECT {$columns} FROM {$table} WHERE store_id=:store AND id>:after"
-            . ($updatedAfter !== null ? ' AND updated_at>=:updated' : '') . ' ORDER BY id LIMIT :limit');
+            . ($updatedAfter !== null ? ' AND (' . implode(' OR ', array_map(static fn(int $i, string $column): string => "{$column}>=:updated{$i}",
+                array_keys($changeColumns), $changeColumns)) . ')' : '') . ' ORDER BY id LIMIT :limit');
         $stmt->bindValue(':store', $storeId);
         $stmt->bindValue(':after', $afterId, PDO::PARAM_INT);
-        if ($updatedAfter !== null) $stmt->bindValue(':updated', $updatedAfter);
+        if ($updatedAfter !== null) foreach (array_keys($changeColumns) as $i) $stmt->bindValue(":updated{$i}", $updatedAfter);
         $stmt->bindValue(':limit', $limit + 1, PDO::PARAM_INT);
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -548,7 +551,8 @@ class ApiV1 {
             'status' => (string)$row['status'],
             'weight_g' => (int)($row['weight_g'] ?? 0),
             'created_at' => (string)($row['created_at'] ?? ''),
-            'updated_at' => (string)($row['updated_at'] ?? ''),
+            // R17: a stock change moves stock_updated_at (not updated_at, which the feed cache reads); the API reports the later one.
+            'updated_at' => max((string)($row['updated_at'] ?? ''), (string)($row['stock_updated_at'] ?? '')),
         ];
     }
 
