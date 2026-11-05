@@ -77,6 +77,11 @@ return [
   already succeeded are not run again. Listeners must be idempotent per event `id`.
 - **Storefront** providers return an array, which templates read from
   `$model['extensions'][<code>][...]`; an empty array adds nothing.
+- **Texts.** Do not add keys to the core's `lang/` files: an update replaces them. Keep an extension's texts
+  in its own folder (for example `extensions/<code>/lang/<locale>.php` returning an array) and pick the
+  language with `I18n::locale()`, falling back to English. Core texts are available through `I18n::t()`.
+  A theme that styles an extension's page ships its own texts (`themes/<name>/lang/`, see
+  [THEMES.md](THEMES.md#texts-and-languages)).
 - **Pages** answer `/?page=<code>.<name>` and return `['title' => string, 'content' => string]`.
   The content is HTML placed into the active theme's layout, so render data through
   `Template::process()` / `Template::render()` (they escape `{{ }}`). Core routes cannot be replaced.
