@@ -567,7 +567,7 @@ final class Updater
                 . implode(', ', $bodyOnly) . ' without a signed X-Shipping-Timestamp are refused; confirm the carrier signs it and set the option explicitly');
         }
         // R17: 2.1.0 removed api.php; a gateway still posting to it gets a 404 and its payments stay pending.
-        if (is_file($this->root . DIRECTORY_SEPARATOR . 'api.php')) {
+        if (is_file($this->root . '/api.php')) {
             $add('warn', 'payment_webhooks', 'api.php is still installed (a release before 2.1.0): this update removes it, so payment and carrier'
                 . ' webhooks must move to /api/v1/webhooks/payment/<provider> and /api/v1/webhooks/shipping/<carrier>. Change the URL in the'
                 . ' Stripe (Developers → Webhooks) and Comgate portals and in every carrier webhook when you deploy (CHANGELOG 2.1.0 upgrade notes)');
