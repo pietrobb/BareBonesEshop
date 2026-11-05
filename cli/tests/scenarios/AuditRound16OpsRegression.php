@@ -115,3 +115,35 @@ try {
 } catch (Throwable $e) {
     $r16oFail('doctor', $e);
 }
+
+// Medium: the 2.1.1 notes had no "Upgrade notes" (migrations, maintenance window, theme and signing changes). Every
+// release section from 2.1.1 on has them, they list the release's migrations, and they give the shipped key's fingerprint.
+try {
+    $r16oNotes = str_replace("\r\n", "\n", (string)file_get_contents($r16oApp . '/CHANGELOG.md'));
+    $r16oFingerprint = UpdateKeyRotation::fingerprint($r16oApp . '/releases/update-public.key');
+    foreach ([
+        '2.1.2' => ['20261104120000_back_in_stock_double_opt_in', 'customers:read', 'nginx_config', 'verify-tag v2.1.2', 'update-2.1.1-2.1.2'],
+        '2.1.1' => ['20261102090000_variant_digital', '20261103090000_order_item_digital', '20261103150000_fulfillment_status_grant',
+            'maintenance', 'rotate-key', '{{account.page_urls.<page>}}', 'pricing.legacy_rules'],
+    ] as $r16oVersion => $r16oNeedles) {
+        $r16oStart = strpos($r16oNotes, "\n## {$r16oVersion} ");
+        $r16oEnd = $r16oStart === false ? false : strpos($r16oNotes, "\n## ", $r16oStart + 4);
+        $r16oSection = $r16oStart === false ? '' : substr($r16oNotes, $r16oStart, ($r16oEnd ?: strlen($r16oNotes)) - $r16oStart);
+        $r16oUpgrade = strpos($r16oSection, '### Upgrade notes');
+        $r16oChanges = strpos($r16oSection, '### Changes');
+        assert_true($r16oUpgrade !== false && $r16oChanges !== false && $r16oUpgrade < $r16oChanges,
+            "R16 ops notes: {$r16oVersion} has Upgrade notes before its changes");
+        $r16oUpgradeText = $r16oUpgrade === false ? '' : substr($r16oSection, $r16oUpgrade, ($r16oChanges ?: strlen($r16oSection)) - $r16oUpgrade);
+        foreach ($r16oNeedles as $r16oNeedle) {
+            // Migrations belong in the upgrade notes; the signed tag and package names are in the release's introduction.
+            $r16oWhere = str_starts_with($r16oNeedle, '2026') ? $r16oUpgradeText : $r16oSection;
+            assert_true(str_contains($r16oWhere, $r16oNeedle), "R16 ops notes: {$r16oVersion} names {$r16oNeedle}");
+        }
+        assert_true(preg_match('/^ {4}([0-9a-f]{64})\r?$/m', $r16oSection, $m) === 1 && $m[1] === $r16oFingerprint,
+            "R16 ops notes: {$r16oVersion} gives the fingerprint update.php fingerprint prints for the shipped key");
+    }
+    assert_true(str_starts_with(substr($r16oNotes, (int)strpos($r16oNotes, '## Unreleased')), "## Unreleased\n\n## 2.1.2 "),
+        'R16 ops notes: nothing released is left under Unreleased');
+} catch (Throwable $e) {
+    $r16oFail('release notes', $e);
+}

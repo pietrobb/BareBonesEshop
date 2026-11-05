@@ -646,6 +646,7 @@ return [
     'admin.order.request_refund' => 'Request refund',
     'admin.order.manual_refund' => 'Record manual refund',
     'admin.order.manual_refund_note' => 'How the money was returned (required)',
+    'admin.order.manual_refund_pending_hint' => 'A refund of {amount} was requested, but this payment is returned by hand: pay it back and record it below.',
     'admin.order.retry_refund' => 'Retry refund',
     'admin.order.retry_refund_hint' => 'The refund of {amount} was requested, but never sent to the payment provider.',
     'admin.order.confirm_refund' => 'Confirm refund paid',

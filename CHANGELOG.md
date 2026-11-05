@@ -2,6 +2,64 @@
 
 ## Unreleased
 
+## 2.1.2 — 2026-11-05
+
+**Correctness hotfix of 2.1.1** (review round 16, high 1 and 3, and the medium findings fixed since). Update every
+2.1.1 shop: after an update rollback on MySQL or MariaDB invoice and credit note numbers were issued a second time,
+orders of a `shipping.json` method could get no label, one anonymous request could disable an extension (payment
+provider included), and a refund after a cancellation credit note failed for ever.
+
+Signed with the same update key as 2.1.0 and 2.1.1, whose fingerprint (`php cli/update.php fingerprint` on a shop,
+`php cli/build-update.php fingerprint --public=releases/update-public.key` in the 2.1.2 tree) is
+
+    ae998f94dde4c8aa8651dd644cfa309880df155a6d0fa4bf695eca75279b576a
+
+The tag `v2.1.2` is signed with the SSH key `SHA256:+6NmgAQLsyy8akzFUqhZuzHqgHZ7cR/Yrz1VbRpyEik` (as `v2.1.1`, listed
+in `releases/allowed_signers`): `git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag v2.1.2`, with
+an `allowed_signers` copy you already trust. The GitHub release `v2.1.2` carries `update-2.1.1-2.1.2` and
+`update-2.1.0-2.1.2` (installed 2.1.1 or 2.1.0: `php cli/update.php apply --package=...`), `update-2.0.0-2.1.2` and
+`update-1.8.0-2.1.2` (run from the trusted 2.1.2 tree with `--installed=<shop root>`, see
+`docs/AI_UPDATE_RUNBOOK.md`).
+
+### Upgrade notes (2.1.1 → 2.1.2)
+
+Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup.php doctor` after it.
+
+- **Rolling this update back:** the snapshot is taken by the shop's own 2.1.1 (or 2.1.0) updater, which does not
+  record customers, so `php cli/update.php rollback` of this update always reports `customers=unknown` and a critical
+  `update.rollback_discarded_writes` incident, even when nobody registered. Before rolling back, list the customers
+  registered since the update (`created_at` after the snapshot time in `php cli/update.php list`) to re-create them
+  afterwards; a SQLite rollback keeps no copy of the replaced database (MySQL/MariaDB with
+  `update_mysql_probe_database` keep a `pre-rollback-*.sql` dump in the snapshot directory). With none, close the
+  incident.
+
+- **Migration** `20261104120000_back_in_stock_double_opt_in`: "Notify me when back in stock" is double opt-in. Requests
+  stored before the update were never confirmed; they lapse 48 hours after the update unless confirmed, so a
+  customer who wants the notice signs up again.
+- **ERP API credentials:** an order's phone, delivery address and note are returned only to a credential with
+  `customers:read` as well as `orders:read`. Grant `customers:read` to an ERP that books or ships orders from them.
+  Resume incremental syncs at `meta.next_updated_after` (not `meta.server_time`), and expect stock changes to move a
+  product's `updated_at`, so the first sync after the update may return more products than usual. Order lines carry
+  `discount` and the VAT of the order's financial snapshot; an ERP that summed the old line VAT should compare again.
+- **Doctor warnings to act on:** the nginx site config (`operations.nginx_config`) missing deny rules of the shipped
+  `deploy/nginx.conf` (copy the named rules, e.g. `*.lock` and `*.tmp`, into your server config); carrier webhook
+  secrets set while `shipping_webhook_require_timestamp` is not (it defaults to `true`: set it to `false` for a
+  carrier that signs only the body, whose webhooks are refused otherwise, or to `true` to silence the warning); `MAIL_FROM` unset or on an example domain (warning)
+  or not a valid address (failure: no e-mail is sent).
+- **Product feeds:** a product with variants is listed as one item per variant (own SKU, price, availability, grouped
+  by `item_group_id`) instead of one item: Google Merchant Center and Meta see the variants as new items, and the
+  product's own item as removed, on the next fetch.
+- **Admin amounts:** `1,299` is read as one thousand two hundred ninety-nine (it was 1.30), and an amount with more
+  decimals than the currency has is refused instead of rounded.
+- **Extensions:** an extension page that throws answers 500 and logs `extension.page_failed`; it is no longer
+  quarantined. An extension quarantined by such a request under 2.1.1 is released once one of its PHP files changes
+  (the doctor lists `extension.quarantined`).
+- **Refunds by hand:** a payment returned by bank transfer or cash on delivery offers only "Record manual refund". A
+  payment left at "Refund in progress" by "Request refund" shows the amount to pay back; pay it and record it.
+- **Backups:** `cli/restore.php` also takes an absolute path to a file in a local backup storage.
+
+### Changes
+
 - **Tests on an installed shop, doctor, restore** (review round 16, medium). After `php cli/setup.php install` the test
   suite stopped midway: it read the installed shop's stores.json and legal texts from `private_runtime_dir` (the
   sample stores are hidden there, so a storefront test answered 404 and ended the run). The suite now runs on its own
@@ -16,9 +74,17 @@
   invoice and credit note counters were not raised past the numbers issued during the update, so those numbers were
   issued a second time: the counter update bound one named placeholder twice, which native prepares reject (HY093;
   SQLite accepts it). A regression test now scans every SQL string in `src/` and `extensions/` for a repeated named
-  placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by
-  v2.1.0 or older (which tracked only orders and payments) it reports the invoices, refunds and customers it never
-  tracked as an unknown number of discarded rows instead of skipping them silently.
+  placeholder. A rollback also counts the customers registered after the snapshot, and for a snapshot taken by an
+  older updater it reports the tables that updater never tracked (v2.1.1: customers; v2.1.0 or older: invoices,
+  refunds and customers) as an unknown number of discarded rows instead of skipping them silently. When the counters
+  still cannot be raised, the rollback notice no longer also claims the discarded invoice numbers are not issued again.
+- **Refunds after a cancellation credit note, refunds by hand** (review round 16). A cancelled purchase on invoice
+  that was paid all the same had its invoice fully credited by the cancellation credit note; refunding that money
+  then failed for ever ("the refund exceeds what the invoice still has uncredited"), and its credit-note job raised a
+  critical incident. The refund now credits only what the invoice still has left (nothing, when the cancellation
+  credited all of it). "Request refund" on a payment returned by hand (bank transfer, cash on delivery) set the
+  payment to "Refund in progress" with nothing to execute it; such an order now offers only "Record manual refund",
+  and a request left from before shows the amount to pay back and record.
 - **Extension quarantine only for real fatal errors** (review round 16). One anonymous request could disable an
   extension, payment provider included, until a developer changed its files: a page throwing on bad input ended the
   request as "Uncaught ..." and the fatal-error guard quarantined the extension. An uncaught exception no longer
@@ -121,6 +187,31 @@ The tag `v2.1.1` is the first signed tag (SSH key `SHA256:+6NmgAQLsyy8akzFUqhZuz
 The GitHub release `v2.1.1` carries `update-2.1.0-2.1.1` (installed 2.1.0: `php cli/update.php apply
 --package=...`), `update-2.0.0-2.1.1` and `update-1.8.0-2.1.1` (run from the trusted 2.1.1 tree with
 `--installed=<shop root>`, see `docs/AI_UPDATE_RUNBOOK.md`; a v1.8.0 shop now upgrades its `stores.json`).
+
+### Upgrade notes (2.1.0 → 2.1.1, added with 2.1.2)
+
+- **Maintenance window:** `update.php apply` and `rollback` (and from 2.1.1 on `php cli/migrate.php apply`) put the
+  shop into maintenance: web requests get 503 with `Retry-After`, `worker.php` and `feed-sync.php` skip their run.
+  The `order_items.digital` backfill runs in ranges of 5,000 lines; on a large order history plan minutes, not
+  seconds.
+- **Migrations:** `20261102090000_variant_digital` (download variants), `20261103090000_order_item_digital` (digital
+  order lines frozen as they were sold, existing lines backfilled) and `20261103150000_fulfillment_status_grant` (a
+  fulfillment account whose store grant lists permissions explicitly gets `orders.status`, which order status moves
+  of that role need since 2.1.1).
+- **Cron:** the CLI install leaves the web worker off. Without the README's cron entries (worker, GDPR retention,
+  backup) order e-mails stay queued; add them if the shop has none.
+- **Signing:** `update.php rotate-key` no longer takes `--public-key`, and an endorsement printed by
+  `build-update.php endorse` of 2.1.0 has to be made again. Verify release tags from v2.1.1 on with
+  `git -c gpg.ssh.allowedSignersFile=releases/allowed_signers verify-tag`.
+- **Custom themes:** account links appending `?p=` to `{{account.action_url}}` lose a further language; use
+  `{{account.page_urls.<page>}}`. Include `{{> global/lang-field}}` in the theme's own GET forms.
+- **Prices:** `pricing.json` catalog rules and customer group discounts are not applied to any price (they never
+  were: nothing read the price maps the cache rebuild wrote for them); `doctor` reports them as `pricing.legacy_rules`. Recreate them as promotions or price lists.
+- **Payments:** bank transfer is offered only when the store has an IBAN with valid check digits (Admin → Stores
+  and seller, which also takes the BIC). A manual order joins only an account with a verified e-mail address.
+- **Retention:** `gdpr_events` are deleted 5 years after the event (`config/data-retention.json`).
+
+### Changes
 
 - **Release process and upgrade** (review round 15, high 7). A v1.8.0 shop adopted exactly per the runbook answered
   503 on `/readyz` and the admin: its `stores.json` (main store keyed `sk`, no `default_store`, no channels) stayed as
