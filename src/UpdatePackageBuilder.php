@@ -153,9 +153,17 @@ final class UpdatePackageBuilder
             }
             // The repository stores text with LF. CRLF means a Windows checkout (core.autocrlf): every hash would then
             // differ from a deployed LF install, so each file of the package would conflict.
-            if (preg_match(self::TEXT_FILE, $relative) === 1 && str_contains((string)file_get_contents($absolute), "\r\n")) {
-                throw new RuntimeException("Release tree file {$relative} has CRLF line endings (a Windows checkout?);"
-                    . ' build from an LF export, e.g. git -c core.autocrlf=false archive --format=tar vX.Y.Z');
+            if (preg_match(self::TEXT_FILE, $relative) === 1) {
+                $content = (string)file_get_contents($absolute);
+                if (str_contains($content, "\r\n")) {
+                    throw new RuntimeException("Release tree file {$relative} has CRLF line endings (a Windows checkout?);"
+                        . ' build from an LF export, e.g. git -c core.autocrlf=false archive --format=tar vX.Y.Z');
+                }
+                // R17: a lone CR makes git treat the file as binary, so neither autocrlf nor text=auto normalises it.
+                if (str_contains($content, "\r")) {
+                    throw new RuntimeException("Release tree file {$relative} contains a stray carriage return (\\r);"
+                        . ' store it with LF line endings only');
+                }
             }
             $result[$relative] = $hash;
         }
