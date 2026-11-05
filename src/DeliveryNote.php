@@ -12,7 +12,7 @@ final class DeliveryNote {
      * shipment's goods, an order without shipments one note with all its items. $shipmentId picks one shipment.
      *
      * @param int[] $orderIds
-     * @return list<array{order: array, items: array, address: array, pickup: ?array, shipment: ?array{number:int,count:int,id:int}}>
+     * @return list<array{order: array, items: array, address: array, pickup: ?array, rate: array, shipment: ?array{number:int,count:int,id:int}}>
      */
     public static function forOrders(array $orderIds, ?int $shipmentId = null): array {
         $notes = [];
@@ -20,8 +20,9 @@ final class DeliveryNote {
             $order = Orders::byId($orderId);
             if (!$order) continue;
             $address = json_decode((string)($order['shipping_addr'] ?? ''), true);
-            $pickup = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true)['pickup_point'] ?? null;
-            $base = ['order' => $order, 'address' => is_array($address) ? $address : [], 'pickup' => is_array($pickup) ? $pickup : null];
+            $rate = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
+            $rate = is_array($rate) ? $rate : [];
+            $base = ['order' => $order, 'address' => is_array($address) ? $address : [], 'pickup' => is_array($rate['pickup_point'] ?? null) ? $rate['pickup_point'] : null, 'rate' => $rate];
             $items = Orders::items($orderId);
             $shipments = array_values(array_filter(Fulfillment::shipments($orderId), static fn(array $s): bool => ($s['status'] ?? '') !== 'cancelled'));
             if ($shipments === []) {
@@ -52,6 +53,14 @@ final class DeliveryNote {
             : $title;
     }
 
+    /** The shipping method as the customer chose it ("Packeta pickup point"), not its code; '' without one. */
+    private static function shippingMethod(array $note): string {
+        $code = (string)($note['order']['shipping_method'] ?? '');
+        if ($code === '') return '';
+        $rate = $note['rate'] ?? [];
+        return MethodLabels::name('shipping', $code, (string)($rate['label'] ?? $rate['name'] ?? '') ?: ucfirst(str_replace('_', ' ', $code)));
+    }
+
     /** @return list<string> recipient block: name, company lines, street, zip city, country, phone */
     public static function recipientLines(array $note): array {
         $address = $note['address'];
@@ -59,7 +68,7 @@ final class DeliveryNote {
         foreach (CheckoutService::companyLines($address) as $line) $lines[] = $line;
         $lines[] = (string)($address['street'] ?? $address['address'] ?? '');
         $lines[] = trim(($address['zip'] ?? '') . ' ' . ($address['city'] ?? ''));
-        $lines[] = strtoupper((string)($address['country'] ?? ''));
+        $lines[] = ShippingService::countryName((string)($address['country'] ?? ''));
         $lines[] = (string)($note['order']['customer_phone'] ?? '');
         return array_values(array_filter(array_map('trim', $lines), static fn(string $line): bool => $line !== ''));
     }
@@ -79,7 +88,7 @@ final class DeliveryNote {
                 . ($seller !== '' ? '<p>' . esc($seller) . '</p>' : '')
                 . '<p>' . esc(I18n::t('admin.th.date')) . ': ' . esc(substr((string)$order['created_at'], 0, 10)) . '</p>'
                 . '<h2>' . esc(I18n::t('admin.delivery_note.ship_to')) . '</h2><p>' . implode('<br>', array_map('esc', self::recipientLines($note))) . '</p>';
-            if (!empty($order['shipping_method'])) $out .= '<p>' . esc(I18n::t('admin.delivery_note.shipping_method')) . ': ' . esc((string)$order['shipping_method']) . '</p>';
+            if (($method = self::shippingMethod($note)) !== '') $out .= '<p>' . esc(I18n::t('admin.delivery_note.shipping_method')) . ': ' . esc($method) . '</p>';
             if ($note['pickup']) $out .= '<p>' . esc(I18n::t('pickup_point')) . ': ' . esc((string)($note['pickup']['name'] ?? '')) . ' (ID ' . esc((string)($note['pickup']['id'] ?? '')) . ')</p>';
             if (($customerNote = Orders::customerNote($order)) !== '') $out .= '<p style="white-space:pre-wrap">' . esc(I18n::t('admin.order.note')) . ': ' . esc($customerNote) . '</p>';
             $out .= '<table><thead><tr><th>' . esc(I18n::t('admin.th.sku')) . '</th><th>' . esc(I18n::t('admin.th.name')) . '</th><th class="qty">' . esc(I18n::t('admin.th.qty')) . '</th></tr></thead><tbody>';
@@ -107,7 +116,7 @@ final class DeliveryNote {
             $y = 34.0;
             $pdf->text(20, $y, I18n::t('admin.delivery_note.ship_to'), ['size' => 10, 'bold' => true]);
             foreach (self::recipientLines($note) as $line) { $y += 5; $pdf->text(20, $y, mb_substr($line, 0, 80), ['size' => 9]); }
-            if (!empty($order['shipping_method'])) { $y += 6; $pdf->text(20, $y, I18n::t('admin.delivery_note.shipping_method') . ': ' . $order['shipping_method'], ['size' => 9]); }
+            if (($method = self::shippingMethod($note)) !== '') { $y += 6; $pdf->text(20, $y, mb_substr(I18n::t('admin.delivery_note.shipping_method') . ': ' . $method, 0, 100), ['size' => 9]); }
             if ($note['pickup']) { $y += 5; $pdf->text(20, $y, mb_substr(I18n::t('pickup_point') . ': ' . ($note['pickup']['name'] ?? '') . ' (ID ' . ($note['pickup']['id'] ?? '') . ')', 0, 100), ['size' => 9]); }
             if (($customerNote = Orders::customerNote($order)) !== '') { $y += 5; $pdf->text(20, $y, mb_substr(I18n::t('admin.order.note') . ': ' . preg_replace('/\s+/', ' ', $customerNote), 0, 110), ['size' => 9]); }
             $header = static function () use ($pdf, &$y): void {

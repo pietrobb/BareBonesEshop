@@ -129,6 +129,8 @@ class I18n {
             self::$lang = file_exists($file) ? require $file : require __DIR__ . '/../lang/en.php';
         }
         if (isset(self::$lang[$key])) return self::$lang[$key];
+        $themeText = Template::themeTexts(self::locale())[$key] ?? null;
+        if ($themeText !== null) return $themeText;
         if (self::$fallbackLang === null) self::$fallbackLang = require __DIR__ . '/../lang/en.php';
         return self::$fallbackLang[$key] ?? $key;
     }
@@ -169,12 +171,12 @@ class I18n {
         }
     }
 
-    /** All UI translations (for template rendering) */
+    /** All UI translations (for template rendering), plus the active theme's own texts (Template::themeTexts). */
     public static function all(): array {
         if (!self::$lang) {
             self::t('_init'); // trigger load
         }
-        return self::$lang;
+        return self::$lang + Template::themeTexts(self::locale());
     }
 
     /**

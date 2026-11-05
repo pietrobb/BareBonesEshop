@@ -307,7 +307,7 @@ try {
     assert_true($r4PageSave['location'] === 'admin.php?p=page_edit' && str_contains($r4PageForm, 'R4 Typed Title') && str_contains($r4PageForm, 'R4 typed body')
         && !str_contains($r4PageAgain, 'R4 Typed Title'),
         'R4 admin CMS: a taken slug reopens the new-page form with the typed title and body, once');
-    $r4ProductSave = $r4Http('POST', '/__admin?fn=handleProductSave', ['sku' => '', 'name' => 'R4 Typed Product', 'price' => '1234', 'category_id' => (string)$r4Cat], $r4Admin);
+    $r4ProductSave = $r4Http('POST', '/__admin?fn=handleProductSave', ['sku' => '', 'name' => 'R4 Typed Product', 'price' => '12.34', 'category_id' => (string)$r4Cat], $r4Admin);
     $r4ProductForm = $r4Http('GET', '/__admin?fn=pageProduct', [], $r4Admin)['body'];
     assert_true($r4ProductSave['location'] === 'admin.php?p=product' && str_contains($r4ProductForm, 'R4 Typed Product'),
         'R4 admin product: a rejected new product returns to the prefilled new-product form, not id=0');

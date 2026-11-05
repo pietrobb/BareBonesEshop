@@ -131,7 +131,7 @@ $items = [['SKU' => 'AAC-DEF-1', 'NAME' => 'Overwritten', 'PRICE' => '12.00', 'S
 $stock = static fn(): array => $q('SELECT w.code, ws.sku, ws.qty FROM warehouse_stock ws JOIN warehouses w ON w.id = ws.warehouse_id ORDER BY w.code, ws.sku');
 $productRow = static fn(string $sku): ?array => $q('SELECT sku, name, price, status, store_id FROM products WHERE sku = ?', [$sku])[0] ?? null;
 $productPost = static fn(string $sku, array $fields): array => array_replace(['sku' => $sku, 'name' => "{$sku} name", 'slug' => strtolower($sku), 'category_id' => (string)$idOf('categories', 'slug', 'aac-cat-default'),
-    'product_type' => 'simple', 'price' => '1000', 'compare_price' => '', 'stock' => '0', 'stock_low_threshold' => '', 'stock_critical_threshold' => '', 'status' => 'active',
+    'product_type' => 'simple', 'price' => '10.00', 'compare_price' => '', 'stock' => '0', 'stock_low_threshold' => '', 'stock_critical_threshold' => '', 'status' => 'active',
     'summary' => '', 'description' => '', 'images' => '', 'weight_g' => '0', 'tags' => '', 'brand_id' => '', 'gtin' => '', 'mpn' => '', 'seo_title' => '', 'meta_description' => ''], $fields);
 $attrPost = static fn(array $fields): array => array_replace(['csrf_token' => 'aac-token', 'name' => 'AAC Color', 'slug' => 'aac-color', 'type' => 'enum', 'unit' => '', 'sort_order' => '0',
     'options' => ['red', 'green'], 'option_order' => ['1', '3'], 'category_ids' => [(string)$idOf('categories', 'slug', 'aac-cat-default')]], $fields);
@@ -321,7 +321,7 @@ switch ($action) {
     case 'product_sku_rename_ordered':
         $extra = static fn(): array => ['row' => $productRow('AAC-DEF-1'), 't' => I18n::format('admin.msg.product.sku_change_blocked', ['sku' => 'AAC-DEF-1', 'reason' => I18n::t('admin.msg.variant.in_orders')])];
         $_GET = ['id' => (string)$productId('AAC-DEF-1')];
-        $_POST = $productPost('AAC-DEF-1-NEW', ['slug' => 'aac-def-1', 'price' => '350']);
+        $_POST = $productPost('AAC-DEF-1-NEW', ['slug' => 'aac-def-1', 'price' => '3.50']);
         handleProductSave();
         break;
     case 'product_sku_rename_free':
@@ -331,7 +331,7 @@ switch ($action) {
         handleProductSave();
         break;
     case 'product_price_floor':
-        $extra = static fn(): array => ['row' => $productRow('AAC-DEF-1'), 't' => I18n::format('admin.msg.product.price_below_variants', ['min' => 300]),
+        $extra = static fn(): array => ['row' => $productRow('AAC-DEF-1'), 't' => I18n::format('admin.msg.product.price_below_variants', ['min' => Money::decimal(300, $aacCur = strtoupper(trim((string)($productRow('AAC-DEF-1')['currency'] ?? '')) ?: strtoupper(StoreContext::current()->currency()))) . ' ' . $aacCur]),
             'import' => (static function() use ($db): array {
                 $out = [];
                 foreach (['AAC-DEF-1' => '1.00', 'AAC-NEG-1' => '-5'] as $sku => $price) {
@@ -340,7 +340,7 @@ switch ($action) {
                 return $out;
             })()];
         $_GET = ['id' => (string)$productId('AAC-DEF-1')];
-        $_POST = $productPost('AAC-DEF-1', ['slug' => 'aac-def-1', 'price' => '100']);
+        $_POST = $productPost('AAC-DEF-1', ['slug' => 'aac-def-1', 'price' => '1.00']);
         handleProductSave();
         break;
     case 'cz_slug_import':

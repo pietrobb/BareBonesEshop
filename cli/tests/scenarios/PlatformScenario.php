@@ -1527,7 +1527,7 @@ assert_true(str_contains($afHtml, 'action="admin.php?p=product&amp;action=save&a
     && str_contains($afHtml, 'id="form-admin-product"') && str_contains($afHtml, 'name="csrf_token"'), 'Admin product form: posts to the admin save handler with CSRF');
 $afValue = static fn(string $html, string $name): ?string => preg_match('/<(?:input|textarea)\b[^>]*\bname="' . preg_quote($name, '/') . '"[^>]*>/', $html, $m)
     ? (preg_match('/\bvalue="([^"]*)"/', $m[0], $v) ? html_entity_decode($v[1], ENT_QUOTES | ENT_HTML5) : '') : null;
-assert_equals(['SA-BOOK', '2398', '9', '10', 'novinka, sci-fi'], array_map(static fn(string $n) => $afValue($afHtml, $n), ['sku', 'price', 'stock', 'stock_low_threshold', 'tags']),
+assert_equals(['SA-BOOK', '23.98', '9', '10', 'novinka, sci-fi'], array_map(static fn(string $n) => $afValue($afHtml, $n), ['sku', 'price', 'stock', 'stock_low_threshold', 'tags']),
     'Admin product form: opens with the stored values');
 assert_true(str_contains($afHtml, '&lt;p&gt;Popis knihy&lt;/p&gt;</textarea>') && str_contains($afHtml, 'id="field-sku"') && str_contains($afHtml, 'for="field-sku"'),
     'Admin product form: textarea filled and field ids match the admin e2e selectors');

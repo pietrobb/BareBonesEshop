@@ -120,6 +120,11 @@ try {
     assert_true(in_array('default:card', (array)($r5dResult['steps']['payments_off'] ?? []), true), 'R13 UX3: install reports the card methods it switched off for lack of Stripe keys (' . json_encode($r5dResult['steps']['payments_off'] ?? null) . ')');
     $r5dDoctorNames = array_column($r5dResult['doctor']['checks'] ?? [], 'status', 'name');
     assert_true(($r5dDoctorNames['admin.accounts'] ?? '') === 'pass' && ($r5dDoctorNames['admin.mfa_key'] ?? '') === 'pass', 'R5 deploy: doctor checks that the owner can sign in (account active, MFA key opens the secret)');
+    // R16 low: doctor exited 0 with failures, so a deploy script went on. Not ready is exit 1; install and apply still succeed.
+    $r5dDoctorRun = $r5dPhp(['cli/setup.php', 'doctor', '--json']);
+    $r5dApplyRun = $r5dPhp(['cli/setup.php', 'apply', '--json']);
+    assert_equals([1, true, 0], [$r5dDoctorRun['code'], (json_decode($r5dDoctorRun['out'], true)['status'] ?? 'ready') !== 'ready', $r5dApplyRun['code']],
+        'R16 low: doctor exits 1 while a check fails (the example seller); apply on the same shop exits 0');
 
     // Staging preflight answers from the real install.
     $r5dPreflight = json_decode($r5dPhp(['cli/staging-preflight.php', '--json'])['out'], true);
@@ -147,8 +152,10 @@ try {
     $r5dLeakStatus = array_column($r5dLeakDoctor['checks'] ?? [], 'status', 'name');
     assert_true(($r5dLeakStatus['runtime.digital_assets_base_dir'] ?? '') === 'fail' && ($r5dLeakDoctor['status'] ?? '') !== 'ready',
         'R5 deploy: doctor is not ready while the paid downloads are inside public_html (' . ($r5dLeakDoctor['status'] ?? '?') . ')');
-    $r5dLeakPre = json_decode($r5dPhp(['cli/staging-preflight.php', '--json'])['out'], true);
+    $r5dLeakPreRun = $r5dPhp(['cli/staging-preflight.php', '--json']);
+    $r5dLeakPre = json_decode($r5dLeakPreRun['out'], true);
     assert_equals('fail', array_column($r5dLeakPre['checks'] ?? [], 'level', 'name')['digital_assets_base_dir'] ?? null, 'R5 deploy: preflight is NO-GO while the paid downloads are inside public_html');
+    assert_equals([1, true], [$r5dLeakPreRun['code'], ($r5dLeakPre['status'] ?? 'GO') !== 'GO'], 'R16 low: preflight exits 1 on NO-GO without --strict');
     rename($r5dShop . '/config.r5orig.php', $r5dShop . '/config.php');
     $r5dCleanPre = json_decode($r5dPhp(['cli/staging-preflight.php', '--json'])['out'], true);
     assert_equals('ok', array_column($r5dCleanPre['checks'] ?? [], 'level', 'name')['digital_assets_base_dir'] ?? null, 'R5 deploy: preflight accepts the downloads folder the installer put above the web root');

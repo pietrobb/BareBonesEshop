@@ -289,7 +289,7 @@ try {
     $a155Core('A15.5 de: variant row flash is German', $a154Run(['p' => 'product', 'id' => (string)$a155Product]),
         ['Variante A155-V: geben Sie die Attribute als Zeilen Schlüssel=Wert ein.']);
     $a154Run(['p' => 'product', 'action' => 'save'], ['sku' => 'A155-N', 'name' => 'A155 Neu', 'slug' => '', 'category_id' => $a155Basis, 'product_type' => 'simple',
-        'price' => '100', 'compare_price' => '', 'stock' => '0', 'stock_low_threshold' => '', 'stock_critical_threshold' => '', 'status' => 'active', 'summary' => '',
+        'price' => '1.00', 'compare_price' => '', 'stock' => '0', 'stock_low_threshold' => '', 'stock_critical_threshold' => '', 'status' => 'active', 'summary' => '',
         'description' => '', 'images' => '', 'weight_g' => '0', 'tags' => '', 'brand_id' => '', 'gtin' => '4006381333932', 'mpn' => '', 'seo_title' => '', 'meta_description' => '']);
     $a155Core('A15.5 de: product editor validation flash is German', $a154Run(['p' => 'product', 'id' => '0']),
         ['GTIN/EAN muss 8, 12, 13 oder 14 Ziffern und eine gültige Prüfziffer haben.']);

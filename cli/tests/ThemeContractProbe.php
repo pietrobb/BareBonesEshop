@@ -4,8 +4,8 @@ require_once dirname(__DIR__, 2) . '/src/autoload.php';
 require_once dirname(__DIR__, 2) . '/src/Entrypoints/Storefront/CheckoutPages.php';
 
 // Separate process: real services/presenter/renderer, but only an in-memory database.
-// Never load bootstrap/config.php, create an order, send mail or contact a gateway.
-$report = ['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'failures' => []];
+// Never load bootstrap (of config.php only private_runtime_dir is read), create an order, send mail or contact a gateway.
+$report = ['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'failures' => [], 'warnings' => []];
 set_error_handler(static function(int $level, string $message, string $file, int $line): bool {
     if (!(error_reporting() & $level)) return false;
     throw new ErrorException($message, 0, $level, $file, $line);
@@ -16,7 +16,12 @@ try {
     $themesDir = (string)($options['themes-dir'] ?? $root . '/themes');
     $blocksDir = (string)($options['blocks-dir'] ?? $root . '/blocks');
     if (!is_dir($themesDir) || !is_dir($blocksDir)) throw new RuntimeException('Theme/block directory does not exist');
-    $storesFile = (string)($options['stores-file'] ?? DataOverrides::storesPath($root, []));
+    // The stores the shop serves: an install keeps stores.json in its data directory (private_runtime_dir in
+    // config.php), so read only that setting; nothing else from config.php is used.
+    $localConfig = is_file($root . '/config.php') ? (array)(require $root . '/config.php') : [];
+    $storesFile = (string)($options['stores-file']
+        ?? DataOverrides::storesPath($root, ['private_runtime_dir' => (string)($localConfig['private_runtime_dir'] ?? '')]));
+    $report['stores_file'] = $storesFile;
     $stores = json_decode((string)file_get_contents($storesFile), true, 32, JSON_THROW_ON_ERROR);
     $targets = [];
     if (isset($options['store'])) {
@@ -72,6 +77,9 @@ try {
             Template::setTheme($theme);
             Template::setStore($store);
             Template::manifest();
+            foreach (Template::unregisteredSections() as $section) {
+                $report['warnings'][] = "{$target} / {$section}: section type has no block in theme.json \"sections\"; it is not rendered.";
+            }
             foreach ($scenarios as $scenario => $ids) {
                 $posted = str_contains($scenario, 'redisplay');
                 $digital = $ids === [99002];

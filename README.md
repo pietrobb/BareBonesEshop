@@ -174,8 +174,8 @@ machine-readable deployment contract is `config/config.schema.json`; fields mark
 ```bash
 php cli/setup.php install            # first install (see Quick start); idempotent
 php cli/setup.php apply --json       # idempotently creates private runtime paths and private_runtime_dir/stores.json
-php cli/setup.php doctor --json      # versioned checklist; does not print secrets
-php cli/setup.php doctor --json --strict
+php cli/setup.php doctor --json      # versioned checklist; does not print secrets; exit 1 until it is ready
+php cli/staging-preflight.php        # GO / NO-GO; exit 1 on NO-GO
 ```
 
 The doctor checks runtime/extensions, config schema, store and DB readiness, private

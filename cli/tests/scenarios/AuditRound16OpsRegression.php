@@ -150,8 +150,10 @@ try {
     $r16oReleasedEnd = $r16oReleasedAt === false ? false : strpos($r16oNotes, "\n## ", $r16oReleasedAt + 4);
     $r16oReleased = $r16oReleasedAt === false ? '' : substr($r16oNotes, $r16oReleasedAt, ($r16oReleasedEnd ?: strlen($r16oNotes)) - $r16oReleasedAt);
     $r16oUnreleased = ($r16oUnreleasedAt === false || $r16oReleasedAt === false) ? '' : substr($r16oNotes, $r16oUnreleasedAt, $r16oReleasedAt - $r16oUnreleasedAt);
-    preg_match_all('/^- \*\*(.+?)\*\*/m', $r16oUnreleased, $r16oTitles);
-    assert_equals([], array_values(array_filter($r16oTitles[1], static fn(string $t): bool => str_contains($r16oReleased, "**{$t}**"))),
+    // Compare each entry's whole first line: titles repeat across rounds ("Low findings" in rounds 15 and 16).
+    preg_match_all('/^- \*\*.+$/m', str_replace("\r\n", "\n", $r16oUnreleased), $r16oTitles);
+    $r16oReleasedLines = explode("\n", str_replace("\r\n", "\n", $r16oReleased));
+    assert_equals([], array_values(array_filter($r16oTitles[0], static fn(string $t): bool => in_array($t, $r16oReleasedLines, true))),
         'R16 ops notes: nothing released in 2.1.2 is left under Unreleased');
 } catch (Throwable $e) {
     $r16oFail('release notes', $e);
