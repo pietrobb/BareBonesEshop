@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **One money unit in the admin** (review round 17, medium). The product price was typed in euros, but variant
+  prices, price lists, promotions and coupons, the B2B credit limit, supplier purchase prices and shipping and payment
+  amounts still took cents ("1290" saved 1 290 €, not 12.90 €). Every admin money field now takes and shows the amount
+  in the currency (12.90), with the currency on the label; stored values stay in cents. A new product in a store
+  with another currency (HUF) is priced in that currency, not EUR.
 - **Extension quarantine only for broken code** (review round 17, medium). Input that made an extension fail an
   allocation ("Out of memory") still quarantined it, payment provider included, for good. Only a parse, compile or
   class-linking error in an extension's file quarantines it now; memory, time and stack limits and exceptions never
