@@ -78,7 +78,7 @@ try {
             );
         }
         // The same migration runner as apply, so a package with migrations gets the preflight apply will see (never run here).
-        $updater = new Updater($root, $stateDirectory, Db::get(), updateMigrationRunner($root), $databaseBackup, new ThemeUpgradeGate($stateDirectory));
+        $updater = new Updater($root, $stateDirectory, Db::get(), updateMigrationRunner($root), $databaseBackup, new ThemeUpgradeGate($stateDirectory), $config);
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
@@ -198,7 +198,7 @@ try {
         $databaseBackup = createUpdateDatabaseBackup($config);
         $migrationRunner = updateMigrationRunner($root);
     }
-    $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
+    $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup, new ThemeUpgradeGate($stateDirectory), $config);
     $database = null; // Updater owns the only non-static reference; enables SQLite rollback on Windows.
 
     if ($command === 'check') {

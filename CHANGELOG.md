@@ -14,6 +14,20 @@
   - A carrier's `generateLabel()` receives the label fields of the order (`ShippingService::LABEL_ORDER_FIELDS`)
     instead of the whole row: no IP address, customer account, payment or ERP data.
 
+- **Admin order acceptance fixes** (review round 17, medium).
+  - Recording a payment as Paid by hand (for example after a failed card payment, or a bank transfer) moves a pending
+    order to Paid, as a gateway capture does; the order used to stay Pending. Delivered cash-on-delivery orders stay
+    Delivered; money recorded on a cancelled order still goes to a manual refund.
+  - An e-book whose line was refunded through a return shows "Blocked" in the order detail instead of "Active"; the
+    download itself was already refused.
+  - A credit note has a variable symbol of its own: "CN-20260007" no longer carries the digits of invoice 20260007.
+- **Updater respects the doctor** (review round 17, medium). `php cli/update.php check` and `apply` refuse every
+  `config.php` FAIL of `doctor` (a private path such as `jobs_dir` inside the web root, a v1.x `stores.json` without
+  `private_runtime_dir`) and show its warnings; `apply` used to install the package anyway. A MariaDB dump client
+  (`mariadb-dump`, the Debian/Ubuntu default, also as `mysqldump`) against a MySQL server is refused before the dump
+  with the generated columns it would break (`ERROR 3105` on restore) and the settings to change; the runbook says
+  which client to install. A shop that still has `api.php` (before 2.1.0) gets a `payment_webhooks` warning from
+  `doctor` and `check` with the new webhook URLs, also added to the runbook.
 - **One money unit in the admin** (review round 17, medium). The product price was typed in euros, but variant
   prices, price lists, promotions and coupons, the B2B credit limit, supplier purchase prices and shipping and payment
   amounts still took cents ("1290" saved 1 290 €, not 12.90 €). Every admin money field now takes and shows the amount

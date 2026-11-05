@@ -88,6 +88,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         // itself (rows per table); only the schema, which writers do not change, is read from the
         // live database — before and after the dump, which proves no DDL ran in between.
         $schemaBefore = $this->schemaInventory($server, $this->database);
+        $this->assertDumpClientFits();
         $this->dump($dumpPath);
         if (!is_file($dumpPath) || filesize($dumpPath) === 0) {
             throw new RuntimeException('MySQL update dump was not created');
@@ -132,6 +133,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         $this->assertSchemaExists($server, $this->database);
         $schema = $this->schemaSettings($server, $this->database);
         $this->assertTransactionalTables($server, $this->database);
+        $this->assertDumpClientFits();
         $this->dump($dumpPath);
         if (!is_file($dumpPath) || filesize($dumpPath) === 0) {
             throw new RuntimeException('MySQL backup dump was not created');
@@ -481,6 +483,41 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         }
     }
 
+    /**
+     * R17: why the configured dump client cannot back up this database, or null. mariadb-dump (the Debian/Ubuntu
+     * default client) writes the values of generated columns into its INSERTs and MySQL refuses them on restore
+     * (ERROR 3105), so neither an update snapshot nor its rollback would ever work against a MySQL server.
+     */
+    public function dumpClientProblem(): ?string
+    {
+        $server = $this->serverConnection();
+        $generated = $server->prepare("SELECT CONCAT(TABLE_NAME, '.', COLUMN_NAME) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = :db AND EXTRA LIKE '%GENERATED%' ORDER BY TABLE_NAME, COLUMN_NAME");
+        $generated->execute([':db' => $this->database]);
+        try {
+            $client = $this->run([$this->dumpBinary, '--version']);
+        } catch (Throwable $e) {
+            return "The MySQL dump client {$this->dumpBinary} cannot be run: " . $e->getMessage();
+        }
+        return self::clientProblem($client, (string)$server->query('SELECT VERSION()')->fetchColumn(), $generated->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** @param list<string> $generatedColumns "table.column" of the live schema */
+    public static function clientProblem(string $clientVersion, string $serverVersion, array $generatedColumns): ?string
+    {
+        if ($generatedColumns === [] || stripos($serverVersion, 'mariadb') !== false || stripos($clientVersion, 'mariadb') === false) return null;
+        return 'The dump client is MariaDB\'s (' . trim(strtok($clientVersion, "\n")) . ') but the server is MySQL ' . $serverVersion
+            . ': it writes the generated columns ' . implode(', ', $generatedColumns) . ' into the dump, which MySQL refuses on restore'
+            . ' (ERROR 3105), so no update snapshot or backup could be restored. Install the MySQL client (mysqldump and mysql 8.x)'
+            . ' and set update_mysql_dump_binary and update_mysql_client_binary in config.php to them (docs/AI_UPDATE_RUNBOOK.md).';
+    }
+
+    private function assertDumpClientFits(): void
+    {
+        $problem = $this->dumpClientProblem();
+        if ($problem !== null) throw new RuntimeException($problem);
+    }
+
     private function dump(string $dumpPath): void
     {
         $this->withDefaultsFile(function (string $defaultsFile) use ($dumpPath): void {
@@ -515,7 +552,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         });
     }
 
-    private function run(array $command, ?string $stdinPath = null): void
+    private function run(array $command, ?string $stdinPath = null): string
     {
         $descriptors = [
             0 => $stdinPath === null ? ['pipe', 'r'] : ['file', $stdinPath, 'rb'],
@@ -542,6 +579,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             throw new RuntimeException('MySQL backup command failed with exit code ' . $exitCode
                 . ($detail !== '' ? ': ' . substr($detail, 0, 4000) : ''));
         }
+        return (string)$stdout;
     }
 
     private function withDefaultsFile(callable $callback): void

@@ -934,6 +934,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.status_failed' => 'No se pudo cambiar el estado de la devolución: {error}',
     'admin.entitlement.status.active' => 'Activo',
     'admin.entitlement.status.revoked' => 'Revocado',
+    'admin.entitlement.status.blocked' => 'Bloqueado (reembolsado o impagado)',
     'admin.rma.status.requested' => 'Solicitada',
     'admin.rma.status.approved' => 'Aprobada',
     'admin.rma.status.received' => 'Recibida',
