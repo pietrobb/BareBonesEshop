@@ -253,6 +253,10 @@ Resources and scopes: products (`products:read`, `products:write`), orders
 also needs `refunds:write`), categories (`categories:read`), customers without
 credentials (`customers:read`) and per-warehouse stock with ledger adjustments
 (`inventory:read`, `inventory:write`). Every credential sees only its own store.
+Personal data on orders (the buyer's phone, the delivery address, the note) is
+returned only to a credential that also has `customers:read`. For an incremental
+sync, pass the first page's `meta.next_updated_after` as the next run's
+`updated_after`; a stock change counts as a product change.
 
 The create command prints the token once; only its SHA-256 hash is stored. Never
 put a token in a URL, log, repository, database export, or webhook payload.

@@ -61,6 +61,16 @@
   midway. `package-lock.json` is accepted by `npm ci` of npm 10 as well as 11. The file-queue worker takes its lock
   in the jobs directory the queue really uses: two suites run side by side (two checkouts sharing the default
   `jobs_dir`) no longer make a test's worker back off and drop out of the run.
+- **ERP API sync, line VAT and personal data** (review round 16, medium). A sale, shipment or stock adjustment left
+  the product's `updated_at` as it was, so `updated_after` never returned a stock change; it now moves `updated_at`
+  of the product (and of the product of a variant). Resuming at `meta.server_time` lost a change committed by a
+  transaction that began earlier: lists now return `meta.next_updated_after` (server_time less five minutes) to pass
+  as the next run's `updated_after`. Under an order discount the lines' `vat_amount` was that of the undiscounted
+  line and did not add up to the order's or the invoice's VAT (248 of 658 orders in the review); a line now carries
+  its `discount` share and the VAT of the order's financial snapshot. `docs/openapi.yaml` misparsed: four unquoted
+  descriptions with a comma inside a flow mapping became stray keys; they are quoted, and CI now lints the file with
+  a strict YAML parser (`npm run lint:openapi`). Upgrade note: the order's phone, delivery address and note are
+  returned only to a credential with `customers:read` as well as `orders:read`; grant it to an ERP that needs them.
 - **ERP API** (review round 15, medium). An ERP could neither create a product, nor sync incrementally, nor book or
   ship an order from the API alone. `POST /api/v1/products` (scope `products:write`, `Idempotency-Key`) creates a
   simple product the way the CSV import does: unique slug, price history, stock booked in the default warehouse
