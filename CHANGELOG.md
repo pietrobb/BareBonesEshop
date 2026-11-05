@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Admin order acceptance fixes** (review round 17, medium).
+  - Recording a payment as Paid by hand (for example after a failed card payment, or a bank transfer) moves a pending
+    order to Paid, as a gateway capture does; the order used to stay Pending. Delivered cash-on-delivery orders stay
+    Delivered; money recorded on a cancelled order still goes to a manual refund.
+  - An e-book whose line was refunded through a return shows "Blocked" in the order detail instead of "Active"; the
+    download itself was already refused.
+  - A credit note has a variable symbol of its own: "CN-20260007" no longer carries the digits of invoice 20260007.
 - **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
   were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
   could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout
