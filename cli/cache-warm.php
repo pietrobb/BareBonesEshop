@@ -15,7 +15,7 @@ $verbose = in_array('--verbose', $argv ?? [], true);
 $withProducts = in_array('--products', $argv ?? [], true);
 $onlyStore = '';
 foreach ($argv ?? [] as $arg) if (str_starts_with($arg, '--store=')) $onlyStore = substr($arg, 8);
-$cfg = require __DIR__ . '/../config.php';
+$cfg = require AppConfig::path(dirname(__DIR__));
 
 echo "BareBones Shop — Cache Warmer\n";
 echo "==============================\n\n";

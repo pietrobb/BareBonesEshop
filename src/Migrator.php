@@ -181,7 +181,7 @@ class Migrator {
         if (!is_dir($dbDir)) @mkdir($dbDir, 0750, true);
         if (is_dir($dbDir) && is_writable($dbDir)) return $dbDir . '/' . self::LOCK_FILENAME;
         if ($config === null) {
-            $config = is_file($appRoot . '/config.php') ? (array)(require $appRoot . '/config.php') : [];
+            $config = is_file(AppConfig::path($appRoot)) ? (array)(require AppConfig::path($appRoot)) : [];
         }
         $runtimeDir = rtrim((string)($config['private_runtime_dir'] ?? ''), '/\\');
         if ($runtimeDir !== '' && is_dir($runtimeDir) && is_writable($runtimeDir)) {

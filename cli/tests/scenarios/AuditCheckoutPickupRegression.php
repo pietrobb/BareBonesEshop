@@ -51,7 +51,7 @@ if ($phase === 'setup') {
     exit(0);
 }
 
-$config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
+$config = is_file($root . '/config.php') ? require AppConfig::path($root) : require $root . '/config.example.php';
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example'] + $config);
 $stores = Bootstrap::stores(); // bank transfer is offered only to a store with a checksum-valid IBAN
 $stores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';

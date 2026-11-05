@@ -170,7 +170,7 @@ final class BankTransferInstructions {
 
     /** Unpaid transfers are released by PendingOrderExpiry; the payment is due before that. */
     private static function payWithinSeconds(): int {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         return PendingOrderExpiry::offlineTtls(is_array($cfg) ? $cfg : [])['bank_transfer'] ?? 14 * 86400;
     }
 

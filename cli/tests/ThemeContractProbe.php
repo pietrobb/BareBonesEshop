@@ -18,7 +18,7 @@ try {
     if (!is_dir($themesDir) || !is_dir($blocksDir)) throw new RuntimeException('Theme/block directory does not exist');
     // The stores the shop serves: an install keeps stores.json in its data directory (private_runtime_dir in
     // config.php), so read only that setting; nothing else from config.php is used.
-    $localConfig = is_file($root . '/config.php') ? (array)(require $root . '/config.php') : [];
+    $localConfig = is_file($root . '/config.php') ? (array)(require AppConfig::path($root)) : [];
     $storesFile = (string)($options['stores-file']
         ?? DataOverrides::storesPath($root, ['private_runtime_dir' => (string)($localConfig['private_runtime_dir'] ?? '')]));
     $report['stores_file'] = $storesFile;

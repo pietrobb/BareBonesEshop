@@ -11,7 +11,7 @@ class Security {
 
     private static function cfg(): array {
         if (!self::$cfg) {
-            self::$cfg = require __DIR__ . '/../config.php';
+            self::$cfg = require AppConfig::path(dirname(__DIR__));
         }
         return self::$cfg;
     }

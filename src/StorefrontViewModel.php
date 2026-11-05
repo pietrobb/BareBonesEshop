@@ -33,7 +33,7 @@ final class StorefrontViewModel
         $images = self::images($source);
         $url = self::productUrl((string)$source['slug']);
         // Structured data and og:image are read off-site: absolute URLs from app_url (never the Host header).
-        $appUrl = rtrim((string)((require __DIR__ . '/../config.php')['app_url'] ?? ''), '/');
+        $appUrl = rtrim((string)((require AppConfig::path(dirname(__DIR__)))['app_url'] ?? ''), '/');
         $absolute = static fn(string $local): string => $appUrl === '' || $local === '' || preg_match('#^https?://#i', $local)
             ? $local : $appUrl . Template::seoPath($local);
         $absoluteUrl = $absolute($url);

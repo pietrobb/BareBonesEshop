@@ -13,7 +13,7 @@ $verbose = in_array('--verbose', $argv ?? []);
 
 if ($verbose) echo "BareBones Shop — ERP Sync\n";
 
-$cfg = require __DIR__ . '/../config.php';
+$cfg = require AppConfig::path(dirname(__DIR__));
 $jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
 if (!is_dir($jobsDir)) @mkdir($jobsDir, 0750, true);
 $lockFile = $jobsDir . '/sync.lock';

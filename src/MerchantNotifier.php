@@ -4,7 +4,7 @@ class MerchantNotifier {
     public static function send(int $orderId, string $event): int {
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} not found");
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require AppConfig::path(dirname(__DIR__));
         $notificationCfg = (array)($cfg['merchant_notifications'] ?? []);
         if (array_key_exists('enabled', $notificationCfg) && !$notificationCfg['enabled']) return 0;
         // Per-event switch, e.g. ['created' => true, 'paid' => false]; unlisted events stay on.

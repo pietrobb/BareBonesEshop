@@ -43,7 +43,7 @@ if ($phase === 'setup') {
     foreach ([[$buyer, 'R8T-BUYER'], [$other, 'R8T-OTHER'], [null, 'R8T-GUEST']] as [$cid, $author]) $review->execute([$hist, $cid, $author]);
     exit(0);
 }
-$config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
+$config = is_file($root . '/config.php') ? require AppConfig::path($root) : require $root . '/config.example.php';
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example'] + $config);
 Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate.sqlite'));
 ini_set('session.use_cookies', '0');
