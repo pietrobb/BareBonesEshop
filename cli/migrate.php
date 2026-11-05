@@ -89,11 +89,13 @@ try {
             // R15: with pending migrations the shop is in maintenance (web 503, the worker waits) as during an update:
             // a long migration otherwise ran against live checkout writes (deadlocks, half-migrated reads). The
             // updater's own window (marker already there) is left to the updater.
+            // R17: a run that fails leaves the shop closed (a migration may have stopped half-way, MySQL DDL does not
+            // roll back); the next successful run, which completes the schema, takes that window over and lifts it.
             $root = dirname(__DIR__);
             $ownMaintenance = false;
             $backupTaken = false;
             $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, $preApplyHook, $root): void {
-                if (!$ownMaintenance && !MaintenanceMode::active($root)) {
+                if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {
                     MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
                     $ownMaintenance = true;
                     $log('  [maintenance] the shop answers 503 until the migrations finish');
@@ -107,9 +109,16 @@ try {
                 foreach (Extensions::migrators() as $code => $extensionMigrator) {
                     $applied = array_merge($applied, $extensionMigrator->apply($logger, $beforeFirst));
                 }
-            } finally {
-                if ($ownMaintenance) MaintenanceMode::leave($root);
+            } catch (Throwable $migrationError) {
+                if ($ownMaintenance) {
+                    MaintenanceMode::fail($root, 'cli/migrate.php failed: ' . $migrationError->getMessage()
+                        . ' — the shop stays in maintenance; fix the cause and run php cli/migrate.php apply again');
+                    fwrite(STDERR, "The shop stays in maintenance (503) until php cli/migrate.php apply succeeds.\n");
+                }
+                throw $migrationError;
             }
+            // Every migration is applied: a window this run opened, or one a failed run left, ends here.
+            if ($ownMaintenance || MaintenanceMode::failed($root, 'cli/migrate.php')) MaintenanceMode::leave($root);
             $n = count($applied);
             echo $n === 0 ? "Nothing to apply.\n" : "Applied {$n} migration(s).\n";
             break;
