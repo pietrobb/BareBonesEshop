@@ -1648,6 +1648,7 @@ return [
     'account.addr_default'        => 'Nastaviť ako predvolenú',
     'account.rate_limited'        => 'Príliš veľa pokusov. Skúste to neskôr.',
     'account.page_not_found'      => 'Stránka sa nenašla.',
+    'account.page_unavailable'    => 'Táto stránka je dočasne nedostupná. Skúste to neskôr.',
     'account.form_retry' => 'Formulár sa nepodarilo odoslať. Skúste to prosím znova.',
     'account.err_address_invalid' => 'Adresa nebola uložená. Skontrolujte označené polia.',
     'account.err_address_required' => 'Toto pole je povinné.',
