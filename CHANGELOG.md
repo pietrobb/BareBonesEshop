@@ -7,6 +7,12 @@
   amounts still took cents ("1290" saved 1 290 €, not 12.90 €). Every admin money field now takes and shows the amount
   in the currency (12.90), with the currency on the label; stored values stay in cents. A new product in a store
   with another currency (HUF) is priced in that currency, not EUR.
+- **Feeds and sitemaps after a sale** (review round 17, medium). Since v2.1.2 every sale, shipment or stock
+  adjustment moved `products.updated_at`, which is part of the feed and sitemap fingerprint, so a busy shop rebuilt
+  them after every order. A stock change now moves the new `products.stock_updated_at` (migration
+  `20261105120000_product_stock_updated_at`); a product or variant going in or out of stock still rebuilds them,
+  through a per-change catalog token instead of a same-second file time check. API v1 `updated_after` matches
+  either column, so an integration still sees the stock change.
 - **Maintenance window** (review round 17, medium).
   - The updater holds a lock on `.maintenance` while it runs: a reused PID no longer keeps the shop on 503 for up to
     24 h, and an update started from another container (docker compose, shared volume) keeps its window past 1 h.
