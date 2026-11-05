@@ -91,7 +91,7 @@ foreach (new DirectoryIterator(dirname(TEST_CLI_DIR)) as $p0Entry) {
 $p0Probe = stream_socket_server('tcp://127.0.0.1:0');
 $p0Port = (int)substr(strrchr((string)stream_socket_get_name($p0Probe, false), ':'), 1);
 fclose($p0Probe);
-$p0Config = require dirname(TEST_CLI_DIR) . '/config.php';
+$p0Config = require AppConfig::path(dirname(TEST_CLI_DIR));
 $p0Config['app_url'] = "http://127.0.0.1:{$p0Port}";
 // Own limiter store: earlier scenarios already checked out from 127.0.0.1.
 $p0Config['private_cache_dir'] = $p0Root . '/private-cache';

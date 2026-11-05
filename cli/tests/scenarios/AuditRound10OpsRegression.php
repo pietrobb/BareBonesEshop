@@ -608,7 +608,7 @@ $r10oContextBefore = StoreContext::hasCurrent() ? StoreContext::current() : null
 $r10oHostBefore = $_SERVER['HTTP_HOST'] ?? null;
 $r10oObLevel = ob_get_level();
 try {
-    $r10oCfgProp->setValue(null, ['app_url' => 'https://main.example'] + (is_array($r10oCfgBefore) ? $r10oCfgBefore : require dirname(TEST_CLI_DIR) . '/config.php'));
+    $r10oCfgProp->setValue(null, ['app_url' => 'https://main.example'] + (is_array($r10oCfgBefore) ? $r10oCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR))));
     $r10oDomainStores = Bootstrap::stores();
     $r10oDomainStores['stores']['r10dom'] = array_replace($r10oDomainStores['stores']['default'], ['id' => 'r10dom', 'url_prefix' => '', 'domains' => ['r10-shop.example'],
         'catalog_scope' => 'default', 'provider_scope' => 'default']);

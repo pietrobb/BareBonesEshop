@@ -54,7 +54,7 @@ assert_true(UpgradeChecks::nginxConfHasPhpFallback("server { location / { root /
 assert_true(UpgradeChecks::nginxPhpFallback([]) === null && UpgradeChecks::nginxPhpFallback(['operations' => ['nginx_config' => $aunRoot . '/missing.conf']]) === null, 'Doctor: no or unreadable nginx_config is skipped');
 file_put_contents($aunRoot . '/site.conf', $aunOldNginx);
 assert_true(UpgradeChecks::nginxPhpFallback(['operations' => ['nginx_config' => $aunRoot . '/site.conf']]) === false, 'Doctor: a configured nginx file without the fallback is reported');
-$aunDoctorCfg = array_replace(require $aunApp . '/config.php', $aunHooks, [
+$aunDoctorCfg = array_replace(require AppConfig::path($aunApp), $aunHooks, [
     'cart_reminder' => ['enabled' => true], 'checkout_consents' => [], 'operations' => ['nginx_config' => $aunRoot . '/site.conf'],
 ]);
 $aunDoctor = [];

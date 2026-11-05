@@ -335,7 +335,7 @@ try {
         $r6mReady = Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mRo);
         assert_equals(['not_ready', 'read_only'], [$r6mReady['status'], $r6mReady['checks']['database'] ?? ''], 'R6 readiness: /readyz is not ready on a read-only database (was ready)');
         $r6mDoctor = [];
-        foreach (Setup::doctor(require dirname(TEST_CLI_DIR) . '/config.php', dirname(TEST_CLI_DIR), $r6mRo)['checks'] as $r6mCheck) $r6mDoctor[$r6mCheck['name']] = $r6mCheck['status'];
+        foreach (Setup::doctor(require AppConfig::path(dirname(TEST_CLI_DIR)), dirname(TEST_CLI_DIR), $r6mRo)['checks'] as $r6mCheck) $r6mDoctor[$r6mCheck['name']] = $r6mCheck['status'];
         assert_equals('fail', $r6mDoctor['database.writable'] ?? 'missing', 'R6 doctor: a read-only database fails the doctor (was ready)');
         $r6mRo = null;
     } finally {

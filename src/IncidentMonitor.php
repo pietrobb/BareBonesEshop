@@ -176,7 +176,7 @@ class IncidentMonitor {
     }
 
     private static function config(): array {
-        return self::$config ??= require __DIR__ . '/../config.php';
+        return self::$config ??= require AppConfig::path(dirname(__DIR__));
     }
 
     private static function settings(): array {

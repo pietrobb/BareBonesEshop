@@ -18,7 +18,7 @@ require ' . var_export($a102Root . '/src/autoload.php', true) . ';
 Db::init(new PDO(' . var_export('sqlite:' . $testDbPath, true) . ', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]));
 Security::setRateDbForTesting(new PDO("sqlite::memory:"));
 UrlAliases::setRules([]);
-(new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => "https://shop.example"] + (require ' . var_export($a102Root . '/config.php', true) . '));
+(new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => "https://shop.example"] + (require ' . var_export(AppConfig::path($a102Root), true) . '));
 $path = (string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
 chdir(' . var_export($a102Root, true) . ');
 $script = ltrim($path, "/");

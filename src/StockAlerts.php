@@ -402,7 +402,7 @@ class StockAlerts {
 
     private static function appConfig(): array {
         if (self::$appConfig === null) {
-            $file = __DIR__ . '/../config.php';
+            $file = AppConfig::path(dirname(__DIR__));
             self::$appConfig = is_file($file) ? (array)(require $file) : [];
         }
         return self::$appConfig;

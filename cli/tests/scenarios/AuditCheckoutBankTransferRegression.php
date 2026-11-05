@@ -58,7 +58,7 @@ if ($phase === 'setup') {
 }
 JobQueue::useBackend(new DatabaseQueue($db, 30));
 
-$config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
+$config = is_file($root . '/config.php') ? require AppConfig::path($root) : require $root . '/config.example.php';
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example'] + $config);
 // The shipped stores.json carries placeholder (checksum-invalid) IBANs; this store gets a real-format account.
 $stores = Bootstrap::stores();
