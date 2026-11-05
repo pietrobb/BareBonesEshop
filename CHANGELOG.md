@@ -14,6 +14,14 @@
     runs on that host, for at most a day; a marker left by a killed updater still stops blocking after an hour.
   - Tests now cover the content of `<style>`, `<script>` and the other elements rich text removes, and a `<style>`
     in the body of a mail's HTML (mutants SEC12 and MAIL2).
+- **Shops installed with `install.php` can be updated** (review round 16, high 2). The web installer left
+  `update_public_key` empty, so the signed updater refused every package ("Signed update package requires an Ed25519
+  public key") and the bookshop package could not be upgraded as the README says. The installer now copies the
+  shipped `releases/update-public.key` to `update-public.key` in the private data folder (outside the web space,
+  0640) and points `update_public_key` at it; `php cli/update.php fingerprint` prints the release key's fingerprint
+  right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
+  notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
+  `starter.json` when built from a tag.
 
 ## 2.1.2 — 2026-11-05
 

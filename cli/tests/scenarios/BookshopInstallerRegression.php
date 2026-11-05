@@ -122,6 +122,24 @@ try {
     assert_equals('2.1.1', json_decode((string)@file_get_contents($wiState), true)['version'] ?? null, 'R15 web installer: the package release becomes the updater\'s installed version');
     WebInstaller::baselineRelease($wiStarterWith('2.2.0'), $wiConfig, $wiRoot);
     assert_equals('2.1.1', json_decode((string)@file_get_contents($wiState), true)['version'] ?? null, 'R15 web installer: an existing installed version is never overwritten');
+
+    // R16: the shop trusts the update key it was uploaded with, as a file in the private folder (rotate-key replaces it).
+    assert_equals(null, WebInstaller::updateKeyTarget($wiRoot, $wiBase . '/home/data'), 'R16 web installer: an upload without releases/update-public.key configures no update key');
+    mkdir($wiRoot . '/releases');
+    copy(dirname(TEST_CLI_DIR) . '/releases/update-public.key', $wiRoot . '/releases/update-public.key');
+    $wiKeyTarget = (string)WebInstaller::updateKeyTarget($wiRoot, $wiBase . '/home/data/');
+    assert_equals($wiBase . '/home/data/bareboneseshop-private/update-public.key', $wiKeyTarget, 'R16 web installer: the update key lives in the private data folder, outside the web space');
+    WebInstaller::installUpdateKey($wiRoot, $wiKeyTarget);
+    assert_equals(UpdateKeyRotation::fingerprint((string)file_get_contents(dirname(TEST_CLI_DIR) . '/releases/update-public.key')), UpdateKeyRotation::fingerprint((string)file_get_contents($wiKeyTarget)),
+        'R16 web installer: the copied key is the release key the package shipped with');
+    file_put_contents($wiRoot . '/releases/update-public.key', "not a key\n");
+    $wiBadKey = 'accepted';
+    try {
+        WebInstaller::installUpdateKey($wiRoot, $wiKeyTarget);
+    } catch (Throwable $e) {
+        $wiBadKey = 'refused';
+    }
+    assert_equals('refused', $wiBadKey, 'R16 web installer: a shipped file that is no Ed25519 public key is refused, not trusted');
 } catch (Throwable $e) { $wiFail('form, seller, payments and starter', $e); }
 
 // A clean clone-equivalent tree over HTTP: / and admin.php lead to install.php, the form installs, then install.php is gone.
@@ -139,6 +157,9 @@ $wiEnv = array_filter(getenv(), static fn(string $name): bool => !str_starts_wit
 $wiServer = null;
 try {
     $wiCopy(dirname(TEST_CLI_DIR), $wiShop);
+    // Of releases/ an upload carries just the update public key (as the bookshop package does).
+    mkdir($wiShop . '/releases');
+    copy(dirname(TEST_CLI_DIR) . '/releases/update-public.key', $wiShop . '/releases/update-public.key');
     mkdir($wiBase . '/http/data', 0777, true);
     $wiProbe = stream_socket_server('tcp://127.0.0.1:0');
     $wiPort = (int)substr(strrchr((string)stream_socket_get_name($wiProbe, false), ':'), 1);
@@ -195,6 +216,15 @@ try {
     // No cron on such hosting: page requests run the worker (paid eBooks are granted, mail leaves the queue).
     $wiInstalledConfig = (static fn(string $file): array => require $file)($wiShop . '/config.php');
     assert_true(WebWorker::enabled($wiInstalledConfig), 'Web installer: config.php turns on operations.web_worker');
+    // R16: without update_public_key the signed updater refused every package of the next release.
+    $wiUpdate = proc_open([PHP_BINARY, 'cli/update.php', 'fingerprint'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $wiUpdatePipes, $wiShop, $wiEnv);
+    fclose($wiUpdatePipes[0]);
+    $wiFingerprint = trim((string)stream_get_contents($wiUpdatePipes[1]) . (string)stream_get_contents($wiUpdatePipes[2]));
+    fclose($wiUpdatePipes[1]);
+    fclose($wiUpdatePipes[2]);
+    proc_close($wiUpdate);
+    assert_equals([$wiPrivate . '/update-public.key', UpdateKeyRotation::fingerprint((string)file_get_contents(dirname(TEST_CLI_DIR) . '/releases/update-public.key'))],
+        [$wiInstalledConfig['update_public_key'] ?? null, $wiFingerprint], 'R16 web installer: the installed shop trusts the release update key (php cli/update.php fingerprint)');
     $wiJobs = (string)$wiInstalledConfig['jobs_dir'];
     assert_true(is_file($wiJobs . '/web-worker.last') && is_file($wiJobs . '/retention-cleanup.last'), 'Web worker: a storefront request ran one cli/worker.php pass (it scheduled the daily cleanup)');
     assert_equals([], glob($wiJobs . '/pending/*.json') ?: [], 'Web worker: the pass also processed the queued cleanup job');

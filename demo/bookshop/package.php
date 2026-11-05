@@ -105,7 +105,7 @@ try {
     echo $version !== '' ? "      release {$version}: the installer records it for the updater\n"
         : "      not a release tag: no version recorded (upgrading needs `php cli/update.php baseline --version=...`)\n";
     file_put_contents($dist . '/starter.json', json_encode(['name' => $shopName, 'database' => 'shop.sqlite', 'downloads' => 'downloads', 'stores' => 'stores.json',
-        'ref' => trim($run(['git', 'rev-parse', $ref], $repo))] + ($version !== '' ? ['version' => $version] : []), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+        'ref' => trim($run(['git', 'rev-parse', $ref . '^{commit}'], $repo))] + ($version !== '' ? ['version' => $version] : []), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
     unlink($shop . '/config.php');
     foreach (['cache', 'logs', 'jobs'] as $runtime) {
         foreach (glob($shop . '/' . $runtime . '/*') ?: [] as $leftover) if (basename($leftover) !== '.htaccess' && basename($leftover) !== '.gitkeep') $remove($leftover);

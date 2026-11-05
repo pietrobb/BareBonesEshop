@@ -319,7 +319,9 @@ final class WebInstaller
     public static function install(array $v, string $root): array
     {
         $stripe = array_filter(array_intersect_key($v, array_flip(self::STRIPE_FIELDS)), static fn($value): bool => $value !== '');
-        $created = Setup::createConfig($root, $v['app_url'], $v['email'], ['driver' => 'sqlite'], $v['private_parent'], $stripe + ['web_worker' => true]);
+        $updateKey = self::updateKeyTarget($root, $v['private_parent']);
+        $created = Setup::createConfig($root, $v['app_url'], $v['email'], ['driver' => 'sqlite'], $v['private_parent'],
+            $stripe + ['web_worker' => true] + ($updateKey !== null ? ['update_public_key' => $updateKey] : []));
         if ($created['action'] !== 'created') throw new RuntimeException('The shop is already installed (config.php exists).');
         $config = require $root . '/config.php';
         $database = (string)$config['db_sqlite_path'];
@@ -328,6 +330,7 @@ final class WebInstaller
         try {
             if ($starter !== null) self::copyStarterStores($starter, $config);
             Setup::apply($config, $root);
+            if ($updateKey !== null) self::installUpdateKey($root, $updateKey);
             if ($starter !== null) $seeded = self::seed($starter, $config);
             // A web request never creates a database by itself (Db refuses a missing file): the installer creates it on purpose.
             if (!$seeded && !is_file($database)) {
@@ -444,6 +447,29 @@ final class WebInstaller
         $private = (string)($config['private_runtime_dir'] ?? dirname($root) . '/bareboneseshop-private');
         $updater = new Updater($root, (string)($config['update_storage_dir'] ?? rtrim($private, '/\\') . '/updates'));
         if (!$updater->hasInstalledState()) $updater->baseline($starter['version']);
+    }
+
+    /**
+     * R16: where the shop keeps the update key it trusts — a copy of the shipped releases/update-public.key in the
+     * private data folder; null when the upload has no key. Without update_public_key the signed updater refuses every
+     * package, so a shop installed over the web could not be updated. A file rather than an inline value, so
+     * `php cli/update.php rotate-key` can replace it; outside the web space, so no update can swap it.
+     */
+    public static function updateKeyTarget(string $root, string $privateParent): ?string
+    {
+        if (!is_file($root . '/releases/update-public.key')) return null;
+        return rtrim(str_replace('\\', '/', $privateParent), '/') . '/bareboneseshop-private/update-public.key';
+    }
+
+    /** Copies the shipped update key (checked to be an Ed25519 public key) to the path config.php names. */
+    public static function installUpdateKey(string $root, string $target): void
+    {
+        $key = UpdateKeyRotation::encoded(trim((string)file_get_contents($root . '/releases/update-public.key')));
+        if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0750, true) && !is_dir(dirname($target))) {
+            throw new RuntimeException('Cannot create the private runtime directory');
+        }
+        if (!DataOverrides::atomicWrite($target, $key . "\n")) throw new RuntimeException('Cannot write the update key');
+        @chmod($target, 0640);
     }
 
     /** The starter's stores.json becomes the install's own copy (apply then keeps it instead of the example). */
