@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Feeds and sitemaps after a sale** (review round 17, medium). Since v2.1.2 every sale, shipment or stock
+  adjustment moved `products.updated_at`, which is part of the feed and sitemap fingerprint, so a busy shop rebuilt
+  them after every order. A stock change now moves the new `products.stock_updated_at` (migration
+  `20261105120000_product_stock_updated_at`); a product or variant going in or out of stock still rebuilds them,
+  through a per-change catalog token instead of a same-second file time check. API v1 `updated_after` matches
+  either column, so an integration still sees the stock change.
 - **Line endings in the release tree** (review round 17, high). The seven `templates/emails/*/order_shipped.html`
   were stored with CRLF and a stray carriage return, so `php cli/build-update.php` refused the tree and no release
   could be built from `main`. They are stored with LF; `.gitattributes` keeps all text LF on every checkout
