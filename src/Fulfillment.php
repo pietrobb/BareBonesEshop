@@ -232,16 +232,18 @@ class Fulfillment {
     /**
      * R15 high 5: after a shipment of the order left (inside the caller's transaction): once all its goods shipped and
      * none wait on a backorder the order becomes 'shipped' through the workflow (status, "on its way" e-mail, the
-     * invoice of cash on delivery, ERP); a partial shipment e-mails the customer that parcel's tracking. Deferred jobs.
+     * invoice of cash on delivery, ERP); a partial shipment e-mails the customer that parcel's tracking (R17: the job
+     * names the parcel, so the e-mail never shows an earlier parcel's number). Deferred jobs.
      * @return list<array{0:string,1:array,2:int}>
      */
-    public static function shippedJobsWithin(int $orderId): array {
+    public static function shippedJobsWithin(int $orderId, ?int $shipmentId = null): array {
         $order = Orders::byId($orderId);
         if (!$order) return [];
         if (self::allShipped($orderId) && in_array('shipped', OrderWorkflow::allowedFor($order), true)) {
             return OrderWorkflow::transitionWithin($orderId, 'shipped', 'All goods shipped');
         }
-        return [['email_send', ['template' => 'order_shipped', 'to' => $order['customer_email'], 'locale' => $order['locale'] ?? '', 'order_id' => $orderId], 5]];
+        return [['email_send', ['template' => 'order_shipped', 'to' => $order['customer_email'], 'locale' => $order['locale'] ?? '', 'order_id' => $orderId]
+            + ($shipmentId !== null ? ['shipment_id' => $shipmentId] : []), 5]];
     }
 
     /** No planned shipment, no backordered unit and nothing left to put in a shipment. */
@@ -333,15 +335,15 @@ class Fulfillment {
 
     /**
      * Carrier, tracking number and tracking URL of the order's most recently shipped shipment, preferring one
-     * that has tracking details (order e-mails).
+     * that has tracking details (order e-mails); with $shipmentId, of that shipped parcel only.
      * By order id alone: the worker sends mail outside any store context.
      * @return array{carrier: ?string, tracking_number: ?string, tracking_url: ?string}|null
      */
-    public static function latestTracking(int $orderId): ?array {
+    public static function latestTracking(int $orderId, ?int $shipmentId = null): ?array {
         $stmt = Db::get()->prepare("SELECT carrier, tracking_number, tracking_url FROM shipments
-            WHERE order_id = :order AND status = 'shipped'
+            WHERE order_id = :order AND status = 'shipped'" . ($shipmentId !== null ? ' AND id = :shipment' : '') . "
             ORDER BY CASE WHEN tracking_number IS NULL AND carrier IS NULL THEN 1 ELSE 0 END, shipped_at DESC, id DESC LIMIT 1");
-        $stmt->execute([':order' => $orderId]);
+        $stmt->execute([':order' => $orderId] + ($shipmentId !== null ? [':shipment' => $shipmentId] : []));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }

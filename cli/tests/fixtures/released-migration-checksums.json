@@ -1,90 +1,112 @@
 {
     "20260424000000_baseline": {
         "lf": [
-            "7a5bd29a8a0ee1100a0149e16a706ba95075f4fb75baa7a81b5f9304b0b8421f"
+            "7a5bd29a8a0ee1100a0149e16a706ba95075f4fb75baa7a81b5f9304b0b8421f",
+            "0733ee8ec1141fe01a63fc86ff0f8a0efff517b7873f847759bcfe0e63500b29"
         ],
         "crlf": [
-            "01d474a45922dd8f1de1f1f9adb1a62e85a8e5f8564c4024d8a954a3a7aacc28"
+            "01d474a45922dd8f1de1f1f9adb1a62e85a8e5f8564c4024d8a954a3a7aacc28",
+            "b77aaf955c42756c146d861e36c942b6f6eba00b639846571dbb69b0c860700d"
         ]
     },
     "20260424221721_create_invoices": {
         "lf": [
-            "9426aba6dde40d3b086f1ee3f6664fed9bd7235ef905dc2c230c8e8a127705d2"
+            "9426aba6dde40d3b086f1ee3f6664fed9bd7235ef905dc2c230c8e8a127705d2",
+            "5f3ae8cbe4351aa66dcf3950298614af9a931466cd5f89d75bb30abcce796e84"
         ],
         "crlf": [
-            "39b27f592f626e102c1e01c09e3320b4e72d90b9a05dd8c790d8b54618221431"
+            "39b27f592f626e102c1e01c09e3320b4e72d90b9a05dd8c790d8b54618221431",
+            "72f897ada616001f367632189e50c54b85e33c8915e2bc3b673afc1ff77d35dc"
         ]
     },
     "20260425013405_add_vat_columns": {
         "lf": [
-            "e81e9601d9beae3ba845ea8d94624776cf96d8d6fe9a894f6e4b90e8b47ef475"
+            "e81e9601d9beae3ba845ea8d94624776cf96d8d6fe9a894f6e4b90e8b47ef475",
+            "a1d5a426999bca90c2ffbe4b3e7c1f8bad06cf70d415a58d77ef6d137b44dce5"
         ],
         "crlf": [
-            "62c13dc02a6f69606a30847578783c9cb2f45b1f14cf643b55bbd47a04bd4e2c"
+            "62c13dc02a6f69606a30847578783c9cb2f45b1f14cf643b55bbd47a04bd4e2c",
+            "e1d674c6cb8160bd322648d561030e52fdd3babfc340478bb74a51be1c1bd164"
         ]
     },
     "20260425033813_add_gdpr_tables": {
         "lf": [
-            "2b8698f5da52f19fc93347b10e53fe76231c21c5aa801c0ed61849b1c8b345e1"
+            "2b8698f5da52f19fc93347b10e53fe76231c21c5aa801c0ed61849b1c8b345e1",
+            "da4fb344cd73b8f42184691e276d2193fb5c8d3ecfec26714fd8ffc956f3238f"
         ],
         "crlf": [
-            "29e96c2aba08e105bb4c45b13222d7af6163a91c28eda7d7296d8c9283b5c543"
+            "29e96c2aba08e105bb4c45b13222d7af6163a91c28eda7d7296d8c9283b5c543",
+            "8e7c68e6aa60d169b983ce37203206b05864e7c198dfeba4fe66cd41b9ce7af4"
         ]
     },
     "20260425064000_shipping_methods_pricing_engine": {
         "lf": [
-            "7f108c8a25117d216a54f65e55789c5190830debac8535875b706835ba1a427b"
+            "7f108c8a25117d216a54f65e55789c5190830debac8535875b706835ba1a427b",
+            "0b8f42a4a9049e68b01c265abc95fd78cb5ce1c598b7bc41f68c6891190cb18d"
         ],
         "crlf": [
-            "e63f2701cbd3d93d9a915cfee251adea1262d2804941560061487e67ed4ebdb8"
+            "e63f2701cbd3d93d9a915cfee251adea1262d2804941560061487e67ed4ebdb8",
+            "694ff0930cf8124307428f7105cbbfc8400675f05b6c2660beb62ef536e5baf5"
         ]
     },
     "20260425071000_payment_methods_pricing_engine": {
         "lf": [
-            "6521e702499a264796764e29f7a486ed33a815174ed2ee82bf2a5e2652fa2a1c"
+            "6521e702499a264796764e29f7a486ed33a815174ed2ee82bf2a5e2652fa2a1c",
+            "3c18e9bf7cf11472c3cf673db4727687b7c032e549143a73d5617ff72d9490f5"
         ],
         "crlf": [
-            "b6728bb1845653db6e1ec5ea9f99f4a4745904de580562d93d2f787ff136605b"
+            "b6728bb1845653db6e1ec5ea9f99f4a4745904de580562d93d2f787ff136605b",
+            "893fe8b1cbcfb6ba9776cf6532e4204d193d98c269d7d49f377b9a0a32be4354"
         ]
     },
     "20260426090000_create_product_reviews": {
         "lf": [
-            "102aa40f08e1bc2807be64cb64200fa7bdb0613dc9996e43a3d82d5d36e52c6d"
+            "102aa40f08e1bc2807be64cb64200fa7bdb0613dc9996e43a3d82d5d36e52c6d",
+            "e0f7600c4d4f970dc8814bdb9972e779eb689862c1af0bf15f67817bb2de4524"
         ],
         "crlf": [
-            "bde17066ffe3259c51ec2f0f31cec94a6fd38fab0bbe55ad9582b604e11a9efc"
+            "bde17066ffe3259c51ec2f0f31cec94a6fd38fab0bbe55ad9582b604e11a9efc",
+            "05da7bb75b1cc8e355565baeb3ba3d975b058c4a7145d69bbad32c545a5dab26"
         ]
     },
     "20260426093000_create_wishlist_items": {
         "lf": [
-            "1d14ab07178305da1af1d8873decfadc46ccd53f5f05beb2b42f83d36e021a52"
+            "1d14ab07178305da1af1d8873decfadc46ccd53f5f05beb2b42f83d36e021a52",
+            "a16b8762e4c656ac945ee4039367037eac23d08f5a76093662ad1f8549ec028f"
         ],
         "crlf": [
-            "0122c697ee59d7159ed1ae28f88e425dc731fa4d07fb88c2c30779585428acec"
+            "0122c697ee59d7159ed1ae28f88e425dc731fa4d07fb88c2c30779585428acec",
+            "3ac343201b6b64efe8857f7333fbd3276a6fd33f3826c30948a56d29e6b3aec1"
         ]
     },
     "20260426100000_create_rma": {
         "lf": [
-            "0b0d4537d06dfb0151bed02c03fcba9f86775f558a505948ece9a8f8f2e8fd03"
+            "0b0d4537d06dfb0151bed02c03fcba9f86775f558a505948ece9a8f8f2e8fd03",
+            "ca2f151aa638e6cbdd484901d7650aff28890c62031067d1f41665aae1540d2e"
         ],
         "crlf": [
-            "618122227d2494b7cde2a9ad7a2d563532cb6e3d8f4ad9bb2fe9e7cd8e275d81"
+            "618122227d2494b7cde2a9ad7a2d563532cb6e3d8f4ad9bb2fe9e7cd8e275d81",
+            "e969d966581bb935484f1861a023d1fff5f3706c5be86df49e538c002c604017"
         ]
     },
     "20260611213000_add_stock_restored_column": {
         "lf": [
-            "31beb9b95a29f873f7e0249f3da76b58835865ed1e06bc1267abe86568c61ed7"
+            "31beb9b95a29f873f7e0249f3da76b58835865ed1e06bc1267abe86568c61ed7",
+            "a4803eb5d0df8cfaade336b4d7a3d6e32c08ab4b98f5978efd97847e257ff723"
         ],
         "crlf": [
-            "b937a90ea83bfe5cb364f0f3bc6ca624735769793cc55f6bd4fad6fe4a3df7cc"
+            "b937a90ea83bfe5cb364f0f3bc6ca624735769793cc55f6bd4fad6fe4a3df7cc",
+            "b6886c3132db22443fd82679686eae92bdd0d6254c9aacb888176bbd0fbaf76a"
         ]
     },
     "20260611220000_add_invoices_order_unique": {
         "lf": [
-            "cf8642838380d52c95cb0cd0479d6cc5dae6521c7eb4f98367b54b2c01cd7fdf"
+            "cf8642838380d52c95cb0cd0479d6cc5dae6521c7eb4f98367b54b2c01cd7fdf",
+            "1bc4df38ae75bd7e3f93286d77142982db3a164d56a3c76e18efe79e6614cb5c"
         ],
         "crlf": [
-            "3d3f4d14399840e1b063829b911ab7ccbf28941818e553bbf00ddaab1ff31d66"
+            "3d3f4d14399840e1b063829b911ab7ccbf28941818e553bbf00ddaab1ff31d66",
+            "f84893a7eeea3a9c37c68f525d7633973c053b1da3da82d7ea7f4f97cfe5188b"
         ]
     },
     "20260713093000_digital_commerce_core": {
@@ -545,10 +567,12 @@
     },
     "20261101150000_price_list_repair": {
         "lf": [
-            "91ac2cc652a960de191c8a47784ad716ddaf5beb99e637e78b2628cc071e8b3a"
+            "91ac2cc652a960de191c8a47784ad716ddaf5beb99e637e78b2628cc071e8b3a",
+            "4d046caec20f4e1570aed21b81ac4ba3937dfb63e4ceb328444648ea22677af3"
         ],
         "crlf": [
-            "e6d5109094a1429adc3a5a0216b9373724ac9f09cd9d447dd031a0da67015642"
+            "e6d5109094a1429adc3a5a0216b9373724ac9f09cd9d447dd031a0da67015642",
+            "db192f25c1fa6caf149d8700bdea78bb9b8be0874dcc89fdf0be4a7963c0dd11"
         ]
     },
     "20261102090000_variant_digital": {
@@ -562,11 +586,13 @@
     "20261103090000_order_item_digital": {
         "lf": [
             "cd4b8440632086049355bd8c1fb2249ea2faff1b371eb086e0a860d31e906602",
-            "de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4"
+            "de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4",
+            "a20305ca19fd60641752e83dfedb82f19ea7b03d9680dfb8c1877e2dd30dcedd"
         ],
         "crlf": [
             "920356b24b9c5aa670771f0eadc4a18756f0d95d440cbfd31f92cefcf86053cf",
-            "3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf"
+            "3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf",
+            "5566dfce8dcb9869f2f0b443bfa8a356fca4a229e1c0278b326b443b1a4f5817"
         ]
     },
     "20261103150000_fulfillment_status_grant": {

@@ -25,8 +25,26 @@ class MailService {
     public const MARKETING_TEMPLATES = ['cart_reminder'];
     /** Rate-limited order mail is retried at most this many times by the worker. */
     public const RATE_LIMIT_MAX_RETRIES = 3;
-    /** Sender when MAIL_FROM is unset; the doctors warn about it (UpgradeChecks::mailSender). */
+    /** Sender when MAIL_FROM is unset and app_url names no public domain; the doctors warn about it (UpgradeChecks::mailSender). */
     public const DEFAULT_FROM = 'noreply@localhost.invalid';
+    /** Domains no mailbox can exist on (RFC 2606 / 6761). */
+    public const RESERVED_DOMAIN = '/(^|\.)(invalid|localhost|local|test|example|example\.(com|net|org))$/';
+
+    /**
+     * The From address: MAIL_FROM, else noreply@ the configured app_url's domain (R17: a shop on a host where no
+     * environment variable can be set sent every e-mail from noreply@localhost.invalid), else DEFAULT_FROM. Never
+     * the request's host name.
+     */
+    public static function sender(): string {
+        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: '')));
+        if ($from !== '') return $from;
+        $host = strtolower((string)parse_url((string)(Security::config()['app_url'] ?? ''), PHP_URL_HOST));
+        if ($host === '' || !str_contains($host, '.') || filter_var($host, FILTER_VALIDATE_IP) || preg_match(self::RESERVED_DOMAIN, $host)) {
+            return self::DEFAULT_FROM;
+        }
+        $address = 'noreply@' . preg_replace('/^www\./', '', $host);
+        return filter_var($address, FILTER_VALIDATE_EMAIL) ? $address : self::DEFAULT_FROM;
+    }
 
     /** For tests: inject a specific adapter (bypasses env). */
     public static function useAdapter(?MailAdapter $a): void {
@@ -85,7 +103,7 @@ class MailService {
         $rendered = self::render($template, $locale, $vars);
 
         $adapter = self::adapter($providerCode);
-        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: self::DEFAULT_FROM)));
+        $from = self::sender();
         if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => $adapter->adapterId(), 'error' => 'invalid sender'];
         }

@@ -28,15 +28,29 @@ class GuestCheckoutAccount {
     }
 
     /**
+     * R17: the offer on the confirmation page of any guest order seen by a browser that is not signed in. Whether the
+     * e-mail already has an account is not shown there (that told anyone who could place an order which addresses
+     * have one); sendLink() decides what the mailbox gets.
+     */
+    public static function shown(array $order): bool {
+        return empty($order['customer_id']) && !Customers::isLoggedIn();
+    }
+
+    /**
      * E-mail the order's address a one-time link that creates the account. Reaching the confirmation page proves
      * nothing about the address (a payment link, the order-status lookup by number + e-mail, an old browser session all
-     * lead there), so the account, and the order in it, wait for whoever reads that mailbox.
+     * lead there), so the account, and the order in it, wait for whoever reads that mailbox. An address that already
+     * has an account gets a sign-in (password reset) link instead, with the same answer on the page.
      * Outcome: sent|not_offered|throttled|unavailable|failed.
      */
     public static function sendLink(array $order, string $locale): string {
-        if (!self::offered($order)) return 'not_offered';
+        if (!self::shown($order)) return 'not_offered';
         $orderId = (int)$order['id'];
         if (!Security::rateLimit('account_offer_' . $orderId, 3, 3600, false)) return 'throttled';
+        if (!self::offered($order)) {
+            $reset = Customers::forgotPassword((string)$order['customer_email'], $locale, Security::config());
+            return in_array($reset, ['sent', 'throttled', 'unknown'], true) ? 'sent' : 'failed';
+        }
         try {
             $baseUrl = AbandonedCarts::storeBaseUrl(StoreContext::current()->id(), Security::appUrl(Security::config()));
         } catch (RuntimeException $e) {
@@ -79,7 +93,7 @@ class GuestCheckoutAccount {
         $db = Db::get();
         $store = StoreContext::current()->id();
         $db->prepare("UPDATE checkout_sessions SET status = 'completed' WHERE provider = ? AND order_id = ?")->execute([self::PROVIDER, (int)$order['id']]);
-        $db->prepare('UPDATE customers SET email_verified_at = ? WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
+        $db->prepare('UPDATE customers SET email_verified_at = ?, updated_at = ' . Db::now() . ' WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
             ->execute([gmdate('Y-m-d H:i:s'), (int)$id, $store]);
         // The claim link proves the address: this order and the other guest orders placed with it join the account.
         Customers::attachGuestOrders((int)$id);

@@ -186,7 +186,7 @@ function handleOrderShipmentCreate(): void {
             'order_id' => $orderId, 'warehouse_id' => $group['warehouse_id'], 'items' => $items,
             'status' => $shipNow ? 'shipped' : 'planned',
         ] + ($shipNow ? array_combine(['carrier', 'tracking_number', 'tracking_url'], $tracking) : []), 'Admin shipment');
-        return $shipNow ? ['admin.shipment.msg.shipped', Fulfillment::shippedJobsWithin($orderId)] : 'admin.shipment.msg.created';
+        return $shipNow ? ['admin.shipment.msg.shipped', Fulfillment::shippedJobsWithin($orderId, $shipmentId)] : 'admin.shipment.msg.created';
     });
 }
 
@@ -200,7 +200,7 @@ function handleOrderShipmentShip(): void {
         if (!Fulfillment::ship((int)$shipment['id'], ...$tracking)) return 'admin.shipment.msg.already_done';
         AuditLog::log('shipment', (int)$shipment['id'], ['status' => 'planned'],
             ['status' => 'shipped'] + array_combine(['carrier', 'tracking_number', 'tracking_url'], $tracking), 'Admin shipment shipped');
-        return ['admin.shipment.msg.shipped', Fulfillment::shippedJobsWithin($orderId)];
+        return ['admin.shipment.msg.shipped', Fulfillment::shippedJobsWithin($orderId, (int)$shipment['id'])];
     });
 }
 

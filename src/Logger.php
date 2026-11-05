@@ -119,8 +119,11 @@ class Logger
         '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s/?\#]+@#i' => '$1[REDACTED]@',
         // Whatever credentials an Authorization header carries, however short.
         '/(\bAuthorization["\']?\s*[:=]\s*["\']?(?:Basic|Bearer|Digest|Token|NTLM|Negotiate)\s+)(?!\[REDACTED)[^\s"\',;]+/i' => '$1[REDACTED]',
-        // JSON inside a JSON string: the quotes are escaped ({\"password\":\"x y\"}), the value runs to the next escaped quote.
-        '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*\\\\+["\']\s*[=:]\s*)(\\\\+["\'])(?!\[REDACTED).*?\2/is' => '$1$2[REDACTED]$2',
+        // JSON inside a JSON string: the quotes are escaped ({\"password\":\"x y\"}), the value runs to the next escaped quote
+        // of the same level; a quote escaped once more inside the value (\\\") does not end it.
+        '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*\\\\+["\']\s*[=:]\s*)(\\\\+["\'])(?!\[REDACTED).*?(?<!\\\\)\2/is' => '$1$2[REDACTED]$2',
+        // XML elements (<password>x</password>, <ns:ClientSecret>, CDATA included): the text up to the next tag.
+        '/(<([\w:-]*(?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*)(?:\s[^>]*)?>)(?!\[REDACTED)(?:<!\[CDATA\[.*?\]\]>|[^<])+/is' => '$1[REDACTED]',
         // Card security codes, keyed (cvc=123, "cvv2": "1234", card_cvc, security_code), escaped quotes included.
         '/((?<![a-z0-9])(?:cvc|cvv2?|cvn|csc|security[_-]?code)(?:\\\\*["\'])?\s*[=:]\s*(?:\\\\*["\'])?)\d{3,4}(?!\d)/i' => '$1[REDACTED]',
         // Cookie headers and session ids: the whole cookie string up to the line end or the closing quote.
@@ -146,7 +149,8 @@ class Logger
         // groups may also hold a CVC, an expiry or a quantity next to the card, and may end a sentence (a full stop that
         // does not start decimals), so whole groups inside the run are tried: maskCardGroups. Possessive, so a long run
         // of digits cannot exhaust the PCRE stack (preg would return null and the whole value would be lost).
-        $text = (string)preg_replace_callback('/(?<![\w.])\d++(?:[ -]\d++)*+/', static function (array $m) use ($text): string {
+        // Groups may also be separated URL- or form-encoded (%20, %2D, +), and follow an encoded character (card%3D4242…).
+        $text = (string)preg_replace_callback('/(?:(?<![\w.])|(?<=%[0-9A-Fa-f]{2}))\d++(?:(?:[ -]|%20|%2[Dd]|\+)\d++)*+/', static function (array $m) use ($text): string {
             $next = substr($text, $m[0][1] + strlen($m[0][0]), 2);
             // The last group glued to a word or the integer part of a decimal is not part of a card number.
             $glued = preg_match('/^(?:[A-Za-z_]|\.\d)/', $next) === 1;
@@ -161,7 +165,7 @@ class Logger
      */
     private static function maskCardGroups(string $run, bool $keepLast): string
     {
-        $parts = preg_split('/([ -])/', $run, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$run];
+        $parts = preg_split('/([ -]|%20|%2[Dd]|\+)/', $run, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$run];
         $tail = $keepLast ? (string)array_pop($parts) : '';
         $count = count($parts);
         $out = '';

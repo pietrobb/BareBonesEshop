@@ -435,9 +435,9 @@ function pageOrder(): void {
             <tr><th><?= esc(I18n::t('admin.common.action')) ?></th><th><?= esc(I18n::t('admin.order.from')) ?></th><th><?= esc(I18n::t('admin.order.to')) ?></th><th><?= esc(I18n::t('admin.common.note')) ?></th><th><?= esc(I18n::t('admin.common.who')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
             <?php foreach ($logs as $log): ?>
             <tr>
-                <td><?= esc($log['action']) ?></td>
-                <td><?= esc($log['old_value'] ?? '') ?></td>
-                <td><?= esc($log['new_value'] ?? '') ?></td>
+                <td><?= esc(adminCodeLabel('admin.order.history.action.', (string)$log['action'])) ?></td>
+                <td><?= esc(($log['old_value'] ?? '') === '' ? '' : OrderStatusLabels::order((string)$log['old_value'])) ?></td>
+                <td><?= esc(($log['new_value'] ?? '') === '' ? '' : OrderStatusLabels::order((string)$log['new_value'])) ?></td>
                 <td class="muted"><?= esc($log['note'] ?? '') ?></td>
                 <td><?= esc($log['actor']) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>

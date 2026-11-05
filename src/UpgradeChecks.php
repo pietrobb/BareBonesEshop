@@ -47,18 +47,23 @@ final class UpgradeChecks
     }
 
     /**
-     * The sender MailService uses (MAIL_FROM) and how it fares: 'ok'; 'warn' when unset (the fallback
-     * MailService::DEFAULT_FROM, which receiving servers reject or file as spam) or on a reserved domain no
-     * mailbox can exist on; 'fail' when it is not an address at all (MailService skips every e-mail).
+     * The sender MailService uses (MailService::sender()) and how it fares: 'ok'; 'warn' when MAIL_FROM is unset
+     * (noreply@ the shop's domain, which may lack SPF/DKIM, or MailService::DEFAULT_FROM, which receiving servers
+     * reject or file as spam) or on a reserved domain no mailbox can exist on; 'fail' when it is not an address at
+     * all (MailService skips every e-mail).
      * @return array{0: 'ok'|'warn'|'fail', 1: string}
      */
     public static function mailSender(): array
     {
-        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: '')));
-        if ($from === '') return ['warn', 'MAIL_FROM is not set: e-mails go out from ' . MailService::DEFAULT_FROM . ', which receiving servers reject or file as spam.'];
+        $from = MailService::sender();
+        if (trim((string)(getenv('MAIL_FROM') ?: '')) === '') {
+            return ['warn', $from === MailService::DEFAULT_FROM
+                ? 'MAIL_FROM is not set: e-mails go out from ' . MailService::DEFAULT_FROM . ', which receiving servers reject or file as spam.'
+                : "MAIL_FROM is not set: e-mails go out from {$from} (from app_url); set MAIL_FROM to an address whose domain has SPF/DKIM for this server."];
+        }
         if (!filter_var($from, FILTER_VALIDATE_EMAIL)) return ['fail', "MAIL_FROM ({$from}) is not a valid e-mail address: no e-mail is sent."];
         $domain = substr($from, strrpos($from, '@') + 1);
-        if (preg_match('/(^|\.)(invalid|localhost|local|test|example|example\.(com|net|org))$/', $domain)) {
+        if (preg_match(MailService::RESERVED_DOMAIN, $domain)) {
             return ['warn', "MAIL_FROM ({$from}) uses a reserved domain (still the example value?): receiving servers reject it."];
         }
         return ['ok', "E-mails are sent from {$from}."];
