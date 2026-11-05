@@ -52,15 +52,17 @@ class R17PayMail implements MailAdapter
     public static function receipt(int $bytes): string { return str_repeat('x', $bytes); }
 }
 PHP);
-    // One request: boot with private_runtime_dir = argv[4] ('' = none), then in mode "oom" allocate 64 TiB in the
-    // extension's file with no memory_limit, which ends the request with "Out of memory".
+    // One request: boot with private_runtime_dir = argv[4] ('' = none), then in mode "oom" allocate 256 PiB in the
+    // extension's file with no memory_limit, which ends the request with "Out of memory". More than any user address
+    // space, so mmap() refuses it on every host; 64 TiB was granted under vm.overcommit_memory=1 and the kernel
+    // killed the process without a message.
     file_put_contents($r17qBase . '/request.php', <<<'PHP'
 <?php
 [, $root, $dir, $mode, $private] = $argv;
 require $root . '/src/autoload.php';
 Extensions::boot(['extensions' => ['r17-pay'], 'private_runtime_dir' => $private], $dir . '/extensions');
 echo "\nR17QSTATE" . json_encode(['loaded' => array_keys(Extensions::loaded()), 'errors' => Extensions::errors()]);
-if ($mode === 'oom') { ini_set('memory_limit', '-1'); R17PayMail::receipt(1 << 46); }
+if ($mode === 'oom') { ini_set('memory_limit', '-1'); R17PayMail::receipt(1 << 58); }
 PHP);
     $r17qRun = static function (string $mode, string $private) use ($r17qBase): array {
         $process = proc_open([PHP_BINARY, $r17qBase . '/request.php', dirname(TEST_CLI_DIR), $r17qBase, $mode, $private],
