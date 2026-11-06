@@ -38,7 +38,7 @@ function adminStoreManagementCards(array $stores, bool $writable): void {
         <?php foreach ($stores as $storeId => $store): if (!is_array($store)) continue; $storeId = (string)$storeId; ?>
         <p data-store-legal-links="<?= esc($storeId) ?>"><strong><?= esc($storeId) ?>:</strong>
             <?php foreach (ConsumerNotice::LEGAL_PAGES as $legalPage): foreach (array_map('strval', (array)($store['languages'] ?? [])) as $locale): ?>
-            <a class="btn btn-sm" href="admin.php?p=stores&amp;store=<?= esc(rawurlencode($storeId)) ?>&amp;legal=<?= esc($legalPage) ?>&amp;text_lang=<?= esc($locale) ?>#store-legal" title="<?= esc($legalPage . ' (' . $locale . ')') ?>"><?= esc(I18n::t(ADMIN_LEGAL_PAGE_LABELS[$legalPage] ?? $legalPage) . ' (' . strtoupper($locale) . ')') ?><?= DataOverrides::legalPath($legalPage, $locale, $storeId) !== null ? ' *' : '' ?></a>
+            <a class="btn btn-sm" href="admin.php?p=stores&amp;store=<?= esc(rawurlencode($storeId)) ?>&amp;legal=<?= esc($legalPage) ?>&amp;text_lang=<?= esc($locale) ?>#store-legal" title="<?= esc($legalPage . ' (' . $locale . ')') ?>"><?= esc(I18n::t(ADMIN_LEGAL_PAGE_LABELS[$legalPage]) . ' (' . strtoupper($locale) . ')') ?><?= DataOverrides::legalPath($legalPage, $locale, $storeId) !== null ? ' *' : '' ?></a>
             <?php endforeach; endforeach; ?></p>
         <?php endforeach; ?>
         <?php if (isset($stores[$legalStore]) && DataOverrides::validLegal($page, $lang, $legalStore)):
