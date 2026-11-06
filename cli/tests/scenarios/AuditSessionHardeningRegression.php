@@ -34,7 +34,7 @@ $a073Pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $a073Pdo->exec("CREATE TABLE IF NOT EXISTS cookie_consent (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NULL, customer_id INTEGER NULL,
     ip_hash TEXT NULL, user_agent TEXT NULL, categories_json TEXT NOT NULL, method TEXT NOT NULL, consent_version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')))");
-$a073Pdo->prepare("INSERT INTO customers (email, password_hash, name, locale, status, store_id) VALUES (?, ?, 'A073', 'en', 'active', 'default')")
+$a073Pdo->prepare("INSERT INTO customers (email, password_hash, name, locale, status, store_id, email_verified_at) VALUES (?, ?, 'A073', 'en', 'active', 'default', '2026-01-01 00:00:00')")
     ->execute(['a073-owner@example.com', password_hash('A073-owner-pass', PASSWORD_BCRYPT, ['cost' => 4])]);
 $a073Pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
     VALUES (9731, 'default', 1, 'A073 item', 'a073-item', 'A073-ITEM', 'simple', 900, 'eur', 'active', 5, 'deny')");

@@ -1685,7 +1685,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_weak_password'   => 'Heslo musí mít alespoň 8 znaků.',
     'account.err_email_taken'     => 'Tento e-mail je již registrován.',
     'account.register_check_email' => 'Na adresu {email} jsme poslali zprávu. Pokud jste si právě vytvořili účet, můžete se hned přihlásit svým heslem.',
-    'account.err_invalid_credentials' => 'Neplatný e-mail nebo heslo.',
+    'account.err_invalid_credentials' => 'Neplatný e-mail nebo heslo. Pokud jste účet právě založili, nejprve potvrďte e-mailovou adresu odkazem, který jsme vám poslali.',
     'account.err_account_blocked' => 'Tento účet je zablokován.',
     'account.err_invalid_current_password' => 'Aktuální heslo není správné.',
     'account.err_invalid_or_expired_token' => 'Neplatný nebo expirovaný odkaz.',

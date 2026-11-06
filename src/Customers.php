@@ -37,13 +37,14 @@ class Customers {
         if (strlen($password) < self::MIN_PASSWORD_LEN) {
             return [false, null, 'weak_password'];
         }
+        // R18: hashed before the lookup, so a taken address costs the same time as a new account (no enumeration by timing).
+        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         $db = Db::get();
         $stmt = $db->prepare("SELECT id FROM customers WHERE email = ? AND store_id = ?");
         $stmt->execute([$email, StoreContext::current()->id()]);
         if ($stmt->fetchColumn()) {
             return [false, null, 'email_taken'];
         }
-        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         $locale = $extras['locale'] ?? I18n::locale();
         $phone = trim($extras['phone'] ?? '');
         $ins = $db->prepare(
@@ -79,8 +80,12 @@ class Customers {
     /**
      * Attempt to log in. Returns [success, customer|null, error|null].
      * On success, populates $_SESSION['customer_id'] and regenerates the session id.
+     * $requireVerifiedEmail (the storefront sign-in form): an account whose e-mail is not confirmed yet signs in only
+     * together with a valid verification token of its own (the link from the mail) and otherwise fails with
+     * 'email_unverified' and the customer id, before any session is touched. R18: a sign-up with a password the
+     * attacker chose could be signed in at once, and that told whether the address had had an account.
      */
-    public static function login(string $email, string $password): array {
+    public static function login(string $email, string $password, bool $requireVerifiedEmail = false, string $verifyToken = ''): array {
         $email = Str::normalizeEmail($email);
         $db = Db::get();
         $stmt = $db->prepare("SELECT * FROM customers WHERE email = ? AND store_id = ?");
@@ -89,6 +94,9 @@ class Customers {
         $passwordValid = password_verify($password, (string)($c['password_hash'] ?? self::DUMMY_PASSWORD_HASH));
         if (!$c || ($c['status'] ?? 'active') !== 'active' || !$passwordValid) {
             return [false, null, 'invalid_credentials'];
+        }
+        if ($requireVerifiedEmail && empty($c['email_verified_at']) && !self::emailVerificationTokenValid($verifyToken, (int)$c['id'])) {
+            return [false, ['id' => (int)$c['id']], 'email_unverified'];
         }
         // Rehash if PHP bumped defaults
         if (password_needs_rehash($c['password_hash'], PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST])) {
@@ -428,6 +436,16 @@ class Customers {
      * token must belong to it: the mailbox owner clicking a link for an account they cannot sign in to verifies nothing
      * and hands over no guest orders.
      */
+    /** An unused, fresh verification token of this account (checked, not consumed: verifyEmail() does that). */
+    private static function emailVerificationTokenValid(string $token, int $customerId): bool {
+        if (!preg_match('/^[a-f0-9]{64}$/', $token) || $customerId <= 0) return false;
+        $find = Db::get()->prepare("SELECT 1 FROM customer_email_verifications v
+            JOIN customers c ON c.id = v.customer_id
+            WHERE v.token_hash = ? AND v.used_at IS NULL AND v.expires_at > ? AND c.store_id = ? AND c.email = v.email AND v.customer_id = ?");
+        $find->execute([hash('sha256', $token), gmdate('Y-m-d H:i:s'), StoreContext::current()->id(), $customerId]);
+        return $find->fetchColumn() !== false;
+    }
+
     public static function verifyEmail(string $token, int $customerId): ?int {
         if (!preg_match('/^[a-f0-9]{64}$/', $token) || $customerId <= 0) return null;
         $db = Db::get();
@@ -503,8 +521,9 @@ class Customers {
                 $db->rollBack();
                 return [false, 'invalid_or_expired_token'];
             }
-            $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
-               ->execute([$hash, $cid, StoreContext::current()->id()]);
+            // The reset link came by e-mail: it proves the address, so an account never confirmed (it cannot sign in) is now.
+            $db->prepare("UPDATE customers SET password_hash = ?, email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ? AND store_id = ?")
+               ->execute([$hash, $now, $cid, StoreContext::current()->id()]);
             // The password is set: every other open reset link of the account dies with it.
             $db->prepare("DELETE FROM password_reset_tokens WHERE customer_id = ? AND used_at IS NULL")->execute([$cid]);
             $db->commit();

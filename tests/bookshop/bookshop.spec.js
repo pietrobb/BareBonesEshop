@@ -2,6 +2,7 @@
 // driven only through the browser: the web installer, three purchases (eBook, paperback cash on delivery,
 // hardcover bank transfer), the owner handling them in the administration, and the eBook download.
 // Run by tests/bookshop/run.sh against a php:8.x-apache container; screenshots go to BOOKSHOP_SHOTS.
+const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,6 +10,7 @@ const { test, expect } = require('@playwright/test');
 
 const SHOTS = process.env.BOOKSHOP_SHOTS || path.join(process.cwd(), 'test-results', 'bookshop-screenshots');
 const PRIVATE_PARENT = process.env.BOOKSHOP_PRIVATE_PARENT || '/srv/bookshop-data';
+const CONTAINER = process.env.BOOKSHOP_CONTAINER || 'bbe-bookshop-acceptance';
 const OWNER = { username: 'owner', password: 'correct horse battery staple' };
 const CUSTOMER = { name: 'Ada Reader', email: `ada.${Date.now()}@books.test`, password: 'reader-pass-2026' };
 const orders = {};
@@ -31,6 +33,13 @@ function totp(secret, step) {
   const digest = crypto.createHmac('sha1', key).update(message).digest();
   const offset = digest[19] & 0x0f;
   return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, '0');
+}
+
+// The shop has no mail server: the default LogMail adapter writes every mail to the private logs (read from the container).
+function verificationToken(email) {
+  const log = execFileSync('docker', ['exec', CONTAINER, 'sh', '-c', `cat $(find ${PRIVATE_PARENT} -name emails.log) 2>/dev/null || true`], { encoding: 'utf8' });
+  const mail = log.split('\n[').filter((entry) => entry.includes(`TO=${email}`) && entry.includes('verify_email')).pop() || '';
+  return (mail.match(/token=([a-f0-9]{64})/) || [])[1] || '';
 }
 
 async function dismissCookies(page) {
@@ -152,8 +161,16 @@ test('a customer buys an eBook, a paperback (cash on delivery) and a hardcover (
   await expect(page.locator('.flash-error')).toHaveCount(0);
   await expect(page.locator('#account-register-email')).toHaveCount(0);
   await expect(page.locator('body')).toContainText(CUSTOMER.email);
-  // Sign-up no longer signs in (it must read the same for a taken address): the new customer signs in with the password.
+  // Sign-up does not sign in, and (R18) neither does the password alone before the address is confirmed: either would
+  // tell whether the address had had an account. The customer opens the link from the mail and signs in with it.
   await expect(page.locator('#account-login-email')).toHaveValue(CUSTOMER.email);
+  await page.locator('#account-login-password').fill(CUSTOMER.password);
+  await page.locator('#account-login-password').locator('xpath=ancestor::form').locator('button').click();
+  await expect(page.locator('.flash-error')).toHaveCount(1);
+  let token = '';
+  await expect(async () => { token = verificationToken(CUSTOMER.email); expect(token).toMatch(/^[a-f0-9]{64}$/); }).toPass({ timeout: 30_000 });
+  await page.goto(`/account.php?p=verify_email&token=${token}`);
+  await page.locator('#account-login-email').fill(CUSTOMER.email);
   await page.locator('#account-login-password').fill(CUSTOMER.password);
   await page.locator('#account-login-password').locator('xpath=ancestor::form').locator('button').click();
   await expect(page.locator('.flash-error')).toHaveCount(0);

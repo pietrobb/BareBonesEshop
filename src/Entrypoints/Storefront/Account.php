@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $password = Security::str($_POST['password'] ?? '');
         $name = Security::clean($_POST['name'] ?? '');
-        $rlKey = 'account_register_' . md5(Security::clientIp());
+        $rlKey = 'account_register_' . md5(Security::rateLimitSubject());
         $looksHuman = Security::formTrapValidate(
             'account_register',
             (string)($_POST['register_token'] ?? ''),
@@ -85,17 +85,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = $t('account.form_retry'); $flashType = 'error';
         } else {
             [$ok, $id, $err] = Customers::register($email, $password, $name, ['locale' => $locale]);
+            $mailConfig = Security::config();
+            // R18: the mails go out after the response, so its timing does not tell a new account from a taken address.
             if ($ok) {
-                // Send welcome email (fire-and-forget)
-                MailService::send('account_welcome', $email, $locale, [
-                    'customer_name' => $name ?: $email,
-                    'shop_name'     => (string)Template::branding()['name'],
-                ], null);
-                Customers::requestEmailVerification((int)$id, $locale, Security::config());
+                $shopName = (string)Template::branding()['name'];
+                WebWorker::defer(static function () use ($email, $locale, $name, $shopName, $id, $mailConfig): void {
+                    MailService::send('account_welcome', $email, $locale, ['customer_name' => $name ?: $email, 'shop_name' => $shopName], null);
+                    Customers::requestEmailVerification((int)$id, $locale, $mailConfig);
+                });
             } elseif ($err === 'email_taken') {
                 // R17: the form does not tell whether an address has an account. Its owner gets a sign-in (reset) link
                 // instead, at most 3 an hour, and the page reads the same as for a new account.
-                Customers::forgotPassword($email, $locale, Security::config());
+                WebWorker::defer(static fn() => Customers::forgotPassword($email, $locale, $mailConfig));
             }
             if ($ok || $err === 'email_taken') {
                 $flash = str_replace('{email}', $email, $t('account.register_check_email'));
@@ -123,10 +124,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // lock any customer out of their account. The trade-off is that a botnet rotating
         // addresses is only slowed per IP; password hashing cost and the per-IP limits bound it.
         if ($ipAllowed && $accountAllowed) {
-            [$ok, $c, $err] = Customers::login($email, $password);
+            // R18: an unconfirmed account signs in only with its own verification link (otherwise a sign-up with the
+            // attacker's password, signed in at once, told that the address had had no account). The answer is the same
+            // as for a wrong password; the owner gets the link again (at most 3 an hour), after the response.
+            $verifyToken = Security::str($_POST['verify_token'] ?? '');
+            [$ok, $c, $err] = Customers::login($email, $password, true, $verifyToken);
+            if ($err === 'email_unverified') {
+                $mailConfig = Security::config();
+                $unverifiedId = (int)($c['id'] ?? 0);
+                WebWorker::defer(static fn() => Customers::requestEmailVerification($unverifiedId, $locale, $mailConfig));
+            }
             if ($ok) {
                 // A verification link opened while signed out comes back with this sign-in: mailbox and password together.
-                if (($verifyToken = Security::str($_POST['verify_token'] ?? '')) !== '') {
+                if ($verifyToken !== '') {
                     $_SESSION['account_flash'] = AccountViewModel::verifyEmailFlash($verifyToken, (int)$c['id']);
                     header('Location: ' . Template::storeUrl('/account.php'));
                     exit;
@@ -254,7 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'data_export' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         $rlCustomer = Security::rateLimit('gdpr_export_c_' . $cid, 1, 86400);
-        $rlIp       = Security::rateLimit('gdpr_export_ip_' . md5(Security::clientIp()), 5, 86400);
+        $rlIp       = Security::rateLimit('gdpr_export_ip_' . md5(Security::rateLimitSubject()), 5, 86400);
         if (!$rlCustomer || !$rlIp) {
             $flash = $t('account.gdpr_export_rate_limit');
             $flashType = 'error';

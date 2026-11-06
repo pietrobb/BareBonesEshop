@@ -58,6 +58,8 @@ $customerPassword = 'G12-customer-password';
     ['locale' => 'en', 'phone' => '+421900000013']
 );
 if (!$customerCreated) throw new RuntimeException('Cannot create E2E customer: ' . $customerError);
+// R18: the storefront signs in a confirmed address only; this fixture customer is one.
+Db::get()->prepare('UPDATE customers SET email_verified_at = ' . Db::now() . ' WHERE id = ?')->execute([(int)$customerId]);
 Customers::addAddress((int)$customerId, [
     'type' => 'shipping', 'is_default' => 1, 'name' => 'G12 Account Customer',
     'street' => 'Qualification 12', 'city' => 'Bratislava', 'zip' => '81101',

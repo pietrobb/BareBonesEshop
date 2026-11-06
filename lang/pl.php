@@ -1685,7 +1685,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_weak_password'   => 'Hasło musi mieć co najmniej 8 znaków.',
     'account.err_email_taken'     => 'Ten e-mail jest już zarejestrowany.',
     'account.register_check_email' => 'Wysłaliśmy wiadomość na adres {email}. Jeśli konto zostało właśnie utworzone, można od razu zalogować się hasłem.',
-    'account.err_invalid_credentials' => 'Nieprawidłowy e-mail lub hasło.',
+    'account.err_invalid_credentials' => 'Nieprawidłowy e-mail lub hasło. Jeśli konto zostało właśnie założone, najpierw potwierdź adres e-mail linkiem, który wysłaliśmy.',
     'account.err_account_blocked' => 'To konto jest zablokowane.',
     'account.err_invalid_current_password' => 'Aktualne hasło jest nieprawidłowe.',
     'account.err_invalid_or_expired_token' => 'Nieprawidłowy lub wygasły link.',

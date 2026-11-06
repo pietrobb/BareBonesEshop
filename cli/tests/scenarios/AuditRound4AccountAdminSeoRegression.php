@@ -22,7 +22,7 @@ $r4Product->execute([$r4Cat, 'R4-PRE', 'r4-pre', 'R4 Pre', 0, 'preorder', 'simpl
 $r4Product->execute([$r4Cat, 'R4-EBOOK', 'r4-ebook', 'R4 Ebook', 0, 'deny', 'digital']);
 Import::recountCategories($r4Db);
 $r4Hash = password_hash('R4-pass-word', PASSWORD_BCRYPT, ['cost' => 4]);
-$r4Customer = $r4Db->prepare("INSERT INTO customers (store_id, email, password_hash, name, status, locale) VALUES ('default', ?, ?, ?, 'active', 'sk')");
+$r4Customer = $r4Db->prepare("INSERT INTO customers (store_id, email, password_hash, name, status, locale, email_verified_at) VALUES ('default', ?, ?, ?, 'active', 'sk', '2026-01-01 00:00:00')");
 $r4Customer->execute(['r4-owner@example.test', $r4Hash, 'R4 Owner']);
 $r4Owner = (int)$r4Db->lastInsertId();
 $r4Customer->execute(['r4-other@example.test', $r4Hash, 'R4 Other']);

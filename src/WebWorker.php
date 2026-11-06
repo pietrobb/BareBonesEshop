@@ -12,6 +12,8 @@ final class WebWorker
     /** Bytes of a page held back (without FastCGI) so the pass can end the response with a Content-Length. */
     public const BUFFER_LIMIT = 1048576;
     private static bool $scheduled = false;
+    /** @var list<callable> */
+    private static array $deferred = [];
     private static bool $ran = false;
 
     public static function enabled(array $config): bool
@@ -39,6 +41,35 @@ final class WebWorker
                 } catch (\Throwable $e) {
                     Logger::exception('web_worker.failed', $e);
                 }
+            });
+        });
+    }
+
+    /**
+     * Runs $task once the visitor has the whole response (on the CLI at once). R18: the sign-up and sign-in e-mails, so
+     * the answer takes as long whether a mail goes out or not, and whether the address had an account or not.
+     */
+    public static function defer(callable $task): void
+    {
+        if (PHP_SAPI === 'cli') {
+            $task();
+            return;
+        }
+        self::$deferred[] = $task;
+        if (count(self::$deferred) > 1) return;
+        if (!self::finishesNatively() && !headers_sent()) ob_start(null, self::BUFFER_LIMIT);
+        register_shutdown_function(static function (): void {
+            register_shutdown_function(static function (): void {
+                ignore_user_abort(true);
+                if (self::responseCanFinish()) self::finishResponse();
+                foreach (self::$deferred as $deferred) {
+                    try {
+                        $deferred();
+                    } catch (\Throwable $e) {
+                        Logger::exception('web_worker.deferred_failed', $e);
+                    }
+                }
+                self::$deferred = [];
             });
         });
     }

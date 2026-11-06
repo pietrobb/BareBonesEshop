@@ -35,7 +35,7 @@ function guestAccountOfferView(array $order, array $outcome): ?array {
 function requestGuestAccount(array $order): array {
     $t = static fn(string $key): string => I18n::t($key);
     if (!Security::csrfValidate()) return ['error' => $t('checkout_csrf_error')];
-    if (!Security::rateLimit('account_offer_ip_' . md5(Security::clientIp()), 10)) return ['error' => $t('account.rate_limited')];
+    if (!Security::rateLimit('account_offer_ip_' . md5(Security::rateLimitSubject()), 10)) return ['error' => $t('account.rate_limited')];
     return match (GuestCheckoutAccount::sendLink($order, I18n::locale())) {
         'sent' => ['sent' => true],
         'throttled' => ['error' => $t('account.rate_limited')],
