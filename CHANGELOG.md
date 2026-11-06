@@ -19,6 +19,9 @@
     store the catalog belongs to (a HU store sharing the default EUR catalog creates EUR products and sells them
     through its HUF price list). It used to be priced in HUF and could not be sold in the EUR store. The product
     form says which currency its prices are in.
+- **The mariadb-dump check names only the real generated columns** (review round 18, medium). Against MySQL 8 it
+  listed every column with a `DEFAULT CURRENT_TIMESTAMP` (184 instead of 2), because MySQL marks them
+  `DEFAULT_GENERATED`; only `VIRTUAL` and `STORED` generated columns count now.
 - **Bounded cart restore and checkout fields** (review round 18, medium and low).
   - `cart_restore` reads at most 200 entries, restores at most 100 lines and prices the cart once; a body over
     64 KiB is refused with 413. One anonymous request with 20 000 lines used to take ~40 s and end in HTTP 500.
