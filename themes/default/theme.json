@@ -1,6 +1,6 @@
 {
   "name": "BareBones Default",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Accessible, mobile-first default storefront package",
   "blocks": "blocks",
   "assets": {
