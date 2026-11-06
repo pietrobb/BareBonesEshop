@@ -5,6 +5,15 @@
 - **The mariadb-dump check names only the real generated columns** (review round 18, medium). Against MySQL 8 it
   listed every column with a `DEFAULT CURRENT_TIMESTAMP` (184 instead of 2), because MySQL marks them
   `DEFAULT_GENERATED`; only `VIRTUAL` and `STORED` generated columns count now.
+- **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
+  - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
+    cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →
+    1234600, B2B credit limit 123456 → 123500), and saving one price-list line rounded every other line. Admin
+    amount fields accept cents in every currency; the storefront still charges whole units.
+  - A product created in the admin of a store that shares another store's catalog is priced in the currency of the
+    store the catalog belongs to (a HU store sharing the default EUR catalog creates EUR products and sells them
+    through its HUF price list). It used to be priced in HUF and could not be sold in the EUR store. The product
+    form says which currency its prices are in.
 - **Bounded cart restore and checkout fields** (review round 18, medium and low).
   - `cart_restore` reads at most 200 entries, restores at most 100 lines and prices the cart once; a body over
     64 KiB is refused with 413. One anonymous request with 20 000 lines used to take ~40 s and end in HTTP 500.
