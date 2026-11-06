@@ -2,10 +2,13 @@
   'use strict';
   const config = window.BareBonesStorefront || {};
   const text = config.text || {};
-  const apiBase = (config.apiUrl || '/api/v1/storefront').replace(/\/+$/, '');
+  // The base carries ?lang= in a further store language (e.g. /api/v1/storefront?lang=en): the action goes on the
+  // path and the request's own parameters join the base's query instead of being glued after it.
   const apiUrl = (action, params = {}) => {
-    const query = new URLSearchParams(params).toString();
-    return `${apiBase}/${action}${query ? `?${query}` : ''}`;
+    const url = new URL(config.apiUrl || '/api/v1/storefront', window.location.href);
+    url.pathname = `${url.pathname.replace(/\/+$/, '')}/${action}`;
+    Object.entries(params).forEach(([name, value]) => url.searchParams.set(name, value));
+    return url.href;
   };
 
   function setTab(id) {
