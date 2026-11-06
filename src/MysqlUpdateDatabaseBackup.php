@@ -491,15 +491,28 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
     public function dumpClientProblem(): ?string
     {
         $server = $this->serverConnection();
-        $generated = $server->prepare("SELECT CONCAT(TABLE_NAME, '.', COLUMN_NAME) FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = :db AND EXTRA LIKE '%GENERATED%' ORDER BY TABLE_NAME, COLUMN_NAME");
-        $generated->execute([':db' => $this->database]);
+        $generated = self::generatedColumns($server, $this->database);
         try {
             $client = $this->run([$this->dumpBinary, '--version']);
         } catch (Throwable $e) {
             return "The MySQL dump client {$this->dumpBinary} cannot be run: " . $e->getMessage();
         }
-        return self::clientProblem($client, (string)$server->query('SELECT VERSION()')->fetchColumn(), $generated->fetchAll(PDO::FETCH_COLUMN));
+        return self::clientProblem($client, (string)$server->query('SELECT VERSION()')->fetchColumn(), $generated);
+    }
+
+    /**
+     * "table.column" of the generated (VIRTUAL or STORED) columns of $database. R18: MySQL 8 also marks every column
+     * with an expression default (DEFAULT CURRENT_TIMESTAMP) DEFAULT_GENERATED in EXTRA: matching any "GENERATED"
+     * listed 184 columns where the schema has 2.
+     * @return list<string>
+     */
+    public static function generatedColumns(PDO $server, string $database): array
+    {
+        $generated = $server->prepare("SELECT CONCAT(TABLE_NAME, '.', COLUMN_NAME) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = :db AND (EXTRA LIKE '%VIRTUAL GENERATED%' OR EXTRA LIKE '%STORED GENERATED%')
+            ORDER BY TABLE_NAME, COLUMN_NAME");
+        $generated->execute([':db' => $database]);
+        return array_values(array_map('strval', $generated->fetchAll(PDO::FETCH_COLUMN)));
     }
 
     /** @param list<string> $generatedColumns "table.column" of the live schema */

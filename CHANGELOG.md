@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The mariadb-dump check names only the real generated columns** (review round 18, medium). Against MySQL 8 it
+  listed every column with a `DEFAULT CURRENT_TIMESTAMP` (184 instead of 2), because MySQL marks them
+  `DEFAULT_GENERATED`; only `VIRTUAL` and `STORED` generated columns count now.
 - **Maintenance window after a refused or failed update step** (review round 18, high).
   - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
     `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a
