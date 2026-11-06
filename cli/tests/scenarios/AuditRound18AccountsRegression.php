@@ -51,7 +51,7 @@ try {
     WebWorker::defer(static function () use (&$r18aDeferred): void { $r18aDeferred[] = 'ran'; });
     $r18aAccount = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Storefront/Account.php');
     assert_true($r18aDeferred === ['ran'] && str_contains($r18aAccount, 'Customers::login($email, $password, true, $verifyToken)')
-        && substr_count($r18aAccount, 'WebWorker::defer(') === 3 && !str_contains($r18aAccount, "\n                MailService::send('account_welcome'"),
+        && substr_count($r18aAccount, 'WebWorker::defer(') === 4 && !str_contains($r18aAccount, "\n                MailService::send('account_welcome'"),
         'R18 accounts: the sign-in form requires a confirmed e-mail, and the account mails go out after the response (deferred; at once on the CLI)');
 } finally {
     $_SESSION = $r18aSession;

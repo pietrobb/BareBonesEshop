@@ -1749,7 +1749,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'payment_status.refunded' => 'Reembolsado',
     'payment_status.disputed' => 'En disputa',
     'account.err_email_taken' => 'Este correo electrónico ya está registrado.',
-    'account.register_check_email' => 'Hemos enviado un mensaje a {email}. Si acaba de crear su cuenta, ya puede iniciar sesión con su contraseña.',
+    'account.register_check_email' => 'Hemos enviado un mensaje a {email}. Si acaba de crear su cuenta, confirme la dirección con el enlace que contiene y después inicie sesión con su contraseña.',
     'account.err_account_blocked' => 'Esta cuenta está bloqueada.',
     'account.err_invalid_current_password' => 'La contraseña actual es incorrecta.',
     'account.err_invalid_or_expired_token' => 'Enlace de restablecimiento no válido o caducado.',

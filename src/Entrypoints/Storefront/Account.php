@@ -87,12 +87,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             [$ok, $id, $err] = Customers::register($email, $password, $name, ['locale' => $locale]);
             $mailConfig = Security::config();
             // R18: the mails go out after the response, so its timing does not tell a new account from a taken address.
+            // R19: a new account gets the confirmation link only; the welcome ("you can sign in") follows the confirmation.
             if ($ok) {
-                $shopName = (string)Template::branding()['name'];
-                WebWorker::defer(static function () use ($email, $locale, $name, $shopName, $id, $mailConfig): void {
-                    MailService::send('account_welcome', $email, $locale, ['customer_name' => $name ?: $email, 'shop_name' => $shopName], null);
-                    Customers::requestEmailVerification((int)$id, $locale, $mailConfig);
-                });
+                WebWorker::defer(static fn() => Customers::requestEmailVerification((int)$id, $locale, $mailConfig));
             } elseif ($err === 'email_taken') {
                 // R17: the form does not tell whether an address has an account. Its owner gets a sign-in (reset) link
                 // instead, at most 3 an hour, and the page reads the same as for a new account.
@@ -161,8 +158,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fieldValues = $_POST;
         $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         // Per client IP here; per recipient (store-scoped, sent mails only) in Customers::forgotPassword().
+        // R19: the reset goes out after the response, so the answer takes as long for an address without an account.
         if (Security::rateLimit('account_forgot_ip', 5, 60)) {
-            Customers::forgotPassword($email, $locale, Security::config());
+            $mailConfig = Security::config();
+            WebWorker::defer(static fn() => Customers::forgotPassword($email, $locale, $mailConfig));
         }
         // Always generic, including throttled and unknown recipients.
         $flash = $t('account.forgot_sent');

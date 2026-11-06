@@ -113,8 +113,9 @@ try {
     assert_true($throttled['mails'] === [] && $throttled['flash_type'] === 'error', $a074vLabel('A07.4 re-send: more than 3 links per hour are throttled', $throttled));
     $latest = (string)$a074vRead('SELECT token_hash FROM customer_email_verifications WHERE customer_id = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1', [$cid]);
 
-    $old = $a074vRun('verify', $a074vEmail, $a074vPassword, (string)$first);
-    assert_true($old['flash_type'] === 'error' && $a074vVerifiedAt() === null, $a074vLabel('A07.4 verify: a superseded link no longer verifies', $old));
+    // R19: a re-sent link does not cancel the earlier ones (the first mail's link kept failing after a sign-in attempt).
+    assert_true($first !== null && (int)$a074vRead('SELECT COUNT(*) FROM customer_email_verifications WHERE token_hash = ? AND used_at IS NULL', [hash('sha256', $first)]) === 1,
+        'R19 re-send: the link from the first mail stays valid after re-sends');
 
     // Expired link.
     $expired = bin2hex(random_bytes(32));
@@ -160,11 +161,29 @@ try {
     assert_true($a074vVerifiedAt() !== null && $a074vPending() === 0, $a074vLabel('A07.4 / R14 #1 verify: the link with the account\'s sign-in verifies the address', $ok));
     $again = $a074vRun('verify', $a074vEmail, $a074vPassword, $live);
     assert_true($again['flash_type'] === 'error', $a074vLabel('A07.4 verify: the link is single-use', $again));
-    assert_true($current !== '' && $latest === hash('sha256', $current), 'A07.4 re-send: the latest mailed link is the only pending one');
+    assert_true($current !== '' && $latest === hash('sha256', $current), 'A07.4 re-send: the latest mailed link is the newest pending one');
 
     $done = $a074vRun('dashboard', $a074vEmail, $a074vPassword);
     $after = $a074vRun('resend', $a074vEmail, $a074vPassword);
     assert_true(!$done['notice'] && $after['mails'] === [] && $after['flash_type'] === 'ok', $a074vLabel('A07.4 verification: a verified account gets no notice and no further mail', $after));
+
+    // R19: the customer signs up, tries to sign in before confirming (refused, the link is mailed again) and then opens
+    // the link from the FIRST mail: it signs in and confirms the address. The welcome ("you can sign in") comes after.
+    $r19Email = 'a074-r19-' . bin2hex(random_bytes(3)) . '@example.com';
+    $r19Reg = $a074vRun('register', $r19Email, $a074vPassword);
+    $r19First = $a074vToken($r19Reg);
+    assert_true($r19First !== null && count($r19Reg['mails']) === 1,
+        $a074vLabel('R19 registration: a new account is mailed the confirmation link only, no welcome yet', $r19Reg));
+    $r19Early = $a074vRun('verify_login', $r19Email, $a074vPassword, '');
+    $r19Second = $a074vToken($r19Early);
+    assert_true($r19Early['flash_type'] === 'error' && $r19Second !== null && $r19Second !== $r19First,
+        $a074vLabel('R19 sign-in before confirming: refused, and the link is mailed again', $r19Early));
+    $r19Done = $a074vRun('verify_login', $r19Email, $a074vPassword, (string)$r19First);
+    $r19Verified = $a074vRead('SELECT email_verified_at FROM customers WHERE email = ? AND store_id = ?', [$r19Email, 'default']);
+    assert_true($r19Verified !== null && $r19Verified !== false && $r19Done['code'] === 302,
+        $a074vLabel('R19 sign-in with the link from the first mail confirms the address and signs in', $r19Done));
+    assert_true(count($r19Done['mails']) === 1 && $a074vToken($r19Done) === null && $r19Done['mails'][0]['to'] === $r19Email,
+        $a074vLabel('R19 the welcome mail goes out once the address is confirmed', $r19Done));
 } finally {
     $a074vTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($a074vRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($a074vTree as $a074vPath) $a074vPath->isDir() ? rmdir($a074vPath->getPathname()) : unlink($a074vPath->getPathname());
