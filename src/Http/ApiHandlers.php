@@ -412,7 +412,13 @@ function apiCartRestore(): array {
         return ['error' => 'Invalid CSRF token'];
     }
 
-    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    // R18: a restore holds at most Cart::MAX_RESTORE_LINES entries; a body far beyond that is not even decoded.
+    $body = (string)file_get_contents('php://input', false, null, 0, 65537);
+    if (strlen($body) > 65536) {
+        http_response_code(413);
+        return ['error' => 'Cart too large'];
+    }
+    $input = json_decode($body, true) ?? [];
     if (!is_array($input)) return ['error' => 'Invalid data'];
 
     Cart::restore($input);
@@ -608,6 +614,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Name, contact and address fields reach e-mails, invoices and carrier labels: no control characters.
     foreach (['name', 'phone', 'street', 'city', 'zip', 'company'] as $field) {
         if (is_string($input[$field] ?? null)) $input[$field] = (string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $input[$field]);
+    }
+    // R18: unbounded lengths reached VARCHAR(191) columns (MySQL refused the order: an incident, not a message).
+    foreach (CheckoutService::FIELD_MAX_LENGTH as $field => $max) {
+        if (is_string($input[$field] ?? null) && mb_strlen(trim($input[$field])) > $max) {
+            return checkoutRefusal('checkout.error.field_too_long', 422, ['field' => $field, 'max_length' => $max]);
+        }
     }
     $name = trim(Security::str($input['name'] ?? ''));
     $email = Security::email($input['email'] ?? '');
