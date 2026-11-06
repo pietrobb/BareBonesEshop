@@ -9,6 +9,8 @@
     keeps the shop on 503 (no mix of old and new files) and the marker names the command to re-run.
   - `php cli/update.php apply` likewise lifts maintenance only after a successful update; a refused or automatically
     rolled-back update restores the window it found (an earlier failed one stays).
+  - Neither reopens the shop an updater killed half-way left closed: a rollback or update refused after it entered
+    maintenance puts back the marker it found, content and age, not only a failed one.
   - `php cli/migrate.php apply` whose pre-migration backup fails (e.g. MySQL with an unusable `mariadb-dump`) ran no
     migration: the shop opens again instead of staying on 503 for good, or keeps an earlier failed run's window.
   - A lock another process holds on `.maintenance` keeps the shop closed for 24 hours at most.
