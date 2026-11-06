@@ -1835,6 +1835,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.no_available_items' => 'Keines der Produkte im Warenkorb ist verfügbar.',
     'checkout.error.mixed_currency' => 'Ihr Warenkorb enthält Produkte in verschiedenen Währungen. Bitte bestellen Sie diese getrennt.',
     'checkout.error.address_required' => 'Für physische Produkte ist eine Lieferadresse erforderlich.',
+    'checkout.error.field_too_long' => 'Ein Feld ist zu lang. Bitte kürzen Sie Name, Kontakt oder Adresse.',
     'checkout.error.shipping_unavailable' => 'Die Lieferung in das gewählte Land ist nicht verfügbar.',
     'checkout.error.payment_unavailable' => 'Die gewählte Zahlungsart ist für diese Bestellung nicht verfügbar.',
     'checkout.error.synthetic_requires_online' => 'Der synthetische Checkout erfordert eine Online-Zahlungsart.',
