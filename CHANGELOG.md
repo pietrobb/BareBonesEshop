@@ -264,6 +264,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   developer's `db_sqlite_path`, so the processes the suite starts opened that database and marked its `event_outbox`
   rows delivered; a theme-check fixture appended its log lines to the developer's `application.jsonl`. The suite's
   database is now the one in its own private directory, child processes included.
+- **Imported products are priced in their catalog's currency** (review round 19, medium). A product created by a CSV
+  import, the API, a feed or an ERP sync in a HUF or CZK catalog was stored as EUR ("12 990 Ft" became 12 990,00 €)
+  and could not be sold in its store; it now takes the currency of the store the catalog belongs to, and an existing
+  product keeps its currency when it is imported again. Products already created this way keep their EUR price;
+  check them in **Catalog → Products**. Also: an import price like "1.234 Kč" (one separator before three digits) is
+  1 234, not 1,23; the shipping and payment pages show and check their amounts in the currency of the store owning
+  the providers (a USD store using the default store's providers saw them as dollars).
 - **Sign-up no longer loops** (review round 19, medium). The page after sign-up and the welcome mail said "you can sign
   in now", but an unconfirmed account cannot sign in, and every attempt mailed a new link that cancelled the earlier
   one, so the link from the first mail failed. The page now asks to confirm the address first; the welcome mail goes
