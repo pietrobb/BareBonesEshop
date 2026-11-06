@@ -764,11 +764,24 @@ class PaymentService {
     }
 
     /**
+     * R18: what an amount recorded as "paid" by hand lacks to the order total (0 when it pays the order). 10 € recorded
+     * for a 100 € order used to pay it and send it to fulfilment. No amount entered means the order total. Money on a
+     * cancelled order is always recorded: it is flagged for a manual refund, whatever the amount.
+     */
+    public static function adminPaymentShortfall(array $order, string $newStatus, int $amount): int {
+        if ($newStatus !== 'paid' || $amount <= 0 || (string)($order['status'] ?? '') === 'cancelled') return 0;
+        return max(0, (int)$order['total'] - $amount);
+    }
+
+    /**
      * A payment status set by hand on the order detail. Money recorded as paid pays a pending order like a gateway
      * capture (R17: after a failed card the order stayed Pending until a second status change). Returns true when the
      * order was cancelled: the money is then flagged for a manual refund instead.
      */
     public static function recordAdminPayment(array $order, string $newStatus, int $amount, string $note, string $actor): bool {
+        if (self::adminPaymentShortfall($order, $newStatus, $amount) > 0) {
+            throw new \InvalidArgumentException('A payment below the order total does not pay the order');
+        }
         $orderId = (int)$order['id'];
         $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
         self::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A partial payment no longer pays the order; feeds are rebuilt only for a change they show** (review round 18,
+  medium).
+  - Recording "Paid" on the order detail with less than the order total (10 € of 100 €) is refused with the missing
+    amount; the order no longer goes to fulfilment. Money on a cancelled order is still recorded for a refund.
+  - Feeds and sitemaps are no longer rebuilt by every ERP or feed sync and every admin stock edit: an unchanged ERP
+    product keeps its `updated_at` (a stock-only change moves `stock_updated_at`), a price feed with the same price
+    does not rewrite the product, a recount to the same number changes nothing, and a stock change that keeps the
+    product in stock refreshes the product pages only. A product going in or out of stock still rebuilds them.
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.

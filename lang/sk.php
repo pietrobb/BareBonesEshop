@@ -703,6 +703,7 @@ return [
     'admin.order.msg.payment_changed' => 'Stav platby zmenený na \'{status}\'.',
     'admin.order.msg.payment_error' => 'Chyba pri zmene stavu platby.',
     'admin.order.msg.paid_on_cancelled' => 'Objednávka je zrušená a zostáva zrušená: platba bola zaznamenaná, treba ju vrátiť zákazníkovi a bol nahlásený incident.',
+    'admin.order.msg.paid_partial' => '{amount} je menej ako suma objednávky {total} (chýba {missing}): čiastočná platba objednávku nezaplatí. Platbu zaznamenajte, keď príde celá suma.',
     'admin.order.msg.refund_amount' => 'Suma refundu musí byť v rozsahu dostupného zostatku.',
     'admin.order.msg.refund_requested' => 'Refund požiadavka bola vytvorená.',
     'admin.order.msg.manual_refund_recorded' => 'Ručný refund bol zaznamenaný.',
