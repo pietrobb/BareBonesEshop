@@ -52,6 +52,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The merchant's withdrawal e-mail names only the withdrawn items** (review round 19, medium). It listed every line
+  of the order and the order total; it now lists the lines of that statement and their sum (new template variable
+  `{{withdrawal_total}}`; `{{order_total}}` is still the whole order for customised templates). On a partly shipped
+  order the admin marks each withdrawn line as already sent (wait for the return) or not sent (do not ship), instead of
+  "do not ship" for all of them, and the acknowledgement column shows the e-mail status in words.
 - **Checkout, cookie consent and search suggestions work in a further store language** (review round 19, medium).
   In a language that is not the store's own (`?lang=en` in the Slovak store, `?lang=en` in the Hungarian one) the
   page hands `storefront.js` an API address that already ends in `?lang=en`; the script put the action after it
