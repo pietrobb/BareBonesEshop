@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Small fixes** (review round 18, low).
+  - The JS tool configs at the web root (`eslint.config.js`, `playwright.config.js`, `lighthouserc.js`, any
+    `*.config.js`/`.mjs`/`.cjs`) are denied by `.htaccess`, `router.php` and `deploy/nginx.conf`. Update a custom
+    nginx configuration accordingly.
+  - The invoice link in the invoice e-mail opens the invoice page in the order's language, not in the language of the
+    admin who issued or resent it.
+  - Invoices and credit notes print their dates in the document language (`24. 10. 2026`, not `2026-10-24`); the
+    delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
 - **Bounded prices** (review round 18, medium).
   - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
     `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is
