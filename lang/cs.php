@@ -1834,6 +1834,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.no_available_items' => 'V košíku nejsou žádné dostupné produkty.',
     'checkout.error.mixed_currency' => 'Košík obsahuje produkty v různých měnách. Objednejte je samostatně.',
     'checkout.error.address_required' => 'U fyzických produktů je doručovací adresa povinná.',
+    'checkout.error.field_too_long' => 'Některé pole je příliš dlouhé. Zkraťte prosím jméno, kontakt nebo adresu.',
     'checkout.error.shipping_unavailable' => 'Doručení do zvolené země není dostupné.',
     'checkout.error.payment_unavailable' => 'Zvolený způsob platby není pro tuto objednávku dostupný.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',

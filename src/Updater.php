@@ -243,7 +243,7 @@ final class Updater
         $halfDone = null;
         $entered = false;
         $installed = false;
-        $prior = $this->failedMaintenance();
+        $prior = $this->priorMaintenance();
         try {
             $report = $this->check($package);
             $this->assertApplicable($report);
@@ -338,8 +338,8 @@ final class Updater
         } finally {
             // R17: files or schema left half-way keep the shop closed until a rollback or update succeeds.
             // R18: only a successful update lifts the window. One refused before maintenance leaves the marker
-            // alone; one that changed nothing (or was rolled back) restores what was there before, a failed window
-            // included.
+            // alone; one that changed nothing (or was rolled back) restores the window there was before (a failed one,
+            // or the fresh marker of an updater killed half-way) or none.
             if ($halfDone !== null) {
                 MaintenanceMode::fail($this->root, $halfDone);
             } elseif ($installed) {
@@ -351,17 +351,23 @@ final class Updater
         }
     }
 
-    /** The marker of a step that failed half-way (it keeps the shop closed), or null. */
-    private function failedMaintenance(): ?array
+    /**
+     * The window that keeps the shop closed before this step: a failed one, or the fresh marker of an updater killed
+     * half-way (its files may be half-written). Null when the shop is open.
+     * @return array{marker: array, modified_at: int}|null
+     */
+    private function priorMaintenance(): ?array
     {
-        return MaintenanceMode::failed($this->root) ? MaintenanceMode::marker($this->root) : null;
+        if (!MaintenanceMode::active($this->root)) return null;
+        $modifiedAt = @filemtime(MaintenanceMode::path($this->root));
+        return ['marker' => MaintenanceMode::marker($this->root), 'modified_at' => $modifiedAt === false ? time() : $modifiedAt];
     }
 
-    /** Back to the window there was before a step that changed nothing: a failed one stays, none is lifted. */
+    /** Back to the window there was before a step that changed nothing: any window that kept the shop closed stays. */
     private function restoreMaintenance(?array $prior): void
     {
         if ($prior !== null) {
-            MaintenanceMode::fail($this->root, (string)($prior['reason'] ?? 'an earlier update step failed half-way'));
+            MaintenanceMode::restore($this->root, $prior['marker'], $prior['modified_at']);
         } else {
             MaintenanceMode::leave($this->root);
         }
@@ -407,7 +413,7 @@ final class Updater
         $touched = false;
         $restored = false;
         $halfDone = null;
-        $prior = $this->failedMaintenance();
+        $prior = $this->priorMaintenance();
         try {
             $metadata = $this->snapshotMetadata($snapshotId);
             $databaseAt = is_array($metadata['database'] ?? null) ? (string)$metadata['created_at'] : null;
@@ -431,8 +437,9 @@ final class Updater
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice];
         } finally {
             // R18: only a completed restore lifts the window. A refused rollback (no --accept-data-loss, unknown
-            // snapshot, changed files) leaves the marker as it was; one that stopped after changing files or the
-            // database keeps the shop closed (no mix of old and new files) and says what to run.
+            // snapshot, changed files) puts back the window it found — failed, or the fresh one of an updater killed
+            // half-way — or none; one that stopped after changing files or the database keeps the shop closed (no mix
+            // of old and new files) and says what to run.
             if ($restored) {
                 MaintenanceMode::leave($this->root);
             } elseif ($entered && $touched && $halfDone !== null) {
