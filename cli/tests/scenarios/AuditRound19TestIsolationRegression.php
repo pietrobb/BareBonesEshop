@@ -12,8 +12,8 @@ assert_equals([$r19iPrivate . '/db/shop.sqlite', str_replace('\\', '/', $testDbP
     [str_replace('\\', '/', (string)($r19iConfig['db_sqlite_path'] ?? '')), $r19iPrivate . '/db/shop.sqlite'],
     'R19 isolation: the suite config names the suite\'s own SQLite database, the one the suite runs on');
 
-// A child process started by the suite opens that database file.
-if (Db::isSqlite()) {
+// A child process started by the suite opens that database file (on a MySQL config the children use MySQL).
+if (strtolower(trim((string)($r19iConfig['db_driver'] ?? ''))) === 'sqlite') {
     $r19iProcess = proc_open([PHP_BINARY, '-r', 'require ' . var_export($r19iRoot . '/src/autoload.php', true) . ';
         try { echo Db::get()->query("PRAGMA database_list")->fetchAll()[0]["file"]; } catch (Throwable $e) { echo "error: ", $e->getMessage(); }'],
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r19iPipes);
