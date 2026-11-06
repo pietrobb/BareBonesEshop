@@ -1862,6 +1862,7 @@ return [
     'checkout.error.no_available_items' => 'V košíku nie sú žiadne dostupné produkty.',
     'checkout.error.mixed_currency' => 'Košík obsahuje produkty v rôznych menách. Objednajte ich samostatne.',
     'checkout.error.address_required' => 'Doručovacia adresa je povinná pri fyzických produktoch.',
+    'checkout.error.field_too_long' => 'Niektoré pole je príliš dlhé. Skráťte prosím meno, kontakt alebo adresu.',
     'checkout.error.shipping_unavailable' => 'Doručenie nie je dostupné do zvolenej krajiny.',
     'checkout.error.payment_unavailable' => 'Zvolený spôsob platby nie je pre túto objednávku dostupný.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',
