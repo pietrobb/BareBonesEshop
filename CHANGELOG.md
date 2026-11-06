@@ -12,6 +12,13 @@
     delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
   - E-mails name the store in the From line (`"Slovenský obchod" <noreply@…>`), and without `MAIL_REPLY_TO` a reply
     goes to the store's contact address (`legal.email` in `stores.json`) instead of the noreply mailbox.
+- **Bounded cart restore and checkout fields** (review round 18, medium and low).
+  - `cart_restore` reads at most 200 entries, restores at most 100 lines and prices the cart once; a body over
+    64 KiB is refused with 413. One anonymous request with 20 000 lines used to take ~40 s and end in HTTP 500.
+    An entry repeated within one restore now counts once.
+  - Checkout refuses a name or e-mail over 191 characters, a phone over 40, a street over 200, a city over 100, a
+    ZIP over 20 and a company over 255 with `checkout.error.field_too_long` (and `field`, `max_length` in JSON),
+    instead of a failed order on MySQL.
 - **Bounded prices** (review round 18, medium).
   - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
     `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is
@@ -25,6 +32,8 @@
     keeps the shop on 503 (no mix of old and new files) and the marker names the command to re-run.
   - `php cli/update.php apply` likewise lifts maintenance only after a successful update; a refused or automatically
     rolled-back update restores the window it found (an earlier failed one stays).
+  - Neither reopens the shop an updater killed half-way left closed: a rollback or update refused after it entered
+    maintenance puts back the marker it found, content and age, not only a failed one.
   - `php cli/migrate.php apply` whose pre-migration backup fails (e.g. MySQL with an unusable `mariadb-dump`) ran no
     migration: the shop opens again instead of staying on 503 for good, or keeps an earlier failed run's window.
   - A lock another process holds on `.maintenance` keeps the shop closed for 24 hours at most.
