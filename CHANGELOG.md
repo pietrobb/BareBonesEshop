@@ -252,6 +252,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
   notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
   `starter.json` when built from a tag.
+- **Sign-up no longer loops** (review round 19, medium). The page after sign-up and the welcome mail said "you can sign
+  in now", but an unconfirmed account cannot sign in, and every attempt mailed a new link that cancelled the earlier
+  one, so the link from the first mail failed. The page now asks to confirm the address first; the welcome mail goes
+  out after the confirmation; the five newest confirmation links stay valid together (24 hours). Low: the forgot
+  password answer no longer takes longer for an address with an account (the mail goes out after the response), and a
+  throttled mail sent after the response no longer logs "headers already sent".
 
 ## 2.1.2 — 2026-11-05
 

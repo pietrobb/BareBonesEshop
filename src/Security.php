@@ -477,8 +477,11 @@ class Security {
         }, $failClosed);
 
         if (!$allowed) {
-            http_response_code(429);
-            header('Retry-After: ' . $windowSeconds);
+            // A check after the response (WebWorker::defer, e.g. a throttled confirmation mail) has no headers left to set.
+            if (!headers_sent()) {
+                http_response_code(429);
+                header('Retry-After: ' . $windowSeconds);
+            }
             return false;
         }
         return true;

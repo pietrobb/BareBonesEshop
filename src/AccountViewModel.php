@@ -176,6 +176,14 @@ final class AccountViewModel
     public static function verifyEmailFlash(string $token, int $customerId): array
     {
         $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token, $customerId) !== null;
+        // R19: the welcome ("you can sign in at any time") is sent once the address is confirmed, when it is true.
+        $customer = $verified ? Customers::byId($customerId) : null;
+        if ($customer !== null) {
+            $email = (string)$customer['email'];
+            $vars = ['customer_name' => (string)(($customer['name'] ?? '') ?: $email), 'shop_name' => (string)Template::branding()['name']];
+            $locale = I18n::locale();
+            WebWorker::defer(static fn() => MailService::send('account_welcome', $email, $locale, $vars, null));
+        }
         return ['message' => I18n::t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid'), 'type' => $verified ? 'ok' : 'error'];
     }
 
