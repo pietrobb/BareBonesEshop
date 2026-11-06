@@ -2,16 +2,6 @@
 
 ## Unreleased
 
-- **Small fixes** (review round 18, low).
-  - The JS tool configs at the web root (`eslint.config.js`, `playwright.config.js`, `lighthouserc.js`, any
-    `*.config.js`/`.mjs`/`.cjs`) are denied by `.htaccess`, `router.php` and `deploy/nginx.conf`. Update a custom
-    nginx configuration accordingly.
-  - The invoice link in the invoice e-mail opens the invoice page in the order's language, not in the language of the
-    admin who issued or resent it.
-  - Invoices and credit notes print their dates in the document language (`24. 10. 2026`, not `2026-10-24`); the
-    delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
-  - E-mails name the store in the From line (`"Slovenský obchod" <noreply@…>`), and without `MAIL_REPLY_TO` a reply
-    goes to the store's contact address (`legal.email` in `stores.json`) instead of the noreply mailbox.
 - **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
   - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
     cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →
@@ -60,6 +50,16 @@
   - UX: the admin order history shows actions in words, one skip link per page, the checkout no longer runs a
     method's name into its price ("Platba kartouZdarma"), and the breadcrumb is laid out as one separated line.
 
+- **Small fixes** (review round 18, low).
+  - The JS tool configs at the web root (`eslint.config.js`, `playwright.config.js`, `lighthouserc.js`, any
+    `*.config.js`/`.mjs`/`.cjs`) are denied by `.htaccess`, `router.php` and `deploy/nginx.conf`. Update a custom
+    nginx configuration accordingly.
+  - The invoice link in the invoice e-mail opens the invoice page in the order's language, not in the language of the
+    admin who issued or resent it.
+  - Invoices and credit notes print their dates in the document language (`24. 10. 2026`, not `2026-10-24`); the
+    delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
+  - E-mails name the store in the From line (`"Slovenský obchod" <noreply@…>`), and without `MAIL_REPLY_TO` a reply
+    goes to the store's contact address (`legal.email` in `stores.json`) instead of the noreply mailbox.
 - **Developer docs and carrier data** (review round 17, medium).
   - The migration example in `docs/EXTENSIONS.md` creates its table with an `id` column; it named no primary-key
     column, so SQLite got a column called `INTEGER` and MySQL/MariaDB refused it (ERROR 1064). A test runs the
