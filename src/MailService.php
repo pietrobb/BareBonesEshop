@@ -109,6 +109,13 @@ class MailService {
         }
         $replyTo = strtolower(trim((string)(getenv('MAIL_REPLY_TO') ?: '')));
         if ($replyTo !== '' && !filter_var($replyTo, FILTER_VALIDATE_EMAIL)) $replyTo = '';
+        // R18 UX: the From address is a noreply; a customer's reply goes to the store's contact address, and the
+        // From line names the store ("Woodle <noreply@woodle.sk>") instead of a bare address.
+        $brand = StoreContext::hasCurrent() ? Template::branding() : [];
+        if ($replyTo === '') {
+            $contact = strtolower(trim((string)($brand['contact']['email'] ?? '')));
+            $replyTo = filter_var($contact, FILTER_VALIDATE_EMAIL) ? $contact : '';
+        }
 
         // Log row BEFORE send attempt (so failures are visible).
         $logId = self::logInsert($to, $template, $locale, $rendered['subject'], $adapter->adapterId(), $orderId, $vars);
@@ -116,6 +123,7 @@ class MailService {
         $msg = [
             'to'          => $to,
             'from'        => $from,
+            'from_name'   => trim((string)($brand['name'] ?? '')),
             'subject'     => $rendered['subject'],
             'html'        => $rendered['html'],
             'text'        => $rendered['text'],

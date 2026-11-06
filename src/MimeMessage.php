@@ -77,7 +77,10 @@ final class MimeMessage
         $altBoundary = 'bbe-alt-' . bin2hex(random_bytes(8));
         $mixBoundary = 'bbe-mix-' . bin2hex(random_bytes(8));
         // RFC 2047 encoded-words are folded (75 chars each) instead of one unbounded line.
-        $data = "From: {$from}\r\n"
+        $fromName = self::stripCrlf(trim((string)($msg['from_name'] ?? '')));
+        $fromHeader = $fromName === '' ? $from
+            : (preg_match('/^[\x20-\x7E]*$/', $fromName) ? '"' . addcslashes($fromName, '"\\') . '"' : self::encodeSubject($fromName)) . " <{$from}>";
+        $data = "From: {$fromHeader}\r\n"
               . "To: {$to}\r\n"
               . "Subject: " . self::encodeSubject($subject) . "\r\n"
               . "Date: " . date('r') . "\r\n"

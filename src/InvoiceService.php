@@ -255,7 +255,10 @@ final class InvoiceService
         $link = self::downloadLink((int)($invoice['id'] ?? 0));
         $appUrl = Security::configuredAppUrl();
         $link = $appUrl === null ? $link : Security::storeAppUrl($appUrl, StoreContext::current()->config()) . Template::seoPath($link);
-        $mailLocale = (string)($order['locale'] ?? '') ?: (string)($invoice['locale'] ?? '') ?: I18n::locale();
+        $documentLocale = (string)($order['locale'] ?? '') ?: (string)($invoice['locale'] ?? '');
+        // The customer's language, not the one of the admin resending it (storeUrl() adds the active ?lang=).
+        $link = $documentLocale === '' ? Bootstrap::withoutLang($link) : Template::withOrderLang($link, ['locale' => $documentLocale]);
+        $mailLocale = $documentLocale ?: I18n::locale();
         return [
             'order_number' => (string)($order['order_number'] ?? ''),
             'invoice_number' => (string)$invoice['number'],
@@ -1954,14 +1957,15 @@ final class InvoiceService
         $pdf->text(20, $y, $documentTitle . ' ' . $invoice['number'], ['size' => 18, 'bold' => true]);
 
         // Right-aligned dates
-        $pdf->text(120, $y, $L['issued_at'] . ': ' . $invoice['issued_at'], ['size' => 9]);
-        $pdf->text(120, $y + 5, $L['delivery_date'] . ': ' . $invoice['delivery_date'], ['size' => 9]);
-        $pdf->text(120, $y + 10, $L['due_date'] . ': ' . $invoice['due_date'], ['size' => 9]);
+        $date = static fn(mixed $ymd): string => I18n::date((string)$ymd, $locale);
+        $pdf->text(120, $y, $L['issued_at'] . ': ' . $date($invoice['issued_at']), ['size' => 9]);
+        $pdf->text(120, $y + 5, $L['delivery_date'] . ': ' . $date($invoice['delivery_date']), ['size' => 9]);
+        $pdf->text(120, $y + 10, $L['due_date'] . ': ' . $date($invoice['due_date']), ['size' => 9]);
 
         // A credit note names the invoice it corrects.
         $source = $creditNote && !empty($invoice['refers_to_invoice_id']) ? self::byId((int)$invoice['refers_to_invoice_id']) : null;
         if ($source !== null) {
-            $pdf->text(20, $y + 10, $L['refers_to'] . ' ' . $source['number'] . ' (' . $L['issued_at'] . ': ' . $source['issued_at'] . ')', ['size' => 9]);
+            $pdf->text(20, $y + 10, $L['refers_to'] . ' ' . $source['number'] . ' (' . $L['issued_at'] . ': ' . $date($source['issued_at']) . ')', ['size' => 9]);
         }
 
         $y += 22;
