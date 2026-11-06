@@ -136,6 +136,8 @@ try {
     Customers::register($a102Email, 'A102-strong-pass!', 'Array Tester');
     $r7rEmail = 'r7r-erase-' . bin2hex(random_bytes(3)) . '@example.com';
     Customers::register($r7rEmail, 'R7r-strong-pass!', 'Erase Tester');
+    // R18: the sign-in form admits confirmed addresses only.
+    Db::get()->prepare('UPDATE customers SET email_verified_at = ' . Db::now() . ' WHERE email IN (?, ?)')->execute([$a102Email, $r7rEmail]);
     $a102Customer = $a102Session();
     $a102Login = $a102Request('POST', '/account.php', ['cookie' => $a102Customer['cookie'],
         'form' => ['csrf_token' => $a102Customer['csrf'], 'action' => 'login', 'email' => $a102Email, 'password' => 'A102-strong-pass!']]);

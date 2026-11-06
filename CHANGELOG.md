@@ -56,6 +56,26 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   breadcrumb, a homepage hero without an image, the method names at checkout) but kept `?v=2.3.0`, so browsers went on using the cached old files for up
   to a year. A test now pins a fingerprint of the theme's assets to its version and fails when they change without a
   new version.
+- **A partial payment no longer pays the order; feeds are rebuilt only for a change they show** (review round 18,
+  medium).
+  - Recording "Paid" on the order detail with less than the order total (10 € of 100 €) is refused with the missing
+    amount; the order no longer goes to fulfilment. Money on a cancelled order is still recorded for a refund.
+  - Feeds and sitemaps are no longer rebuilt by every ERP or feed sync and every admin stock edit: an unchanged ERP
+    product keeps its `updated_at` (a stock-only change moves `stock_updated_at`), a price feed with the same price
+    does not rewrite the product, a recount to the same number changes nothing, and a stock change that keeps the
+    product in stock refreshes the product pages only. A product going in or out of stock still rebuilds them.
+- **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
+  - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
+    cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →
+    1234600, B2B credit limit 123456 → 123500), and saving one price-list line rounded every other line. Admin
+    amount fields accept cents in every currency; the storefront still charges whole units.
+  - A product created in the admin of a store that shares another store's catalog is priced in the currency of the
+    store the catalog belongs to (a HU store sharing the default EUR catalog creates EUR products and sells them
+    through its HUF price list). It used to be priced in HUF and could not be sold in the EUR store. The product
+    form says which currency its prices are in.
+- **The mariadb-dump check names only the real generated columns** (review round 18, medium). Against MySQL 8 it
+  listed every column with a `DEFAULT CURRENT_TIMESTAMP` (184 instead of 2), because MySQL marks them
+  `DEFAULT_GENERATED`; only `VIRTUAL` and `STORED` generated columns count now.
 - **Bounded cart restore and checkout fields** (review round 18, medium and low).
   - `cart_restore` reads at most 200 entries, restores at most 100 lines and prices the cart once; a body over
     64 KiB is refused with 413. One anonymous request with 20 000 lines used to take ~40 s and end in HTTP 500.
@@ -63,12 +83,32 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   - Checkout refuses a name or e-mail over 191 characters, a phone over 40, a street over 200, a city over 100, a
     ZIP over 20 and a company over 255 with `checkout.error.field_too_long` (and `field`, `max_length` in JSON),
     instead of a failed order on MySQL.
+- **Sign-up no longer reveals whether an address has an account** (review round 18, medium + low).
+  - The storefront sign-in admits an account only once its e-mail address is confirmed. A sign-up could be signed in
+    at once with the password the visitor had just chosen, which told that the address had had no account. An
+    unconfirmed account gets the same answer as a wrong password (the message now mentions the confirmation link) and
+    its owner is sent the link again (at most 3 an hour); the link plus the password signs in and confirms the address.
+    A completed password reset confirms it too. **Upgrade note:** existing customers who never confirmed their
+    address confirm it at their next sign-in (with the mailed link) or reset the password.
+  - Registering a taken address now takes as long as a new account: the password is hashed first and the account
+    e-mails (welcome, confirmation, sign-in link) are sent after the response.
+  - Per-IP rate limits (sign-in, registration, data export, account offer, admin sign-in) count an IPv6 client per
+    /64 network; one client could rotate through the addresses of its /64.
 - **Bounded prices** (review round 18, medium).
   - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
     `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is
     reported as an error and an existing product keeps its price.
   - A thousands separator must group three digits: `5..0` is refused instead of read as 50.00, and so are `1.29,00`
     and `1234.567,89`; `1.299,00`, `1,299.00` and `12,345,678` parse as before.
+- **Manual orders and withdrawals in the admin** (review round 18, medium).
+  - A manual order (and an edit of its lines) stores the product names in the customer's language, not the admin's.
+  - The shipping and payment selects start on "— choose —"; an order the admin did not pick them for is refused
+    instead of being saved with the first method of the list.
+  - A withdrawal on an order already shipped or delivered tells the admin to wait for the return, not "do not ship".
+- **`shipping.json` methods next to the store's own shipping rates** (review round 18, medium). Once a store had
+  `shipping_rates` rows (the default install seeds Packeta, GLS and pickup), "Standard Delivery" and "Express
+  Delivery" from `shipping.json` were neither offered nor accepted at checkout. They are now quoted alongside the
+  store's rates, at their `shipping.json` prices and free-shipping thresholds; a store method with the same code wins.
 - **Maintenance window after a refused or failed update step** (review round 18, high).
   - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
     `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a
@@ -82,6 +122,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
     migration: the shop opens again instead of staying on 503 for good, or keeps an earlier failed run's window.
   - A lock another process holds on `.maintenance` keeps the shop closed for 24 hours at most.
 
+- **Test suite isolation** (review round 18, medium). The suite's copy of `config.php` now also moves every private
+  directory and log file (jobs, invoices, backups, updates, cache, downloads, logs, GDPR salt) into the suite's own
+  temp directory: it had left about 330 jobs in the developer's `jobs/pending` for their worker to run with the real
+  config, overwritten an invoice and written into their logs. `AppConfig` and `DataOverrides` follow the suite's
+  environment variables only on the command line and only for a suite directory in the system temp directory, so a
+  web request or a stray variable in production cannot point the shop at another config or data directory.
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.
@@ -95,6 +141,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   - UX: the admin order history shows actions in words, one skip link per page, the checkout no longer runs a
     method's name into its price ("Platba kartouZdarma"), and the breadcrumb is laid out as one separated line.
 
+- **Small fixes** (review round 18, low).
+  - The JS tool configs at the web root (`eslint.config.js`, `playwright.config.js`, `lighthouserc.js`, any
+    `*.config.js`/`.mjs`/`.cjs`) are denied by `.htaccess`, `router.php` and `deploy/nginx.conf`. Update a custom
+    nginx configuration accordingly.
+  - The invoice link in the invoice e-mail opens the invoice page in the order's language, not in the language of the
+    admin who issued or resent it.
+  - Invoices and credit notes print their dates in the document language (`24. 10. 2026`, not `2026-10-24`); the
+    delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
+  - E-mails name the store in the From line (`"Slovenský obchod" <noreply@…>`), and without `MAIL_REPLY_TO` a reply
+    goes to the store's contact address (`legal.email` in `stores.json`) instead of the noreply mailbox.
 - **Developer docs and carrier data** (review round 17, medium).
   - The migration example in `docs/EXTENSIONS.md` creates its table with an `id` column; it named no primary-key
     column, so SQLite got a column called `INTEGER` and MySQL/MariaDB refused it (ERROR 1064). A test runs the

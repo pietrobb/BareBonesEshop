@@ -187,7 +187,9 @@ $architectureBudgets = [
     // +3 lines R10 UX10: the product and CMS page editors load the rich-text editor (Catalog.php requires RichText.php).
     // +1 line R14 UX7: the product editor loads the image list script (ImageOrder.php).
     // +14 lines, +1 function, +1 coupling R16 low: product prices are typed in the currency, not in cents (Money).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1317, 'functions' => 26, 'max_function_lines' => 210, 'coupling' => 22],
+    // +4 lines R18 feeds: a stock-only product save moves stock_updated_at, and rebuilds feeds only across in/out of stock.
+    // +14 lines, +1 function, +2 coupling R18 currency: lossless CZK/HUF amounts, a new shared-catalog product in its currency.
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1335, 'functions' => 27, 'max_function_lines' => 210, 'coupling' => 24],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
@@ -248,7 +250,8 @@ $architectureBudgets = [
     // +1 the parcel row shows the cash on delivery it collects.
     // +4 lines, +1 coupling (OrderWorkflow) R15 high 5: shipping the last goods moves the order to shipped and e-mails.
     // +1 coupling (MethodLabels) R15 medium: the parcel list names the carrier ("Packeta"), not its code.
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 285, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 12],
+    // +2 lines R18 acceptance: a withdrawal on a shipped or delivered order waits for the return.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 287, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 12],
     // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected) and the
     // cash on delivery of every parcel, shown also when no carrier API is connected.
     // +14 lines, +1 function R15: only the carrier the customer chose is offered (adminOrderLabelCarriers).
@@ -273,7 +276,7 @@ $architectureBudgets = [
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
     // +8 lines, +1 coupling R10 UX3: the order detail's "Pay" button starts a payment for the unpaid order (PaymentLink).
-    /* R14 #1: the verification link verifies only with the account's sign-in (+6); R17: registering a taken address reads like a new account (+7) */ 'src/Entrypoints/Storefront/Account.php' => ['lines' => 471, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 17],
+    /* R14 #1: the verification link verifies only with the account's sign-in (+6); R17: registering a taken address reads like a new account (+7); R18: no sign-in before the e-mail is verified, even timing (+10, +1 coupling) */ 'src/Entrypoints/Storefront/Account.php' => ['lines' => 481, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 18],
     // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing; +1 coupling R8: legal pages render through ConsumerNotice, shared with the confirmation attachment */ 'coupling' => 9],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).

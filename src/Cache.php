@@ -195,11 +195,13 @@ class Cache {
      * Mark every cached product page, category listing/filter and category tree built from a catalog
      * (default: the active one) stale at once, in every store and channel sharing that catalog.
      * Called by the product, stock and import write paths; readCatalogJson() honours it.
+     * R18: $feeds = false leaves the public feeds and sitemaps (catalogVersion()) alone: a stock change that keeps
+     * the goods in (or out of) stock, a sync whose product rows carry their own updated_at.
      */
-    public static function catalogChanged(?string $catalogId = null): void {
+    public static function catalogChanged(?string $catalogId = null, bool $feeds = true): void {
         try {
             $catalogId ??= StoreContext::current()->catalogId();
-            $written = self::writeCatalogMarker($catalogId);
+            $written = self::writeCatalogMarker($catalogId, $feeds);
             // Inside a transaction a reader can still rebuild an entry from the uncommitted (old) rows
             // after this write: the marker is written again once the transaction is over.
             if (self::inTransaction()) {
@@ -207,7 +209,7 @@ class Cache {
                     register_shutdown_function([self::class, 'flushPendingCatalogChanges']);
                     self::$pendingFlushRegistered = true;
                 }
-                self::$pendingCatalogs[$catalogId] = true;
+                self::$pendingCatalogs[$catalogId] = $feeds || (self::$pendingCatalogs[$catalogId] ?? false);
             }
         } catch (Throwable $e) {
             $written = false; // a cache marker must never fail the product write that triggered it
@@ -215,25 +217,27 @@ class Cache {
         if (!$written) Logger::warning('cache.write_failed', ['path' => 'catalogs']);
     }
 
-    /** @var array<string, true> catalogs changed inside a transaction that was still open */
+    /** @var array<string, bool> catalogs changed inside a transaction that was still open (=> whether their feeds changed) */
     private static array $pendingCatalogs = [];
     private static bool $pendingFlushRegistered = false;
 
     /** Rewrite the markers of catalogs changed inside a transaction once no transaction is open (worker loop, shutdown). */
     public static function flushPendingCatalogChanges(): void {
         if (self::$pendingCatalogs === [] || self::inTransaction()) return;
-        $catalogIds = array_keys(self::$pendingCatalogs);
+        $pending = self::$pendingCatalogs;
         self::$pendingCatalogs = [];
-        foreach ($catalogIds as $catalogId) {
-            if (!self::writeCatalogMarker((string)$catalogId)) Logger::warning('cache.write_failed', ['path' => 'catalogs']);
+        foreach ($pending as $catalogId => $feeds) {
+            if (!self::writeCatalogMarker((string)$catalogId, $feeds)) Logger::warning('cache.write_failed', ['path' => 'catalogs']);
         }
     }
 
-    private static function writeCatalogMarker(string $catalogId): bool {
+    private static function writeCatalogMarker(string $catalogId, bool $feeds): bool {
         $marker = self::catalogMarker($catalogId);
         $dir = dirname($marker);
-        return (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir))
-            && @file_put_contents($marker, time() . ' ' . bin2hex(random_bytes(8)), LOCK_EX) !== false;
+        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) return false;
+        $token = time() . ' ' . bin2hex(random_bytes(8));
+        return @file_put_contents($marker, $token, LOCK_EX) !== false
+            && (!$feeds || @file_put_contents(self::feedsMarker($catalogId), $token, LOCK_EX) !== false);
     }
 
     private static function inTransaction(): bool {
@@ -265,16 +269,21 @@ class Cache {
     /**
      * R17: a token that changes with every catalogChanged() of the active catalog ('' before the first): a product
      * or page saved, a price list changed, a product or variant going in or out of stock. Part of the public feed and
-     * sitemap fingerprint, so those are rebuilt then, however soon after they were written.
+     * sitemap fingerprint, so those are rebuilt then, however soon after they were written. R18: not with a
+     * catalogChanged(feeds: false).
      */
     public static function catalogVersion(): string {
         self::flushPendingCatalogChanges();
-        $marker = self::catalogMarker(StoreContext::current()->catalogId());
+        $marker = self::feedsMarker(StoreContext::current()->catalogId());
         return is_file($marker) ? (string)@file_get_contents($marker) : '';
     }
 
     private static function catalogMarker(string $catalogId): string {
         return self::dir() . '/catalogs/' . rawurlencode($catalogId) . '.changed';
+    }
+
+    private static function feedsMarker(string $catalogId): string {
+        return self::dir() . '/catalogs/' . rawurlencode($catalogId) . '.feeds';
     }
 
     /**

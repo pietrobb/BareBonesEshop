@@ -137,7 +137,8 @@ class Import {
         self::recountCategories($db);
 
         Db::optimize($db);
-        if ($imported > 0) Cache::catalogChanged();
+        // R18: feeds and sitemaps follow the products' own updated_at (bumped only by a real change), not every import.
+        if ($imported > 0) Cache::catalogChanged(null, false);
 
         return [
             'success'  => !$limitExceeded,
@@ -356,57 +357,26 @@ class Import {
             }
         }
 
-        if (Db::isSqlite()) {
-            $stmt = $db->prepare("
-                INSERT INTO products (store_id, sku, slug, product_type, name, category_id, price, compare_price, stock, status,
-                    summary, description, images, attrs, tags, filter_tags, weight_g, translations)
-                VALUES (:catalog, :sku, :slug, :ptype, :name, :cat, :price, :cprice, :stock, :status,
-                    :summary, :desc, :images, :attrs, :tags, :ftags, :weight, :translations)
-                ON CONFLICT(sku) DO UPDATE SET
-                    slug = excluded.slug,
-                    product_type = excluded.product_type,
-                    name = excluded.name,
-                    category_id = excluded.category_id,
-                    price = excluded.price,
-                    compare_price = excluded.compare_price,
-                    stock = excluded.stock,
-                    status = excluded.status,
-                    summary = excluded.summary,
-                    description = excluded.description,
-                    images = excluded.images,
-                    attrs = excluded.attrs,
-                    tags = excluded.tags,
-                    filter_tags = excluded.filter_tags,
-                    weight_g = excluded.weight_g,
-                    translations = excluded.translations,
-                    updated_at = datetime('now')
-            ");
-        } else {
-            $stmt = $db->prepare("
-                INSERT INTO products (store_id, sku, slug, product_type, name, category_id, price, compare_price, stock, status,
-                    summary, description, images, attrs, tags, filter_tags, weight_g, translations)
-                VALUES (:catalog, :sku, :slug, :ptype, :name, :cat, :price, :cprice, :stock, :status,
-                    :summary, :desc, :images, :attrs, :tags, :ftags, :weight, :translations)
-                ON DUPLICATE KEY UPDATE
-                    slug = VALUES(slug),
-                    product_type = VALUES(product_type),
-                    name = VALUES(name),
-                    category_id = VALUES(category_id),
-                    price = VALUES(price),
-                    compare_price = VALUES(compare_price),
-                    stock = VALUES(stock),
-                    status = VALUES(status),
-                    summary = VALUES(summary),
-                    description = VALUES(description),
-                    images = VALUES(images),
-                    attrs = VALUES(attrs),
-                    tags = VALUES(tags),
-                    filter_tags = VALUES(filter_tags),
-                    weight_g = VALUES(weight_g),
-                    translations = VALUES(translations),
-                    updated_at = NOW()
-            ");
-        }
+        // R18: an ERP or feed sync that sends the product unchanged keeps its updated_at (the feed and sitemap cache
+        // fingerprint reads it), and a stock-only change moves stock_updated_at instead. Both are assigned first: MySQL
+        // evaluates SET left to right, so they still compare the old row.
+        $columns = ['slug' => 'slug', 'product_type' => 'ptype', 'name' => 'name', 'category_id' => 'cat', 'price' => 'price',
+            'compare_price' => 'cprice', 'stock' => 'stock', 'status' => 'status', 'summary' => 'summary', 'description' => 'desc',
+            'images' => 'images', 'attrs' => 'attrs', 'tags' => 'tags', 'filter_tags' => 'ftags', 'weight_g' => 'weight',
+            'translations' => 'translations'];
+        $sqlite = Db::isSqlite();
+        $new = static fn(string $column): string => $sqlite ? "excluded.{$column}" : "VALUES({$column})";
+        $same = static fn(string $column): string => $sqlite ? "products.{$column} IS {$new($column)}" : "{$column} <=> {$new($column)}";
+        $content = implode(' AND ', array_map($same, array_diff(array_keys($columns), ['stock'])));
+        $now = Db::now();
+        $assignments = array_merge(
+            ["updated_at = CASE WHEN {$content} THEN updated_at ELSE {$now} END",
+                "stock_updated_at = CASE WHEN {$same('stock')} THEN stock_updated_at ELSE {$now} END"],
+            array_map(static fn(string $column): string => "{$column} = {$new($column)}", array_keys($columns))
+        );
+        $stmt = $db->prepare('INSERT INTO products (store_id, sku, ' . implode(', ', array_keys($columns)) . ')
+            VALUES (:catalog, :sku, ' . implode(', ', array_map(static fn(string $p): string => ":{$p}", $columns)) . ')
+            ' . ($sqlite ? 'ON CONFLICT(sku) DO UPDATE SET ' : 'ON DUPLICATE KEY UPDATE ') . implode(', ', $assignments));
 
         $stmt->execute([
             ':catalog'      => $catalog,

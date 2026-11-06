@@ -414,7 +414,19 @@ class Security {
     }
 
     private static function rateKey(string $action, bool $bindIp): string {
-        return hash('sha256', $action . '|' . ($bindIp ? self::clientIp() : 'global'));
+        return hash('sha256', $action . '|' . ($bindIp ? self::rateLimitSubject() : 'global'));
+    }
+
+    /**
+     * The client a per-IP limit counts: the IPv4 address, or the /64 network of an IPv6 address. R18: one IPv6
+     * customer line (and any server) gets a whole /64, so a limit per address let it rotate through 2^64 of them.
+     */
+    public static function rateLimitSubject(?string $ip = null): string {
+        $ip ??= self::clientIp();
+        $packed = @inet_pton($ip);
+        if ($packed === false || strlen($packed) !== 16) return $ip;
+        if (str_starts_with($packed, str_repeat("\0", 10) . "\xff\xff")) return (string)inet_ntop(substr($packed, 12)); // ::ffff:a.b.c.d
+        return inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
     }
 
     /**
@@ -695,14 +707,14 @@ class Security {
             if ($isFormLogin && !self::csrfValidate()) self::renderAdminLogin('admin.login.error_form_expired');
             if ($user !== '' && $pass !== '') {
                 $ip = self::clientIp();
-                [$throttle, $retryAfter] = self::reserveAdminLogin($user, $ip);
+                [$throttle, $retryAfter] = self::reserveAdminLogin($user, self::rateLimitSubject($ip));
                 if ($retryAfter > 0 || $throttle === null) {
                     header('Retry-After: ' . $retryAfter);
                     self::renderAdminLogin('admin.login.error_throttled', 429);
                 }
                 $identity = AdminIdentity::authenticate($user, $pass, $mfa, $ip, (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
                 if ($identity !== null) {
-                    $throttle->recordSuccess($user, $ip);
+                    $throttle->recordSuccess($user, self::rateLimitSubject($ip));
                     session_regenerate_id(true);
                     $_SESSION['admin_authenticated'] = true;
                     $_SESSION['admin_identity_token'] = $identity['token'];
@@ -725,7 +737,7 @@ class Security {
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
         $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
         $ip = self::clientIp();
-        [$throttle, $retryAfter] = $user !== '' ? self::reserveAdminLogin($user, $ip) : [null, 0];
+        [$throttle, $retryAfter] = $user !== '' ? self::reserveAdminLogin($user, self::rateLimitSubject($ip)) : [null, 0];
         if ($retryAfter > 0) {
             http_response_code(429);
             header('Retry-After: ' . $retryAfter);

@@ -34,7 +34,7 @@ KEY=$(docker exec -u uploader "$NAME" php -r 'echo require "/var/www/html/instal
 if [ "$KEEP" = "--prepare-only" ]; then trap - EXIT; echo "Ready: http://127.0.0.1:$PORT (container $NAME), installation key $KEY"; exit 0; fi
 
 cd "$ROOT"
-BOOKSHOP_URL="http://127.0.0.1:$PORT" BOOKSHOP_SHOTS="$OUT/screenshots" BOOKSHOP_PRIVATE_PARENT=/srv/bookshop-data BOOKSHOP_INSTALL_KEY="$KEY" \
+BOOKSHOP_URL="http://127.0.0.1:$PORT" BOOKSHOP_CONTAINER="$NAME" BOOKSHOP_SHOTS="$OUT/screenshots" BOOKSHOP_PRIVATE_PARENT=/srv/bookshop-data BOOKSHOP_INSTALL_KEY="$KEY" \
   npx playwright test -c tests/bookshop/playwright.config.js
 # The installation removes its key and the starter source (database, paid eBooks) from the web space.
 docker exec "$NAME" sh -c 'test ! -e /var/www/html/install-key.php && test ! -e /var/www/html/demo/bookshop/dist' \

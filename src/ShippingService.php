@@ -104,7 +104,10 @@ class ShippingService
         if (self::hasDatabasePricing() && StoreContext::current()->usesProviderPrices($currency)) {
             $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
             if (!empty($dbRates)) {
-                return self::applyFreeShippingRules($dbRates, $subtotal, $physicalQty);
+                // R18: the shipping.json delivery methods stay orderable next to the store's own rates.
+                $dbCodes = array_map(static fn(array $r): string => (string)($r['method_code'] ?? ''), $dbRates);
+                $legacy = self::legacyRates($country, $weightG, $subtotal, strtoupper($currency ?? StoreContext::current()->currency()), $dbCodes);
+                return self::applyFreeShippingRules(array_merge($dbRates, $legacy), $subtotal, $physicalQty);
             }
         }
 
@@ -139,12 +142,24 @@ class ShippingService
             }
         }
 
-        // Legacy fallback: add JSON-based methods for carriers not yet adapted. shipping.json prices
-        // are in its own "currency" (EUR when absent) and are never quoted to a store in another one.
+        $rates = array_merge($rates, self::legacyRates($country, $weightG, $subtotal, $currency, $coveredCarriers));
+
+        return self::applyFreeShippingRules($rates, $subtotal, $physicalQty);
+    }
+
+    /**
+     * The shipping.json delivery methods (standard, express) a country can get, except those already quoted under
+     * the same code. shipping.json prices are in its own "currency" (EUR when absent) and are never quoted to a store
+     * in another one.
+     *
+     * @param list<string> $covered method codes already quoted
+     */
+    private static function legacyRates(string $country, int $weightG, int $subtotal, string $currency, array $covered): array
+    {
+        $rates = [];
         $legacyMethods = Shipping::currency() === $currency ? ['standard', 'express'] : [];
         foreach ($legacyMethods as $method) {
-            // Skip if already covered by an adapter
-            if (in_array($method, $coveredCarriers, true)) continue;
+            if (in_array($method, $covered, true)) continue;
 
             $cost = Shipping::calculate($method, $country, $weightG, $subtotal);
             if ($cost >= 0) { // -1 means "not available for zone"
@@ -170,8 +185,7 @@ class ShippingService
                 ];
             }
         }
-
-        return self::applyFreeShippingRules($rates, $subtotal, $physicalQty);
+        return $rates;
     }
 
     public static function selectRate(

@@ -50,7 +50,11 @@ class Inventory {
         StockAlerts::touch($sku);
         $availableAfter = $onHandAfter - $reservedAfter;
         $availableBefore = $availableAfter - $quantityDelta + $reservedDelta;
-        if (!in_array($type, self::ORDER_FLOW_MOVEMENTS, true) || ($availableBefore > 0) !== ($availableAfter > 0)) Cache::catalogChanged();
+        // R18: the public feeds and sitemaps show availability only, and a recount to the same number (every feed/ERP
+        // sync books one per SKU) changes nothing at all.
+        $flipped = ($availableBefore > 0) !== ($availableAfter > 0);
+        if ($flipped) Cache::catalogChanged();
+        elseif (!in_array($type, self::ORDER_FLOW_MOVEMENTS, true) && ($quantityDelta !== 0 || $reservedDelta !== 0)) Cache::catalogChanged(null, false);
         if ($availableBefore <= 0 && $availableAfter > 0) BackInStock::touch($sku); // R10 UX8: shoppers waiting for it
         return $stmt->rowCount() === 1;
     }
