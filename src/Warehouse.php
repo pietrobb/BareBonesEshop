@@ -30,6 +30,12 @@ class Warehouse {
         return $catalog;
     }
 
+    /** R18/R19: the currency (lower case) a new product of $catalog is priced in: that of the store the catalog belongs to. */
+    public static function catalogCurrency(string $catalog): string {
+        $config = (array)((Bootstrap::stores()['stores'] ?? [])[self::catalogStoreId($catalog)] ?? []);
+        return strtolower(trim((string)($config['currency'] ?? '')) ?: StoreContext::current()->currency());
+    }
+
     public static function byId(int $id): ?array {
         $stmt = Db::get()->prepare("SELECT * FROM warehouses WHERE id = :id AND store_id = :store");
         $stmt->execute([':id' => $id, ':store' => StoreContext::current()->catalogId()]);
