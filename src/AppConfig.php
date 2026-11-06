@@ -14,23 +14,46 @@ final class AppConfig
 {
     public const SUITE_FILE = 'suite-config.php';
 
+    public const SUITE_DIR_PREFIX = 'barebones-suite-data-';
+
     public static function path(string $root): string
     {
-        $dir = getenv('BBE_SUITE_DATA_DIR');
-        $suiteRoot = getenv('BBE_SUITE_APP_ROOT');
-        if (is_string($dir) && $dir !== '' && is_string($suiteRoot) && $suiteRoot !== ''
-            && is_file($dir . '/' . self::SUITE_FILE) && realpath($root) === $suiteRoot) {
-            return $dir . '/' . self::SUITE_FILE;
-        }
+        $dir = self::suiteDataDir($root);
+        if ($dir !== null && is_file($dir . '/' . self::SUITE_FILE)) return $dir . '/' . self::SUITE_FILE;
         return $root . '/config.php';
     }
 
     /**
-     * The suite's config: the developer's config (database, private directories, app_url, keys stay, the suite runs
-     * in this environment) with everything that reaches outside the machine reset to config.example.php.
+     * The test suite's data directory, inherited through the environment by the processes the suite starts, for this
+     * same application root. R18: only on the command line (the suite, its php -S servers and CLI children) and only a
+     * suite directory in the system temp directory: a web request or a stray variable in a production environment can
+     * no longer point the shop at another config.php or data directory.
      */
-    public static function suiteConfigForTesting(array $config, array $example): array
+    public static function suiteDataDir(string $root): ?string
     {
+        if (!in_array(PHP_SAPI, ['cli', 'cli-server'], true)) return null;
+        $dir = getenv('BBE_SUITE_DATA_DIR');
+        $suiteRoot = getenv('BBE_SUITE_APP_ROOT');
+        if (!is_string($dir) || $dir === '' || !is_string($suiteRoot) || $suiteRoot === '' || realpath($root) !== $suiteRoot) return null;
+        $real = realpath($dir);
+        $temp = realpath(sys_get_temp_dir());
+        if ($real === false || $temp === false || dirname($real) !== $temp || !str_starts_with(basename($real), self::SUITE_DIR_PREFIX)) return null;
+        return $dir;
+    }
+
+    /**
+     * The suite's config: the developer's config (database, app_url, keys stay, the suite runs in this environment) with
+     * everything that reaches outside the machine reset to config.example.php. With $privateDir every private directory
+     * and log file moves under it (R18: the suite left ~330 jobs in the developer's jobs/pending for their worker to run
+     * with the real config, overwrote an invoice and wrote into their logs).
+     */
+    public static function suiteConfigForTesting(array $config, array $example, ?string $privateDir = null): array
+    {
+        if ($privateDir !== null) {
+            $privateDir = rtrim(str_replace('\\', '/', $privateDir), '/');
+            $config['private_runtime_dir'] = $privateDir;
+            foreach (self::SUITE_PRIVATE_PATHS as $key => $relative) $config[$key] = $privateDir . '/' . $relative;
+        }
         foreach (self::SUITE_RESET as $key) {
             if (array_key_exists($key, $example)) {
                 $config[$key] = $example[$key];
@@ -48,6 +71,15 @@ final class AppConfig
         }
         return $config;
     }
+
+    /** Where the suite's copy keeps what config.php puts in the private directory (relative to the suite's one). */
+    private const SUITE_PRIVATE_PATHS = [
+        'jobs_dir' => 'jobs', 'invoice_storage_dir' => 'invoices', 'backup_storage_dir' => 'backups',
+        'backup_log_file' => 'logs/backup.log', 'backup_recovery_dir' => 'restore-recovery',
+        'structured_log_file' => 'logs/application.jsonl', 'metrics_log_file' => 'logs/metrics.jsonl',
+        'update_storage_dir' => 'updates', 'private_cache_dir' => 'cache', 'digital_assets_base_dir' => 'downloads',
+        'gdpr_salt_file' => 'secrets/gdpr_salt',
+    ];
 
     /** Extensions, outbound webhooks, mail/ERP/carrier providers and integrations, gateway credentials, alert mail. */
     private const SUITE_RESET = [
