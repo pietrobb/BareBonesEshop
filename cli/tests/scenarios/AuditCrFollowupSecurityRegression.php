@@ -172,7 +172,7 @@ PHP);
     // would let a few addresses lock any customer out (lockout DoS), so failures from other IPs
     // must never block the owner, while the hammering IPs themselves are throttled.
     $crsEmail = 'crs-login@example.com';
-    $pdo->prepare("INSERT INTO customers (email, password_hash, name, locale, status, store_id) VALUES (?, ?, 'CRS', 'en', 'active', 'default')")
+    $pdo->prepare("INSERT INTO customers (email, password_hash, name, locale, status, store_id, email_verified_at) VALUES (?, ?, 'CRS', 'en', 'active', 'default', '2026-01-01 00:00:00')")
         ->execute([$crsEmail, password_hash('crs-customer-pass', PASSWORD_BCRYPT, ['cost' => 4])]);
     file_put_contents($crsRoot . '/account.php', <<<'PHP'
 <?php

@@ -1698,7 +1698,7 @@ return [
     'account.err_weak_password'   => 'Heslo musí mať aspoň 8 znakov.',
     'account.err_email_taken'     => 'Tento e-mail je už registrovaný.',
     'account.register_check_email' => 'Na adresu {email} sme poslali správu. Ak ste si práve vytvorili účet, môžete sa hneď prihlásiť svojím heslom.',
-    'account.err_invalid_credentials' => 'Neplatný e-mail alebo heslo.',
+    'account.err_invalid_credentials' => 'Neplatný e-mail alebo heslo. Ak ste účet práve založili, najprv potvrďte e-mailovú adresu odkazom, ktorý sme vám poslali.',
     'account.err_account_blocked' => 'Tento účet je zablokovaný.',
     'account.err_invalid_current_password' => 'Aktuálne heslo nie je správne.',
     'account.err_invalid_or_expired_token' => 'Neplatný alebo exspirovaný odkaz na obnovu.',

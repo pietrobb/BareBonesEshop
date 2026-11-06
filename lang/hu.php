@@ -1689,7 +1689,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_weak_password'   => 'A jelszónak legalább 8 karakter hosszúnak kell lennie.',
     'account.err_email_taken'     => 'Ez az e-mail már regisztrálva van.',
     'account.register_check_email' => 'Üzenetet küldtünk a(z) {email} címre. Ha most hozta létre a fiókját, máris bejelentkezhet a jelszavával.',
-    'account.err_invalid_credentials' => 'Érvénytelen e-mail vagy jelszó.',
+    'account.err_invalid_credentials' => 'Érvénytelen e-mail vagy jelszó. Ha most hozta létre a fiókot, előbb erősítse meg az e-mail-címét az elküldött hivatkozással.',
     'account.err_account_blocked' => 'Ez a fiók zárolva van.',
     'account.err_invalid_current_password' => 'A jelenlegi jelszó nem helyes.',
     'account.err_invalid_or_expired_token' => 'Érvénytelen vagy lejárt link.',

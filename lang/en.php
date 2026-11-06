@@ -1689,7 +1689,7 @@ return [
     'account.err_weak_password'   => 'Password must be at least 8 characters.',
     'account.err_email_taken'     => 'This email is already registered.',
     'account.register_check_email' => 'We have sent a message to {email}. If you have just created your account, you can sign in now with your password.',
-    'account.err_invalid_credentials' => 'Invalid email or password.',
+    'account.err_invalid_credentials' => 'Invalid email or password. If you have just created the account, first confirm your e-mail address with the link we sent you.',
     'account.err_account_blocked' => 'This account is blocked.',
     'account.err_invalid_current_password' => 'Current password is incorrect.',
     'account.err_invalid_or_expired_token' => 'Invalid or expired reset link.',

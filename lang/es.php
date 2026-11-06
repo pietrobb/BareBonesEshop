@@ -316,7 +316,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.addr_phone' => 'Teléfono',
     'account.err_invalid_email' => 'Correo electrónico no válido.',
     'account.err_weak_password' => 'La contraseña debe tener al menos 8 caracteres.',
-    'account.err_invalid_credentials' => 'Correo o contraseña incorrectos.',
+    'account.err_invalid_credentials' => 'Correo o contraseña incorrectos. Si acaba de crear la cuenta, confirme primero su dirección de correo con el enlace que le enviamos.',
     'account.privacy' => 'Privacidad y datos',
     'account.privacy_intro' => 'Gestione aquí sus datos personales y preferencias de cookies.',
     'account.gdpr_export_title' => 'Descargar mis datos',
