@@ -73,6 +73,14 @@ final class DeliveryNote {
         return array_values(array_filter(array_map('trim', $lines), static fn(string $line): bool => $line !== ''));
     }
 
+    /** The order's day on the store's calendar in the current language's date format (created_at is UTC). */
+    private static function orderDay(array $order): string {
+        $created = trim((string)($order['created_at'] ?? ''));
+        $ts = $created === '' ? false : strtotime($created . ' UTC');
+        if ($ts === false) return $created;
+        return I18n::date(ShopTime::date('Y-m-d', $ts, (string)($order['store_id'] ?? '') ?: null));
+    }
+
     /** One print-ready HTML document, one page per order. */
     public static function html(array $notes): string {
         $seller = (string)(StoreContext::current()->legal()['name'] ?? '');
@@ -86,7 +94,7 @@ final class DeliveryNote {
                 . (!empty($note['shipment']) ? ' data-shipment="' . (int)$note['shipment']['id'] . '"' : '') . '>'
                 . '<h1>' . esc(self::title($note)) . '</h1>'
                 . ($seller !== '' ? '<p>' . esc($seller) . '</p>' : '')
-                . '<p>' . esc(I18n::t('admin.th.date')) . ': ' . esc(substr((string)$order['created_at'], 0, 10)) . '</p>'
+                . '<p>' . esc(I18n::t('admin.th.date')) . ': ' . esc(self::orderDay($order)) . '</p>'
                 . '<h2>' . esc(I18n::t('admin.delivery_note.ship_to')) . '</h2><p>' . implode('<br>', array_map('esc', self::recipientLines($note))) . '</p>';
             if (($method = self::shippingMethod($note)) !== '') $out .= '<p>' . esc(I18n::t('admin.delivery_note.shipping_method')) . ': ' . esc($method) . '</p>';
             if ($note['pickup']) $out .= '<p>' . esc(I18n::t('pickup_point')) . ': ' . esc((string)($note['pickup']['name'] ?? '')) . ' (ID ' . esc((string)($note['pickup']['id'] ?? '')) . ')</p>';
@@ -111,7 +119,7 @@ final class DeliveryNote {
             $order = $note['order'];
             $pdf->addPage();
             $pdf->text(20, 20, mb_substr(self::title($note), 0, 60), ['size' => 16, 'bold' => true]);
-            $pdf->text(130, 20, I18n::t('admin.th.date') . ': ' . substr((string)$order['created_at'], 0, 10), ['size' => 9]);
+            $pdf->text(130, 20, I18n::t('admin.th.date') . ': ' . self::orderDay($order), ['size' => 9]);
             if ($seller !== '') $pdf->text(130, 25, $seller, ['size' => 9]);
             $y = 34.0;
             $pdf->text(20, $y, I18n::t('admin.delivery_note.ship_to'), ['size' => 10, 'bold' => true]);
