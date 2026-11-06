@@ -44,7 +44,7 @@ try {
     // Timing: the taken address hashes the password like a new account (it returned before password_hash()).
     $r18aTime = static function (string $email): float { $start = hrtime(true); Customers::register($email, 'R18a-timing-pass', 'T'); return (hrtime(true) - $start) / 1e9; };
     $r18aTaken = min($r18aTime($r18aEmail), $r18aTime($r18aEmail));
-    $r18aFresh = $r18aTime('r18-accounts-fresh-' . bin2hex(random_bytes(3)) . '@example.test');
+    $r18aFresh = min($r18aTime('r18-accounts-fresh-' . bin2hex(random_bytes(3)) . '@example.test'), $r18aTime('r18-accounts-fresh-' . bin2hex(random_bytes(3)) . '@example.test'));
     assert_true($r18aTaken >= 0.5 * $r18aFresh, sprintf('R18 accounts: registering a taken address takes as long as a new account (%.3f s vs %.3f s)', $r18aTaken, $r18aFresh));
 
     $r18aDeferred = [];
