@@ -1853,6 +1853,7 @@ return [
     'checkout.error.no_available_items' => 'No products in your cart are available.',
     'checkout.error.mixed_currency' => 'Your cart contains products in different currencies. Please order them separately.',
     'checkout.error.address_required' => 'A delivery address is required for physical products.',
+    'checkout.error.field_too_long' => 'A field is too long. Please shorten the name, contact or address.',
     'checkout.error.shipping_unavailable' => 'Delivery is not available to the selected country.',
     'checkout.error.payment_unavailable' => 'The selected payment method is not available for this order.',
     'checkout.error.synthetic_requires_online' => 'The synthetic checkout requires an online payment method.',

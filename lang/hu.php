@@ -1833,6 +1833,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.no_available_items' => 'A kosárban nincs elérhető termék.',
     'checkout.error.mixed_currency' => 'A kosár különböző pénznemű termékeket tartalmaz. Kérjük, rendelje meg őket külön.',
     'checkout.error.address_required' => 'Fizikai termékeknél a szállítási cím megadása kötelező.',
+    'checkout.error.field_too_long' => 'Az egyik mező túl hosszú. Kérjük, rövidítse le a nevet, az elérhetőséget vagy a címet.',
     'checkout.error.shipping_unavailable' => 'A kiválasztott országba nem lehetséges a szállítás.',
     'checkout.error.payment_unavailable' => 'A választott fizetési mód ennél a rendelésnél nem érhető el.',
     'checkout.error.synthetic_requires_online' => 'A szintetikus rendeléshez online fizetési mód szükséges.',

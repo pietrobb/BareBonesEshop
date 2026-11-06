@@ -1833,6 +1833,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.no_available_items' => 'Żaden produkt w koszyku nie jest dostępny.',
     'checkout.error.mixed_currency' => 'Koszyk zawiera produkty w różnych walutach. Zamów je osobno.',
     'checkout.error.address_required' => 'Adres dostawy jest wymagany dla produktów fizycznych.',
+    'checkout.error.field_too_long' => 'Jedno z pól jest za długie. Skróć imię i nazwisko, dane kontaktowe lub adres.',
     'checkout.error.shipping_unavailable' => 'Dostawa do wybranego kraju jest niedostępna.',
     'checkout.error.payment_unavailable' => 'Wybrana metoda płatności jest niedostępna dla tego zamówienia.',
     'checkout.error.synthetic_requires_online' => 'Syntetyczne zamówienie wymaga płatności online.',
