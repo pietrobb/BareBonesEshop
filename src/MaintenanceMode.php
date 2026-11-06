@@ -7,9 +7,9 @@ declare(strict_types=1);
  * the job worker waits. The marker is <app root>/.maintenance.
  *
  * - R17: the process that entered maintenance holds an exclusive lock on the marker until it leaves. While anyone
- *   holds it the shop stays closed, however long the update takes, also when the check runs in another container on
- *   the same volume (docker compose). The kernel drops the lock when that process ends, so a reused PID cannot keep
- *   the shop closed.
+ *   holds it the shop stays closed, also when the check runs in another container on the same volume (docker
+ *   compose). The kernel drops the lock when that process ends, so a reused PID cannot keep the shop closed.
+ *   R18: any process that can open the marker could hold such a lock, so it counts for MAX_AGE at most.
  * - Without a lock holder, a fresh marker (younger than STALE_AFTER) still blocks: an updater killed a moment ago
  *   may have left half-written files. An older one blocks only while the PID it names still runs on this host as the
  *   same process (same start time), at most MAX_AGE — for a file system without locks.
@@ -36,11 +36,12 @@ final class MaintenanceMode
         clearstatcache(true, $path);
         $since = @filemtime($path);
         if ($since === false) return false;
-        if (self::lockHeld($path)) return true;
         $marker = self::marker($root);
         if (($marker['failed'] ?? false) === true) return true;
         if ($since > time() - self::STALE_AFTER) return true;
         if ($since <= time() - self::MAX_AGE) return false;
+        // R18: anyone who can open the marker can lock it, so a lock alone keeps the shop closed for MAX_AGE at most.
+        if (self::lockHeld($path)) return true;
         return ($marker['host'] ?? null) === (string)gethostname() && self::running((int)($marker['pid'] ?? 0), $marker['start'] ?? null);
     }
 
