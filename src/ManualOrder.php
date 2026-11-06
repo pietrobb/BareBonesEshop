@@ -71,7 +71,8 @@ final class ManualOrder {
         if ($name === '' || !$email) return self::refusal('admin.order.manual.name_email');
         if ($lines === []) return self::refusal('admin.order.manual.no_lines');
         $customerId = self::customerIdFor($email);
-        $priced = self::priced($lines, $buyer, $customerId, null);
+        $locale = self::locale((string)($buyer['locale'] ?? ''));
+        $priced = self::priced($lines, $buyer, $customerId, null, $locale);
         if (isset($priced['error'])) return self::refusal($priced['error'], (string)($priced['detail'] ?? ''));
 
         $customer = [
@@ -81,7 +82,7 @@ final class ManualOrder {
             'phone' => mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', Security::str($buyer['phone'] ?? ''))), 0, 64),
             'address' => $priced['address'],
             'currency' => $priced['currency'],
-            'locale' => self::locale((string)($buyer['locale'] ?? '')),
+            'locale' => $locale,
             'shipping_cost' => $priced['shipping_cost'],
             'payment_fee' => $priced['payment_fee'],
             'payment_method_snapshot' => $priced['payment_method_snapshot'],
@@ -133,8 +134,9 @@ final class ManualOrder {
         $storedScenario = (string)($order['vat_scenario'] ?? '');
         $vatIdStatus = $storedScenario === VatService::SCENARIO_REVERSE_CHARGE ? 'valid' : 'unverified';
         $detail = '';
-        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, $vatIdStatus, $storedScenario, &$detail): array {
-            $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus);
+        $locale = self::locale((string)($order['locale'] ?? ''));
+        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, $vatIdStatus, $storedScenario, $locale, &$detail): array {
+            $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus, $locale);
             if (isset($priced['error'])) {
                 $detail = (string)($priced['detail'] ?? '');
                 return $priced;
@@ -165,16 +167,30 @@ final class ManualOrder {
 
     /**
      * Price $lines for $buyer the way checkout does. Returns ['error' => key, 'detail' => ...] or the order inputs.
-     * $vatIdStatus null checks the VAT ID in VIES; else it is the status the order was placed with.
+     * $vatIdStatus null checks the VAT ID in VIES; else it is the status the order was placed with. R18: priced in the
+     * order's $locale, so the order lines (and their documents) carry the product names in the customer's language.
      * @return array<string, mixed>
      */
-    private static function priced(array $lines, array $buyer, ?int $customerId, ?string $vatIdStatus): array {
+    private static function priced(array $lines, array $buyer, ?int $customerId, ?string $vatIdStatus, string $locale): array {
+        $adminLocale = I18n::locale();
+        I18n::setLocale($locale);
+        try {
+            return self::pricedInLocale($lines, $buyer, $customerId, $vatIdStatus);
+        } finally {
+            I18n::setLocale($adminLocale);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private static function pricedInLocale(array $lines, array $buyer, ?int $customerId, ?string $vatIdStatus): array {
         if (!function_exists('shippingCartMetrics')) require_once __DIR__ . '/Http/ApiHandlers.php';
         return self::withShopperSession($lines, $customerId, static function () use ($lines, $buyer, $customerId, $vatIdStatus): array {
             $country = strtoupper(trim(Security::str($buyer['country'] ?? '')));
             if (!preg_match('/^[A-Z]{2}$/', $country)) return ['error' => 'checkout.error.invalid_country'];
             $shippingMethod = Security::slug($buyer['shipping_method'] ?? '');
             $paymentMethod = Security::str($buyer['payment_method'] ?? '');
+            // R18: the admin picks both; the form preselects neither, an empty choice is never replaced by a default.
+            if ($paymentMethod === '') return ['error' => 'admin.order.manual.choose_methods'];
             if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) return ['error' => 'checkout.error.invalid_payment_method'];
             $company = CheckoutService::buyerCompany($buyer);
             if ($company['error'] !== null) return ['error' => 'admin.order.manual.company', 'detail' => (string)$company['error']];
@@ -205,6 +221,7 @@ final class ManualOrder {
             $subtotal = array_sum(array_column($items, 'total'));
             $digitalOnly = CheckoutService::isDigitalOnly($items);
             if (!$digitalOnly) {
+                if ($shippingMethod === '') return ['error' => 'admin.order.manual.choose_methods'];
                 foreach (['street', 'city', 'zip'] as $field) {
                     if (trim(Security::str($buyer[$field] ?? '')) === '') return ['error' => 'checkout.error.address_required'];
                 }

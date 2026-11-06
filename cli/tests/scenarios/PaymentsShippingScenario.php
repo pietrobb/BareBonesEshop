@@ -937,7 +937,9 @@ assert_equals((int)$twoBooksCod['cod_surcharge'], (int)$twoBooksCod['price'], 'F
 $freeByAmount = ShippingService::selectRate('packeta', 'SK', 1000, 5000, false, 0, 1);
 assert_equals('amount', (string)$freeByAmount['free_reason'], 'Free qty: amount threshold still applies and is recorded');
 foreach (ShippingService::calculateRates('SK', 1000, 2000, false, 0, 2) as $freeQtyRate) {
-    assert_equals(0, (int)$freeQtyRate['price'], 'Free qty: rule applies to every method ' . $freeQtyRate['method_code']);
+    // R18: shipping.json methods are quoted too and follow shipping.json, which sets no free_from_qty.
+    $freeQtyExpected = ($freeQtyRate['provider'] ?? '') === 'legacy' ? Shipping::calculate((string)$freeQtyRate['method_code'], 'SK', 1000, 2000) : 0;
+    assert_equals($freeQtyExpected, (int)$freeQtyRate['price'], 'Free qty: rule applies to every method ' . $freeQtyRate['method_code']);
 }
 $hintRates = ShippingService::calculateRates('SK', 500, 1000, false, 0, 1);
 assert_equals(1, ShippingService::unitsToFreeShipping($hintRates, 1), 'Free qty hint: one more physical item unlocks free shipping');

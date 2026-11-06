@@ -32,6 +32,15 @@
     reported as an error and an existing product keeps its price.
   - A thousands separator must group three digits: `5..0` is refused instead of read as 50.00, and so are `1.29,00`
     and `1234.567,89`; `1.299,00`, `1,299.00` and `12,345,678` parse as before.
+- **Manual orders and withdrawals in the admin** (review round 18, medium).
+  - A manual order (and an edit of its lines) stores the product names in the customer's language, not the admin's.
+  - The shipping and payment selects start on "— choose —"; an order the admin did not pick them for is refused
+    instead of being saved with the first method of the list.
+  - A withdrawal on an order already shipped or delivered tells the admin to wait for the return, not "do not ship".
+- **`shipping.json` methods next to the store's own shipping rates** (review round 18, medium). Once a store had
+  `shipping_rates` rows (the default install seeds Packeta, GLS and pickup), "Standard Delivery" and "Express
+  Delivery" from `shipping.json` were neither offered nor accepted at checkout. They are now quoted alongside the
+  store's rates, at their `shipping.json` prices and free-shipping thresholds; a store method with the same code wins.
 - **Maintenance window after a refused or failed update step** (review round 18, high).
   - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
     `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a

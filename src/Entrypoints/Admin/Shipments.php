@@ -6,10 +6,12 @@ require_once __DIR__ . '/ShipmentLabels.php';
 function renderOrderWithdrawals(array $order, array $withdrawals): void {
     if (!$withdrawals) return;
     $names = array_column(Orders::items((int)$order['id']), 'name', 'id');
+    // R18: "do not ship" only while the goods are still here; once sent, the customer returns them.
+    $sent = (string)($order['delivered_at'] ?? '') !== '' || in_array((string)($order['status'] ?? ''), ['shipped', 'delivered', 'returned'], true);
     ?>
     <div class="card" id="withdrawals" data-withdrawals style="border-left:4px solid #c62828">
         <h3><?= esc(I18n::t('admin.withdrawal.heading')) ?></h3>
-        <p><?= esc(I18n::t('admin.withdrawal.notice')) ?></p>
+        <p><?= esc(I18n::t($sent ? 'admin.withdrawal.notice_sent' : 'admin.withdrawal.notice')) ?></p>
         <table>
             <tr><th><?= esc(I18n::t('admin.withdrawal.received_at')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.withdrawal.reason')) ?></th><th><?= esc(I18n::t('admin.withdrawal.confirmation')) ?></th></tr>
             <?php foreach ($withdrawals as $withdrawal): ?>
