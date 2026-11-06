@@ -14,6 +14,7 @@ class Customers {
     // Bounds the open links per account; when reached, new requests are dropped, never older links evicted.
     private const MAX_ACTIVE_RESET_TOKENS = 5;
     private const EMAIL_VERIFY_TTL_SECONDS = 86400; // 24 hours
+    private const MAX_ACTIVE_EMAIL_VERIFY_TOKENS = 5;
     private const SESSION_IDLE_TTL_SECONDS = 1800;
     public const MIN_PASSWORD_LEN = 8;
     private const SESSION_AUTH_KEYS = ['customer_id', 'customer_email', 'customer_auth_hash', 'customer_last_seen'];
@@ -359,7 +360,11 @@ class Customers {
         return 'sent';
     }
 
-    /** Issues a verification token for an unverified active customer; earlier unused tokens are dropped. */
+    /**
+     * Issues a verification token for an unverified active customer. R19: earlier links stay valid until they expire or
+     * one is used (a sign-in attempt re-sends the link, and dropping the first one made the link from the first mail
+     * fail); only the newest MAX_ACTIVE_EMAIL_VERIFY_TOKENS stay.
+     */
     public static function startEmailVerification(int $customerId): ?string {
         $db = Db::get();
         $stmt = $db->prepare("SELECT email, email_verified_at FROM customers WHERE id = ? AND store_id = ? AND status = 'active'");
@@ -369,7 +374,14 @@ class Customers {
         $token = bin2hex(random_bytes(32));
         $db->beginTransaction();
         try {
-            $db->prepare('DELETE FROM customer_email_verifications WHERE customer_id = ? AND used_at IS NULL')->execute([$customerId]);
+            $db->prepare('DELETE FROM customer_email_verifications WHERE customer_id = ? AND used_at IS NULL AND expires_at <= ?')
+               ->execute([$customerId, gmdate('Y-m-d H:i:s')]);
+            $live = $db->prepare('SELECT id FROM customer_email_verifications WHERE customer_id = ? AND used_at IS NULL ORDER BY id DESC');
+            $live->execute([$customerId]);
+            $older = array_slice(array_map('intval', $live->fetchAll(PDO::FETCH_COLUMN)), self::MAX_ACTIVE_EMAIL_VERIFY_TOKENS - 1);
+            if ($older !== []) {
+                $db->prepare('DELETE FROM customer_email_verifications WHERE id IN (' . implode(',', array_fill(0, count($older), '?')) . ')')->execute($older);
+            }
             $db->prepare('INSERT INTO customer_email_verifications (customer_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)')
                ->execute([$customerId, (string)$c['email'], hash('sha256', $token), gmdate('Y-m-d H:i:s', time() + self::EMAIL_VERIFY_TTL_SECONDS)]);
             $db->commit();
