@@ -84,6 +84,19 @@ final class MaintenanceMode
         self::write($path, ['since' => gmdate('c'), 'reason' => $reason, 'failed' => true, 'host' => (string)gethostname()]);
     }
 
+    /**
+     * Put back a window found before a step that then changed nothing (content and age): a failed one stays failed,
+     * the fresh marker of an updater killed half-way keeps blocking exactly as long as it did.
+     */
+    public static function restore(string $root, array $marker, int $modifiedAt): void
+    {
+        $path = self::path($root);
+        self::release($path);
+        self::write($path, $marker);
+        @touch($path, $modifiedAt);
+        clearstatcache(true, $path);
+    }
+
     public static function leave(string $root): void
     {
         $path = self::path($root);

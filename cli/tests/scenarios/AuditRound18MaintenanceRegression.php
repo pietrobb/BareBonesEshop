@@ -57,6 +57,22 @@ try {
     $r18mError(static fn() => $r18mUpdater->rollback($r18mSnapshot, false, false));
     assert_true(!is_file(MaintenanceMode::path($r18mShop)), 'R18 rollback: a refused rollback leaves an open shop open');
 
+    // 3b. Capability review: the window of an updater killed mid-apply (fresh marker, not failed, files half-written)
+    //     survives a rollback refused after it entered maintenance (the changed file, no --force) unchanged.
+    $r18mKilled = ['since' => gmdate('c', time() - 600), 'reason' => 'update 18.0.1', 'pid' => 999999, 'host' => (string)gethostname()];
+    file_put_contents(MaintenanceMode::path($r18mShop), json_encode($r18mKilled));
+    touch(MaintenanceMode::path($r18mShop), time() - 600);
+    clearstatcache();
+    $r18mKilledAt = filemtime(MaintenanceMode::path($r18mShop));
+    file_put_contents($r18mShop . '/src/Core.php', "half\n");
+    $r18mChanged = $r18mError(static fn() => $r18mUpdater->rollback($r18mSnapshot, false, true));
+    clearstatcache();
+    assert_equals([true, true, $r18mKilled, $r18mKilledAt], [str_contains($r18mChanged, 'src/Core.php'), MaintenanceMode::active($r18mShop),
+        MaintenanceMode::marker($r18mShop), @filemtime(MaintenanceMode::path($r18mShop))],
+        'R18 rollback: a rollback refused for a changed file keeps the window of a killed updater as it was (' . $r18mChanged . ')');
+    file_put_contents($r18mShop . '/src/Core.php', "core v2\n");
+    MaintenanceMode::leave($r18mShop);
+
     // 4. A rollback that stops after it began restoring keeps the shop closed and says what to run.
     $r18mCopy = $r18mRoot . '/private/snapshots/' . $r18mSnapshot . '/files/src/Core.php';
     rename($r18mCopy, $r18mCopy . '.away');
