@@ -10,6 +10,8 @@
     admin who issued or resent it.
   - Invoices and credit notes print their dates in the document language (`24. 10. 2026`, not `2026-10-24`); the
     delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
+  - E-mails name the store in the From line (`"Slovenský obchod" <noreply@…>`), and without `MAIL_REPLY_TO` a reply
+    goes to the store's contact address (`legal.email` in `stores.json`) instead of the noreply mailbox.
 - **Bounded prices** (review round 18, medium).
   - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
     `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is

@@ -93,3 +93,42 @@ try {
     StoreContext::activate($r18lSavedStore);
     I18n::setLocale($r18lSavedLocale);
 }
+
+echo "\n--- R18 UX: e-mail sender ---\n";
+
+// Every e-mail came from a bare noreply@ address: no store name in the inbox, and a customer's reply went to the
+// noreply mailbox unless MAIL_REPLY_TO was set.
+$r18lSavedReply = getenv('MAIL_REPLY_TO');
+try {
+    putenv('MAIL_REPLY_TO=');
+    Bootstrap::initStoreContext('/', '', 'default');
+    $r18lBrand = Template::branding();
+    LogMail::clearCaptured();
+    MailService::useAdapter(new LogMail(['log_file' => test_fixture_path('r18-low-mail') . '.log']));
+    $r18lSent = MailService::send('order_paid', 'r18l@example.com', 'sk', ['order_number' => 'R18L-M', 'customer_name' => 'R18L', 'order_total' => '1,00 €']);
+    $r18lMail = LogMail::lastCaptured() ?? [];
+    assert_equals('sent', $r18lSent['status'] ?? '', 'R18 UX: the mail is sent');
+    assert_equals((string)$r18lBrand['name'], $r18lMail['from_name'] ?? null, 'R18 UX: the From line names the store');
+    assert_equals('info@example.sk', $r18lMail['reply_to'] ?? null, "R18 UX: replies go to the store's contact address");
+    putenv('MAIL_REPLY_TO=orders@example.sk');
+    MailService::send('order_paid', 'r18l@example.com', 'sk', ['order_number' => 'R18L-M2', 'customer_name' => 'R18L', 'order_total' => '1,00 €']);
+    assert_equals('orders@example.sk', (LogMail::lastCaptured() ?? [])['reply_to'] ?? null, 'R18 UX: MAIL_REPLY_TO still wins');
+
+    $r18lHeader = static function (array $msg): string {
+        preg_match('/^From: (.*(?:\r\n .*)*)\r\n/m', MimeMessage::build($msg + ['to' => 'a@example.com', 'subject' => 's', 'text' => 'x']), $m);
+        return (string)($m[1] ?? '');
+    };
+    $r18lUnicode = $r18lHeader(['from' => 'noreply@example.sk', 'from_name' => 'Kníhkupectvo "U Žabky"']);
+    assert_true(str_ends_with($r18lUnicode, ' <noreply@example.sk>') && iconv_mime_decode('From: ' . $r18lUnicode, 0, 'UTF-8') === 'From: Kníhkupectvo "U Žabky" <noreply@example.sk>',
+        "R18 UX: a non-ASCII store name is an encoded word before the address ({$r18lUnicode})");
+    assert_equals('"Woodle \"SK\"" <noreply@example.sk>', $r18lHeader(['from' => 'noreply@example.sk', 'from_name' => 'Woodle "SK"']), 'R18 UX: an ASCII store name is a quoted string');
+    assert_equals('"WoodleBcc: x@example.com" <noreply@example.sk>', $r18lHeader(['from' => 'noreply@example.sk', 'from_name' => "Woodle\r\nBcc: x@example.com"]), 'R18 UX: a line break in the store name cannot add a header');
+    assert_equals('noreply@example.sk', $r18lHeader(['from' => 'noreply@example.sk']), 'R18 UX: without a store name the From line is the address');
+} catch (Throwable $e) {
+    assert_true(false, 'R18 UX e-mail sender (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+} finally {
+    $r18lSavedReply === false ? putenv('MAIL_REPLY_TO') : putenv('MAIL_REPLY_TO=' . $r18lSavedReply);
+    MailService::useAdapter(null);
+    @unlink(test_fixture_path('r18-low-mail') . '.log');
+    StoreContext::activate($r18lSavedStore);
+}
