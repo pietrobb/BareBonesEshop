@@ -97,7 +97,10 @@ foreach (['src', 'adapters', 'migrations', 'themes', 'blocks', 'lang', 'catalog.
     if (!is_dir(dirname($r16dShop . '/' . $r16dPath))) mkdir(dirname($r16dShop . '/' . $r16dPath), 0700, true);
     $r16dCopy($r16dApp . '/' . $r16dPath, $r16dShop . '/' . $r16dPath);
 }
-$r16dWrite($r16dShop . '/config.php', '<?php return ' . var_export(['private_runtime_dir' => $r16dTemp . '/private'] + (require $r16dApp . '/config.example.php'), true) . ';');
+// R19: config.example.php names the developer's private directory (dirname of this checkout): every private path and
+// log of the copy goes to its own data directory, or the probe appended its log lines to the developer's.
+$r16dExample = require $r16dApp . '/config.example.php';
+$r16dWrite($r16dShop . '/config.php', '<?php return ' . var_export(AppConfig::suiteConfigForTesting($r16dExample, $r16dExample, $r16dTemp . '/private'), true) . ';');
 $r16dStores = json_decode((string)file_get_contents($r16dApp . '/stores.example.json'), true);
 $r16dStores['stores'] = ['r16-installed' => ['name' => 'R16 installed', 'theme' => 'bookshop'] + (array)reset($r16dStores['stores'])];
 $r16dWrite($r16dTemp . '/private/stores.json', json_encode($r16dStores));

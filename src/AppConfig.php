@@ -45,7 +45,8 @@ final class AppConfig
      * The suite's config: the developer's config (database, app_url, keys stay, the suite runs in this environment) with
      * everything that reaches outside the machine reset to config.example.php. With $privateDir every private directory
      * and log file moves under it (R18: the suite left ~330 jobs in the developer's jobs/pending for their worker to run
-     * with the real config, overwrote an invoice and wrote into their logs).
+     * with the real config, overwrote an invoice and wrote into their logs). R19: the SQLite database file too (the
+     * suite's processes marked the developer's event_outbox rows delivered); the suite's own database is that file.
      */
     public static function suiteConfigForTesting(array $config, array $example, ?string $privateDir = null): array
     {
@@ -74,6 +75,7 @@ final class AppConfig
 
     /** Where the suite's copy keeps what config.php puts in the private directory (relative to the suite's one). */
     private const SUITE_PRIVATE_PATHS = [
+        'db_sqlite_path' => 'db/shop.sqlite',
         'jobs_dir' => 'jobs', 'invoice_storage_dir' => 'invoices', 'backup_storage_dir' => 'backups',
         'backup_log_file' => 'logs/backup.log', 'backup_recovery_dir' => 'restore-recovery',
         'structured_log_file' => 'logs/application.jsonl', 'metrics_log_file' => 'logs/metrics.jsonl',

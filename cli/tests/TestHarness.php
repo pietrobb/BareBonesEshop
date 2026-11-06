@@ -14,10 +14,12 @@ DataOverrides::isolateSuiteForTesting(TEST_DATA_DIR);
 // extensions, outbound webhooks, mail/ERP/carrier providers and gateway keys taken out: an enabled extension broke
 // core tests, and the suite posted signed events to the developer's real webhook. R18: its private directories and logs
 // are the suite's own too (TEST_DATA_DIR/private), not the developer's jobs, invoices and logs.
+// R19: the SQLite database too (TEST_DATA_DIR/private/db/shop.sqlite is the suite's database).
 (static function (): void {
     $root = dirname(TEST_CLI_DIR);
     $example = require $root . '/config.example.php';
     $developer = require $root . '/config.php';
+    mkdir(TEST_DATA_DIR . '/private/db', 0700, true);
     file_put_contents(TEST_DATA_DIR . '/' . AppConfig::SUITE_FILE,
         '<?php return ' . var_export(AppConfig::suiteConfigForTesting(is_array($developer) ? $developer : [], $example, TEST_DATA_DIR . '/private'), true) . ";\n");
 })();
