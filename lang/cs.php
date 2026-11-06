@@ -987,6 +987,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.related_save' => 'Uložit související produkty',
     'admin.product.related_saved' => 'Vazby produktu byly uloženy.',
     'admin.product.duplicate' => 'Duplikovat',
+    'admin.product.prices_in' => 'Ceny jsou v měně {currency}.',
     'admin.product.duplicated' => 'Kopie je vytvořena jako koncept s novým SKU a bez zásob. Zkontrolujte ji a zveřejněte.',
     'admin.product.copy_name' => '{name} (kopie)',
     'admin.rich_text.bold' => 'Tučně',
