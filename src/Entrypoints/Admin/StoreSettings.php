@@ -41,6 +41,12 @@ function pageStoreSettings(): void {
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div class="form-row"><label for="store-<?= esc($storeId) ?>-store_name"><?= esc(I18n::t('admin.stores.field.store_name')) ?></label>
                 <input id="store-<?= esc($storeId) ?>-store_name" name="store_name" value="<?= esc((string)($draft['store_name'] ?? ($store['name'] ?? ''))) ?>" required maxlength="200"></div>
+            <?php $zone = (string)($draft['timezone'] ?? StoreContext::timezoneFor($store)); ?>
+            <div class="form-row"><label for="store-<?= esc($storeId) ?>-timezone"><?= esc(I18n::t('admin.stores.field.timezone')) ?></label>
+                <select id="store-<?= esc($storeId) ?>-timezone" name="timezone" data-store-timezone aria-describedby="store-<?= esc($storeId) ?>-timezone-hint">
+                    <?php foreach (DateTimeZone::listIdentifiers() as $identifier): ?><option<?= $identifier === $zone ? ' selected' : '' ?>><?= esc($identifier) ?></option><?php endforeach; ?>
+                </select>
+                <small class="muted" id="store-<?= esc($storeId) ?>-timezone-hint"><?= esc(I18n::t('admin.stores.timezone_hint')) ?></small></div>
             <?php if ($seller !== null): ?>
             <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p>
             <?php else: ?>

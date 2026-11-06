@@ -242,10 +242,12 @@ $architectureBudgets = [
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
-    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 83, 'functions' => 3, 'max_function_lines' => 55, 'coupling' => 5],
+    // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
+    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 89, 'functions' => 3, 'max_function_lines' => 61, 'coupling' => 6],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
-    'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 84, 'functions' => 4, 'max_function_lines' => 38, 'coupling' => 7],
+    // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.
+    'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 88, 'functions' => 4, 'max_function_lines' => 38, 'coupling' => 7],
     // +3 lines R11 H9: the parcel row shows its carrier label (ShipmentLabels.php) and the ship form keeps the label's tracking number;
     // +1 the parcel row shows the cash on delivery it collects.
     // +4 lines, +1 coupling (OrderWorkflow) R15 high 5: shipping the last goods moves the order to shipped and e-mails.

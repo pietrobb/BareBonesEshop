@@ -1,6 +1,6 @@
 <?php
 /**
- * Merchant-editable part of stores.json: each store's storefront name, seller identity (legal block) and VAT
+ * Merchant-editable part of stores.json: each store's storefront name, time zone, seller identity (legal block) and VAT
  * switches. Currency, URL prefix, domains, scopes and invoice prefixes stay file-only: changing them reprices the
  * store or breaks invoice numbering. The updater keeps the installed stores.json, so admin edits survive updates.
  */
@@ -173,6 +173,9 @@ final class StoreSettings {
             if ($legal['vat_registered'] && $legal['ic_dph'] === '') $errors[] = I18n::t('admin.stores.err.vat_id');
         }
         if ($storeName === '') $errors[] = I18n::format('admin.stores.err.required', ['fields' => I18n::t('admin.stores.field.store_name')]);
+        // A form without the field (an older admin page) keeps the store's zone.
+        $timezone = array_key_exists('timezone', $input) ? $text('timezone') : (string)($store['timezone'] ?? '');
+        if (array_key_exists('timezone', $input) && StoreContext::configuredTimezone(['timezone' => $timezone]) === null) $errors[] = I18n::t('admin.stores.err.timezone');
         // The default store is always public. A hidden store goes public only once its own seller identity is entered.
         $isDefault = $storeId === (string)($data['default_store'] ?? '');
         $public = $isDefault || (isset($input['public']) ? $input['public'] === '1' : StoreContext::isPublicConfig($store));
@@ -185,12 +188,13 @@ final class StoreSettings {
         if (!$sharesSeller && array_filter($printed, static fn(string $f): bool => (string)($before['legal'][$f] ?? '') !== (string)$legal[$f])) $legal['updated_at'] = date('Y-m-d');
         $store['name'] = $storeName;
         $store['oss_enabled'] = ($input['oss_enabled'] ?? '') === '1';
+        if ($timezone !== '') $store['timezone'] = $timezone;
         $store['legal'] = $legal;
         if ($public) unset($store['public']); else $store['public'] = false;
         $data['stores'][$storeId] = $store;
         if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
-        AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
-            ['store' => $storeId, 'name' => $store['name'], 'oss_enabled' => $store['oss_enabled'], 'public' => $public, 'legal' => $store['legal']]);
+        AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'timezone' => $before['timezone'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
+            ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'public' => $public, 'legal' => $store['legal']]);
         return ['ok' => true, 'errors' => []];
     }
 

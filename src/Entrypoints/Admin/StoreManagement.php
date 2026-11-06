@@ -1,6 +1,10 @@
 <?php
 /** Admin "Stores and seller", owner part: add or remove a storefront and edit the legal texts (StoreSettings, DataOverrides). */
 
+/** ConsumerNotice::LEGAL_PAGES codes → the storefront footer's names for them. */
+const ADMIN_LEGAL_PAGE_LABELS = ['privacy' => 'privacy_policy', 'terms' => 'terms_conditions', 'cookies' => 'cookie_policy',
+    'accessibility' => 'accessibility_statement', 'imprint' => 'imprint'];
+
 function adminStoreManagementCards(array $stores, bool $writable): void {
     if (Security::adminRole() !== 'owner') return;
     $page = Security::str($_GET['legal'] ?? '');
@@ -34,7 +38,7 @@ function adminStoreManagementCards(array $stores, bool $writable): void {
         <?php foreach ($stores as $storeId => $store): if (!is_array($store)) continue; $storeId = (string)$storeId; ?>
         <p data-store-legal-links="<?= esc($storeId) ?>"><strong><?= esc($storeId) ?>:</strong>
             <?php foreach (ConsumerNotice::LEGAL_PAGES as $legalPage): foreach (array_map('strval', (array)($store['languages'] ?? [])) as $locale): ?>
-            <a class="btn btn-sm" href="admin.php?p=stores&amp;store=<?= esc(rawurlencode($storeId)) ?>&amp;legal=<?= esc($legalPage) ?>&amp;text_lang=<?= esc($locale) ?>#store-legal"><?= esc($legalPage . ' (' . $locale . ')') ?><?= DataOverrides::legalPath($legalPage, $locale, $storeId) !== null ? ' *' : '' ?></a>
+            <a class="btn btn-sm" href="admin.php?p=stores&amp;store=<?= esc(rawurlencode($storeId)) ?>&amp;legal=<?= esc($legalPage) ?>&amp;text_lang=<?= esc($locale) ?>#store-legal" title="<?= esc($legalPage . ' (' . $locale . ')') ?>"><?= esc(I18n::t(ADMIN_LEGAL_PAGE_LABELS[$legalPage]) . ' (' . strtoupper($locale) . ')') ?><?= DataOverrides::legalPath($legalPage, $locale, $storeId) !== null ? ' *' : '' ?></a>
             <?php endforeach; endforeach; ?></p>
         <?php endforeach; ?>
         <?php if (isset($stores[$legalStore]) && DataOverrides::validLegal($page, $lang, $legalStore)):

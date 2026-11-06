@@ -257,7 +257,7 @@ function pageGdpr(): void {
             <?php foreach ($events as $e): ?>
             <tr>
                 <td><?= (int)$e['id'] ?></td>
-                <td><?= esc($e['action']) ?></td>
+                <td title="<?= esc((string)$e['action']) ?>"><?= esc(adminCodeLabel('admin.gdpr.action.', (string)$e['action'])) ?></td>
                 <td><?= $e['customer_id'] !== null ? (int)$e['customer_id'] : '' ?></td>
                 <td><?= esc($e['actor'] ?? '') ?></td>
                 <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis"><?= esc($e['note'] ?? '') ?></td>
