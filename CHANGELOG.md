@@ -252,6 +252,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
   notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
   `starter.json` when built from a tag.
+- **Imported products are priced in their catalog's currency** (review round 19, medium). A product created by a CSV
+  import, the API, a feed or an ERP sync in a HUF or CZK catalog was stored as EUR ("12 990 Ft" became 12 990,00 €)
+  and could not be sold in its store; it now takes the currency of the store the catalog belongs to, and an existing
+  product keeps its currency when it is imported again. Products already created this way keep their EUR price;
+  check them in **Catalog → Products**. Also: an import price like "1.234 Kč" (one separator before three digits) is
+  1 234, not 1,23; the shipping and payment pages show and check their amounts in the currency of the store owning
+  the providers (a USD store using the default store's providers saw them as dollars).
 
 ## 2.1.2 — 2026-11-05
 
