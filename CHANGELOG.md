@@ -5,6 +5,12 @@
 - **The mariadb-dump check names only the real generated columns** (review round 18, medium). Against MySQL 8 it
   listed every column with a `DEFAULT CURRENT_TIMESTAMP` (184 instead of 2), because MySQL marks them
   `DEFAULT_GENERATED`; only `VIRTUAL` and `STORED` generated columns count now.
+- **Bounded prices** (review round 18, medium).
+  - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
+    `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is
+    reported as an error and an existing product keeps its price.
+  - A thousands separator must group three digits: `5..0` is refused instead of read as 50.00, and so are `1.29,00`
+    and `1234.567,89`; `1.299,00`, `1,299.00` and `12,345,678` parse as before.
 - **Maintenance window after a refused or failed update step** (review round 18, high).
   - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
     `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a
