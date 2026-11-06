@@ -108,7 +108,19 @@ function pageProducts(): void {
 }
 /** The currency a product's price is typed in: its own, else the store's. */
 function adminProductCurrency(?array $row): string {
-    return strtoupper(trim((string)($row['currency'] ?? ''))) ?: strtoupper(StoreContext::current()->currency());
+    return strtoupper(trim((string)($row['currency'] ?? ''))) ?: adminCatalogCurrency();
+}
+
+/**
+ * R18: the currency a new product of the active catalog is priced in: that of the store the catalog belongs to. A product
+ * created in the admin of a HUF store sharing an EUR store's catalog was priced in HUF and could not be sold in the EUR
+ * store; the HUF store sells it through a price list in its currency (StoreCurrencyCoverage).
+ */
+function adminCatalogCurrency(): string {
+    $context = StoreContext::current();
+    $owner = Warehouse::catalogStoreId($context->catalogId());
+    $config = (array)((Bootstrap::stores()['stores'] ?? [])[$owner] ?? []);
+    return strtoupper(trim((string)($config['currency'] ?? '')) ?: $context->currency());
 }
 
 /**
@@ -129,8 +141,8 @@ function adminFormValues(string $formId, ?array $row): array {
             'meta_description' => (string)($row['meta_description'] ?? ''),
             'product_type'  => $row['product_type'] ?? 'simple',
             // R16 low: prices are typed in the store's currency ("12.90"), stored in cents.
-            'price'         => Money::decimal((int)($row['price'] ?? 0), adminProductCurrency($row)),
-            'compare_price' => isset($row['compare_price']) ? Money::decimal((int)$row['compare_price'], adminProductCurrency($row)) : '',
+            'price'         => Money::adminValue((int)($row['price'] ?? 0), adminProductCurrency($row)),
+            'compare_price' => isset($row['compare_price']) ? Money::adminValue((int)$row['compare_price'], adminProductCurrency($row)) : '',
             'stock'         => (string)(int)($row['stock'] ?? 0),
             'status'        => $row['status'] ?? 'active',
             'summary'       => $row['summary'] ?? '',
@@ -232,6 +244,7 @@ function pageProduct(): void {
     }
     ?>
     <h1><?= $product ? esc(strtr(I18n::t('admin.common.edit_named'), ['{name}' => $product['name']])) : esc(I18n::t('admin.title.product_new')) ?></h1>
+    <p class="muted"><?= esc(I18n::format('admin.product.prices_in', ['currency' => adminProductCurrency($product ?: null)])) ?></p>
     <?php if ($product): ?><form method="post" action="admin.php?p=product&amp;id=<?= (int)$product['id'] ?>&amp;action=duplicate"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.product.duplicate')) ?></button></form><?php endif; ?>
     <div class="card">
         <?php ob_start(); ?>
@@ -851,10 +864,11 @@ function handleProductSave(): void {
     // BBF checks required fields, numbers, the select lists (a stored value outside today's lists survives an
     // unchanged save) and the uploaded image's size, extension and content.
     $form = AdminForm::validate('admin-product', $old ? adminFormValues('admin-product', $old) : []);
-    // The prices are typed in the currency (R16 low); a finer amount than it shows ("12.5" HUF, "1.299") is refused.
+    // The prices are typed in the currency (R16 low); a finer amount than a cent ("1.299") is refused. R18: an amount with
+    // cents in CZK/HUF (as stored by an import) is kept as shown, not rounded on an unchanged save.
     $currency = adminProductCurrency($old);
-    $price = $form === null ? -1 : Money::parseInput($form['price'], $currency);
-    $comparePrice = $form === null || trim($form['compare_price']) === '' ? 0 : Money::parseInput($form['compare_price'], $currency);
+    $price = $form === null ? -1 : (Money::adminInput($form['price'], $currency, -1) ?? -1);
+    $comparePrice = $form === null ? -1 : (Money::adminInput($form['compare_price'], $currency) ?? -1);
     // Brand, GTIN/MPN, SEO, extra categories and translations are checked against the active catalog first.
     $editor = match (true) {
         $form === null => AdminForm::firstError(),
