@@ -9,28 +9,29 @@ test.beforeEach(() => {
   execFileSync('php', ['tests/e2e/reset-rate-limits.php'], { cwd: process.cwd(), encoding: 'utf8' });
 });
 
-function orderFacts(orderNumber) {
-  return JSON.parse(execFileSync('php', ['tests/e2e/order-facts.php', orderNumber], { cwd: process.cwd(), encoding: 'utf8' }));
+function orderFacts(orderNumber, store) {
+  return JSON.parse(execFileSync('php', ['tests/e2e/order-facts.php', orderNumber, store], { cwd: process.cwd(), encoding: 'utf8' }));
 }
 
-const apiCall = (page, action) => page.waitForResponse(response => {
-  const url = new URL(response.url());
-  return url.pathname === `/api/v1/storefront/${action}` && url.searchParams.get('lang') === 'es';
-});
+// apiLang: the ?lang= the API calls carry — null when the language is another store's own one (Bootstrap::secondaryLocale).
+async function shopInFurtherLanguage(page, testInfo, { prefix, lang, apiLang = lang, store, currency, symbol, minorFactor, contact }) {
+  const apiCall = action => page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === `${prefix}/api/v1/storefront/${action}` && url.searchParams.get('lang') === apiLang;
+  });
 
-test('a further store language reaches the storefront API and checkout shows the total it charges', async ({ page }, testInfo) => {
-  await page.goto('/?lang=es');
-  await expect(page.locator('html')).toHaveAttribute('lang', 'es');
+  await page.goto(`${prefix}/?lang=${lang}`);
+  await expect(page.locator('html')).toHaveAttribute('lang', lang);
   const rejectConsent = page.locator('#cc-reject');
   if (await rejectConsent.isVisible()) {
-    const consent = apiCall(page, 'cookie_consent');
+    const consent = apiCall('cookie_consent');
     await rejectConsent.click();
     expect((await consent).status()).toBe(200);
   }
 
   const search = page.locator('input[data-search-suggest]').first();
   if (await search.isVisible()) {
-    const suggest = apiCall(page, 'search_suggest');
+    const suggest = apiCall('search_suggest');
     await search.fill('ab');
     expect((await suggest).status()).toBe(200);
     await search.fill('');
@@ -41,15 +42,15 @@ test('a further store language reaches the storefront API and checkout shows the
   await button.click();
   await expect(page.locator('.cart-badge')).toHaveText(/^[1-9]/);
 
-  const rates = apiCall(page, 'shipping_rates');
-  await page.goto('/?page=checkout&lang=es');
+  const rates = apiCall('shipping_rates');
+  await page.goto(`${prefix}/?page=checkout&lang=${lang}`);
   expect((await rates).status()).toBe(200);
-  await page.locator('input[name="name"]').fill('R19 Lang Customer');
-  await page.locator('input[name="email"]').fill(`r19-lang-${testInfo.project.name}@example.test`);
-  await page.locator('input[name="phone"]').fill('+421900000019');
-  await page.locator('input[name="street"]').fill('Jazykova 19');
-  await page.locator('input[name="city"]').fill('Bratislava');
-  await page.locator('input[name="zip"]').fill('81101');
+  await page.locator('input[name="name"]').fill(contact.name);
+  await page.locator('input[name="email"]').fill(`${contact.mailbox}-${testInfo.project.name}@example.test`);
+  await page.locator('input[name="phone"]').fill(contact.phone);
+  await page.locator('input[name="street"]').fill(contact.street);
+  await page.locator('input[name="city"]').fill(contact.city);
+  await page.locator('input[name="zip"]').fill(contact.zip);
   await expect(page.locator('#shipping-options .shipping-error')).toHaveCount(0);
 
   // Every shipping choice re-prices the summary: its shipping line shows that method's price.
@@ -58,7 +59,7 @@ test('a further store language reaches the storefront API and checkout shows the
   for (let i = 0; i < await shippingInputs.count(); i++) {
     const option = shippingInputs.nth(i);
     if (!await option.isChecked()) {
-      const payments = apiCall(page, 'payment_methods');
+      const payments = apiCall('payment_methods');
       await option.check();
       expect((await payments).status()).toBe(200);
     }
@@ -77,10 +78,40 @@ test('a further store language reaches the storefront API and checkout shows the
     await expect(offline).toHaveCount(1);
     await offline.check();
   }
+  // The script formats with Intl in the page language: es/en show the code (7243 CZK, CZK 7,243), cs the symbol.
+  await expect(page.locator('#summary-total')).toContainText(new RegExp(`${symbol}|${currency.toUpperCase()}`));
   const shown = (await page.locator('#summary-total').textContent()).replace(/\D/g, '');
   await page.locator('form.checkout-form button.btn-checkout').click();
-  await expect(page).toHaveURL(/page=order-done/);
+  await expect(page).toHaveURL(new RegExp(`^[^?]*${prefix}/\\?page=order-done`));
   const orderNumber = (await page.locator('.order-done > p strong').textContent()).trim();
-  const facts = orderFacts(orderNumber);
-  expect(String(facts.total)).toBe(shown);
+  const facts = orderFacts(orderNumber, store);
+  expect(facts.store_id).toBe(store);
+  expect(facts.currency).toBe(currency);
+  // The shown total is in the currency's shown units; the order stores minor units (cents).
+  expect(facts.total).toBe(Number(shown) * minorFactor);
+}
+
+test('a further store language reaches the storefront API and checkout shows the total it charges', async ({ page }, testInfo) => {
+  await shopInFurtherLanguage(page, testInfo, {
+    prefix: '', lang: 'es', store: 'default', currency: 'eur', symbol: '€', minorFactor: 1,
+    contact: { name: 'R19 Lang Customer', mailbox: 'r19-lang', phone: '+421900000019', street: 'Jazykova 19', city: 'Bratislava', zip: '81101' },
+  });
+});
+
+// The same in a store with a URL prefix (/cs/, the API must strip it next to ?lang=) and a currency shown without
+// decimals (CZK) — the shape of the review's HU numbers (5 490 Ft shown, 7 180 Ft charged).
+const czContact = suffix => ({ name: `R19 Lang Cz ${suffix}`, mailbox: `r19-lang-cz-${suffix}`, phone: '+420777000019', street: 'Vinohradska 19', city: 'Praha', zip: '12000' });
+
+test('a further language of a prefixed store with a 0-decimal currency shows the total it charges', async ({ page }, testInfo) => {
+  await shopInFurtherLanguage(page, testInfo, {
+    prefix: '/cs', lang: 'es', store: 'cz', currency: 'czk', symbol: 'Kč', minorFactor: 100, contact: czContact('es'),
+  });
+});
+
+// English is the /en/ store's own language: in /cs/ it renders, but links and the API stay on the store's URL
+// without ?lang=en (Bootstrap::secondaryLocale). The checkout still prices every choice and charges what it shows.
+test('English in the prefixed CZK store shows the total it charges', async ({ page }, testInfo) => {
+  await shopInFurtherLanguage(page, testInfo, {
+    prefix: '/cs', lang: 'en', apiLang: null, store: 'cz', currency: 'czk', symbol: 'Kč', minorFactor: 100, contact: czContact('en'),
+  });
 });
