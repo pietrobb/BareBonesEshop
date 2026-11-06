@@ -49,7 +49,7 @@ function emailTemplateEditor(string $template, string $locale): void {
     $preview = EmailTemplates::preview($template, $locale, $previewDraft ? $draft : null);
     $action = 'admin.php?p=email_templates&template=' . rawurlencode($template) . '&locale=' . rawurlencode($locale);
     ?>
-    <h1><?= esc(I18n::format('admin.email.edit_title', ['template' => $template, 'locale' => strtoupper($locale)])) ?></h1>
+    <h1><?= esc(I18n::format('admin.email.edit_title', ['template' => adminCodeLabel('admin.email.tpl.', $template), 'locale' => strtoupper($locale)])) ?></h1>
     <p><a href="admin.php?p=email_templates"><?= esc(I18n::t('admin.btn.back')) ?></a> · <?= esc(adminCodeLabel('admin.email.tpl.', $template)) ?> ·
         <?= esc($override ? I18n::format('admin.email.custom_since', ['at' => I18n::dateTime((string)$override['updated_at']), 'by' => $override['updated_by']]) : I18n::t('admin.email.uses_default')) ?></p>
     <div class="card">

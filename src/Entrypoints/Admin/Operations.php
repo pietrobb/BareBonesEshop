@@ -201,7 +201,7 @@ function pageAudit(): void {
             <tr><th><?= esc(I18n::t('admin.audit.entity')) ?></th><th>ID</th><th><?= esc(I18n::t('admin.common.action')) ?></th><th><?= esc(I18n::t('admin.audit.old')) ?></th><th><?= esc(I18n::t('admin.audit.new')) ?></th><th><?= esc(I18n::t('admin.common.note')) ?></th><th><?= esc(I18n::t('admin.common.who')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
             <?php foreach ($logs as $log): ?>
             <tr>
-                <td><?= esc($log['entity']) ?></td>
+                <td><?= esc(adminCodeLabel('admin.audit.entity.', (string)$log['entity'])) ?></td>
                 <td><?= (int)$log['entity_id'] ?></td>
                 <td><?= esc(adminCodeLabel('admin.audit.action.', (string)$log['action'])) ?></td>
                 <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(substr($log['old_value'] ?? '', 0, 80)) ?></td>

@@ -221,7 +221,7 @@ try {
     $a158Check('A15.8 de: e-mail template list is German with every template and store language', $a158Run('owner', ['p' => 'email_templates', 'lang' => 'de']),
         ['E-Mail-Vorlagen', 'Bestellbestätigung', 'Passwort zurücksetzen', 'Standard', '>SK<', '>CS<', '>EN<', 'order_shipped', 'merchant_stock_low']);
     $a158Check('A15.8 de: editor shows the file template, allowed variables and a sandboxed sample-order preview', $a158Run('owner', $a158Editor),
-        ['Vorlage order_confirmation (SK)', 'Erlaubte Variablen', '{{bank_iban}}', 'Vorschau mit einer Beispielbestellung', 'sandbox=""', 'SK-2026-000123', 'Jana Nováková',
+        ['Vorlage Bestellbestätigung (SK)', 'Erlaubte Variablen', '{{bank_iban}}', 'Vorschau mit einer Beispielbestellung', 'sandbox=""', 'SK-2026-000123', 'Jana Nováková',
             'die Standardvorlage wird verwendet', 'Vorschau ohne Speichern'], ['Standardvorlage wiederherstellen<']);
     $a158Check('A15.8 de: draft preview renders the unsaved draft with the sample order', $a158Run('owner', $a158Editor + ['action' => 'preview'], $a158Draft),
         ['Vorschau des ungespeicherten Entwurfs', 'A158 Entwurf SK-2026-000123 für Jana Nováková', 'A158 Bestellung SK-2026-000123']);
@@ -237,7 +237,7 @@ try {
     assert_true(count($a158Stored) === 1 && $a158Stored[0]['store_id'] === 'default' && $a158Stored[0]['subject'] === 'A158 Bestellung {{order_number}}',
         'A15.8 de: a valid save stores the override for the active store and locale (' . json_encode($a158Stored, JSON_UNESCAPED_UNICODE) . ')');
     $a158Check('A15.8 de: saved flash, customised state and reset button are German', $a158Run('owner', $a158Editor),
-        ['Vorlage order_confirmation (sk) gespeichert.', 'angepasst am', 'A158 Entwurf SK-2026-000123', 'Standardvorlage wiederherstellen', 'Die Anpassung für diesen Shop und diese Sprache wird gelöscht.']);
+        ['Vorlage Bestellbestätigung (sk) gespeichert.', 'angepasst am', 'A158 Entwurf SK-2026-000123', 'Standardvorlage wiederherstellen', 'Die Anpassung für diesen Shop und diese Sprache wird gelöscht.']);
     $a158Check('A15.8 de: the list marks the customised locale', $a158Run('owner', ['p' => 'email_templates']), ['angepasst']);
 
     $a158Viewer = $a158Run('viewer', ['p' => 'email_templates']);
