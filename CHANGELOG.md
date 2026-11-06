@@ -52,6 +52,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The merchant's withdrawal e-mail names only the withdrawn items** (review round 19, medium). It listed every line
+  of the order and the order total; it now lists the lines of that statement and their sum (new template variable
+  `{{withdrawal_total}}`; `{{order_total}}` is still the whole order for customised templates). On a partly shipped
+  order the admin marks each withdrawn line as already sent (wait for the return) or not sent (do not ship), instead of
+  "do not ship" for all of them, and the acknowledgement column shows the e-mail status in words.
 - **Default theme 2.3.1** (review round 18, medium). `storefront.css` and `storefront.js` changed after 2.1.2 (the
   breadcrumb, a homepage hero without an image, the method names at checkout) but kept `?v=2.3.0`, so browsers went on using the cached old files for up
   to a year. A test now pins a fingerprint of the theme's assets to its version and fails when they change without a
