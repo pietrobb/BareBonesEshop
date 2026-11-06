@@ -117,10 +117,7 @@ function adminProductCurrency(?array $row): string {
  * store; the HUF store sells it through a price list in its currency (StoreCurrencyCoverage).
  */
 function adminCatalogCurrency(): string {
-    $context = StoreContext::current();
-    $owner = Warehouse::catalogStoreId($context->catalogId());
-    $config = (array)((Bootstrap::stores()['stores'] ?? [])[$owner] ?? []);
-    return strtoupper(trim((string)($config['currency'] ?? '')) ?: $context->currency());
+    return strtoupper(Warehouse::catalogCurrency(StoreContext::current()->catalogId()));
 }
 
 /**
