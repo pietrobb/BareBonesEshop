@@ -91,18 +91,24 @@ try {
             // updater's own window (marker already there) is left to the updater.
             // R17: a run that fails leaves the shop closed (a migration may have stopped half-way, MySQL DDL does not
             // roll back); the next successful run, which completes the schema, takes that window over and lifts it.
+            // R18: a run that stops before its first migration (the pre-migration backup failed, e.g. MySQL with an
+            // unusable mariadb-dump) changed nothing: the window goes back to what it was, open or a failed one.
             $root = dirname(__DIR__);
             $ownMaintenance = false;
             $backupTaken = false;
-            $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, $preApplyHook, $root): void {
+            $schemaTouched = false;
+            $priorFailure = MaintenanceMode::failed($root, 'cli/migrate.php') ? (string)(MaintenanceMode::marker($root)['reason'] ?? '') : null;
+            $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, &$schemaTouched, $preApplyHook, $root): void {
                 if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {
                     MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
                     $ownMaintenance = true;
                     $log('  [maintenance] the shop answers 503 until the migrations finish');
                 }
-                if ($backupTaken || $preApplyHook === null) return;
-                $preApplyHook($names, $log);
-                $backupTaken = true;
+                if (!$backupTaken && $preApplyHook !== null) {
+                    $preApplyHook($names, $log);
+                    $backupTaken = true;
+                }
+                $schemaTouched = true; // Migrator::apply() runs the pending migrations right after this hook
             };
             try {
                 $applied = $migrator->apply($logger, $beforeFirst);
@@ -110,7 +116,15 @@ try {
                     $applied = array_merge($applied, $extensionMigrator->apply($logger, $beforeFirst));
                 }
             } catch (Throwable $migrationError) {
-                if ($ownMaintenance) {
+                if ($ownMaintenance && !$schemaTouched) {
+                    if ($priorFailure !== null) {
+                        MaintenanceMode::fail($root, $priorFailure);
+                        fwrite(STDERR, "No migration ran; the shop stays in maintenance (503) from the earlier failed run until php cli/migrate.php apply succeeds.\n");
+                    } else {
+                        MaintenanceMode::leave($root);
+                        fwrite(STDERR, "No migration ran; the shop is open again on the unchanged schema.\n");
+                    }
+                } elseif ($ownMaintenance) {
                     MaintenanceMode::fail($root, 'cli/migrate.php failed: ' . $migrationError->getMessage()
                         . ' — the shop stays in maintenance; fix the cause and run php cli/migrate.php apply again');
                     fwrite(STDERR, "The shop stays in maintenance (503) until php cli/migrate.php apply succeeds.\n");

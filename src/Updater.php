@@ -241,12 +241,16 @@ final class Updater
         $staged = [];
         $mutated = false;
         $halfDone = null;
+        $entered = false;
+        $installed = false;
+        $prior = $this->failedMaintenance();
         try {
             $report = $this->check($package);
             $this->assertApplicable($report);
             // From the snapshot on, no web request or worker writes: the snapshot stays consistent and nobody runs
             // a mix of old and new files against a half-migrated database (T20).
             MaintenanceMode::enter($this->root, 'update ' . $package->version());
+            $entered = true;
             $snapshot = $this->createSnapshot($package, $report, 'pre-update');
             $report = $this->check($package);
             $this->assertApplicable($report);
@@ -292,14 +296,15 @@ final class Updater
             ];
             $this->writeJsonAtomic($this->statePath(), $state);
             $this->setSnapshotStatus($snapshot['id'], 'applied');
-
-            return [
+            $result = [
                 'version' => $package->version(),
                 'snapshot' => $snapshot['id'],
                 'changed' => count($report['ready']),
                 'already_current' => count($report['current']),
                 'retired' => $this->retireObsoleteFiles($snapshot['id']),
             ];
+            $installed = true;
+            return $result;
         } catch (Throwable $e) {
             foreach ($staged as $temporary) {
                 @unlink($temporary);
@@ -332,12 +337,33 @@ final class Updater
             throw $e;
         } finally {
             // R17: files or schema left half-way keep the shop closed until a rollback or update succeeds.
+            // R18: only a successful update lifts the window. One refused before maintenance leaves the marker
+            // alone; one that changed nothing (or was rolled back) restores what was there before, a failed window
+            // included.
             if ($halfDone !== null) {
                 MaintenanceMode::fail($this->root, $halfDone);
-            } else {
+            } elseif ($installed) {
                 MaintenanceMode::leave($this->root);
+            } elseif ($entered) {
+                $this->restoreMaintenance($prior);
             }
             $this->unlock();
+        }
+    }
+
+    /** The marker of a step that failed half-way (it keeps the shop closed), or null. */
+    private function failedMaintenance(): ?array
+    {
+        return MaintenanceMode::failed($this->root) ? MaintenanceMode::marker($this->root) : null;
+    }
+
+    /** Back to the window there was before a step that changed nothing: a failed one stays, none is lifted. */
+    private function restoreMaintenance(?array $prior): void
+    {
+        if ($prior !== null) {
+            MaintenanceMode::fail($this->root, (string)($prior['reason'] ?? 'an earlier update step failed half-way'));
+        } else {
+            MaintenanceMode::leave($this->root);
         }
     }
 
@@ -377,6 +403,11 @@ final class Updater
     public function rollback(string $snapshotId, bool $force = false, bool $acceptDataLoss = false): array
     {
         $this->lock();
+        $entered = false;
+        $touched = false;
+        $restored = false;
+        $halfDone = null;
+        $prior = $this->failedMaintenance();
         try {
             $metadata = $this->snapshotMetadata($snapshotId);
             $databaseAt = is_array($metadata['database'] ?? null) ? (string)$metadata['created_at'] : null;
@@ -385,13 +416,30 @@ final class Updater
                     . ' Stop all writers, export or reconcile those records, then re-run with --accept-data-loss.');
             }
             MaintenanceMode::enter($this->root, 'rollback ' . $snapshotId);
+            $entered = true;
             $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
-            $result = $this->restoreSnapshot($snapshotId, $force, $databaseAt !== null ? $this->numberingHighWater() : []);
+            try {
+                $result = $this->restoreSnapshot($snapshotId, $force, $databaseAt !== null ? $this->numberingHighWater() : [], $touched);
+            } catch (Throwable $e) {
+                $halfDone = "rollback {$snapshotId} failed half-way ({$e->getMessage()}); fix the cause and run php cli/update.php rollback --snapshot={$snapshotId} --force"
+                    . ($databaseAt !== null ? ' --accept-data-loss' : '');
+                throw $e;
+            }
+            $restored = true;
             $this->setSnapshotStatus($snapshotId, 'rolled-back', null, $discarded);
             $notice = $this->reportDiscardedWrites($discarded, 'manual rollback', $result['numbering_raised']);
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice];
         } finally {
-            MaintenanceMode::leave($this->root);
+            // R18: only a completed restore lifts the window. A refused rollback (no --accept-data-loss, unknown
+            // snapshot, changed files) leaves the marker as it was; one that stopped after changing files or the
+            // database keeps the shop closed (no mix of old and new files) and says what to run.
+            if ($restored) {
+                MaintenanceMode::leave($this->root);
+            } elseif ($entered && $touched && $halfDone !== null) {
+                MaintenanceMode::fail($this->root, $halfDone);
+            } elseif ($entered) {
+                $this->restoreMaintenance($prior);
+            }
             $this->unlock();
         }
     }
@@ -717,8 +765,12 @@ final class Updater
         return $metadata;
     }
 
-    /** @param array|string $numbering numberingHighWater() read before the restore: raised again on the restored database. */
-    private function restoreSnapshot(string $snapshotId, bool $force, array|string $numbering = []): array
+    /**
+     * @param array|string $numbering numberingHighWater() read before the restore: raised again on the restored database.
+     * @param bool $touched set once the restore has changed an installed file or the live database (R18): a failure
+     *                      before that left the installation as it was
+     */
+    private function restoreSnapshot(string $snapshotId, bool $force, array|string $numbering = [], bool &$touched = false): array
     {
         $numberingRaised = is_string($numbering) ? $numbering : null;
         if (is_string($numbering)) $numbering = [];
@@ -745,15 +797,22 @@ final class Updater
         }
         $sqliteSource = $database !== null && !$isMysql ? $this->verifiedSqliteSnapshot($directory, $database) : null;
 
-        $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource, $numbering, &$numberingRaised): void {
+        $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource, $numbering, &$numberingRaised, &$touched): void {
             if ($isMysql) {
                 // First, so that a refused rollback (other sessions still connected) leaves code and database untouched.
                 $this->database = null;
                 if (class_exists('Db', false)) {
                     Db::reset();
                 }
-                $this->databaseBackup->restore($directory, $database);
+                try {
+                    $this->databaseBackup->restore($directory, $database);
+                } catch (Throwable $e) {
+                    // Refused before the drop: nothing changed. After it, the live database was replaced or re-imported.
+                    if ($e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP) $touched = true;
+                    throw $e;
+                }
             }
+            $touched = true;
             foreach ($metadata['files'] as $row) {
                 $path = (string)$row['path'];
                 if (!empty($row['existed'])) {
