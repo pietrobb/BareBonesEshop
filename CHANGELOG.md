@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+### Upgrade notes (2.1.2 → 2.1.3)
+
+Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup.php doctor` after it.
+
+- **Admin amounts are typed in the currency, not in cents.** Variant prices, price lists, promotions and coupons,
+  the B2B credit limit, supplier purchase prices and shipping and payment amounts took cents up to 2.1.2: from 2.1.3
+  "1290" saves 1 290 €, not 12.90 €. Tell everyone who enters prices to type "12.90"; the stored amounts do not
+  change. A CZK/HUF amount stored finer than a whole unit is shown with its cents ("12345.67") and kept on save. A
+  price above 20 000 000.00 is refused in the admin, the CSV import and feeds (the row or item is reported, the product
+  keeps its price), and a thousands separator must group three digits (`5..0` and `1.29,00` are refused).
+- **MySQL with a MariaDB dump client: install the MySQL client first.** Against a MySQL server `mariadb-dump` (also
+  installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package) writes generated columns into the dump and
+  MySQL refuses it on restore. `php cli/update.php doctor`, `check` and `apply` refuse such a client, so the package
+  does not install, and `php cli/migrate.php apply` runs no migration because its pre-migration backup fails. Install
+  the MySQL 8.x client and set `update_mysql_dump_binary` and `update_mysql_client_binary` to it
+  (`docs/AI_UPDATE_RUNBOOK.md`); the check names the generated columns concerned (`categories.parent_id_uniq` and
+  the invoice uniqueness column). A MariaDB server keeps the MariaDB client.
+- **Stricter update check:** `check` and `apply` refuse while the doctor reports a configuration FAIL (a private
+  path such as `jobs_dir` inside the web root, a v1.x `stores.json` without `private_runtime_dir`); 2.1.2 installed
+  the package anyway. Fix the named settings first. A shop that still has `api.php` gets a `payment_webhooks`
+  warning with the webhook URLs to set in the payment gateways.
+- **Migration** `20261105120000_product_stock_updated_at` adds `products.stock_updated_at`: a sale or stock change
+  moves it instead of `updated_at`, and API v1 `updated_after` matches either column. Feeds and sitemaps are rebuilt
+  only for a change they show (price, content, going in or out of stock).
+- **Maintenance window:** a refused or failed update step no longer reopens the shop. A rollback refused (without
+  `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
+  the window it found. A rollback that stopped after it began restoring and a failed `php cli/migrate.php apply` keep
+  the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
+  half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
+  lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
+- **Theme assets:** the default theme is version 2.3.1, so browsers fetch the changed `storefront.css` and
+  `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
+  takes over these changes bumps its own `version`.
+- **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
+  confirmation link at the next sign-in attempt (at most 3 an hour) and signs in with the link and the password, or
+  resets the password. Expect questions from such customers in the first days.
+- **Checkout:** "Standard Delivery" and "Express Delivery" from `shipping.json` are now offered next to the store's
+  `shipping_rates`; remove them from `shipping.json` if the shop does not ship that way.
+  Checkout refuses over-long fields with `checkout.error.field_too_long`, and `cart_restore` takes at most 200 entries
+  (100 lines, 64 KiB body).
+- **E-mail:** the From line names the store, and without `MAIL_REPLY_TO` customers' replies go to the store's
+  `legal.email` in `stores.json` instead of the noreply mailbox: make sure that mailbox is read, or set `MAIL_REPLY_TO`.
+- **Web server:** the shipped rules deny the JS tool configs at the web root (`*.config.js`, `.mjs`, `.cjs`). A custom
+  nginx site config needs the new `deploy/nginx.conf` deny line; the doctor lists it under `operations.nginx_config`.
+- **Admin orders:** recording "Paid" with less than the order total is refused with the missing amount. A manual order
+  starts with no shipping or payment method chosen; pick both. A product created in a store that shares another
+  store's catalog is priced in that catalog's currency.
+
+### Changes
+
+- **Default theme 2.3.1** (review round 18, medium). `storefront.css` and `storefront.js` changed after 2.1.2 (the
+  breadcrumb, a homepage hero without an image, the method names at checkout) but kept `?v=2.3.0`, so browsers went on using the cached old files for up
+  to a year. A test now pins a fingerprint of the theme's assets to its version and fails when they change without a
+  new version.
 - **Bounded cart restore and checkout fields** (review round 18, medium and low).
   - `cart_restore` reads at most 200 entries, restores at most 100 lines and prices the cart once; a body over
     64 KiB is refused with 413. One anonymous request with 20 000 lines used to take ~40 s and end in HTTP 500.
