@@ -329,8 +329,12 @@ class Import {
             $assignments = implode(', ', array_map(static fn(string $c): string => "{$c} = :{$c}", array_keys($changes)));
             $params = [':id' => (int)$existing['id']];
             foreach ($changes as $column => $value) $params[":{$column}"] = $value;
-            $db->prepare("UPDATE products SET {$assignments}, updated_at = " . Db::now() . " WHERE id = :id")->execute($params);
+            // R19: a stock-only change moves stock_updated_at, not updated_at (the feed and sitemap fingerprint): 5 → 7 pieces
+            // rebuilt every feed. Going in or out of stock is shown by the feeds, so that marks them changed.
+            $touched = array_keys($changes) === ['stock'] ? 'stock_updated_at' : 'updated_at';
+            $db->prepare("UPDATE products SET {$assignments}, {$touched} = " . Db::now() . " WHERE id = :id")->execute($params);
             if (isset($changes['price'])) PriceHistory::record([(int)$existing['id']], $db);
+            if ($touched === 'stock_updated_at' && ((int)$existing['stock'] > 0) !== ((int)$changes['stock'] > 0)) Cache::catalogChanged();
         }
         if (isset($changes['attrs'])) self::syncProductAttrs((int)$existing['id'], $attrs, $db);
 
@@ -348,6 +352,9 @@ class Import {
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
         $catalog = self::assertSkuInCatalog((string)$data['sku'], $db);
+        $stockBefore = $db->prepare('SELECT stock FROM products WHERE sku = :sku AND store_id = :catalog');
+        $stockBefore->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
+        $stockBefore = $stockBefore->fetchColumn();
         // MySQL's ON DUPLICATE KEY fires on any unique key: a slug held by another SKU would overwrite that product.
         $data['slug'] = self::freeProductSlug((string)$data['slug'], (string)$data['sku'], $db);
         $data['description'] = Security::sanitizeRichHtml((string)($data['description'] ?? ''));
@@ -401,6 +408,8 @@ class Import {
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
         PriceHistory::record([(int)$id->fetchColumn()], $db);
+        // R19: a stock-only change keeps updated_at (above); going in or out of stock is shown by the feeds.
+        if ($stockBefore !== false && ((int)$stockBefore > 0) !== ((int)$data['stock'] > 0)) Cache::catalogChanged($catalog);
     }
 
     /** $slug, or "$slug-2", "$slug-3"… when another SKU already owns it (product slugs are unique across catalogs). */

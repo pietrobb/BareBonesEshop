@@ -252,6 +252,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
   notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
   `starter.json` when built from a tag.
+- **A stock change by a CSV import no longer rebuilds the feeds** (review round 19, medium). A CSV import that moved
+  a product's stock (5 → 7 pieces) bumped its `updated_at`, so every feed and sitemap was rebuilt; it now moves
+  `stock_updated_at` only, and the feeds are rebuilt when a CSV import or an ERP product sync takes a product into or
+  out of stock (the ERP sync did not mark them changed then). Low: a price saved within the same second as the
+  change a feed was built after is in the feed at once (was: the old price for up to 15 minutes).
 
 ## 2.1.2 — 2026-11-05
 
