@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
+  - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
+    cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →
+    1234600, B2B credit limit 123456 → 123500), and saving one price-list line rounded every other line. Admin
+    amount fields accept cents in every currency; the storefront still charges whole units.
+  - A product created in the admin of a store that shares another store's catalog is priced in the currency of the
+    store the catalog belongs to (a HU store sharing the default EUR catalog creates EUR products and sells them
+    through its HUF price list). It used to be priced in HUF and could not be sold in the EUR store. The product
+    form says which currency its prices are in.
+
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.

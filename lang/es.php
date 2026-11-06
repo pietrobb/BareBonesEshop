@@ -1113,6 +1113,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.related_save' => 'Guardar productos relacionados',
     'admin.product.related_saved' => 'Relaciones de productos guardadas.',
     'admin.product.duplicate' => 'Duplicar',
+    'admin.product.prices_in' => 'Los precios están en {currency}.',
     'admin.product.duplicated' => 'Copia creada como borrador con un SKU nuevo y sin stock. Revísela y publíquela.',
     'admin.product.copy_name' => '{name} (copia)',
     'admin.rich_text.bold' => 'Negrita',
