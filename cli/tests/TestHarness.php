@@ -6,19 +6,20 @@ require_once TEST_CLI_DIR . '/../src/autoload.php';
 
 // R16: after `setup.php install` the shop's stores.json and legal texts live in private_runtime_dir; the suite runs on
 // its own copy of the shipped stores.example.json there instead (and never writes into the installed shop's data).
-define('TEST_DATA_DIR', sys_get_temp_dir() . '/barebones-suite-data-' . getmypid() . '-' . bin2hex(random_bytes(4)));
+define('TEST_DATA_DIR', sys_get_temp_dir() . '/' . AppConfig::SUITE_DIR_PREFIX . getmypid() . '-' . bin2hex(random_bytes(4)));
 mkdir(TEST_DATA_DIR, 0700, true);
 copy(dirname(TEST_CLI_DIR) . '/' . DataOverrides::STORES_EXAMPLE, TEST_DATA_DIR . '/stores.json');
 DataOverrides::isolateSuiteForTesting(TEST_DATA_DIR);
 // R17: the suite and every process it starts read this copy of config.php (AppConfig::path), with the developer's
 // extensions, outbound webhooks, mail/ERP/carrier providers and gateway keys taken out: an enabled extension broke
-// core tests, and the suite posted signed events to the developer's real webhook.
+// core tests, and the suite posted signed events to the developer's real webhook. R18: its private directories and logs
+// are the suite's own too (TEST_DATA_DIR/private), not the developer's jobs, invoices and logs.
 (static function (): void {
     $root = dirname(TEST_CLI_DIR);
     $example = require $root . '/config.example.php';
     $developer = require $root . '/config.php';
     file_put_contents(TEST_DATA_DIR . '/' . AppConfig::SUITE_FILE,
-        '<?php return ' . var_export(AppConfig::suiteConfigForTesting(is_array($developer) ? $developer : [], $example), true) . ";\n");
+        '<?php return ' . var_export(AppConfig::suiteConfigForTesting(is_array($developer) ? $developer : [], $example, TEST_DATA_DIR . '/private'), true) . ";\n");
 })();
 
 function entrypointSource(string $entrypoint): string {

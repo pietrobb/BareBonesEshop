@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Test suite isolation** (review round 18, medium). The suite's copy of `config.php` now also moves every private
+  directory and log file (jobs, invoices, backups, updates, cache, downloads, logs, GDPR salt) into the suite's own
+  temp directory: it had left about 330 jobs in the developer's `jobs/pending` for their worker to run with the real
+  config, overwritten an invoice and written into their logs. `AppConfig` and `DataOverrides` follow the suite's
+  environment variables only on the command line and only for a suite directory in the system temp directory, so a
+  web request or a stray variable in production cannot point the shop at another config or data directory.
 - **Maintenance window after a refused or failed update step** (review round 18, high).
   - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
     `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a

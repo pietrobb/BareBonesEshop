@@ -34,11 +34,7 @@ final class DataOverrides
     /** The suite's data directory in this process, or inherited from the suite for this same application root. */
     private static function suiteDir(): ?string
     {
-        if (self::$suiteDir !== null) return self::$suiteDir;
-        $dir = getenv('BBE_SUITE_DATA_DIR');
-        $root = getenv('BBE_SUITE_APP_ROOT');
-        if (!is_string($dir) || $dir === '' || !is_string($root) || $root === '') return null;
-        return realpath(dirname(__DIR__)) === $root ? $dir : null;
+        return self::$suiteDir ?? AppConfig::suiteDataDir(dirname(__DIR__));
     }
 
     /** The writable data directory, or null when none is configured. */
