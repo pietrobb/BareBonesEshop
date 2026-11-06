@@ -2,17 +2,6 @@
 
 ## Unreleased
 
-- **Sign-up no longer reveals whether an address has an account** (review round 18, medium + low).
-  - The storefront sign-in admits an account only once its e-mail address is confirmed. A sign-up could be signed in
-    at once with the password the visitor had just chosen, which told that the address had had no account. An
-    unconfirmed account gets the same answer as a wrong password (the message now mentions the confirmation link) and
-    its owner is sent the link again (at most 3 an hour); the link plus the password signs in and confirms the address.
-    A completed password reset confirms it too. **Upgrade note:** existing customers who never confirmed their
-    address confirm it at their next sign-in (with the mailed link) or reset the password.
-  - Registering a taken address now takes as long as a new account: the password is hashed first and the account
-    e-mails (welcome, confirmation, sign-in link) are sent after the response.
-  - Per-IP rate limits (sign-in, registration, data export, account offer, admin sign-in) count an IPv6 client per
-    /64 network; one client could rotate through the addresses of its /64.
 - **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
   - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
     cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →
@@ -29,6 +18,17 @@
   - Checkout refuses a name or e-mail over 191 characters, a phone over 40, a street over 200, a city over 100, a
     ZIP over 20 and a company over 255 with `checkout.error.field_too_long` (and `field`, `max_length` in JSON),
     instead of a failed order on MySQL.
+- **Sign-up no longer reveals whether an address has an account** (review round 18, medium + low).
+  - The storefront sign-in admits an account only once its e-mail address is confirmed. A sign-up could be signed in
+    at once with the password the visitor had just chosen, which told that the address had had no account. An
+    unconfirmed account gets the same answer as a wrong password (the message now mentions the confirmation link) and
+    its owner is sent the link again (at most 3 an hour); the link plus the password signs in and confirms the address.
+    A completed password reset confirms it too. **Upgrade note:** existing customers who never confirmed their
+    address confirm it at their next sign-in (with the mailed link) or reset the password.
+  - Registering a taken address now takes as long as a new account: the password is hashed first and the account
+    e-mails (welcome, confirmation, sign-in link) are sent after the response.
+  - Per-IP rate limits (sign-in, registration, data export, account offer, admin sign-in) count an IPv6 client per
+    /64 network; one client could rotate through the addresses of its /64.
 - **Bounded prices** (review round 18, medium).
   - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
     `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is
