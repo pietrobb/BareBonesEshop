@@ -699,6 +699,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_error' => 'Hiba a fizetés állapotának módosításakor.',
     'admin.order.msg.paid_on_cancelled' => 'A rendelés törölve van, és törölve marad: a fizetést rögzítettük, vissza kell téríteni a vásárlónak, és incidenst jelentettünk.',
     'admin.order.msg.paid_partial' => '{amount} kevesebb a rendelés {total} összegénél (hiányzik {missing}): a részleges fizetés nem fizeti ki a rendelést. Akkor rögzítse a fizetést, amikor a teljes összeg megérkezett.',
+    'admin.order.msg.paid_zero' => 'A 0 összeg nem fizetés. Adja meg a beérkezett összeget, vagy hagyja üresen a mezőt a teljes rendelési összeghez.',
+    'admin.order.msg.paid_over' => 'Rögzítve: {amount}, {over} összeggel több a rendelés {total} összegénél: a különbözetet térítse vissza a vásárlónak.',
     'admin.order.msg.refund_amount' => 'A visszatérítés összegének a rendelkezésre álló egyenlegen belül kell lennie.',
     'admin.order.msg.refund_requested' => 'A visszatérítési kérelem létrejött.',
     'admin.order.msg.manual_refund_recorded' => 'A kézi visszatérítés rögzítve.',
@@ -1790,6 +1792,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'powered_by' => 'A BareBones E-shop működteti', 'added_to_cart' => 'Hozzáadva ✓',
     'select_variant' => 'Válasszon változatot.', 'cart_error' => 'A termék nem adható hozzá.', 'variant_required' => 'Válasszon változatot.',
     'variant_invalid' => 'A kiválasztott változat érvénytelen.', 'product_invalid' => 'A termék nem érhető el.', 'product_unavailable' => 'Ez a választás nem érhető el.',
+    'cart_full' => 'A kosárban legfeljebb 100 különböző tétel lehet.',
     'shipping_loading' => 'Szállítási módok betöltése…', 'shipping_unavailable' => 'A szállítás nem érhető el.', 'select_shipping_first' => 'Először válasszon szállítást.',
     'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.

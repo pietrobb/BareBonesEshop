@@ -699,6 +699,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_error' => 'Fehler beim Ändern des Zahlungsstatus.',
     'admin.order.msg.paid_on_cancelled' => 'Die Bestellung ist storniert und bleibt storniert: Die Zahlung wurde erfasst, muss dem Kunden erstattet werden, und ein Vorfall wurde gemeldet.',
     'admin.order.msg.paid_partial' => '{amount} ist weniger als die Bestellsumme {total} (es fehlen {missing}): Eine Teilzahlung bezahlt die Bestellung nicht. Erfassen Sie die Zahlung, sobald der volle Betrag eingegangen ist.',
+    'admin.order.msg.paid_zero' => 'Ein Betrag von 0 ist keine Zahlung. Geben Sie den erhaltenen Betrag ein oder lassen Sie das Feld für die volle Bestellsumme leer.',
+    'admin.order.msg.paid_over' => '{amount} erfasst, {over} mehr als die Bestellsumme {total}: Erstatten Sie dem Kunden die Differenz.',
     'admin.order.msg.refund_amount' => 'Der Erstattungsbetrag muss im verfügbaren Restbetrag liegen.',
     'admin.order.msg.refund_requested' => 'Erstattungsanfrage erstellt.',
     'admin.order.msg.manual_refund_recorded' => 'Manuelle Erstattung erfasst.',
@@ -1790,6 +1792,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'powered_by' => 'Bereitgestellt von BareBones E-shop', 'added_to_cart' => 'Hinzugefügt ✓',
     'select_variant' => 'Variante auswählen.', 'cart_error' => 'Artikel konnte nicht hinzugefügt werden.', 'variant_required' => 'Variante auswählen.',
     'variant_invalid' => 'Die gewählte Variante ist ungültig.', 'product_invalid' => 'Produkt ist nicht verfügbar.', 'product_unavailable' => 'Diese Auswahl ist nicht verfügbar.',
+    'cart_full' => 'Der Warenkorb kann höchstens 100 verschiedene Artikel enthalten.',
     'shipping_loading' => 'Versandarten werden geladen…', 'shipping_unavailable' => 'Versand ist nicht verfügbar.', 'select_shipping_first' => 'Wählen Sie zuerst den Versand.',
     'payment_loading' => 'Zahlungsarten werden geladen…', 'payment_unavailable' => 'Zahlung ist nicht verfügbar.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.

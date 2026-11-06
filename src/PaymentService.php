@@ -773,6 +773,17 @@ class PaymentService {
         return max(0, (int)$order['total'] - $amount);
     }
 
+    /** R19: what an amount recorded as "paid" by hand exceeds the order total by (it passed without a word). */
+    public static function adminPaymentExcess(array $order, string $newStatus, int $amount): int {
+        if ($newStatus !== 'paid' || (string)($order['status'] ?? '') === 'cancelled') return 0;
+        return max(0, $amount - (int)$order['total']);
+    }
+
+    /** R19: "0" typed as the amount is no payment (it paid the whole order); only an empty field means the order total. */
+    public static function adminPaymentZero(string $newStatus, string $input, int $amount): bool {
+        return $newStatus === 'paid' && $amount === 0 && trim($input) !== '';
+    }
+
     /**
      * A payment status set by hand on the order detail. Money recorded as paid pays a pending order like a gateway
      * capture (R17: after a failed card the order stayed Pending until a second status change). Returns true when the

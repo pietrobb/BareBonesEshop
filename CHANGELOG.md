@@ -52,6 +52,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Cart and manual payment limits** (review round 19, low). Adding to the cart stops at 100 different items, as a
+  restore already did (the storefront says the cart is full). A restore that lists the same new item twice counts it
+  once (2 × 30 gave 60). On the order detail, "Paid" with the amount `0` is refused (it paid the whole order; an empty
+  amount still means the order total), and an amount above the order total is recorded with a warning naming the excess.
 - **Checkout, cookie consent and search suggestions work in a further store language** (review round 19, medium).
   In a language that is not the store's own (`?lang=en` in the Slovak store, `?lang=en` in the Hungarian one) the
   page hands `storefront.js` an API address that already ends in `?lang=en`; the script put the action after it
