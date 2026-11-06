@@ -57,6 +57,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
   snapshot misses a file is refused before it changes anything and gives the shop back the window it had (it was marked
   failed and stayed closed). `docs/AI_UPDATE_RUNBOOK.md` describes the maintenance window instead of saying there is none.
+- **The merchant's withdrawal e-mail names only the withdrawn items** (review round 19, medium). It listed every line
+  of the order and the order total; it now lists the lines of that statement and their sum (new template variable
+  `{{withdrawal_total}}`; `{{order_total}}` is still the whole order for customised templates). On a partly shipped
+  order the admin marks each withdrawn line as already sent (wait for the return) or not sent (do not ship), instead of
+  "do not ship" for all of them, and the acknowledgement column shows the e-mail status in words.
 - **Checkout, cookie consent and search suggestions work in a further store language** (review round 19, medium).
   In a language that is not the store's own (`?lang=en` in the Slovak store, `?lang=en` in the Hungarian one) the
   page hands `storefront.js` an API address that already ends in `?lang=en`; the script put the action after it
@@ -265,6 +270,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
   notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
   `starter.json` when built from a tag.
+- **Imported products are priced in their catalog's currency** (review round 19, medium). A product created by a CSV
+  import, the API, a feed or an ERP sync in a HUF or CZK catalog was stored as EUR ("12 990 Ft" became 12 990,00 €)
+  and could not be sold in its store; it now takes the currency of the store the catalog belongs to, and an existing
+  product keeps its currency when it is imported again. Products already created this way keep their EUR price;
+  check them in **Catalog → Products**. Also: an import price like "1.234 Kč" (one separator before three digits) is
+  1 234, not 1,23; the shipping and payment pages show and check their amounts in the currency of the store owning
+  the providers (a USD store using the default store's providers saw them as dollars).
 - **Sign-up no longer loops** (review round 19, medium). The page after sign-up and the welcome mail said "you can sign
   in now", but an unconfirmed account cannot sign in, and every attempt mailed a new link that cancelled the earlier
   one, so the link from the first mail failed. The page now asks to confirm the address first; the welcome mail goes
