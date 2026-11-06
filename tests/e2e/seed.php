@@ -15,14 +15,20 @@ if (!$safe) {
 // stores (the default one and /cs/, where multistore-checkout pays by transfer) get real-format test accounts,
 // saved where the admin saves stores.json.
 $e2eStores = StoreSettings::load();
-$e2eIbanChanged = false;
+$e2eStoresChanged = false;
 foreach (['default' => 'SK31 1200 0000 1987 4263 7541', 'cz' => 'CZ65 0800 0000 1920 0014 5399'] as $e2eStore => $e2eIban) {
     if (!isset($e2eStores['stores'][$e2eStore])) continue;
     if (BankTransferInstructions::validIban(strtoupper(str_replace(' ', '', (string)($e2eStores['stores'][$e2eStore]['legal']['iban'] ?? ''))))) continue;
     $e2eStores['stores'][$e2eStore]['legal']['iban'] = $e2eIban;
-    $e2eIbanChanged = true;
+    $e2eStoresChanged = true;
 }
-if ($e2eIbanChanged) {
+// Spanish is no store's own language: on the default store it is a further language (?lang=es), which
+// secondary-language.spec.js shops in.
+if (isset($e2eStores['stores']['default']) && !in_array('es', (array)($e2eStores['stores']['default']['languages'] ?? []), true)) {
+    $e2eStores['stores']['default']['languages'][] = 'es';
+    $e2eStoresChanged = true;
+}
+if ($e2eStoresChanged) {
     $e2eStoresPath = DataOverrides::storesWritePath() ?? throw new RuntimeException('No writable stores.json location for the E2E shop');
     file_put_contents($e2eStoresPath, json_encode($e2eStores, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
 }

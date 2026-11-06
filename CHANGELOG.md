@@ -32,7 +32,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
-- **Theme assets:** the default theme is version 2.3.1, so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.2, so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -52,6 +52,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Checkout, cookie consent and search suggestions work in a further store language** (review round 19, medium).
+  In a language that is not the store's own (`?lang=en` in the Slovak store, `?lang=en` in the Hungarian one) the
+  page hands `storefront.js` an API address that already ends in `?lang=en`; the script put the action after it
+  (`/api/v1/storefront?lang=en/shipping_rates`) and every storefront API call answered 404 since round 14. Checkout
+  kept the total without the chosen shipping (23,33 € shown, 26,82 € charged; 5 490 Ft shown, 7 180 Ft charged), the
+  cookie choice was not recorded on the server and search suggestions stayed empty. The action now goes on the path and
+  the request's parameters join the address's query. Default theme 2.3.2; a browser test shops in `?lang=es` and checks
+  that the total shown is the order's total.
 - **Default theme 2.3.1** (review round 18, medium). `storefront.css` and `storefront.js` changed after 2.1.2 (the
   breadcrumb, a homepage hero without an image, the method names at checkout) but kept `?v=2.3.0`, so browsers went on using the cached old files for up
   to a year. A test now pins a fingerprint of the theme's assets to its version and fails when they change without a
@@ -257,6 +265,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `stock_updated_at` only, and the feeds are rebuilt when a CSV import or an ERP product sync takes a product into or
   out of stock (the ERP sync did not mark them changed then). Low: a price saved within the same second as the
   change a feed was built after is in the feed at once (was: the old price for up to 15 minutes).
+- **Sign-up no longer loops** (review round 19, medium). The page after sign-up and the welcome mail said "you can sign
+  in now", but an unconfirmed account cannot sign in, and every attempt mailed a new link that cancelled the earlier
+  one, so the link from the first mail failed. The page now asks to confirm the address first; the welcome mail goes
+  out after the confirmation; the five newest confirmation links stay valid together (24 hours). Low: the forgot
+  password answer no longer takes longer for an address with an account (the mail goes out after the response), and a
+  throttled mail sent after the response no longer logs "headers already sent".
 
 ## 2.1.2 — 2026-11-05
 

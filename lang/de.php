@@ -1688,7 +1688,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_invalid_email'   => 'Ungültige E-Mail.',
     'account.err_weak_password'   => 'Passwort muss mindestens 8 Zeichen haben.',
     'account.err_email_taken'     => 'Diese E-Mail ist bereits registriert.',
-    'account.register_check_email' => 'Wir haben eine Nachricht an {email} gesendet. Wenn Sie gerade Ihr Konto angelegt haben, können Sie sich jetzt mit Ihrem Passwort anmelden.',
+    'account.register_check_email' => 'Wir haben eine Nachricht an {email} gesendet. Wenn Sie gerade Ihr Konto angelegt haben, bestätigen Sie die Adresse mit dem Link darin und melden Sie sich dann mit Ihrem Passwort an.',
     'account.err_invalid_credentials' => 'Ungültige E-Mail oder Passwort. Wenn Sie das Konto gerade angelegt haben, bestätigen Sie zuerst Ihre E-Mail-Adresse über den Link, den wir Ihnen geschickt haben.',
     'account.err_account_blocked' => 'Dieses Konto ist gesperrt.',
     'account.err_invalid_current_password' => 'Aktuelles Passwort ist falsch.',
