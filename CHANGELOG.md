@@ -10,6 +10,23 @@
     product keeps its `updated_at` (a stock-only change moves `stock_updated_at`), a price feed with the same price
     does not rewrite the product, a recount to the same number changes nothing, and a stock change that keeps the
     product in stock refreshes the product pages only. A product going in or out of stock still rebuilds them.
+- **Bounded prices** (review round 18, medium).
+  - A price from a CSV import, a feed or an admin money field above 20 000 000.00 (`Import::MAX_CENTS`) is refused.
+    `184467440737095516.16` overflowed to 0 and the CSV import created the product active for free; now the row is
+    reported as an error and an existing product keeps its price.
+  - A thousands separator must group three digits: `5..0` is refused instead of read as 50.00, and so are `1.29,00`
+    and `1234.567,89`; `1.299,00`, `1,299.00` and `12,345,678` parse as before.
+- **Maintenance window after a refused or failed update step** (review round 18, high).
+  - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
+    `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a
+    failed update left closed stays closed. A rollback that stops after it began restoring files or the database
+    keeps the shop on 503 (no mix of old and new files) and the marker names the command to re-run.
+  - `php cli/update.php apply` likewise lifts maintenance only after a successful update; a refused or automatically
+    rolled-back update restores the window it found (an earlier failed one stays).
+  - `php cli/migrate.php apply` whose pre-migration backup fails (e.g. MySQL with an unusable `mariadb-dump`) ran no
+    migration: the shop opens again instead of staying on 503 for good, or keeps an earlier failed run's window.
+  - A lock another process holds on `.maintenance` keeps the shop closed for 24 hours at most.
+
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.

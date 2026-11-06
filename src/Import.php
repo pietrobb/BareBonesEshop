@@ -677,6 +677,8 @@ class Import {
      * "€24.90" / "24,90 EUR" / "1 299,- Kč" → the number without the currency. With both separators the last one is
      * the decimal mark; one kind repeated is a thousands separator. An int is already cents. An empty value is 0;
      * anything else that is not a price, and a negative price, is refused.
+     * R18: above MAX_CENTS is refused ("184467440737095516.16" overflowed to 0 and imported an active product for
+     * free), and a thousands separator must group three digits ("5..0" is not 50.00).
      */
     public static function parsePriceToCents($price): int {
         if (is_int($price)) {
@@ -690,20 +692,33 @@ class Import {
             if (!preg_match('/^-?\d[\d.,]*$/', $s)) throw new \InvalidArgumentException("Not a price: {$raw}");
             $lastComma = strrpos($s, ',');
             $lastDot = strrpos($s, '.');
+            $grouping = null;
             if ($lastComma !== false && $lastDot !== false) {
                 $decimal = $lastComma > $lastDot ? ',' : '.';
-                $s = str_replace($decimal === ',' ? '.' : ',', '', $s);
+                $grouping = $decimal === ',' ? '.' : ',';
             } else {
                 $decimal = $lastComma !== false ? ',' : '.';
-                if (substr_count($s, $decimal) > 1) $s = str_replace($decimal, '', $s);
+                if (substr_count($s, $decimal) > 1) [$grouping, $decimal] = [$decimal, ''];
             }
-            $s = str_replace($decimal, '.', $s);
+            if ($grouping !== null) {
+                $whole = $decimal === '' ? $s : substr($s, 0, (int)strrpos($s, $decimal));
+                $sep = preg_quote($grouping, '/');
+                if (!preg_match('/^-?\d{1,3}(?:' . $sep . '\d{3})+$/', $whole)) throw new \InvalidArgumentException("Not a price: {$raw}");
+                $s = str_replace($grouping, '', $s);
+            }
+            if ($decimal !== '') $s = str_replace($decimal, '.', $s);
             if (!preg_match('/^-?\d+(?:\.\d+)?$/', $s)) throw new \InvalidArgumentException("Not a price: {$raw}");
-            $cents = (int)round((float)$s * 100);
+            // Bounded before the int cast, which wraps a float beyond PHP_INT_MAX (to 0 and the like).
+            $float = round((float)$s * 100);
+            $cents = $float < 0 ? -1 : ($float > self::MAX_CENTS ? self::MAX_CENTS + 1 : (int)$float);
         }
         if ($cents < 0) throw new \InvalidArgumentException('Price must not be negative');
+        if ($cents > self::MAX_CENTS) throw new \InvalidArgumentException('Price must not exceed ' . self::formatCents(self::MAX_CENTS));
         return $cents;
     }
+
+    /** The largest amount in cents a price may have (fits MySQL INT columns with room to spare). */
+    public const MAX_CENTS = 2000000000;
 
     /** Generate URL-safe slug with proper Central European transliteration */
     public static function slugify(string $text): string {
