@@ -7,15 +7,16 @@ echo "\n--- R18: cart restore is bounded and linear, checkout fields have a maxi
 $r18cCatalog = StoreContext::current()->catalogId();
 $r18cDb = Db::get();
 $r18cSession = $_SESSION ?? [];
+// Own id range: 988xx is taken by earlier scenarios (R17 dev docs keeps product 98871 with an order).
 try {
     $r18cInsert = $r18cDb->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (?, ?, 1, ?, ?, ?, 'simple', 500, 'eur', 'active', 50, 'deny')");
     for ($r18cI = 1; $r18cI <= 150; $r18cI++) {
-        $r18cInsert->execute([98800 + $r18cI, $r18cCatalog, "R18C {$r18cI}", "r18c-{$r18cI}", "R18C-{$r18cI}"]);
+        $r18cInsert->execute([981000 + $r18cI, $r18cCatalog, "R18C {$r18cI}", "r18c-{$r18cI}", "R18C-{$r18cI}"]);
     }
     $r18cItems = [];
-    for ($r18cI = 1; $r18cI <= 150; $r18cI++) $r18cItems[] = ['product_id' => 98800 + $r18cI, 'qty' => 1];
-    for ($r18cI = 0; $r18cI < 3000; $r18cI++) $r18cItems[] = ['product_id' => 98801, 'qty' => 99];
+    for ($r18cI = 1; $r18cI <= 150; $r18cI++) $r18cItems[] = ['product_id' => 981000 + $r18cI, 'qty' => 1];
+    for ($r18cI = 0; $r18cI < 3000; $r18cI++) $r18cItems[] = ['product_id' => 981001, 'qty' => 99];
 
     $_SESSION = ['cart' => []];
     $r18cStart = microtime(true);
@@ -23,12 +24,12 @@ try {
     $r18cSeconds = microtime(true) - $r18cStart;
     assert_true(count($_SESSION['cart']) === Cart::MAX_LINES && $r18cSeconds < 5,
         sprintf('R18 cart_restore: 3 150 entries give at most Cart::MAX_LINES lines, quickly (%d lines, %.1f s)', count($_SESSION['cart']), $r18cSeconds));
-    assert_equals(1, (int)($_SESSION['cart']['p_98801']['qty'] ?? 0),
+    assert_equals(1, (int)($_SESSION['cart']['p_981001']['qty'] ?? 0),
         'R18 cart_restore: an entry repeated in the same restore counts once (it did not add 99 × 3 000)');
 
-    $_SESSION = ['cart' => ['p_98801' => ['product_id' => 98801, 'variant_id' => null, 'qty' => 2]]];
-    Cart::restore([['product_id' => 98801, 'qty' => 3], ['product_id' => 98802, 'qty' => 1], ['product_id' => 99999999, 'qty' => 1], 'junk']);
-    assert_equals([5, 1, false], [(int)($_SESSION['cart']['p_98801']['qty'] ?? 0), (int)($_SESSION['cart']['p_98802']['qty'] ?? 0), isset($_SESSION['cart']['p_99999999'])],
+    $_SESSION = ['cart' => ['p_981001' => ['product_id' => 981001, 'variant_id' => null, 'qty' => 2]]];
+    Cart::restore([['product_id' => 981001, 'qty' => 3], ['product_id' => 981002, 'qty' => 1], ['product_id' => 99999999, 'qty' => 1], 'junk']);
+    assert_equals([5, 1, false], [(int)($_SESSION['cart']['p_981001']['qty'] ?? 0), (int)($_SESSION['cart']['p_981002']['qty'] ?? 0), isset($_SESSION['cart']['p_99999999'])],
         'R18 cart_restore: an existing line still adds up, an unknown product or a malformed entry is skipped');
 
     $r18cApi = (string)file_get_contents(TEST_CLI_DIR . '/../src/Http/ApiHandlers.php');
@@ -50,5 +51,5 @@ try {
     I18n::setLocale('sk');
 } finally {
     $_SESSION = $r18cSession;
-    $r18cDb->exec('DELETE FROM products WHERE id > 98800 AND id <= 98950');
+    $r18cDb->exec('DELETE FROM products WHERE id > 981000 AND id <= 981150');
 }
