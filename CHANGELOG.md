@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Maintenance window after a refused or failed update step** (review round 18, high).
+  - `php cli/update.php rollback` lifts maintenance only when the restore completed. A rollback refused without
+    `--accept-data-loss`, for an unknown snapshot or for changed files no longer removes `.maintenance`, so a shop a
+    failed update left closed stays closed. A rollback that stops after it began restoring files or the database
+    keeps the shop on 503 (no mix of old and new files) and the marker names the command to re-run.
+  - `php cli/update.php apply` likewise lifts maintenance only after a successful update; a refused or automatically
+    rolled-back update restores the window it found (an earlier failed one stays).
+  - `php cli/migrate.php apply` whose pre-migration backup fails (e.g. MySQL with an unusable `mariadb-dump`) ran no
+    migration: the shop opens again instead of staying on 503 for good, or keeps an earlier failed run's window.
+  - A lock another process holds on `.maintenance` keeps the shop closed for 24 hours at most.
+
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.

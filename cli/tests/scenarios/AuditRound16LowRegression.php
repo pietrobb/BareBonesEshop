@@ -42,7 +42,7 @@ assert_equals(['R16 box delivery', 'R16 courier', ''], [
 ], 'R16 low: the delivery note shows the method as chosen at checkout, else a readable form of its code, not the raw code');
 
 // 4. The maintenance marker stopped blocking after an hour even while the updater still ran (a long migration).
-//    The window now lasts while the process that wrote the marker runs on this host, at most a day.
+//    The window now lasts while the process that wrote the marker runs (or holds its lock), at most a day.
 if (is_dir('/proc/self') || function_exists('posix_kill')) {
     $r16lRoot = test_fixture_path('r16-maintenance');
     mkdir($r16lRoot);
@@ -60,9 +60,9 @@ if (is_dir('/proc/self') || function_exists('posix_kill')) {
         file_put_contents($r16lMarker, json_encode(['since' => gmdate('c'), 'reason' => 'r16', 'pid' => getmypid(), 'host' => 'r16-other-host.invalid']));
         touch($r16lMarker, time() - MaintenanceMode::STALE_AFTER - 600);
         $r16lHost = MaintenanceMode::active($r16lRoot);
-        // R17: the updater holds the marker's lock, so its window lasts as long as it runs, also past a day.
-        assert_equals([true, true, false, false], [$r16lLong, $r16lDay, $r16lOld, $r16lHost],
-            'R16 low: an update still running after an hour (R17: or a day) keeps the shop in maintenance; an unlocked marker without a PID or from another host does not');
+        // R18: any process able to open the marker could hold its lock, so a lock counts for MAX_AGE (a day) at most.
+        assert_equals([true, false, false, false], [$r16lLong, $r16lDay, $r16lOld, $r16lHost],
+            'R16 low: an update still running after an hour keeps the shop in maintenance (R18: at most a day); an unlocked marker without a PID or from another host does not');
     } finally {
         @unlink(MaintenanceMode::path($r16lRoot));
         @rmdir($r16lRoot);
