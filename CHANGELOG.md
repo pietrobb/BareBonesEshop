@@ -2,12 +2,6 @@
 
 ## Unreleased
 
-- **Test suite isolation** (review round 18, medium). The suite's copy of `config.php` now also moves every private
-  directory and log file (jobs, invoices, backups, updates, cache, downloads, logs, GDPR salt) into the suite's own
-  temp directory: it had left about 330 jobs in the developer's `jobs/pending` for their worker to run with the real
-  config, overwritten an invoice and written into their logs. `AppConfig` and `DataOverrides` follow the suite's
-  environment variables only on the command line and only for a suite directory in the system temp directory, so a
-  web request or a stray variable in production cannot point the shop at another config or data directory.
 - **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
   - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
     cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →
@@ -43,6 +37,12 @@
     migration: the shop opens again instead of staying on 503 for good, or keeps an earlier failed run's window.
   - A lock another process holds on `.maintenance` keeps the shop closed for 24 hours at most.
 
+- **Test suite isolation** (review round 18, medium). The suite's copy of `config.php` now also moves every private
+  directory and log file (jobs, invoices, backups, updates, cache, downloads, logs, GDPR salt) into the suite's own
+  temp directory: it had left about 330 jobs in the developer's `jobs/pending` for their worker to run with the real
+  config, overwritten an invoice and written into their logs. `AppConfig` and `DataOverrides` follow the suite's
+  environment variables only on the command line and only for a suite directory in the system temp directory, so a
+  web request or a stray variable in production cannot point the shop at another config or data directory.
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.
