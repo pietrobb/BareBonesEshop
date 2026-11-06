@@ -38,7 +38,7 @@ try {
         'R17 maintenance: a reused PID (other start time) does not keep the shop closed; the same process still does');
 
     // 2. The updater runs in another process (another container on the same volume): its lock keeps the window,
-    //    past the hour and past the day, whatever host and PID the marker names; it ends when that process ends.
+    //    past the hour, whatever host and PID the marker names; it ends when that process ends.
     file_put_contents($r17mRoot . '/child.php', '<?php
 require ' . var_export(dirname(TEST_CLI_DIR) . '/src/autoload.php', true) . ';
 MaintenanceMode::enter($argv[1], "update 9.9.9");
@@ -64,8 +64,9 @@ exit(1); // killed mid-update: leave() never runs
     proc_close($r17mChild);
     $r17mAge(MaintenanceMode::STALE_AFTER + 600);
     $r17mGone = MaintenanceMode::active($r17mRoot);
-    assert_equals(['entered', true, true, false], [$r17mEntered, $r17mHour, $r17mDay, $r17mGone],
-        'R17 maintenance: an update in another process keeps its window while it runs (after 1 h and 24 h); once it is gone, an hour-old marker no longer blocks');
+    // R18: past MAX_AGE a lock alone no longer counts (any process that can open the marker could hold one).
+    assert_equals(['entered', true, false, false], [$r17mEntered, $r17mHour, $r17mDay, $r17mGone],
+        'R17 maintenance: an update in another process keeps its window while it runs (after 1 h, up to MAX_AGE); once it is gone, an hour-old marker no longer blocks');
     @unlink($r17mMarker);
 
     // 3. A step that failed half-way keeps the shop closed: the marker never goes stale and names what to run.
