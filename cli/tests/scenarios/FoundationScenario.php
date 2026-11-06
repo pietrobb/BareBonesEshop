@@ -263,17 +263,17 @@ if ($mysqlDsn) {
         }
         $my->exec("INSERT INTO orders (id, customer_id, store_id, customer_email) VALUES (97405, NULL, 'default', ' A074-MySQL@example.com ')");
         $my->exec("INSERT INTO customers (id, email, status, store_id) VALUES (97404, 'a074-mysql@example.com', 'active', 'default')");
+        // R19: a re-send keeps the earlier link valid (the first mail's link must still work).
         $a074vMysqlToken = Customers::startEmailVerification(97404);
-        $a074vMysqlStale = Customers::startEmailVerification(97404);
-        $a074vMysqlStaleRefused = $a074vMysqlToken !== null && Customers::verifyEmail($a074vMysqlToken, 97404) === null;
-        $a074vMysqlForeign = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale, 97406) === null
+        $a074vMysqlResent = Customers::startEmailVerification(97404);
+        $a074vMysqlForeign = $a074vMysqlToken !== null && $a074vMysqlResent !== null && Customers::verifyEmail($a074vMysqlToken, 97406) === null
             && (int)$my->query('SELECT COUNT(*) FROM orders WHERE id = 97405 AND customer_id IS NULL')->fetchColumn() === 1;
-        $a074vMysqlVerified = $a074vMysqlForeign && Customers::verifyEmail($a074vMysqlStale, 97404) === 97404;
-        $a074vMysqlReuse = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale, 97404) === null;
-        assert_true($a074vMysqlStaleRefused && $a074vMysqlVerified && $a074vMysqlReuse
+        $a074vMysqlVerified = $a074vMysqlForeign && Customers::verifyEmail($a074vMysqlToken, 97404) === 97404;
+        $a074vMysqlReuse = Customers::verifyEmail((string)$a074vMysqlToken, 97404) === null;
+        assert_true($a074vMysqlVerified && $a074vMysqlReuse
             && $my->query('SELECT email_verified_at FROM customers WHERE id = 97404')->fetchColumn() !== null
             && (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_email_verifications'")->fetchColumn() === 1,
-            'MySQL live: A07.4 e-mail verification migration is idempotent; tokens are single-use and superseded by re-send');
+            'MySQL live: A07.4 e-mail verification migration is idempotent; tokens are single-use, a re-send keeps the earlier link');
         assert_equals(97404, (int)$my->query('SELECT customer_id FROM orders WHERE id = 97405')->fetchColumn(),
             'MySQL live: R13 UX5 verifying the e-mail attaches the guest order placed with it (case and spaces ignored)');
         $my->exec('DELETE FROM orders WHERE id = 97405');
