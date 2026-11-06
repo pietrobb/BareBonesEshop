@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Bounded cart restore and checkout fields** (review round 18, medium and low).
+  - `cart_restore` reads at most 200 entries, restores at most 100 lines and prices the cart once; a body over
+    64 KiB is refused with 413. One anonymous request with 20 000 lines used to take ~40 s and end in HTTP 500.
+    An entry repeated within one restore now counts once.
+  - Checkout refuses a name or e-mail over 191 characters, a phone over 40, a street over 200, a city over 100, a
+    ZIP over 20 and a company over 255 with `checkout.error.field_too_long` (and `field`, `max_length` in JSON),
+    instead of a failed order on MySQL.
+
 - **Small fixes** (review round 17, low).
   - Setting an order's payment id, a sign-in (`last_login_at`) and an e-mail verification move `updated_at`, so
     API v1 `updated_after` sees them.
