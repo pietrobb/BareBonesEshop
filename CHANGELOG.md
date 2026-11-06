@@ -151,6 +151,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
     delivery note shows the order's day on the store's calendar (it showed the UTC day) in the same format.
   - E-mails name the store in the From line (`"Slovenský obchod" <noreply@…>`), and without `MAIL_REPLY_TO` a reply
     goes to the store's contact address (`legal.email` in `stores.json`) instead of the noreply mailbox.
+  - Admin → Stores and seller has a time zone list per store (saved as `timezone` in `stores.json`); it was file-only,
+    so doctor's "store sets no timezone" warning could not be fixed from the admin.
+  - The admin shows GDPR event actions, webhook incident states, audit log actions and the legal-text buttons in words
+    ("Anonymized by an admin", "Terms & conditions (SK)") instead of their internal codes.
 - **Developer docs and carrier data** (review round 17, medium).
   - The migration example in `docs/EXTENSIONS.md` creates its table with an `id` column; it named no primary-key
     column, so SQLite got a column called `INTEGER` and MySQL/MariaDB refused it (ERROR 1064). A test runs the

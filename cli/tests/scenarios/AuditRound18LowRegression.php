@@ -132,3 +132,86 @@ try {
     @unlink(test_fixture_path('r18-low-mail') . '.log');
     StoreContext::activate($r18lSavedStore);
 }
+
+echo "\n--- R18 UX: raw codes in the admin ---\n";
+
+// The GDPR event log, the webhook incidents and the audit log printed their internal codes (admin_anonymize,
+// unresolved_dead, update), and the legal-text buttons the page ids (terms (sk)).
+if (!function_exists('adminCodeLabel')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php';
+$r18lAdminSrc = static fn(string $file): string => (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/' . $file);
+$r18lSavedLocale = I18n::locale();
+try {
+    $r18lGdprActions = preg_match('/\$allowed = \[([^\]]+)\]/', (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/GdprService.php'), $r18lM)
+        ? array_map(static fn(string $c): string => trim($c, " '"), explode(',', $r18lM[1])) : [];
+    assert_true(count($r18lGdprActions) >= 6, 'R18 UX: the GDPR event actions are read from GdprService::logEvent (' . implode(',', $r18lGdprActions) . ')');
+    $r18lCodes = ['admin.gdpr.action.' => $r18lGdprActions, 'admin.ops.webhook_status.' => ['retry', 'dead', 'unresolved_retry', 'unresolved_dead'],
+        'admin.audit.action.' => ['create', 'update', 'delete']];
+    foreach (['en', 'sk', 'de'] as $r18lLocale) {
+        I18n::setLocale($r18lLocale);
+        foreach ($r18lCodes as $r18lPrefix => $r18lList) {
+            foreach ($r18lList as $r18lCode) {
+                assert_true(adminCodeLabel($r18lPrefix, $r18lCode) !== $r18lCode, "R18 UX: {$r18lPrefix}{$r18lCode} has a {$r18lLocale} label");
+            }
+        }
+    }
+    assert_true(str_contains($r18lAdminSrc('Customers.php'), "adminCodeLabel('admin.gdpr.action.', (string)\$e['action'])") && !str_contains($r18lAdminSrc('Customers.php'), "<td><?= esc(\$e['action']) ?></td>"),
+        'R18 UX: the GDPR event log shows the action label');
+    $r18lOps = $r18lAdminSrc('Operations.php');
+    assert_true(str_contains($r18lOps, "adminCodeLabel('admin.ops.webhook_status.', (string)\$incident['status'])") && !str_contains($r18lOps, "<td><?= esc(\$incident['status']) ?></td>"),
+        'R18 UX: webhook incidents show the status label');
+    assert_true(str_contains($r18lOps, "adminCodeLabel('admin.audit.action.', (string)\$log['action'])") && !str_contains($r18lOps, "<td><?= esc(\$log['action']) ?></td>"),
+        'R18 UX: the audit log shows the action label');
+    require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/StoreManagement.php';
+    I18n::setLocale('sk');
+    foreach (ConsumerNotice::LEGAL_PAGES as $r18lPage) {
+        $r18lLabel = I18n::t(ADMIN_LEGAL_PAGE_LABELS[$r18lPage] ?? $r18lPage);
+        assert_true(isset(ADMIN_LEGAL_PAGE_LABELS[$r18lPage]) && $r18lLabel !== ADMIN_LEGAL_PAGE_LABELS[$r18lPage] && $r18lLabel !== $r18lPage,
+            "R18 UX: the legal text button for {$r18lPage} is named ({$r18lLabel})");
+    }
+    assert_true(!str_contains($r18lAdminSrc('StoreManagement.php'), "#store-legal\"><?= esc(\$legalPage . ' ('"), 'R18 UX: the legal text buttons no longer print the page id');
+} catch (Throwable $e) {
+    assert_true(false, 'R18 UX admin codes (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+} finally {
+    I18n::setLocale($r18lSavedLocale);
+}
+
+echo "\n--- R18 UX: store time zone in the admin ---\n";
+
+// The store time zone (invoice dates and numbers, deadlines, the daily report) could only be set by editing
+// stores.json; doctor warned about a missing one with no way to fix it from Admin → Stores and seller.
+$r18lTmp = test_fixture_path('r18-low-tz');
+@mkdir($r18lTmp, 0700, true);
+try {
+    copy(dirname(TEST_CLI_DIR) . '/stores.example.json', $r18lTmp . '/stores.json');
+    StoreSettings::setPathForTesting($r18lTmp . '/stores.json');
+    $r18lStore = StoreSettings::load()['stores']['default'];
+    $r18lInput = ['store_name' => (string)$r18lStore['name'], 'iban' => 'SK31 1200 0000 1987 4263 7541'] + array_map('strval', array_filter($r18lStore['legal'], 'is_scalar'))
+        + ['payment_terms_days' => (string)($r18lStore['legal']['payment_terms_days'] ?? '14'), 'vat_registered' => !empty($r18lStore['legal']['vat_registered']) ? '1' : ''];
+    $r18lSaved = StoreSettings::save('default', ['timezone' => 'Europe/Budapest'] + $r18lInput);
+    $r18lAfter = StoreSettings::load()['stores']['default'];
+    assert_true($r18lSaved['ok'] && ($r18lAfter['timezone'] ?? null) === 'Europe/Budapest' && StoreContext::timezoneFor($r18lAfter) === 'Europe/Budapest',
+        'R18 UX: the admin saves the store time zone (' . implode(' ', $r18lSaved['errors']) . ')');
+    foreach (['Mars/Olympus', 'europe/bratislava ', '', '../UTC'] as $r18lBad) {
+        $r18lBefore = (string)file_get_contents($r18lTmp . '/stores.json');
+        $r18lResult = StoreSettings::save('default', ['timezone' => $r18lBad] + $r18lInput);
+        assert_true(!$r18lResult['ok'] && in_array(I18n::t('admin.stores.err.timezone'), $r18lResult['errors'], true) && $r18lBefore === (string)file_get_contents($r18lTmp . '/stores.json'),
+            "R18 UX: an unknown time zone \"{$r18lBad}\" is refused and nothing is saved");
+    }
+    assert_true(StoreSettings::save('default', $r18lInput)['ok'] && (StoreSettings::load()['stores']['default']['timezone'] ?? null) === 'Europe/Budapest',
+        'R18 UX: a form without the field keeps the saved zone');
+    $r18lForm = $r18lAdminSrc('StoreSettings.php');
+    assert_true(str_contains($r18lForm, 'name="timezone"') && str_contains($r18lForm, 'DateTimeZone::listIdentifiers()') && str_contains($r18lForm, 'StoreContext::timezoneFor($store)'),
+        'R18 UX: the store form offers every time zone with the effective one selected');
+    foreach (['en', 'sk'] as $r18lLocale) {
+        I18n::setLocale($r18lLocale);
+        foreach (['admin.stores.field.timezone', 'admin.stores.timezone_hint', 'admin.stores.err.timezone'] as $r18lKey) assert_true(I18n::t($r18lKey) !== $r18lKey, "R18 UX: {$r18lKey} is translated ({$r18lLocale})");
+    }
+} catch (Throwable $e) {
+    assert_true(false, 'R18 UX store time zone (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+} finally {
+    StoreSettings::setPathForTesting(null);
+    I18n::setLocale($r18lSavedLocale);
+    @unlink($r18lTmp . '/stores.json');
+    @unlink($r18lTmp . '/stores.json.lock');
+    @rmdir($r18lTmp);
+}
