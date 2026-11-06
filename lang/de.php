@@ -989,6 +989,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.related_save' => 'Ähnliche Produkte speichern',
     'admin.product.related_saved' => 'Produktbeziehungen gespeichert.',
     'admin.product.duplicate' => 'Duplizieren',
+    'admin.product.prices_in' => 'Preise in {currency}.',
     'admin.product.duplicated' => 'Kopie als Entwurf mit neuer SKU und ohne Bestand angelegt. Prüfen und veröffentlichen.',
     'admin.product.copy_name' => '{name} (Kopie)',
     'admin.rich_text.bold' => 'Fett',

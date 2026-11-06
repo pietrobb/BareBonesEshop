@@ -989,6 +989,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.related_save' => 'Zapisz powiązane produkty',
     'admin.product.related_saved' => 'Powiązania produktu zapisane.',
     'admin.product.duplicate' => 'Duplikuj',
+    'admin.product.prices_in' => 'Ceny są w walucie {currency}.',
     'admin.product.duplicated' => 'Kopia utworzona jako szkic z nowym SKU i bez stanu magazynowego. Sprawdź ją i opublikuj.',
     'admin.product.copy_name' => '{name} (kopia)',
     'admin.rich_text.bold' => 'Pogrubienie',
