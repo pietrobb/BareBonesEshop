@@ -248,7 +248,8 @@ $architectureBudgets = [
     // +1 the parcel row shows the cash on delivery it collects.
     // +4 lines, +1 coupling (OrderWorkflow) R15 high 5: shipping the last goods moves the order to shipped and e-mails.
     // +1 coupling (MethodLabels) R15 medium: the parcel list names the carrier ("Packeta"), not its code.
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 285, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 12],
+    // +2 lines R18 acceptance: a withdrawal on a shipped or delivered order waits for the return.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 287, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 12],
     // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected) and the
     // cash on delivery of every parcel, shown also when no carrier API is connected.
     // +14 lines, +1 function R15: only the carrier the customer chose is offered (adminOrderLabelCarriers).
