@@ -32,7 +32,7 @@ php -r "exit(extension_loaded('sodium') ? 0 : 1);"
 Version 1.8.0 predates the updater. No v1.9.0 update package was ever published, and copying a few updater files into the old tree does not work (they need classes v1.8.0 does not have). Instead, the updater of the **trusted target release** adopts the installed shop with `--installed=<shop root>`: it reads that shop's `config.php` and database and installs into that tree. Perform this once:
 
 1. Confirm that the deployment is really v1.8.0. Do not infer the version from a directory name. Compare the deployed core against the immutable `v1.8.0` source and preserve all customer changes.
-2. Stop all writers. The application has no built-in maintenance mode: block shop traffic at the web server or load balancer (static maintenance page or HTTP 503), then stop workers, cron, imports and webhooks.
+2. Stop all writers. v1.8.0 has no maintenance mode (it ignores the `.maintenance` marker the current updater writes during `apply`), so block shop traffic at the web server or load balancer (static maintenance page or HTTP 503), then stop workers, cron, imports and webhooks.
 3. Make an independent filesystem and database backup using the deployment platform.
 4. **v1.x `config.php` notes** (do these before anything else touches the tree):
    - v1.x tracked `config.php` in git. Copy it to a safe place first. A `git pull`/`git checkout` of a newer release deletes it (newer releases ignore it and ship `config.example.php`), and git refuses the checkout if it was edited. Never replace it with the example file: it holds the database credentials, the admin password hash and the payment secrets.
@@ -91,7 +91,7 @@ PACKAGE=/trusted/releases/update-X.Y.Z
 Then execute this state machine:
 
 1. **Observe** — record current application version, health, free disk space, active jobs, and database driver.
-2. **Quiesce** — the application has no built-in maintenance mode: block shop traffic at the web server or load balancer (static maintenance page or HTTP 503), then stop workers, cron, imports, and all other writers. Record the time: a later database rollback loses everything written after the update snapshot.
+2. **Quiesce** — while `apply` and `rollback` run, the updater keeps the shop closed itself: it writes `<shop root>/.maintenance`, web requests answer HTTP 503, and `cli/worker.php` and `cli/feed-sync.php` wait. After a step that stopped half-way the marker is marked failed and keeps the shop closed until a later `rollback`, `php cli/migrate.php apply` or an update that runs the migrations succeeds (an update of code only leaves it); its `reason` says what to run (`cat .maintenance`). The marker does not cover the time before `apply` or other cron scripts, so still stop cron, imports and all other writers. An update *from* 2.1.2 or older is applied by that release's updater, which reopens the shop after a failure: for that transition also block shop traffic at the web server or load balancer (static maintenance page or HTTP 503) and check `.maintenance` after a failure. Record the time: a later database rollback loses everything written after the update snapshot.
 3. **Prove readiness**:
 
 ```bash

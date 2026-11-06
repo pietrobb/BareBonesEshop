@@ -52,6 +52,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
+  window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
+  the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
+  snapshot misses a file is refused before it changes anything and gives the shop back the window it had (it was marked
+  failed and stayed closed). `docs/AI_UPDATE_RUNBOOK.md` describes the maintenance window instead of saying there is none.
 - **Checkout, cookie consent and search suggestions work in a further store language** (review round 19, medium).
   In a language that is not the store's own (`?lang=en` in the Slovak store, `?lang=en` in the Hungarian one) the
   page hands `storefront.js` an API address that already ends in `?lang=en`; the script put the action after it
