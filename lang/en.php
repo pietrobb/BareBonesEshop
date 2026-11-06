@@ -962,6 +962,7 @@ return [
     'admin.product.related_save' => 'Save related products',
     'admin.product.related_saved' => 'Product relations saved.',
     'admin.product.duplicate' => 'Duplicate',
+    'admin.product.prices_in' => 'Prices are in {currency}.',
     'admin.product.duplicated' => 'Copy created as a draft with a new SKU and no stock. Check it and publish.',
     'admin.product.copy_name' => '{name} (copy)',
     'admin.rich_text.bold' => 'Bold',

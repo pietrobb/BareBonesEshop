@@ -31,6 +31,12 @@ final class Money {
      * or has more decimals than the currency shows (CZK/HUF are whole units).
      */
     public static function parseInput(mixed $raw, string $currency): int {
+        $cents = self::parseCents($raw);
+        return $cents >= 0 && self::round($cents, $currency) === $cents ? $cents : -1;
+    }
+
+    /** An amount with at most two decimals as cents, -1 when it is not one. */
+    private static function parseCents(mixed $raw): int {
         if (!is_string($raw)) return -1;
         // R15 low: "1,299" is 1 299 or a typo, never 1,30 €: a decimal part finer than a cent is refused, not rounded.
         // The decimal separator is found as Import::parsePriceToCents finds it (the last one when both kinds occur,
@@ -44,29 +50,32 @@ final class Money {
             return -1;
         }
         try {
-            $cents = Import::parsePriceToCents($raw);
+            return Import::parsePriceToCents($raw);
         } catch (\InvalidArgumentException $e) {
             return -1;
         }
-        return self::round($cents, $currency) === $cents ? $cents : -1;
     }
 
     /**
      * R17: an admin money field typed in the currency ("12.90", "-1,50") as cents; null when it is not such an amount.
      * '' is $empty. Negative only with $signed (a variant surcharge).
+     * R18: cents are accepted in every currency. An amount stored finer than a CZK/HUF unit (an import, the API, an
+     * older version) is shown with its cents by adminValue() and saved back unchanged, not rounded (1234567 stayed
+     * 1234567, it became 1234600); the storefront still rounds it to whole units.
      */
     public static function adminInput(mixed $raw, string $currency, ?int $empty = 0, bool $signed = false): ?int {
         if (!is_scalar($raw)) return null;
         $raw = trim((string)$raw);
         if ($raw === '') return $empty;
         $negative = $signed && str_starts_with($raw, '-');
-        $cents = self::parseInput($negative ? ltrim(substr($raw, 1)) : $raw, $currency);
+        $cents = self::parseCents($negative ? ltrim(substr($raw, 1)) : $raw);
         if ($cents < 0) return null;
         return $negative ? -$cents : $cents;
     }
 
-    /** An amount in cents as an admin field shows it, in the currency ("12.90"); null is ''. */
+    /** An amount in cents as an admin field shows it, in the currency ("12.90", HUF "12346", or "12345.67" when stored so); null is ''. */
     public static function adminValue(?int $cents, string $currency): string {
-        return $cents === null ? '' : self::decimal($cents, $currency);
+        if ($cents === null) return '';
+        return self::round($cents, $currency) === $cents ? self::decimal($cents, $currency) : number_format($cents / 100, 2, '.', '');
     }
 }

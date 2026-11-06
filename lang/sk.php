@@ -967,6 +967,7 @@ return [
     'admin.product.related_save' => 'Uložiť súvisiace produkty',
     'admin.product.related_saved' => 'Produktové vzťahy boli uložené.',
     'admin.product.duplicate' => 'Duplikovať',
+    'admin.product.prices_in' => 'Ceny sú v mene {currency}.',
     'admin.product.duplicated' => 'Kópia je vytvorená ako koncept s novým SKU a bez zásob. Skontrolujte ju a zverejnite.',
     'admin.product.copy_name' => '{name} (kópia)',
     'admin.rich_text.bold' => 'Tučné',

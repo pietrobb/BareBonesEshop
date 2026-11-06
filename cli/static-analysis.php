@@ -188,7 +188,8 @@ $architectureBudgets = [
     // +1 line R14 UX7: the product editor loads the image list script (ImageOrder.php).
     // +14 lines, +1 function, +1 coupling R16 low: product prices are typed in the currency, not in cents (Money).
     // +4 lines R18 feeds: a stock-only product save moves stock_updated_at, and rebuilds feeds only across in/out of stock.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1321, 'functions' => 26, 'max_function_lines' => 210, 'coupling' => 22],
+    // +14 lines, +1 function, +2 coupling R18 currency: lossless CZK/HUF amounts, a new shared-catalog product in its currency.
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1335, 'functions' => 27, 'max_function_lines' => 210, 'coupling' => 24],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],

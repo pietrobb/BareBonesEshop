@@ -988,6 +988,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.related_save' => 'Kapcsolódó termékek mentése',
     'admin.product.related_saved' => 'A termékkapcsolatok mentve.',
     'admin.product.duplicate' => 'Másolás',
+    'admin.product.prices_in' => 'Az árak pénzneme: {currency}.',
     'admin.product.duplicated' => 'A másolat piszkozatként jött létre, új SKU-val és készlet nélkül. Ellenőrizze és tegye közzé.',
     'admin.product.copy_name' => '{name} (másolat)',
     'admin.rich_text.bold' => 'Félkövér',
