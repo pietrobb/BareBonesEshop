@@ -203,6 +203,8 @@ class StoreContext {
     public function usesProviderPrices(?string $chargeCurrency = null): bool {
         return $this->providerCurrency === strtolower($chargeCurrency ?? $this->currency());
     }
+    /** R19: the currency the provider scope's amounts are entered in (that of the store owning the scope). */
+    public function providerCurrency(): string { return $this->providerCurrency; }
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
     public function config(): array { return $this->config; }
 
