@@ -696,6 +696,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_changed' => 'Stav platby změněn na \'{status}\'.',
     'admin.order.msg.payment_error' => 'Chyba při změně stavu platby.',
     'admin.order.msg.paid_on_cancelled' => 'Objednávka je zrušená a zůstává zrušená: platba byla zaznamenána, je třeba ji vrátit zákazníkovi a byl nahlášen incident.',
+    'admin.order.msg.paid_partial' => '{amount} je méně než částka objednávky {total} (chybí {missing}): částečná platba objednávku nezaplatí. Platbu zaznamenejte, až dorazí celá částka.',
     'admin.order.msg.refund_amount' => 'Částka refundace musí být v rozsahu dostupného zůstatku.',
     'admin.order.msg.refund_requested' => 'Požadavek na refundaci byl vytvořen.',
     'admin.order.msg.manual_refund_recorded' => 'Ruční refundace byla zaznamenána.',

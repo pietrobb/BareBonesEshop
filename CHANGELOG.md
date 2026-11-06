@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A partial payment no longer pays the order; feeds are rebuilt only for a change they show** (review round 18,
+  medium).
+  - Recording "Paid" on the order detail with less than the order total (10 € of 100 €) is refused with the missing
+    amount; the order no longer goes to fulfilment. Money on a cancelled order is still recorded for a refund.
+  - Feeds and sitemaps are no longer rebuilt by every ERP or feed sync and every admin stock edit: an unchanged ERP
+    product keeps its `updated_at` (a stock-only change moves `stock_updated_at`), a price feed with the same price
+    does not rewrite the product, a recount to the same number changes nothing, and a stock change that keeps the
+    product in stock refreshes the product pages only. A product going in or out of stock still rebuilds them.
 - **CZK/HUF amounts in the admin, currency of a new product in a shared catalog** (review round 18, medium).
   - An amount stored finer than a whole koruna/forint (by an import, the API or an older version) is shown with its
     cents ("12345.67") and saved back unchanged. Saving an unchanged form used to round it (price list 1234567 →

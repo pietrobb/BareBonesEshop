@@ -168,7 +168,8 @@ class FeedImport {
         // A full upsert creates products and moves them between categories, as a CSV import does. Counted after the
         // commit: the recount must not hold the feed's write transaction (and its locks) open.
         if ($importMode === self::MODE_UPSERT && $result['imported'] > 0) Import::recountCategories($db);
-        if ($result['imported'] > 0) Cache::catalogChanged();
+        // R18: feeds and sitemaps follow the products' own updated_at (bumped only by a real change), not every sync.
+        if ($result['imported'] > 0) Cache::catalogChanged(null, false);
 
         // Update warehouse stock
         if (!empty($stockMap)) {
@@ -279,8 +280,9 @@ class FeedImport {
         $row = $existing->fetch();
         if (!$row) return false;
         $updates = [];
-        if (isset($mapped['price'])) {
-            $priceCents = Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price']));
+        $priceCents = isset($mapped['price']) ? Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price'])) : null;
+        // R18: the same price again is not a change (no updated_at bump, so feeds and sitemaps are not rebuilt).
+        if ($priceCents !== null && $priceCents !== (int)$row['price']) {
             $updates[] = 'price = :price';
             $params[':price'] = $priceCents;
             // Set old price as compare_price if price dropped

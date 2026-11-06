@@ -698,6 +698,7 @@ return [
     'admin.order.msg.payment_changed' => 'Payment status changed to \'{status}\'.',
     'admin.order.msg.payment_error' => 'Error while changing the payment status.',
     'admin.order.msg.paid_on_cancelled' => 'The order is cancelled and stays cancelled: the payment was recorded, must be returned to the customer and an incident was raised.',
+    'admin.order.msg.paid_partial' => '{amount} is less than the order total {total} ({missing} missing): a partial payment does not pay the order. Record the payment once the full amount has arrived.',
     'admin.order.msg.refund_amount' => 'The refund amount must be within the available balance.',
     'admin.order.msg.refund_requested' => 'Refund request created.',
     'admin.order.msg.manual_refund_recorded' => 'Manual refund recorded.',

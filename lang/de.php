@@ -696,6 +696,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_changed' => 'Zahlungsstatus geändert auf \'{status}\'.',
     'admin.order.msg.payment_error' => 'Fehler beim Ändern des Zahlungsstatus.',
     'admin.order.msg.paid_on_cancelled' => 'Die Bestellung ist storniert und bleibt storniert: Die Zahlung wurde erfasst, muss dem Kunden erstattet werden, und ein Vorfall wurde gemeldet.',
+    'admin.order.msg.paid_partial' => '{amount} ist weniger als die Bestellsumme {total} (es fehlen {missing}): Eine Teilzahlung bezahlt die Bestellung nicht. Erfassen Sie die Zahlung, sobald der volle Betrag eingegangen ist.',
     'admin.order.msg.refund_amount' => 'Der Erstattungsbetrag muss im verfügbaren Restbetrag liegen.',
     'admin.order.msg.refund_requested' => 'Erstattungsanfrage erstellt.',
     'admin.order.msg.manual_refund_recorded' => 'Manuelle Erstattung erfasst.',

@@ -943,11 +943,13 @@ function handleProductSave(): void {
             }
             if (ProductEditor::categoriesChanged($id, $editor)) $changed[] = 'categories';
             if ($changed) {
+                // R18: a stock-only edit moves stock_updated_at, not updated_at (the feed and sitemap fingerprint).
+                $touched = array_diff($changed, ['stock']) ? "updated_at={$now}" : "stock_updated_at={$now}";
                 // Stock moves by the admin's change only: a sale committed after $old was read stays sold.
                 $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type, stock=CASE WHEN stock + :stock_delta < 0 THEN 0 ELSE stock + :stock_delta2 END,
                     category_id=:category_id, brand_id=:brand_id, gtin=:gtin, mpn=:mpn, seo_title=:seo_title, meta_description=:meta_description, translations=:translations, price=:price, compare_price=:compare_price,
                     status=:status, summary=:summary, description=:description, images=:images, image_alts=:image_alts, tags=:tags, weight_g=:weight_g,
-                    stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id AND store_id=:catalog");
+                    stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, {$touched} WHERE id=:id AND store_id=:catalog");
                 $db->beginTransaction(); // an exception ends the request; the uncommitted transaction is rolled back
                 $stmt->execute(array_diff_key($data, [':stock' => 1]) + [':stock_delta' => $data[':stock'] - (int)$old['stock'], ':stock_delta2' => $data[':stock'] - (int)$old['stock'],
                     ':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
@@ -1022,7 +1024,9 @@ function handleProductSave(): void {
             $specIns->execute([':pid' => $id, ':name' => $name, ':val' => $displayVal, ':num' => $numericVal]);
         }
     }
-    Cache::catalogChanged();
+    // R18: the feeds and sitemaps only when the product went in or out of stock; any other change they show bumped
+    // updated_at (a new product their product count).
+    Cache::catalogChanged(null, $old && ((int)$old['stock'] > 0) !== ($data[':stock'] > 0));
 
     header("Location: admin.php?p=product&id={$id}");
     exit;

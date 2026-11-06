@@ -725,6 +725,14 @@ function handleOrderPaymentTransition(): void {
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
+    $shortfall = PaymentService::adminPaymentShortfall($order, $newStatus, $amount);
+    if ($shortfall > 0) {
+        $currency = (string)$order['currency'];
+        setFlash('err', I18n::format('admin.order.msg.paid_partial', ['amount' => I18n::price($amount, $currency),
+            'total' => I18n::price((int)$order['total'], $currency), 'missing' => I18n::price($shortfall, $currency)]));
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
 
     try {
         if (PaymentService::recordAdminPayment($order, $newStatus, $amount, $note, Security::adminUser())) {

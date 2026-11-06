@@ -696,6 +696,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_changed' => 'A fizetés állapota módosítva: \'{status}\'.',
     'admin.order.msg.payment_error' => 'Hiba a fizetés állapotának módosításakor.',
     'admin.order.msg.paid_on_cancelled' => 'A rendelés törölve van, és törölve marad: a fizetést rögzítettük, vissza kell téríteni a vásárlónak, és incidenst jelentettünk.',
+    'admin.order.msg.paid_partial' => '{amount} kevesebb a rendelés {total} összegénél (hiányzik {missing}): a részleges fizetés nem fizeti ki a rendelést. Akkor rögzítse a fizetést, amikor a teljes összeg megérkezett.',
     'admin.order.msg.refund_amount' => 'A visszatérítés összegének a rendelkezésre álló egyenlegen belül kell lennie.',
     'admin.order.msg.refund_requested' => 'A visszatérítési kérelem létrejött.',
     'admin.order.msg.manual_refund_recorded' => 'A kézi visszatérítés rögzítve.',

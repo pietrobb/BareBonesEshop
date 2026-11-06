@@ -779,16 +779,25 @@ class Products {
 
         // Fallback: direct update (no warehouses configured)
         $db = Db::get();
+        $before = $db->prepare("SELECT stock FROM products WHERE sku = :sku AND store_id = :store");
         $stmt = $db->prepare("UPDATE products SET stock = :qty, stock_updated_at = " . Db::now() . " WHERE sku = :sku AND store_id = :store");
         $updated = 0;
+        $changed = $flipped = false;
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         foreach ($stockData as $item) {
-            $stmt->execute([':qty' => (int)$item['qty'], ':sku' => $item['sku'], ':store' => StoreContext::current()->catalogId()]);
-            if ($stmt->rowCount() > 0) $updated++;
+            $params = [':sku' => $item['sku'], ':store' => StoreContext::current()->catalogId()];
+            $before->execute($params);
+            $old = $before->fetchColumn();
+            if ($old === false) continue;
+            $updated++;
+            if ((int)$old === (int)$item['qty']) continue; // R18: the same count again is no change
+            $stmt->execute($params + [':qty' => (int)$item['qty']]);
+            $changed = true;
+            $flipped = $flipped || ((int)$old > 0) !== ((int)$item['qty'] > 0);
         }
         if ($ownTransaction) $db->commit();
-        if ($updated > 0) Cache::catalogChanged();
+        if ($changed) Cache::catalogChanged(null, $flipped);
         return $updated;
     }
 
