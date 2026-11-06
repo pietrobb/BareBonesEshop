@@ -6,6 +6,10 @@
 class Cart {
     /** Most units of one line: every add/update path (JSON API, storefront form, reorder, restore) is capped here. */
     public const MAX_QTY = 99;
+    /** Most lines a cart restore brings back (R18: one request sent 20 000). */
+    public const MAX_LINES = 100;
+    /** Entries of a restore request that are read at all (duplicates and invalid ones included). */
+    public const MAX_RESTORE_LINES = 200;
     /** unavailable_reason of a line whose effective unit price is negative (e.g. a variant delta that outgrew its base price). */
     public const UNAVAILABLE_PRICE_INVALID = 'price_invalid';
     public const UNAVAILABLE_CURRENCY = 'not_priced_in_store_currency';
@@ -48,22 +52,26 @@ class Cart {
         $_SESSION['cart'][$key]['qty'] = min(self::MAX_QTY, (int)$_SESSION['cart'][$key]['qty'] + max(0, $qty));
     }
 
-    /** Validate a storefront cart command against canonical server data. */
-    public static function addValidated(int $productId, ?int $variantId, int $qty): array {
+    /** Why a product (and variant) cannot go into the cart, or null when it can: the catalog decides, not the request. */
+    private static function lineError(int $productId, ?int $variantId): ?string {
         $product = $productId > 0 ? Products::byId($productId) : null;
-        if (!$product || ($product['status'] ?? '') !== 'active') return ['ok' => false, 'error' => 'product_invalid'];
+        if (!$product || ($product['status'] ?? '') !== 'active') return 'product_invalid';
         $variants = Products::variants($productId);
-        if ($variants !== [] && $variantId === null) return ['ok' => false, 'error' => 'variant_required'];
+        if ($variants !== [] && $variantId === null) return 'variant_required';
         if ($variantId !== null) {
             $variant = null;
             foreach ($variants as $candidate) {
                 if ((int)$candidate['id'] === $variantId) { $variant = $candidate; break; }
             }
-            if ($variant === null) return ['ok' => false, 'error' => 'variant_invalid'];
+            if ($variant === null) return 'variant_invalid';
         }
-        if (!VariantAvailability::isPurchasable($productId, $variantId)) {
-            return ['ok' => false, 'error' => 'product_unavailable'];
-        }
+        return VariantAvailability::isPurchasable($productId, $variantId) ? null : 'product_unavailable';
+    }
+
+    /** Validate a storefront cart command against canonical server data. */
+    public static function addValidated(int $productId, ?int $variantId, int $qty): array {
+        $error = self::lineError($productId, $variantId);
+        if ($error !== null) return ['ok' => false, 'error' => $error];
         $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
         $previous = $_SESSION['cart'][$key] ?? null;
         $requested = (int)(self::get()[$key]['qty'] ?? 0) + max(1, $qty);
@@ -455,16 +463,36 @@ class Cart {
     }
 
     /**
-     * Restore cart from localStorage data (when session expired)
+     * Restore cart from localStorage data (when session expired).
+     * R18: one anonymous request sent 20 000 lines and every one was validated against a freshly priced cart
+     * (quadratic, ~40 s and HTTP 500). Only the first MAX_RESTORE_LINES entries are read, the cart holds at most
+     * MAX_LINES lines, each line is validated once, and the cart is priced once at the end.
      */
     public static function restore(array $items): void {
-        foreach ($items as $item) {
+        $restored = [];
+        $lines = count(self::get());
+        foreach (array_slice($items, 0, self::MAX_RESTORE_LINES) as $item) {
+            if (!is_array($item)) continue;
             $productId = Security::int($item['product_id'] ?? 0);
             $variantId = isset($item['variant_id']) && $item['variant_id']
                 ? Security::int($item['variant_id']) : null;
-            $qty = max(1, min(self::MAX_QTY, Security::int($item['qty'] ?? 1)));
-            // addValidated: a product with variants is skipped without one of its own variants (no base-price line).
-            if ($productId > 0) self::addValidated($productId, $variantId, $qty);
+            $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
+            if ($productId <= 0 || isset($restored[$key])) continue;
+            $previous = $_SESSION['cart'][$key] ?? null;
+            if ($previous === null && $lines >= self::MAX_LINES) break;
+            // A product with variants is skipped without one of its own variants (no base-price line).
+            if (self::lineError($productId, $variantId) !== null) continue;
+            self::add($productId, $variantId, max(1, min(self::MAX_QTY, Security::int($item['qty'] ?? 1))));
+            $restored[$key] = $previous;
+            if ($previous === null) $lines++;
+        }
+        if ($restored === []) return;
+        // As addValidated does: a line with no price in the store's currency is not sold here and is put back.
+        foreach (self::enriched()['items'] as $line) {
+            $key = (string)($line['key'] ?? '');
+            if (!array_key_exists($key, $restored) || ($line['unavailable_reason'] ?? null) !== self::UNAVAILABLE_CURRENCY) continue;
+            if ($restored[$key] === null) unset($_SESSION['cart'][$key]);
+            else $_SESSION['cart'][$key] = $restored[$key];
         }
     }
 

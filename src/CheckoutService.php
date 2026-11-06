@@ -4,6 +4,8 @@ declare(strict_types=1);
 class CheckoutService {
     /** Session key of the contact and address the shopper last posted at checkout (formState()). */
     public const DRAFT_KEY = 'checkout_draft';
+    /** Longest contact and address fields a checkout accepts (characters); customer_name/email/phone are VARCHAR(191) on MySQL. */
+    public const FIELD_MAX_LENGTH = ['name' => 191, 'email' => 191, 'phone' => 40, 'street' => 200, 'city' => 100, 'zip' => 20, 'company' => 255];
 
     public static function isDigitalOnly(array $items): bool {
         if (!function_exists('cartIsDigitalOnly')) require_once __DIR__ . '/Http/ApiHandlers.php';
