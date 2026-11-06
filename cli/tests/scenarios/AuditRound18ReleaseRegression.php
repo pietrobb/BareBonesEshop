@@ -16,7 +16,7 @@ $r18rEnd = $r18rStart === false ? false : strpos($r18rLog, "\n### ", $r18rStart 
 $r18rNotes = $r18rStart === false ? '' : substr($r18rLog, $r18rStart, ($r18rEnd === false ? strlen($r18rLog) : $r18rEnd) - $r18rStart);
 foreach ([
     '"1290" saves 1 290 €', 'mariadb-dump', 'update_mysql_dump_binary', 'update_mysql_client_binary', 'migrate.php apply',
-    'configuration FAIL', '.maintenance', '--accept-data-loss', 'version 2.3.1', 'confirmed e-mail address', 'shipping.json',
+    'configuration FAIL', '.maintenance', '--accept-data-loss', 'confirmed e-mail address', 'shipping.json',
     'field_too_long', 'MAIL_REPLY_TO', 'legal.email', '*.config.js', 'operations.nginx_config', "catalog's currency",
 ] as $r18rNeedle) {
     assert_true(str_contains($r18rNotes, $r18rNeedle), "R18 release: the 2.1.3 upgrade notes cover {$r18rNeedle}");
@@ -40,9 +40,11 @@ foreach (['css', 'js'] as $r18rKind) {
 }
 $r18rFingerprints = [
     '2.3.1' => '5d9f7c8f0c409ef255f301d967d5993bee340031370bfd40730e1a75792802de',
+    '2.3.2' => 'b0c2781f99d4115555a359b429ec455c5e2c296bd6a2d999be08005dc047d0b6',
 ];
 $r18rVersion = (string)($r18rManifest['version'] ?? '');
 assert_equals($r18rFingerprints[$r18rVersion] ?? '(no fingerprint recorded for theme version ' . $r18rVersion . ')', hash_final($r18rHash),
     'R18 release: the default theme assets match the fingerprint recorded for theme.json version ' . $r18rVersion);
-assert_true(array_filter(Template::assets()['css'], static fn(string $u): bool => str_ends_with($u, 'storefront.css?v=2.3.1')) !== [],
-    'R18 release: storefront.css is served as ?v=2.3.1');
+assert_true(array_filter(Template::assets()['css'], static fn(string $u): bool => str_ends_with($u, 'storefront.css?v=' . $r18rVersion)) !== [],
+    'R18 release: storefront.css is served as ?v=' . $r18rVersion);
+assert_true(str_contains($r18rNotes, 'version ' . $r18rVersion), 'R18 release: the 2.1.3 upgrade notes name theme version ' . $r18rVersion);
