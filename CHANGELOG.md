@@ -78,7 +78,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   digits as digit grouping applied in every currency, so a CSV import or XML feed from an ERP exporting three decimals
   stored "12.500" as 12 500,00 € instead of 12,50 € and "99.990" as 99 990 €, without a warning. The rule now holds
   only in a currency shown in whole units (CZK, HUF: "1.234 Kč" is 1 234 Kč); in a currency with cents the separator is
-  the decimal mark. An existing product's price is read in its own currency.
+  the decimal mark. An existing product's price is read in its own currency. A value finer than a cent ("1.234 €",
+  which may mean 1 234 € or 1,23 €; "0.125") is refused with a row or feed item error, as the admin price field refuses
+  it, instead of being rounded; zeros past the cent ("12.500", "19.900000") are still read.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
