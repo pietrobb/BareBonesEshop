@@ -123,6 +123,9 @@ class Bootstrap {
         $uri = $uri ?? (string)($_SERVER['REQUEST_URI'] ?? '/');
         $path = Template::seoPath((string)(parse_url($uri, PHP_URL_PATH) ?: '/'));
         if (str_ends_with($path, '/index.php')) $path = substr($path, 0, -9);
+        // R22: /cs//evil.example/ (a 404) left "//evil.example/" once the store prefix was cut: a protocol-relative link
+        // to another site in the store switch. Repeated slashes are collapsed.
+        $path = (string)preg_replace('#/{2,}#', '/', $path);
         parse_str((string)(parse_url($uri, PHP_URL_QUERY) ?? ''), $query);
         $kept = [];
         foreach (self::CANONICAL_QUERY_PARAMS as $key) {
@@ -182,6 +185,8 @@ class Bootstrap {
             if ($p !== '' && $pathNoPrefix === $p) { $pathNoPrefix = '/'; break; }
         }
         if ($pathNoPrefix === '') $pathNoPrefix = '/';
+        // R22: never a protocol-relative "//host" (or "/\host") that the links built from it would send off-site.
+        $pathNoPrefix = (string)preg_replace('#^[/\\\\]+#', '/', $pathNoPrefix);
 
         $defaultStore = $storesCfg['default_store'] ?? '';
         $xDefaultPrefix = ($storesCfg['stores'][$defaultStore] ?? ['url_prefix' => ''])['url_prefix'] ?? '';
