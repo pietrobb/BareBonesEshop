@@ -28,7 +28,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package) writes generated columns into the dump and
   MySQL refuses it on restore. The 2.1.2 updater refuses this package when it restores its pre-update dump into the
   probe database (`doctor` reports the backup probe as FAIL, `apply` stops before changing a file with the MySQL
-  restore error, not the client name). From 2.1.3 on `doctor`, `check` and `apply` name the client, and
+  restore error, not the client name), but only when the dump holds a row of `categories` or `invoices`, the two
+  tables with a generated column: a shop with no category and no invoice yet passes the probe and is updated, and
+  its later snapshots stop restoring once it has one. Install the MySQL client before the update either way. From
+  2.1.3 on `doctor`, `check` and `apply` name the client whether or not those tables hold rows, and
   `php cli/migrate.php apply` runs no migration because its pre-migration backup fails. Install
   the MySQL 8.x client and set `update_mysql_dump_binary` and `update_mysql_client_binary` to it
   (`docs/AI_UPDATE_RUNBOOK.md`); the check names the generated columns concerned (`categories.parent_id_uniq` and
@@ -68,6 +71,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A rollback of code only keeps a failed migration's window** (review round 20, low). Like an update of code only,
+  a rollback that restores no database leaves the schema of a `php cli/migrate.php apply` stopped half-way as it was,
+  so the shop stays closed and `update.php rollback` warns (it reopened the shop). A rollback that restores the
+  database still lifts the window. `README.md` and the runbook say which step lifts which window, and the upgrade
+  note on a MariaDB dump client says that the 2.1.2 updater refuses it only when `categories` or `invoices` hold rows.
 - **Feed and sitemap cache** (review round 20, low). The catalog fingerprint read every product row (a count and the
   round 19 price sums) on every feed and sitemap request, also when the file came from the cache: about 0.1 s on SQLite
   and 0.7 s on MySQL with 200 000 products. It now reads only indexes (the newest product id and `updated_at`); a
