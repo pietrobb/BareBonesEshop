@@ -282,8 +282,9 @@ class Import {
         if ($has('slug')) $set['slug'] = trim((string)$data['slug']) ?: self::productSlug($name, (string)$existing['sku']);
         if ($has('product_type')) $set['product_type'] = trim((string)$data['product_type']) ?: 'simple';
         if ($has('category')) $set['category_id'] = self::ensureCategory(trim((string)$data['category']) ?: 'uncategorized', $db);
-        if ($has('price') && trim((string)$data['price']) !== '') $set['price'] = self::assertVariantFloor((int)$existing['id'], self::parsePriceToCents($data['price']));
-        if ($has('compare_price')) $set['compare_price'] = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null;
+        $currency = trim((string)($existing['currency'] ?? '')) ?: null;
+        if ($has('price') && trim((string)$data['price']) !== '') $set['price'] = self::assertVariantFloor((int)$existing['id'], self::parsePriceToCents($data['price'], $currency));
+        if ($has('compare_price')) $set['compare_price'] = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price'], $currency) : null;
         if ($has('stock') && trim((string)$data['stock']) !== '') $set['stock'] = (int)$data['stock'];
         if ($has('status')) $set['status'] = self::productStatus((string)$data['status'], (string)$existing['status']);
         if ($has('summary')) $set['summary'] = trim((string)$data['summary']);
@@ -691,9 +692,10 @@ class Import {
      * anything else that is not a price, and a negative price, is refused.
      * R18: above MAX_CENTS is refused ("184467440737095516.16" overflowed to 0 and imported an active product for
      * free), and a thousands separator must group three digits ("5..0" is not 50.00). R19: a single separator before
-     * exactly three digits is digit grouping ("1.234" → 123400).
+     * exactly three digits is digit grouping ("1.234" → 123400). R20: only in a currency shown in whole units (CZK, HUF;
+     * $currency, by default that of the current catalog): in EUR an ERP's three decimals "12.500" are 12,50, not 12 500.
      */
-    public static function parsePriceToCents($price): int {
+    public static function parsePriceToCents($price, ?string $currency = null): int {
         if (is_int($price)) {
             $cents = $price;
         } else {
@@ -711,9 +713,13 @@ class Import {
                 $grouping = $decimal === ',' ? '.' : ',';
             } else {
                 $decimal = $lastComma !== false ? ',' : '.';
-                // R19: one separator before exactly three digits groups them ("1.234 Kč", "12,990 Ft" are 1 234 and 12 990,
-                // not 1,23 and 12,99); "0.125" keeps its decimal mark.
-                if (substr_count($s, $decimal) > 1 || preg_match('/^-?[1-9]\d{0,2}[.,]\d{3}$/', $s)) [$grouping, $decimal] = [$decimal, ''];
+                // R19: one separator before exactly three digits groups them in CZK/HUF ("1.234 Kč", "12,990 Ft" are 1 234
+                // and 12 990, not 1,23 and 12,99); "0.125" keeps its decimal mark. R20: in a currency with cents it is the
+                // decimal mark ("12.500 €" from an ERP was stored as 12 500,00 €).
+                if (substr_count($s, $decimal) > 1 || (preg_match('/^-?[1-9]\d{0,2}[.,]\d{3}$/', $s)
+                        && Money::decimals($currency ?? Warehouse::catalogCurrency(StoreContext::current()->catalogId())) === 0)) {
+                    [$grouping, $decimal] = [$decimal, ''];
+                }
             }
             if ($grouping !== null) {
                 $whole = $decimal === '' ? $s : substr($s, 0, (int)strrpos($s, $decimal));

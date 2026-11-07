@@ -236,7 +236,7 @@ try {
     assert_true(in_array('/shop/category/sfb-cat?pg=2', $sfbAlternates, true) && in_array('/shop/cs/category/sfb-cat?pg=2', $sfbAlternates, true),
         'Storefront SEO: hreflang alternates point at each store\'s canonical category URL (' . implode(' ', $sfbAlternates) . ')');
     $sfbSwitcher = $sfbAttr((string)(preg_match('#<div class="lang-switch">(.*?)</div>#s', $sfbHtml, $m) ? $m[1] : ''), '#href="([^"]*)"#');
-    assert_true($sfbSwitcher !== [] && in_array('/shop/cs/?page=category&slug=sfb-cat&pg=2', $sfbSwitcher, true) && in_array('/shop/?page=category&slug=sfb-cat&pg=2', $sfbSwitcher, true),
+    assert_true($sfbSwitcher !== [] && in_array('/shop/cs/?page=category&slug=sfb-cat&pg=2', $sfbSwitcher, true) && in_array('/shop/cs/?page=category&slug=sfb-cat&pg=2&lang=sk', $sfbSwitcher, true),
         'Storefront SEO: the language switcher keeps the base path once and only canonical parameters (' . implode(' ', $sfbSwitcher) . ')');
     foreach (array_merge($sfbAlternates, $sfbSwitcher) as $sfbHref) {
         assert_true(!str_contains($sfbHref, '/shop/shop') && !str_contains($sfbHref, 'utm_source') && !str_contains($sfbHref, 'sort=') && !str_contains($sfbHref, 'spec'),
