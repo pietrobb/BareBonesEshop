@@ -175,9 +175,11 @@ final class AccountViewModel
      */
     public static function verifyEmailFlash(string $token, int $customerId): array
     {
-        $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token, $customerId) !== null;
+        $firstTime = false;
+        $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token, $customerId, $firstTime) !== null;
         // R19: the welcome ("you can sign in at any time") is sent once the address is confirmed, when it is true.
-        $customer = $verified ? Customers::byId($customerId) : null;
+        // R20: once only — a further link of an account already confirmed sends no second welcome.
+        $customer = $firstTime ? Customers::byId($customerId) : null;
         if ($customer !== null) {
             $email = (string)$customer['email'];
             $vars = ['customer_name' => (string)(($customer['name'] ?? '') ?: $email), 'shop_name' => (string)Template::branding()['name']];

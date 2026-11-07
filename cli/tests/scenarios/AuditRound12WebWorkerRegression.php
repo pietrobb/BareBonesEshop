@@ -43,6 +43,7 @@ if (!function_exists('apache_setenv')) {
 }
 require getenv('R12W_ROOT') . '/src/WebWorker.php';
 require getenv('R12W_APP') . '/src/autoload.php';
+file_put_contents(getenv('R12W_ROOT') . '/config-path.txt', AppConfig::path(getenv('R12W_APP')));
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'http://127.0.0.1', 'jobs_dir' => getenv('R12W_ROOT') . '/jobs',
     'operations' => ['web_worker' => true, 'web_worker_interval' => 3600]]);
 set_time_limit(20);
@@ -54,7 +55,8 @@ PHP);
     $r12wProbe = stream_socket_server('tcp://127.0.0.1:0');
     $r12wPort = (int)substr(strrchr((string)stream_socket_get_name($r12wProbe, false), ':'), 1);
     fclose($r12wProbe);
-    $r12wEnv = ['PHP_CLI_SERVER_WORKERS' => '3', 'R12W_ROOT' => $r12wRoot, 'R12W_APP' => dirname(TEST_CLI_DIR), 'PATH' => (string)getenv('PATH')];
+    // R20: the server inherits the suite's environment (BBE_SUITE_*), or the app it loads opens the developer's config.php.
+    $r12wEnv = array_merge(getenv(), ['PHP_CLI_SERVER_WORKERS' => '3', 'R12W_ROOT' => $r12wRoot, 'R12W_APP' => dirname(TEST_CLI_DIR)]);
     $r12wServer = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $r12wRoot . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1',
         '-d', 'error_log=' . $r12wBase . '/php-error.log', '-S', "127.0.0.1:{$r12wPort}", $r12wRoot . '/router.php'],
         [0 => ['pipe', 'r'], 1 => ['file', $r12wBase . '/server.log', 'a'], 2 => ['file', $r12wBase . '/server.log', 'a']], $r12wPipes, $r12wRoot, $r12wEnv);
@@ -82,6 +84,9 @@ PHP);
     for ($i = 0; $i < 100 && $r12wGet('/?p=ready')['body'] !== 'ready'; $i++) usleep(100000);
 
     $r12wFirst = $r12wGet('/?p=login');
+    $r12wConfig = (string)@file_get_contents($r12wRoot . '/config-path.txt');
+    assert_true(str_ends_with($r12wConfig, '/' . AppConfig::SUITE_FILE) && $r12wConfig === AppConfig::path(dirname(TEST_CLI_DIR)),
+        'R20 web worker: the php -S server reads the suite\'s config, not the developer\'s config.php (' . $r12wConfig . ')');
     assert_true(str_contains($r12wFirst['body'], 'page login') && $r12wFirst['length'] === strlen($r12wFirst['body']),
         'R12 web worker: the response that triggers the pass carries its exact Content-Length (complete without FastCGI)');
     assert_true($r12wFirst['elapsed'] < 2.0 && !is_file($r12wRoot . '/worker-done'),
