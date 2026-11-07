@@ -4,7 +4,8 @@
 /** R21: $details (e.g. the refused rows of an import and why) are listed under the message, the first 20 of them. */
 function setFlash(string $type, string $msg, array $details = []): void {
     $more = count($details) - 20;
-    $details = array_map('strval', array_slice(array_values($details), 0, 20));
+    // R22: each line is clipped too: one 1 MB feed value made a 9 MB page.
+    $details = array_map(static fn($line): string => Str::clip((string)$line), array_slice(array_values($details), 0, 20));
     if ($more > 0) $details[] = strtr(I18n::t('admin.common.flash_more'), ['{count}' => (string)$more]);
     $_SESSION['flash'] = ['type' => $type, 'msg' => $msg, 'details' => $details];
 }
