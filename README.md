@@ -316,6 +316,25 @@ can dispatch them independently. A final whole-order shipment fails closed while
 backordered units remain. Prices and taxes remain on the unchanged order-item and
 financial snapshots; bundles affect only the auditable physical allocation layer.
 
+### Supplier feeds: field mapping and prices
+
+A feed (Admin → Feeds) maps the supplier's XML or CSV fields to product fields as JSON:
+a plain `"ITEM_ID": "sku"`, or an object with `field`, an optional `transform`
+(`price_to_cents`, `weight_to_grams`, `boolean_stock` with `default_qty`,
+`category_path` with `separator`) and `append` for `image` and text fields. A price
+with one separator before exactly three digits (`199.000`, `12.990`, `2.000`) is
+refused as ambiguous, the product keeps its price and its stock still syncs. Declare
+the feed's decimal mark on the price mapping to read such prices:
+
+```json
+"PRICE_VAT": {"field": "price", "transform": "price_to_cents", "decimal": ","}
+```
+
+With `"decimal": ","` the dot groups thousands (`12.990` is 12 990, `199,000` is
+199,00); with `"decimal": "."` the comma does. Saving the feed refuses any other
+value and a `decimal` on a mapping that is not `price_to_cents`. A CSV import has no
+such setting: write its prices unambiguously (`199.00`, `199000`).
+
 ## Partial returns, exchanges and credit notes
 
 Migration `20260801210000_returns_credit_notes` adds store-scoped return labels,

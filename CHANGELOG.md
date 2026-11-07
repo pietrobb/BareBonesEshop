@@ -110,6 +110,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `gross`, a product's `price`) show in the record's currency, not in cents. Re-queued and failed refund notes are
   written in money, and older ones are read that way. The English order e-mail asks for "this amount and payment
   reference" (it still said "variable symbol").
+- **Feed messages only where a price was kept, `decimal` checked, the feed status translated** (review round 22,
+  low). "Price kept" was listed for SKUs that are not in the catalog (skipped anyway in "price and stock") and when the
+  price was updated and only the compare price was refused, which filled a supplier feed's error list. A SKU not in
+  the catalog gets no message, "price and stock" (which never writes a compare price) does not report one, and a
+  refused compare price says "compare price kept". Saving a feed refuses a `decimal` other than `","` or `"."`, or one
+  on a mapping that is not `price_to_cents` (it was saved and refused every price at the next sync); the README
+  documents it under "Supplier feeds". A CSV import's ambiguous price no longer advises declaring the feed's decimal
+  mark (a CSV import has no such setting); a feed's still names `decimal`. With `"decimal": ","` a `0.500` was read as
+  500,00: grouped digits never start with a zero, so it is refused. The feed status and the refused items are shown
+  in the admin's language (they were English in the SK and HU admin); CLI and logs keep the English text.
 - **No off-site link from the store switch, error messages of bounded length** (review round 22, low). On
   `/cs//evil.example/` (a 404) the store switch linked the SK store as `//evil.example/`, a protocol-relative link to
   another site: the store prefix was cut from a path with a doubled slash (older, round 21 extended it to every store
@@ -120,7 +130,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Rollbacks newest first, the updater restored last** (review round 22, low). A rollback stopped half-way had already
   put back the old release's `cli/update.php` and `src/Updater.php` (the snapshot's file order); the next rollback ran
   that updater, which did not know the failed window and opened the half-restored shop. The updater's own files are now
-  restored after every other file. A rollback of a snapshot while an update applied after it is still installed, or
+  restored after every other file, the version state and the SQLite database, so a rollback stopped at the state or
+  the database step also leaves the updater that wrote the window. A rollback of a snapshot while an update applied after it is still installed, or
   half-applied after its automatic rollback failed, restored only its own files next to the later release's others;
   it is refused before it changes anything and names the rollback to run first. `update_snapshots_keep` no longer
   deletes the snapshot whose rollback a failed `.maintenance` names (an update during that window could delete it, and

@@ -95,7 +95,7 @@ try {
         && str_contains($r21lHtml, strtr(I18n::t('admin.common.flash_more'), ['{count}' => '2'])),
         'R21 admin: the import and feed sync message lists the refused rows with the reason (the first 20, then how many more), escaped');
     $r21lOps = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Operations.php');
-    assert_true(str_contains($r21lOps, '$encodingNote, $result[\'errors\']);') && str_contains($r21lOps, "\$msg, \$result['errors'] ?? []);")
+    assert_true(str_contains($r21lOps, '$encodingNote, $result[\'errors\']);') && str_contains($r21lOps, "\$msg, array_map(FeedMessages::error(...), \$result['errors'] ?? []));")
         && str_contains($r21lOps, 'Warehouse::feedLastErrors($f)'),
         'R21 admin: the CSV import, "Sync now" and the feed page show the refused rows');
 } finally {
