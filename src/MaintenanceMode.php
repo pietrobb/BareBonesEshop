@@ -13,8 +13,10 @@ declare(strict_types=1);
  * - Without a lock holder, a fresh marker (younger than STALE_AFTER) still blocks: an updater killed a moment ago
  *   may have left half-written files. An older one blocks only while the PID it names still runs on this host as the
  *   same process (same start time), at most MAX_AGE — for a file system without locks.
- * - A failed step that left the schema or the files half-done marks the window failed (fail()): it never goes stale,
- *   and the next successful `php cli/migrate.php apply`, update or rollback lifts it.
+ * - A failed step that left the schema or the files half-done marks the window failed (fail()): it never goes stale.
+ *   A failed migration is lifted by a successful `php cli/migrate.php apply`, an update that runs the migrations or a
+ *   rollback that restores the database; a half-done update or rollback only by the rollback its reason names
+ *   (Updater::windowKept()). Any other step puts the failed window back.
  */
 final class MaintenanceMode
 {

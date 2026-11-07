@@ -306,10 +306,8 @@ final class Updater
             ];
             // R19: a failed window found before (a migration stopped half-way) is lifted only by an update that ran the
             // migrations; one of code only left the schema as it was and keeps the shop closed for what the marker says.
-            if ($prior !== null && ($prior['marker']['failed'] ?? false) === true && !$package->runsMigrations()) {
-                $keepClosed = (string)($prior['marker']['reason'] ?? '');
-                $result['still_closed'] = $keepClosed;
-            }
+            $keepClosed = self::windowKept($prior, null, $package->runsMigrations());
+            if ($keepClosed !== null) $result['still_closed'] = $keepClosed;
             $installed = true;
             return $result;
         } catch (Throwable $e) {
@@ -370,6 +368,21 @@ final class Updater
         return ['marker' => MaintenanceMode::marker($this->root), 'modified_at' => $modifiedAt === false ? time() : $modifiedAt];
     }
 
+    /**
+     * The reason of a failed window found before a successful update or rollback ($snapshotId) that this step leaves in
+     * place, null when it lifts it. A migration stopped half-way is lifted by a step that ran the migrations or restored
+     * the database ($resetsSchema); one of code only left that schema as it was. R21: a half-done update or rollback is
+     * lifted only by the rollback of the snapshot the marker names: a rollback of code only of another snapshot opened a
+     * shop whose files and database were still half-restored.
+     */
+    private static function windowKept(?array $prior, ?string $snapshotId, bool $resetsSchema): ?string
+    {
+        if ($prior === null || ($prior['marker']['failed'] ?? false) !== true) return null;
+        $reason = (string)($prior['marker']['reason'] ?? '');
+        if (preg_match('/--snapshot=(\S+)/', $reason, $named)) return $named[1] === $snapshotId ? null : $reason;
+        return $resetsSchema ? null : $reason;
+    }
+
     /** Back to the window there was before a step that changed nothing: any window that kept the shop closed stays. */
     private function restoreMaintenance(?array $prior): void
     {
@@ -381,9 +394,9 @@ final class Updater
     }
 
     /**
-     * Delete all but the newest $keep (at least 1) 'pre-update' snapshots: each holds a full database copy
-     * or dump, so they would otherwise pile up with every update (and keep erased personal data forever).
-     * The snapshot of the installed release and 'manual-backup' snapshots are never deleted.
+     * Delete all but the newest $keep (at least 1) 'pre-update' snapshots with a database copy or dump, and as many of
+     * those of code only: they would otherwise pile up with every update (and keep erased personal data forever).
+     * The snapshot of the installed release is never deleted; 'manual-backup' snapshots are kept the same way.
      * @return list<string> ids of the deleted snapshots
      */
     public function pruneSnapshots(int $keep): array
@@ -398,8 +411,11 @@ final class Updater
                 // Manual `update.php backup` snapshots are full copies too: the newest $keep of each kind stay.
                 $reason = (string)($snapshot['reason'] ?? '');
                 if (!in_array($reason, ['pre-update', 'manual-backup'], true) || !preg_match('/^\d{14}-[0-9a-f]{12}$/', $id)) continue;
-                $kept[$reason] = ($kept[$reason] ?? 0) + 1;
-                if ($kept[$reason] <= max(1, $keep) || $id === $installed) continue;
+                // R21: snapshots of updates of code only hold no database; counted with the others, three such updates
+                // (or their rollbacks) deleted the only database snapshot. The newest $keep with a database stay too.
+                $kind = $reason . (is_array($snapshot['database'] ?? null) ? ':database' : ':files');
+                $kept[$kind] = ($kept[$kind] ?? 0) + 1;
+                if ($kept[$kind] <= max(1, $keep) || $id === $installed) continue;
                 $this->removeTree($this->snapshotDirectory($id));
                 $deleted[] = $id;
             }
@@ -444,9 +460,7 @@ final class Updater
             $notice = $this->reportDiscardedWrites($discarded, 'manual rollback', $result['numbering_raised']);
             // R20: as for an update of code only, a rollback that restored no database left a schema a migration stopped
             // half-way on as it was, so the shop stays closed for what the marker says (it was opened).
-            $stillClosed = $databaseAt === null && $prior !== null && ($prior['marker']['failed'] ?? false) === true
-                && str_starts_with((string)($prior['marker']['reason'] ?? ''), 'cli/migrate.php')
-                ? (string)$prior['marker']['reason'] : null;
+            $stillClosed = self::windowKept($prior, $snapshotId, $databaseAt !== null);
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice,
                 'still_closed' => $stillClosed];
         } finally {
