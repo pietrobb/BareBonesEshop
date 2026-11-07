@@ -280,7 +280,7 @@ class FeedImport {
         $row = $existing->fetch();
         if (!$row) return false;
         $updates = [];
-        $priceCents = isset($mapped['price']) ? Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price'])) : null;
+        $priceCents = isset($mapped['price']) ? Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price'], trim((string)($row['currency'] ?? '')) ?: null)) : null;
         // R18: the same price again is not a change (no updated_at bump, so feeds and sitemaps are not rebuilt).
         if ($priceCents !== null && $priceCents !== (int)$row['price']) {
             $updates[] = 'price = :price';

@@ -74,6 +74,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   product deleted in the admin marks the catalog changed. A product renamed, repriced or taken off sale in the same
   second as another change (`updated_at` has whole seconds) reached the feed only after the 15-minute cache time: an
   entry built in the second of the latest change is now rebuilt once that second is over.
+- **The language switcher stays in the store** (review round 20, medium). In the HU and CZ stores the EN link led to
+  another store (`/?lang=en` or `/en/`) and the cart was repriced in its currency (5 490 Ft became 31,67 €). A language
+  the current store offers in `languages` now opens the same page of the current store (`/hu/?lang=en`), with the same
+  cart and currency; only a language the store does not offer leads to the store that has it. English chosen in the HU
+  store also stays on the next page: links, forms and the storefront API keep `?lang=en` even though English is the
+  `/en/` store's own language (the canonical URL still leaves English to that store).
+- **Import prices with three decimals** (review round 20, medium). The round 19 rule reading one separator before three
+  digits as digit grouping applied in every currency, so a CSV import or XML feed from an ERP exporting three decimals
+  stored "12.500" as 12 500,00 € instead of 12,50 € and "99.990" as 99 990 €, without a warning. The rule now holds
+  only in a currency shown in whole units (CZK, HUF: "1.234 Kč" is 1 234 Kč); in a currency with cents the separator is
+  the decimal mark. An existing product's price is read in its own currency.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
@@ -309,8 +320,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   import, the API, a feed or an ERP sync in a HUF or CZK catalog was stored as EUR ("12 990 Ft" became 12 990,00 €)
   and could not be sold in its store; it now takes the currency of the store the catalog belongs to, and an existing
   product keeps its currency when it is imported again. Products already created this way keep their EUR price;
-  check them in **Catalog → Products**. Also: an import price like "1.234 Kč" (one separator before three digits) is
-  1 234, not 1,23; the shipping and payment pages show and check their amounts in the currency of the store owning
+  check them in **Catalog → Products**. Also: an import price like "1.234 Kč" (one separator before three digits) in
+  a CZK or HUF catalog is 1 234, not 1,23 (in a currency with cents it stays 1,234, see round 20); the shipping and payment pages show and check their amounts in the currency of the store owning
   the providers (a USD store using the default store's providers saw them as dollars).
 - **Sign-up no longer loops** (review round 19, medium). The page after sign-up and the welcome mail said "you can sign
   in now", but an unconfirmed account cannot sign in, and every attempt mailed a new link that cancelled the earlier
