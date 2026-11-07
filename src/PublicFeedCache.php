@@ -103,12 +103,6 @@ final class PublicFeedCache
         }
     }
 
-    /** Change marker over every store's catalog and CMS pages (catalogState()); '' when tables are missing. */
-    public static function catalogFingerprint(): string
-    {
-        return self::catalogState()['fingerprint'];
-    }
-
     /** Seconds a latest change may be stamped ahead of the database clock (a timestamp written by PHP) and still count as now. */
     private const CLOCK_SKEW = 5;
 
