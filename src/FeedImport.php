@@ -119,6 +119,7 @@ class FeedImport {
 
         // Import products + collect stock data
         $db = Db::get();
+        $startedAt = Import::dbNow($db);
         $db->beginTransaction();
         $stockMap = [];
         $listed = [];
@@ -193,8 +194,7 @@ class FeedImport {
         // A full upsert creates products and moves them between categories, as a CSV import does. Counted after the
         // commit: the recount must not hold the feed's write transaction (and its locks) open.
         if ($importMode === self::MODE_UPSERT && $result['imported'] > 0) Import::recountCategories($db);
-        // R18: feeds and sitemaps follow the products' own updated_at (bumped only by a real change), not every sync.
-        if ($result['imported'] > 0) Cache::catalogChanged(null, false);
+        if ($result['imported'] > 0) Import::catalogWritten($db, $startedAt);
 
         // Update warehouse stock
         if (!empty($stockMap)) {
@@ -213,7 +213,7 @@ class FeedImport {
             $status = ($cutShort ? 'stopped after ' : 'partial: ') . count($result['errors']) . ' errors'
                 . ($result['prices_refused'] > 0 ? " ({$result['prices_refused']} prices refused)" : '');
         }
-        Warehouse::updateFeedStatus($feedId, $status, $result['imported']);
+        Warehouse::updateFeedStatus($feedId, $status, $result['imported'], $result['errors']);
         return $result;
     }
 

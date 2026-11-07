@@ -93,6 +93,7 @@ class Import {
             }
         };
         $heartbeat();
+        $startedAt = self::dbNow($db);
         $db->beginTransaction();
         $lineNum = 1; // header = line 1
 
@@ -137,8 +138,7 @@ class Import {
         self::recountCategories($db);
 
         Db::optimize($db);
-        // R18: feeds and sitemaps follow the products' own updated_at (bumped only by a real change), not every import.
-        if ($imported > 0) Cache::catalogChanged(null, false);
+        if ($imported > 0) self::catalogWritten($db, $startedAt);
 
         return [
             'success'  => !$limitExceeded,
@@ -351,6 +351,9 @@ class Import {
      */
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
+        // R21: an ERP row's price went into the column as sent ("abc" or -5 on SQLite, which keeps any value).
+        $data['price'] = self::centsField($data['price'] ?? null, 'price');
+        $data['compare_price'] = ($data['compare_price'] ?? null) === null ? null : self::centsField($data['compare_price'], 'compare_price');
         $catalog = self::assertSkuInCatalog((string)$data['sku'], $db);
         $stockBefore = $db->prepare('SELECT stock FROM products WHERE sku = :sku AND store_id = :catalog');
         $stockBefore->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
@@ -752,6 +755,33 @@ class Import {
         if ($cents < 0) throw new \InvalidArgumentException('Price must not be negative');
         if ($cents > self::MAX_CENTS) throw new \InvalidArgumentException('Price must not exceed ' . self::formatCents(self::MAX_CENTS));
         return $cents;
+    }
+
+    /** The database clock, the one updated_at is stamped with. */
+    public static function dbNow(PDO $db): string {
+        return (string)$db->query('SELECT ' . Db::now())->fetchColumn();
+    }
+
+    /**
+     * After an import or feed sync committed: catalog pages are stale; feeds and sitemaps too when a product changed.
+     * R18 left them to MAX(updated_at), but a row is stamped when written, not when committed: a feed rebuilt during a
+     * long sync (MySQL keeps reading the old rows) after a later admin edit kept that edit's MAX at the commit, and
+     * the old price stayed in the public feed until its TTL (15 min). A product stamped since $since bumps them now.
+     */
+    public static function catalogWritten(PDO $db, string $since): void {
+        $catalog = StoreContext::current()->catalogId();
+        $changed = $db->prepare('SELECT 1 FROM products WHERE store_id = :catalog AND updated_at >= :since LIMIT 1');
+        $changed->execute([':catalog' => $catalog, ':since' => $since]);
+        Cache::catalogChanged($catalog, $changed->fetchColumn() !== false);
+    }
+
+    /** An upserted price is integer cents (the ERP contract): an int or a string of digits, within 0..MAX_CENTS. */
+    private static function centsField(mixed $value, string $field): int {
+        if (is_string($value) && preg_match('/^\d{1,10}$/', $value)) $value = (int)$value;
+        if (!is_int($value) || $value < 0 || $value > self::MAX_CENTS) {
+            throw new \InvalidArgumentException("Invalid {$field}: " . (is_scalar($value) ? var_export($value, true) : get_debug_type($value)) . ' (integer cents expected)');
+        }
+        return $value;
     }
 
     /** The largest amount in cents a price may have (fits MySQL INT columns with room to spare). */

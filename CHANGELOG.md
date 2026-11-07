@@ -50,6 +50,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261105120000_product_stock_updated_at` adds `products.stock_updated_at`: a sale or stock change
   moves it instead of `updated_at`, and API v1 `updated_after` matches either column. Feeds and sitemaps are rebuilt
   only for a change they show (price, content, going in or out of stock).
+- **Migration** `20261107120000_feed_last_errors` adds `feeds.last_errors`: the feed detail lists which items the
+  last sync refused and why (also for a scheduled sync), not only their count.
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -120,6 +122,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   is then not created, and refused prices do not count towards the 100 item errors that stop a sync (400 items with
   four-decimal prices updated the stock of 51). The feed status says `partial: N errors (M prices refused)` or
   `stopped after N errors` instead of `ok with N errors`, and the admin's "Sync now" reports such a sync as an error.
+  The reading no longer depends on any currency, so an XML feed and a CSV file read a price the same way whatever the
+  currency of the product or its catalog (round 20 used the catalog's currency in feeds, the product's in CSV).
+- **Import, feed and ERP sync details** (review round 21, low). The admin saw only how many rows a CSV import or a
+  feed sync refused: the message now lists them with the reason (the first 20), and the feed page keeps the item
+  errors of the last sync, also a scheduled one (migration `20261107120000_feed_last_errors` adds `feeds.last_errors`).
+  A product row is stamped when written, not when committed: a public feed rebuilt during a long sync (MySQL serves
+  the old rows until the commit) after a later admin edit kept that edit's `updated_at` as its fingerprint, and the
+  synced prices reached the feed only after its 15-minute cache time; a sync or import that changed a product now
+  marks feeds and sitemaps stale when it commits. The ERP product sync stored its `price` and `compare_price` as
+  sent: "abc" or a negative price was saved on SQLite. Both must be integer cents (0 to 2 000 000 000), otherwise the
+  product is skipped and counted like any other refused product.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
