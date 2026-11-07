@@ -693,7 +693,8 @@ class Import {
      * R18: above MAX_CENTS is refused ("184467440737095516.16" overflowed to 0 and imported an active product for
      * free), and a thousands separator must group three digits ("5..0" is not 50.00). R19: a single separator before
      * exactly three digits is digit grouping ("1.234" → 123400). R20: only in a currency shown in whole units (CZK, HUF;
-     * $currency, by default that of the current catalog): in EUR an ERP's three decimals "12.500" are 12,50, not 12 500.
+     * $currency, by default that of the current catalog): in EUR an ERP's three decimals "12.500" are 12,50, not 12 500;
+     * a non-zero part finer than a cent ("1.234 €", "0.125") is refused as the admin price field refuses it.
      */
     public static function parsePriceToCents($price, ?string $currency = null): int {
         if (is_int($price)) {
@@ -728,7 +729,12 @@ class Import {
                 $s = str_replace($grouping, '', $s);
             }
             if ($decimal !== '') $s = str_replace($decimal, '.', $s);
-            if (!preg_match('/^-?\d+(?:\.\d+)?$/', $s)) throw new \InvalidArgumentException("Not a price: {$raw}");
+            if (!preg_match('/^-?\d+(?:\.(\d+))?$/', $s, $digits)) throw new \InvalidArgumentException("Not a price: {$raw}");
+            // R20: as in the admin price field, a part finer than a cent is refused, not rounded: "1.234 €" may be 1 234 €
+            // or 1,234 €. Zeros past the cent are an ERP's fixed three decimals ("12.500" is 12,50).
+            if (isset($digits[1]) && rtrim(substr($digits[1], 2), '0') !== '') {
+                throw new \InvalidArgumentException("Not a price: {$raw} (finer than a cent, write e.g. 1234.00 or 1.23)");
+            }
             // Bounded before the int cast, which wraps a float beyond PHP_INT_MAX (to 0 and the like).
             $float = round((float)$s * 100);
             $cents = $float < 0 ? -1 : ($float > self::MAX_CENTS ? self::MAX_CENTS + 1 : (int)$float);
