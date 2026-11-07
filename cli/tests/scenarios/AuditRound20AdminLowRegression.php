@@ -151,6 +151,9 @@ try {
         I18n::setLocale('hu');
         return MethodLabels::name('shipping', 'gls', 'GLS futár');
     })()], 'R20 methods: without a locale argument the current page language decides');
+    assert_equals(['Platba kartou', 'Platba kartou', I18n::tIn('methods.payment.card', 'en')], [MethodLabels::name('payment', 'card', 'Platba kartou', 'sk'),
+        MethodLabels::name('payment', 'card', 'Platba kartou', 'cs'), MethodLabels::name('payment', 'card', 'Platba kartou', 'en')],
+        'R20 methods: "Platba kartou" is Czech and Slovak, so a Slovak page keeps it');
 
     // 6. storefront.js writes amounts with the server's format (symbol, separators, decimals), not the browser's.
     $r20aJs = (string)file_get_contents($r20aRoot . '/themes/default/assets/storefront.js');

@@ -49,7 +49,7 @@ final class MethodLabels {
 
     /**
      * R20: the names migration 20261022230000 seeds into the CZ, HU and PL stores — an English page of the HU store
-     * showed "GLS futár" next to English text. Seeded name => its language; in that language the name stays as seeded.
+     * showed "GLS futár" next to English text. Seeded name => its languages (space-separated); in them the name stays as seeded ("Platba kartou" is Czech and Slovak).
      */
     private const SEEDED_STORE_NAMES = [
         'shipping' => [
@@ -58,7 +58,7 @@ final class MethodLabels {
             'gls' => ['GLS kurýr' => 'cs', 'GLS futár' => 'hu', 'Kurier GLS' => 'pl'],
         ],
         'payment' => [
-            'card' => ['Platba kartou' => 'cs', 'Bankkártyás fizetés' => 'hu', 'Karta płatnicza' => 'pl'],
+            'card' => ['Platba kartou' => 'cs sk', 'Bankkártyás fizetés' => 'hu', 'Karta płatnicza' => 'pl'],
             'bank_transfer' => ['Bankovní převod' => 'cs', 'Banki átutalás' => 'hu', 'Przelew bankowy' => 'pl'],
             'cod' => ['Dobírka' => 'cs', 'Utánvét' => 'hu', 'Pobranie' => 'pl'],
         ],
@@ -69,7 +69,7 @@ final class MethodLabels {
         $names = self::SEEDED_STORE_NAMES[$kind][$code] ?? [];
         if ($field === 0 && array_key_exists($value, $names)) {
             // "Packeta" is the brand in every language; it needs no translation.
-            if ($names[$value] === null || $names[$value] === ($locale === null || $locale === '' ? I18n::locale() : $locale)) return $value;
+            if ($names[$value] === null || in_array($locale === null || $locale === '' ? I18n::locale() : $locale, explode(' ', $names[$value]), true)) return $value;
         } elseif ($seeded === null || $value !== $seeded) {
             return $value;
         }
