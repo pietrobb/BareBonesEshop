@@ -68,6 +68,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **One welcome e-mail per account** (review round 20, low). Every further confirmation link of an account already
+  confirmed sent the welcome e-mail again; now only the link that confirms the address does. Tests: the web worker
+  test's `php -S` server inherits the suite's environment, so it no longer opens the developer's `config.php` and
+  database.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose

@@ -458,7 +458,9 @@ class Customers {
         return $find->fetchColumn() !== false;
     }
 
-    public static function verifyEmail(string $token, int $customerId): ?int {
+    /** $firstTime: whether this link confirmed the address (R20: a further link of a confirmed account changes nothing). */
+    public static function verifyEmail(string $token, int $customerId, bool &$firstTime = false): ?int {
+        $firstTime = false;
         if (!preg_match('/^[a-f0-9]{64}$/', $token) || $customerId <= 0) return null;
         $db = Db::get();
         $hash = hash('sha256', $token);
@@ -475,8 +477,9 @@ class Customers {
                 $db->rollBack();
                 return null;
             }
-            $db->prepare('UPDATE customers SET email_verified_at = ?, updated_at = ' . Db::now() . ' WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
-               ->execute([$now, $cid, StoreContext::current()->id()]);
+            $verify = $db->prepare('UPDATE customers SET email_verified_at = ?, updated_at = ' . Db::now() . ' WHERE id = ? AND store_id = ? AND email_verified_at IS NULL');
+            $verify->execute([$now, $cid, StoreContext::current()->id()]);
+            $firstTime = $verify->rowCount() === 1;
             self::attachGuestOrders($cid);
             $db->commit();
             return $cid;
