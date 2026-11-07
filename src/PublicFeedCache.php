@@ -101,6 +101,8 @@ final class PublicFeedCache
      * Change marker over every store's catalog and CMS pages; '' when tables are missing.
      * Products and pages carry updated_at. Categories have no updated_at column, so their rows
      * are folded into a checksum (rename, slug, parent, translation and meta edits change it).
+     * R19: updated_at has whole seconds, so a price saved in the same second as the change the feed was
+     * built after did not change it (the old price was served for up to the TTL); the price sums do.
      */
     public static function catalogFingerprint(): string
     {
@@ -109,6 +111,7 @@ final class PublicFeedCache
             $row = $db->query('SELECT
                     (SELECT COUNT(*) FROM products) AS product_count,
                     (SELECT MAX(updated_at) FROM products) AS product_updated,
+                    (SELECT SUM(price) + SUM(COALESCE(compare_price, 0)) FROM products) AS product_prices,
                     (SELECT COUNT(*) FROM pages) AS page_count,
                     (SELECT MAX(updated_at) FROM pages) AS page_updated')->fetch(PDO::FETCH_NUM);
             if (!is_array($row)) return '';
