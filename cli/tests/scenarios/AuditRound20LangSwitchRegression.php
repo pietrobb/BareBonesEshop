@@ -8,6 +8,7 @@ echo "\n--- R20: the language switcher stays in the store and its currency ---\n
 
 $r20lSavedLocale = I18n::locale();
 $r20lSavedStore = StoreContext::current();
+$r20lSavedGet = $_GET;
 $r20lLinks = static function (): array {
     $method = new ReflectionMethod(StorefrontSeo::class, 'languageLinks');
     $links = [];
@@ -27,6 +28,7 @@ try {
 
     // English chosen in the HU store: links, forms and the API keep it; the canonical stays the HU store's URL.
     I18n::setLocale('en');
+    $_GET['lang'] = 'en';
     assert_equals(['en', null], [Bootstrap::secondaryLocale(), Bootstrap::canonicalSecondaryLocale()],
         'R20 switcher: English in the HU store is carried by its links, not by its canonical (the /en/ store owns English)');
     assert_equals(Template::baseUrl() . '/hu/cart?lang=en', Template::storeUrl('/cart'), 'R20 switcher: the next page of the HU store stays English');
@@ -35,6 +37,10 @@ try {
         'R20 switcher: from English back to Hungarian drops ?lang= and stays in the HU store');
     preg_match('#<link rel="canonical" href="([^"]*)"#', Seo::head('T', 'D', Template::storeUrl('/cart')), $r20lCanonical);
     assert_true(str_ends_with((string)($r20lCanonical[1] ?? ''), '/hu/cart'), 'R20 switcher: the canonical of English in the HU store is its HU URL (' . ($r20lCanonical[1] ?? '') . ')');
+
+    unset($_GET['lang']);
+    I18n::setLocale('en');
+    assert_equals(null, Bootstrap::secondaryLocale(), 'R20 switcher: without ?lang=en a stray English locale adds nothing to the HU store\'s links');
 
     // The CZ store: EN stays in /cs/ (CZK), SK too (a further language of the CZ store).
     Bootstrap::initStoreContext('/cs/', '', 'cz');
@@ -51,6 +57,7 @@ try {
     assert_equals(['/en/?page=cart *', '/en/?page=cart&lang=es'], [$r20lUs['EN'] ?? null, $r20lUs['ES'] ?? null],
         'R20 switcher: the /en/ store keeps Spanish as ?lang=es on its own URL');
 } finally {
+    $_GET = $r20lSavedGet;
     StoreContext::activate($r20lSavedStore);
     I18n::setLocale($r20lSavedLocale);
 }

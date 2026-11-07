@@ -201,7 +201,10 @@ class Bootstrap {
         $context = StoreContext::current();
         $locale = I18n::locale();
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
-        return $locale !== $context->defaultLocale() && in_array($locale, $languages, true) ? $locale : null;
+        if ($locale === $context->defaultLocale() || !in_array($locale, $languages, true)) return null;
+        // Another store's own language counts only as this request chose it (initLocale): ?lang=en in the HU store.
+        $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
+        return !in_array($locale, $storeDefaults, true) || strtolower(Security::str($_GET['lang'] ?? '')) === $locale ? $locale : null;
     }
 
     /** secondaryLocale() as a canonical URL shows it: another store's default language is that store's URL (its hreflang alternate). */
