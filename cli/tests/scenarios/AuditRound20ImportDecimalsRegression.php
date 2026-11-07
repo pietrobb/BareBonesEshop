@@ -2,29 +2,21 @@
 
 // Review round 20 (2026-11-07), medium "three decimals on import": the R19 rule reading "1.234" as 1 234 applied in every
 // currency, so an ERP CSV or XML feed exporting three decimals stored "12.500" as 12 500,00 € (instead of 12,50 €) and
-// "99.990" as 99 990 €, silently. Digit grouping before three digits is now read only in a currency shown in whole
-// units (CZK, HUF); in a currency with cents it is the decimal mark.
-echo "\n--- R20: '12.500' is 12,50 in EUR, '1.234' is 1 234 only in CZK/HUF ---\n";
+// "99.990" as 99 990 €, silently. R21 (AuditRound21Prices): such a value is refused in every currency instead of being
+// guessed; a feed that declares its decimal mark reads it, in an EUR as in a HUF catalog.
+echo "\n--- R20: an ERP's '12.500' is never stored as 12 500 €: refused, or 12,50 with a declared decimal mark ---\n";
 
-assert_equals([1250, 9999, 1250, 1990], [
-    Import::parsePriceToCents('12.500', 'eur'), Import::parsePriceToCents('99.990', 'eur'), Import::parsePriceToCents('12,500', 'eur'),
-    Import::parsePriceToCents('19.900000', 'eur'),
-], 'R20 import: in EUR a single separator before three digits is the decimal mark ("12.500" is 12,50, was 12 500,00)');
-$r20dRefused = static function (string $price, string $currency): string {
+$r20dRefused = static function (string $price, ?string $mark = null): string {
     try {
-        return 'accepted ' . Import::parsePriceToCents($price, $currency);
+        return 'accepted ' . Import::parsePriceToCents($price, $mark);
     } catch (InvalidArgumentException $e) {
         return str_starts_with($e->getMessage(), 'Not a price') ? 'refused' : $e->getMessage();
     }
 };
-assert_equals(['refused', 'refused', 'refused', 'refused', 'refused', -1, -1],
-    [$r20dRefused('1.234', 'eur'), $r20dRefused('123.456 EUR', 'eur'), $r20dRefused('0.125', 'eur'), $r20dRefused('1.299,125', 'eur'),
-        $r20dRefused('0.125', 'czk'), Money::parseInput('1.234', 'eur'), Money::parseInput('0.125', 'czk')],
-    'R20 import: a part finer than a cent ("1.234 €" = 1 234 € or 1,23 €?) is refused like the admin price field, not rounded');
-assert_equals([123400, 1250000, 1299000, 129900], [
-    Import::parsePriceToCents('1.234', 'czk'), Import::parsePriceToCents('12.500', 'huf'), Import::parsePriceToCents('12,990 Ft', 'huf'),
-    Import::parsePriceToCents('1.299,00', 'eur'),
-], 'R20 import: in CZK/HUF it still groups digits ("1.234 Kč" is 1 234); both separators keep meaning the same in EUR');
+assert_equals(['refused', 'refused', 'refused', 'refused', 'accepted 1990', 'accepted 1250', 'accepted 9999', -1, -1],
+    [$r20dRefused('12.500'), $r20dRefused('99.990'), $r20dRefused('0.125'), $r20dRefused('1.299,125'), $r20dRefused('19.900000'),
+        $r20dRefused('12.500', '.'), $r20dRefused('99.990', '.'), Money::parseInput('1.234', 'eur'), Money::parseInput('0.125', 'czk')],
+    'R20 import: three decimals are refused unless the decimal mark is declared, a part finer than a cent always, like the admin price field');
 
 [$r20dSavedDb, $r20dSavedDriver] = [Db::get(), Db::driver()];
 $r20dStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
@@ -38,53 +30,25 @@ try {
     $r20dSample = json_decode((string)file_get_contents(dirname(TEST_CLI_DIR) . '/stores.example.json'), true);
     $r20dSample['stores']['hu']['catalog_scope'] = 'hu';
     $r20dStoresProp->setValue(null, $r20dSample);
-
-    // The default store's EUR catalog: a CSV row and a Heureka-style XML feed from an ERP with three decimals.
-    StoreContext::activate(StoreContext::resolve($r20dSample, null, null, 'default', 'storefront'));
-    Import::importProduct(['sku' => 'R20D-EUR-CSV', 'name' => 'R20 EUR CSV', 'price' => '12.500', 'compare_price' => '99.990', 'stock' => '2', 'category' => 'R20D EUR']);
-    $r20dWh = Warehouse::save(['code' => 'r20d-erp', 'name' => 'R20D ERP', 'is_default' => 0]);
-    $r20dFeeds = [];
-    foreach (['transform' => ['field' => 'price', 'transform' => 'price_to_cents'], 'plain' => 'price'] as $r20dKind => $r20dPrice) {
-        $r20dFeeds[$r20dKind] = Warehouse::feedById(Warehouse::saveFeed(['code' => "r20d-{$r20dKind}", 'name' => "R20D {$r20dKind}", 'warehouse_id' => $r20dWh,
-            'url' => 'https://example.com/feed.xml', 'format' => 'xml', 'import_mode' => FeedImport::MODE_UPSERT,
-            'field_map' => ['ITEM_ID' => 'sku', 'PRODUCTNAME' => 'name', 'PRICE_VAT' => $r20dPrice, 'CATEGORYTEXT' => 'category', 'STOCK' => 'stock']]));
-    }
     $r20dXml = static fn(string $sku, string $price = '99.990'): string => '<?xml version="1.0" encoding="utf-8"?><SHOP><SHOPITEM><ITEM_ID>' . $sku . '</ITEM_ID>'
-        . '<PRODUCTNAME>R20 feed</PRODUCTNAME><PRICE_VAT>' . $price . '</PRICE_VAT><CATEGORYTEXT>R20D EUR</CATEGORYTEXT><STOCK>4</STOCK></SHOPITEM></SHOP>';
-    $r20dErrors = array_merge(FeedImport::importDocument($r20dFeeds['transform'], $r20dXml('R20D-EUR-FEED'))['errors'],
-        FeedImport::importDocument($r20dFeeds['plain'], $r20dXml('R20D-EUR-FEED2'))['errors']);
-    // An ambiguous value is a visible item / row error, and nothing is stored.
-    $r20dAmbiguous = [];
-    foreach (['transform', 'plain'] as $r20dKind) {
-        $r20dAmbiguous[] = implode(' | ', FeedImport::importDocument($r20dFeeds[$r20dKind], $r20dXml("R20D-AMB-{$r20dKind}", '123.456'))['errors']);
+        . '<PRODUCTNAME>R20 feed</PRODUCTNAME><PRICE_VAT>' . $price . '</PRICE_VAT><CATEGORYTEXT>R20D</CATEGORYTEXT><STOCK>4</STOCK></SHOPITEM></SHOP>';
+    $r20dErrors = [];
+    foreach (['default' => 'eur', 'hu' => 'huf'] as $r20dStore => $r20dCurrency) {
+        StoreContext::activate(StoreContext::resolve($r20dSample, null, null, $r20dStore, 'storefront'));
+        $r20dWh = Warehouse::save(['code' => "r20d-erp-{$r20dStore}", 'name' => "R20D ERP {$r20dStore}", 'is_default' => 0]);
+        foreach (['plain' => 'price', 'transform' => ['field' => 'price', 'transform' => 'price_to_cents'],
+            'dot' => ['field' => 'price', 'transform' => 'price_to_cents', 'decimal' => '.']] as $r20dKind => $r20dPrice) {
+            $r20dFeed = Warehouse::feedById(Warehouse::saveFeed(['code' => "r20d-{$r20dStore}-{$r20dKind}", 'name' => "R20D {$r20dKind}", 'warehouse_id' => $r20dWh,
+                'url' => 'https://example.com/feed.xml', 'format' => 'xml', 'import_mode' => FeedImport::MODE_UPSERT,
+                'field_map' => ['ITEM_ID' => 'sku', 'PRODUCTNAME' => 'name', 'PRICE_VAT' => $r20dPrice, 'CATEGORYTEXT' => 'category', 'STOCK' => 'stock']]));
+            $r20dErrors["{$r20dCurrency} {$r20dKind}"] = count(FeedImport::importDocument($r20dFeed, $r20dXml(strtoupper("R20D-{$r20dCurrency}-{$r20dKind}")))['errors']);
+        }
     }
-    $r20dCsv = tempnam(sys_get_temp_dir(), 'r20d') . '.csv';
-    file_put_contents($r20dCsv, "sku,name,price,category\nR20D-AMB-CSV,R20 amb,1.234,R20D EUR\nR20D-OK-CSV,R20 ok,1.230,R20D EUR\n");
-    $r20dCsvResult = Import::csv($r20dCsv);
-    @unlink($r20dCsv);
-    assert_equals(['Item #0: Not a price: 123.456', 'Item #0: Not a price: 123.456', 1, 'Line 2 (SKU: R20D-AMB-CSV): Not a price: 1.234', '0', '1'],
-        [preg_replace('/ \(.*$/', '', $r20dAmbiguous[0]), preg_replace('/ \(.*$/', '', $r20dAmbiguous[1]), $r20dCsvResult['imported'],
-            preg_replace('/ \(finer.*$/', '', $r20dCsvResult['errors'][0] ?? ''),
-            (string)$r20dDb->query("SELECT COUNT(*) FROM products WHERE sku LIKE 'R20D-AMB-%'")->fetchColumn(),
-            (string)$r20dDb->query("SELECT COUNT(*) FROM products WHERE sku = 'R20D-OK-CSV' AND price = 123")->fetchColumn()],
-        'R20 import: an ambiguous "123.456" in an XML feed and "1.234" in a CSV row are refused with an item/row error, nothing stored');
-    // An existing EUR product updated by the CSV import: the new price is read in the product's currency.
-    Import::importProduct(['sku' => 'R20D-EUR-CSV', 'name' => 'R20 EUR CSV', 'price' => '24.900']);
-
-    // The HU store with a catalog of its own (HUF): "12.500" there is 12 500 Ft.
-    StoreContext::activate(StoreContext::resolve($r20dSample, null, null, 'hu', 'storefront'));
-    Import::importProduct(['sku' => 'R20D-HUF-CSV', 'name' => 'R20 HUF CSV', 'price' => '12.500', 'stock' => '1', 'category' => 'R20D HUF']);
-    // The same XML feed into the HUF catalog: "99.990" there is 99 990 Ft.
-    $r20dHuFeed = Warehouse::feedById(Warehouse::saveFeed(['code' => 'r20d-hu', 'name' => 'R20D HU', 'warehouse_id' => Warehouse::save(['code' => 'r20d-erp-hu', 'name' => 'R20D ERP HU', 'is_default' => 0]),
-        'url' => 'https://example.com/feed-hu.xml', 'format' => 'xml', 'import_mode' => FeedImport::MODE_UPSERT,
-        'field_map' => ['ITEM_ID' => 'sku', 'PRODUCTNAME' => 'name', 'PRICE_VAT' => ['field' => 'price', 'transform' => 'price_to_cents'], 'CATEGORYTEXT' => 'category', 'STOCK' => 'stock']]));
-    $r20dErrors = array_merge($r20dErrors, FeedImport::importDocument($r20dHuFeed, $r20dXml('R20D-HUF-FEED'))['errors']);
-
-    $r20dRows = array_map(static fn(array $r): string => $r['sku'] . ' ' . $r['currency'] . ' ' . $r['price'] . ' ' . ($r['compare_price'] ?? '-'),
-        $r20dDb->query("SELECT sku, currency, price, compare_price FROM products WHERE sku LIKE 'R20D-%' ORDER BY sku")->fetchAll());
-    assert_equals(['R20D-EUR-CSV eur 2490 9999', 'R20D-EUR-FEED eur 9999 -', 'R20D-EUR-FEED2 eur 9999 -', 'R20D-HUF-CSV huf 1250000 -', 'R20D-HUF-FEED huf 9999000 -', 'R20D-OK-CSV eur 123 -'], $r20dRows,
-        'R20 import: an ERP CSV/XML feed "12.500"/"99.990" is 12,50/99,99 € (was 12 500/99 990 €), "12.500" in a HUF catalog is 12 500 Ft ('
-        . json_encode($r20dErrors) . ')');
+    $r20dRows = array_map(static fn(array $r): string => $r['sku'] . ' ' . $r['currency'] . ' ' . $r['price'],
+        $r20dDb->query("SELECT sku, currency, price FROM products WHERE sku LIKE 'R20D-%' ORDER BY sku")->fetchAll());
+    assert_equals([['eur plain' => 1, 'eur transform' => 1, 'eur dot' => 0, 'huf plain' => 1, 'huf transform' => 1, 'huf dot' => 0],
+        ['R20D-EUR-DOT eur 9999', 'R20D-HUF-DOT huf 9999']], [$r20dErrors, $r20dRows],
+        'R20 import: an ERP feed "99.990" is an item error (no 99 990 €, no product) unless the feed declares "decimal": ".", then 99,99 in either catalog');
 } finally {
     Db::init($r20dSavedDb, $r20dSavedDriver);
     @unlink($r20dLock);

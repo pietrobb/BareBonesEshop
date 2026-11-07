@@ -51,7 +51,8 @@ try {
     assert_equals(3, Warehouse::totalAvailable('R7C-A'), 'R7 feed: a feed without a stock column does not zero the products it omits');
     // A sync that stops at the error limit never saw the rest of the feed: those products are still listed.
     $r7cBadRows = [];
-    for ($n = 0; $n < 102; $n++) $r7cBadRows[] = ['SKU' => "R7C-BAD-{$n}", 'NAME' => 'R7C bad', 'PRICE' => 'na dotaz', 'STOCK' => '1'];
+    // (Without a name: a refused price no longer counts towards the limit since R21.)
+    for ($n = 0; $n < 102; $n++) $r7cBadRows[] = ['SKU' => "R7C-BAD-{$n}", 'NAME' => '', 'PRICE' => '1.00', 'STOCK' => '1'];
     $r7cCut = FeedImport::applyItems($r7cFeed, [...$r7cBadRows, ['SKU' => 'R7C-A', 'NAME' => 'R7C A', 'PRICE' => '10.00', 'STOCK' => '3']]);
     assert_true(count($r7cCut['errors']) === 101 && Warehouse::totalAvailable('R7C-A') === 3 && (int)($r7cCut['stock_zeroed'] ?? 0) === 0,
         'R7 feed: a sync cut short by the error limit zeroes nothing (errors ' . count($r7cCut['errors']) . ', R7C-A ' . Warehouse::totalAvailable('R7C-A') . ', zeroed ' . (int)($r7cCut['stock_zeroed'] ?? 0) . ')');
