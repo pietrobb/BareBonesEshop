@@ -76,6 +76,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   so the shop stays closed and `update.php rollback` warns (it reopened the shop). A rollback that restores the
   database still lifts the window. `README.md` and the runbook say which step lifts which window, and the upgrade
   note on a MariaDB dump client says that the 2.1.2 updater refuses it only when `categories` or `invoices` hold rows.
+- **Feed and sitemap cache** (review round 20, low). The catalog fingerprint read every product row (a count and the
+  round 19 price sums) on every feed and sitemap request, also when the file came from the cache: about 0.1 s on SQLite
+  and 0.7 s on MySQL with 200 000 products. It now reads only indexes (the newest product id and `updated_at`); a
+  product deleted in the admin marks the catalog changed. A product renamed, repriced or taken off sale in the same
+  second as another change (`updated_at` has whole seconds) reached the feed only after the 15-minute cache time: an
+  entry built in the second of the latest change is now rebuilt once that second is over.
 - **The language switcher stays in the store** (review round 20, medium). In the HU and CZ stores the EN link led to
   another store (`/?lang=en` or `/en/`) and the cart was repriced in its currency (5 490 Ft became 31,67 €). A language
   the current store offers in `languages` now opens the same page of the current store (`/hu/?lang=en`), with the same
