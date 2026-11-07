@@ -503,14 +503,18 @@ unless the operator supplies `--allow-unsigned` explicitly. While `apply` or
 `rollback` runs, the shop is in maintenance (the `.maintenance` file in the
 application root): web requests get 503 and the worker and feed sync skip their run.
 The updater holds a lock on that file for as long as it runs, so the window also
-holds when the shop checks it from another container on the same volume, and it
-ends when that process ends. `php cli/migrate.php apply` uses the same window; a
-migration that fails, an update whose automatic rollback fails, or a rollback that
-stops after it began restoring leaves the shop in maintenance (the file says what to
-run). A failed migration is lifted only by a successful `migrate.php apply`, an update
-that runs the migrations or a rollback that restores the database; an update or
-rollback of code only leaves that schema as it was and keeps the shop closed (it
-warns). A failed update or rollback is lifted by the command the file names.
+holds when the shop checks it from another container on the same volume (a lock
+counts for 24 hours at most). The updater removes the file when it ends; one killed
+half-way leaves it, and it keeps blocking for an hour (longer, up to 24 hours, while
+the process it names still runs on that host). `php cli/migrate.php apply` uses the
+same window; a migration that fails, an update whose automatic rollback fails, or a
+rollback that stops after it began restoring marks the window failed: it never
+expires and the file says what to run. A failed migration is lifted only by a
+successful `migrate.php apply`, an update that runs the migrations or a rollback that
+restores the database; an update or rollback of code only leaves that schema as it
+was and keeps the shop closed (it warns). A failed update or rollback is lifted only
+by the rollback the file names (`--snapshot=...`); any other update or rollback keeps
+the shop closed and warns.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The

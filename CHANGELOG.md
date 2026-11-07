@@ -71,6 +71,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A half-done rollback keeps the shop closed until that rollback succeeds** (review round 21, low). After an update
+  whose automatic rollback failed, or a rollback that stopped half-way, a completed rollback of code only of another
+  snapshot reopened the shop although `.maintenance` still named the rollback that was due. Such a window is now lifted
+  only by the rollback it names; any other update or rollback keeps the shop closed and warns. `update_snapshots_keep`
+  counts the snapshots of updates of code only (no database) apart from those with a database: three such updates,
+  or their rollbacks, deleted the only database snapshot. `README.md` and the `MaintenanceMode` comment say which step
+  lifts which window and that a killed updater's marker blocks for an hour.
 - **Admin, documents and languages** (review round 20, low). A withdrawn line of which only some units left (1 of 3)
   says how many were sent and that the rest must not ship; it read "already sent". The invoice's VAT scenario in the
   order detail and the status values in the audit log ("shipped", `{"status":"draft"}`) are shown by their names. The

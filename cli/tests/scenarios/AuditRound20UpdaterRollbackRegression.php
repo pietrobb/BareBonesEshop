@@ -36,13 +36,13 @@ try {
         [$r20uState(), $r20uBack['still_closed'] ?? null, $r20uBack['database_restored_to'], $r20uRead()],
         'R20 rollback: one of code only keeps the failed window of a half-done migration and says so (was: shop reopened)');
 
-    // 2. A window another step left failed (not a migration) is lifted by a completed code-only rollback, as before.
+    // 2. The window of a half-done rollback is lifted by the completed rollback it names (R21: only by that one).
     MaintenanceMode::leave($r20uShop);
     $r20uAgain = $r20uUpdater->apply(new UpdatePackage($r20uRoot . '/package-code', null, true));
-    MaintenanceMode::fail($r20uShop, "rollback x failed half-way (boom); fix the cause and run php cli/update.php rollback --snapshot=x --force");
+    MaintenanceMode::fail($r20uShop, "rollback {$r20uAgain['snapshot']} failed half-way (boom); fix the cause and run php cli/update.php rollback --snapshot={$r20uAgain['snapshot']} --force");
     $r20uOther = $r20uUpdater->rollback((string)$r20uAgain['snapshot'], true, true);
     assert_equals([false, null], [is_file(MaintenanceMode::path($r20uShop)), $r20uOther['still_closed'] ?? null],
-        'R20 rollback: a completed code-only rollback still lifts the window of a half-done rollback');
+        'R20 rollback: the completed rollback a half-done rollback\'s window names lifts it');
 
     // 3. A rollback that restores the database does lift a failed migration's window.
     $r20uUpdater->apply(new UpdatePackage($r20uRoot . '/package-code', null, true));

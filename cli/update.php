@@ -173,7 +173,7 @@ try {
             fwrite(STDERR, "WARNING: {$result['notice']}\n");
         }
         if (($result['still_closed'] ?? null) !== null) {
-            fwrite(STDERR, "WARNING: the shop stays closed: a migration failed and this rollback restored no database ({$result['still_closed']})\n");
+            fwrite(STDERR, "WARNING: the shop stays closed until the step .maintenance names succeeds ({$result['still_closed']})\n");
         }
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
@@ -233,7 +233,7 @@ try {
         echo "Moved obsolete generated file {$retiredPath} into the snapshot (retired/)\n";
     }
     if (($result['still_closed'] ?? null) !== null) {
-        fwrite(STDERR, "WARNING: the shop stays closed: an earlier step failed and this update did not run migrations ({$result['still_closed']})\n");
+        fwrite(STDERR, "WARNING: the shop stays closed until the step .maintenance names succeeds ({$result['still_closed']})\n");
     }
     // R15 high 7: a shop adopted from v1.x still has the old stores.json, which this release cannot run on (503).
     if (DataOverrides::storesNeedUpgrade($root, $config)) {
