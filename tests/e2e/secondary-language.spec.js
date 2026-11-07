@@ -111,10 +111,33 @@ test('a further language of a prefixed store with a 0-decimal currency shows the
   });
 });
 
-// English is the /en/ store's own language: in /cs/ it renders, but links and the API stay on the store's URL
-// without ?lang=en (Bootstrap::secondaryLocale). The checkout still prices every choice and charges what it shows.
+// English is the /en/ store's own language; in /cs/ it is a further language like Spanish (R20: links and the API keep
+// ?lang=en, only the canonical points at /en/). The checkout still prices every choice and charges what it shows.
 test('English in the prefixed CZK store shows the total it charges', async ({ page }, testInfo) => {
   await shopInFurtherLanguage(page, testInfo, {
-    prefix: '/cs', lang: 'en', apiLang: null, store: 'cz', currency: 'czk', symbol: 'Kč', minorFactor: 100, contact: czContact('en'),
+    prefix: '/cs', lang: 'en', store: 'cz', currency: 'czk', symbol: 'Kč', minorFactor: 100, contact: czContact('en'),
   });
+});
+
+// Review round 20: the switcher's EN link in the CZ/HU store led to another store, and the cart was repriced in its
+// currency (5 490 Ft became 31,67 €). It now stays in the store: same cart, same currency, English on the next page.
+test('the language switcher of a prefixed store keeps the store, its cart and its currency', async ({ page }) => {
+  await page.goto('/cs/');
+  const rejectConsent = page.locator('#cc-reject');
+  if (await rejectConsent.isVisible()) await rejectConsent.click();
+  await page.locator('[data-storefront-action="cart-add"]').first().click();
+  await expect(page.locator('.cart-badge')).toHaveText(/^[1-9]/);
+  const badge = (await page.locator('.cart-badge').textContent()).trim();
+
+  await page.locator('.lang-switch a', { hasText: /^EN$/ }).click();
+  await expect(page).toHaveURL(/\/cs\/\?lang=en$/);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('.cart-badge')).toHaveText(badge);
+
+  await page.goto('/cs/?page=cart&lang=en');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('body')).toContainText(/Kč|CZK/);
+  // The next store link keeps English.
+  const home = page.locator('a[href*="/cs/"][href*="lang=en"]').first();
+  await expect(home).toHaveCount(1);
 });

@@ -191,14 +191,26 @@ class Bootstrap {
         return (string)preg_replace('/[?&](?=#|$)/', '', $clean);
     }
 
-    /** The active locale when it is a non-primary language of the current store (selected by ?lang=), else null. */
+    /**
+     * The active locale when it is a non-primary language of the current store (selected by ?lang=), else null. Store
+     * links, forms and the storefront API carry it. R20: also a language that is another store's own (English in the
+     * HU store): the visitor stays in this store and its currency instead of falling back to its language on the next page.
+     */
     public static function secondaryLocale(): ?string {
         if (!StoreContext::hasCurrent()) return null;
         $context = StoreContext::current();
         $locale = I18n::locale();
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
-        // Another store's default language is that store's URL (its hreflang alternate), not ?lang= here.
+        if ($locale === $context->defaultLocale() || !in_array($locale, $languages, true)) return null;
+        // Another store's own language counts only as this request chose it (initLocale): ?lang=en in the HU store.
         $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
-        return $locale !== $context->defaultLocale() && in_array($locale, $languages, true) && !in_array($locale, $storeDefaults, true) ? $locale : null;
+        return !in_array($locale, $storeDefaults, true) || strtolower(Security::str($_GET['lang'] ?? '')) === $locale ? $locale : null;
+    }
+
+    /** secondaryLocale() as a canonical URL shows it: another store's default language is that store's URL (its hreflang alternate). */
+    public static function canonicalSecondaryLocale(): ?string {
+        $locale = self::secondaryLocale();
+        $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
+        return $locale !== null && !in_array($locale, $storeDefaults, true) ? $locale : null;
     }
 }
