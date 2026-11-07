@@ -100,6 +100,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The store switch keeps the language, the sitemap lists every language version** (review round 22, low). The
+  store switch opened every store in its own language: a shopper reading the HU store in English landed in the SK
+  store in Slovak. A store that has the shopper's language now opens in it (`?lang=en`, also Slovak in the CZ store);
+  one that does not opens in its own. The sitemap listed only each store's default language, while the page's
+  hreflang also announces the further store languages (`cs-SK`, `en-HU`, `es` of the /en/ store): each is a `<loc>`
+  of its own and an alternate of every entry, with the same URL as the page's hreflang (`/hu/…?lang=en`).
 - **Feed messages only where a price was kept, `decimal` checked, the feed status translated** (review round 22,
   low). "Price kept" was listed for SKUs that are not in the catalog (skipped anyway in "price and stock") and when the
   price was updated and only the compare price was refused, which filled a supplier feed's error list. A SKU not in

@@ -153,7 +153,8 @@ test('the store switch moves the cart to another store and says its currency cha
   await expect(page.locator('.cart-badge')).toHaveText(/^[1-9]/);
 
   await page.locator('.store-switch a', { hasText: 'SK · €' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  // R22: the SK store also has Czech, so the shopper stays in Czech.
+  await expect(page).toHaveURL(/\/\?lang=cs$/);
   await expect(page.locator('#storefront-flash')).toContainText('EUR');
   await page.reload();
   await expect(page.locator('#storefront-flash')).toHaveText('');

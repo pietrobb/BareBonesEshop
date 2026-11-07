@@ -29,13 +29,14 @@ try {
     assert_equals(['SK' => '/?page=cart *', 'CS' => '/?page=cart&lang=cs', 'EN' => '/?page=cart&lang=en'], $r21sLinks('languageLinks'),
         'R21 switcher: the SK store\'s language links are its own languages (CS is Czech in this store)');
     $r21sSk = $r21sLinks('storeLinks');
-    assert_equals(['SK · €' => '/?page=cart *', 'CZ · Kč' => '/cs/?page=cart', 'HU · Ft' => '/hu/?page=cart'],
+    // R22: the CZ store has Slovak too, so the shopper stays in Slovak there.
+    assert_equals(['SK · €' => '/?page=cart *', 'CZ · Kč' => '/cs/?page=cart&lang=sk', 'HU · Ft' => '/hu/?page=cart'],
         array_intersect_key($r21sSk, array_flip(['SK · €', 'CZ · Kč', 'HU · Ft'])),
         'R21 switcher: the SK store links the CZ and HU stores by country and currency (the CZ store was unreachable) (' . json_encode($r21sSk, JSON_UNESCAPED_UNICODE) . ')');
     Bootstrap::initStoreContext('/cs/', '', 'cz');
     I18n::setLocale('cs');
     $r21sCz = $r21sLinks('storeLinks');
-    assert_equals(['/?page=cart', '/cs/?page=cart *'], [$r21sCz['SK · €'] ?? null, $r21sCz['CZ · Kč'] ?? null], 'R21 switcher: the CZ store links back to the SK store');
+    assert_equals(['/?page=cart&lang=cs', '/cs/?page=cart *'], [$r21sCz['SK · €'] ?? null, $r21sCz['CZ · Kč'] ?? null], 'R21 switcher: the CZ store links back to the SK store');
     assert_true(!isset($r21sLinks('languageLinks')['HU']), 'R21 switcher: HU is a store, not a language link of the CZ store');
     $r21sTitles = array_column((new ReflectionMethod(StorefrontSeo::class, 'storeLinks'))->invoke(null, Bootstrap::hreflangAlternates('/')), 'title');
     assert_true(in_array('Magyar üzlet', $r21sTitles, true), 'R21 switcher: a store link is titled with the store name');

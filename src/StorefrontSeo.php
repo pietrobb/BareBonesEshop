@@ -115,19 +115,25 @@ final class StorefrontSeo
      * R21: every public store by country and currency ("CZ · Kč", the store name as title), on the same page in that
      * store's own language. Changing the store changes the currency the cart is priced in, so it is a separate choice
      * (StorefrontCartAction::noteStoreCurrency() tells a shopper with a cart). Empty with a single public store.
+     * R22: a store that has the shopper's language keeps it (English in the HU store → the SK store in English, not
+     * in Slovak); otherwise the store's own language.
      * @return list<array{url: string, label: string, title: string, active: bool}>
      */
     private static function storeLinks(array $alternates): array
     {
         $config = Bootstrap::stores();
         $currentId = StoreContext::current()->id();
+        $locale = strtolower(I18n::locale());
         $links = [];
         foreach (is_array($config['stores'] ?? null) ? $config['stores'] : [] as $id => $store) {
             if (!is_array($store) || !StoreContext::isPublicConfig($store)) continue;
             $country = strtoupper((string)($store['legal']['country'] ?? ''));
             $name = (string)($store['name'] ?? $id);
+            $url = Template::url((string)($store['url_prefix'] ?? '') . $alternates['pathNoPrefix']);
+            $further = array_map(static fn($language): string => strtolower((string)$language), (array)($store['languages'] ?? []));
+            $keepsLocale = $locale !== strtolower((string)($store['default_locale'] ?? 'en')) && in_array($locale, $further, true);
             $links[] = [
-                'url' => Template::url((string)($store['url_prefix'] ?? '') . $alternates['pathNoPrefix']),
+                'url' => $keepsLocale ? Bootstrap::withLang($url, $locale) : $url,
                 'label' => preg_match('/^[A-Z]{2}$/', $country) ? $country . ' · ' . I18n::priceFormat(strtolower((string)($store['currency'] ?? '')))['symbol'] : $name,
                 'title' => $name,
                 'active' => (string)($store['id'] ?? $id) === $currentId,
