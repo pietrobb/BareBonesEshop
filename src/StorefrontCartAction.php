@@ -46,6 +46,21 @@ final class StorefrontCartAction
             : I18n::t('cart_added_notice');
     }
 
+    /**
+     * R21: the session cart is priced by the store that shows it. Arriving with a cart in a store of another currency
+     * (the store switch) says so once, instead of repricing it unannounced (5 490 Ft became 31,67 €).
+     */
+    public static function noteStoreCurrency(int $cartCount): void
+    {
+        $store = StoreContext::current();
+        $currency = strtolower($store->currency());
+        $previous = $_SESSION['cart_currency'] ?? null;
+        $_SESSION['cart_currency'] = $currency;
+        if ($cartCount > 0 && is_string($previous) && $previous !== $currency) {
+            StorefrontFlash::set(I18n::format('cart_currency_changed', ['currency' => strtoupper($currency), 'store' => (string)($store->config()['name'] ?? $store->id())]));
+        }
+    }
+
     public static function count(): int
     {
         return (int)Cart::enriched()['count'];

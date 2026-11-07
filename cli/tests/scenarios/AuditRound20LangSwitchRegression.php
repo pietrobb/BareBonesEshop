@@ -23,20 +23,20 @@ try {
     $r20lHu = $r20lLinks();
     assert_equals(['/hu/?page=cart *', '/hu/?page=cart&lang=en'], [$r20lHu['HU'] ?? null, $r20lHu['EN'] ?? null],
         'R20 switcher: in the HU store HU and EN stay in the HU store (EN led to another store and currency) (' . json_encode($r20lHu) . ')');
-    assert_equals(['/?page=cart', '/cs/?page=cart', '/de/?page=cart'], [$r20lHu['SK'] ?? null, $r20lHu['CS'] ?? null, $r20lHu['DE'] ?? null],
-        'R20 switcher: a language the HU store does not offer still leads to the store that has it');
+    // R21: a language the HU store does not offer is no language link any more; the other stores are in the store switch.
+    assert_equals([null, null, null], [$r20lHu['SK'] ?? null, $r20lHu['CS'] ?? null, $r20lHu['DE'] ?? null],
+        'R20/R21 switcher: the HU store\'s language links are its own languages only');
 
-    // English chosen in the HU store: links, forms and the API keep it; the canonical stays the HU store's URL.
+    // English chosen in the HU store: links, forms and the API keep it; R21: so does its canonical (hreflang en-HU).
     I18n::setLocale('en');
     $_GET['lang'] = 'en';
-    assert_equals(['en', null], [Bootstrap::secondaryLocale(), Bootstrap::canonicalSecondaryLocale()],
-        'R20 switcher: English in the HU store is carried by its links, not by its canonical (the /en/ store owns English)');
+    assert_equals('en', Bootstrap::secondaryLocale(), 'R20 switcher: English in the HU store is carried by its links');
     assert_equals(Template::baseUrl() . '/hu/cart?lang=en', Template::storeUrl('/cart'), 'R20 switcher: the next page of the HU store stays English');
     $r20lHuEn = $r20lLinks();
     assert_equals(['/hu/?page=cart', '/hu/?page=cart&lang=en *'], [$r20lHuEn['HU'] ?? null, $r20lHuEn['EN'] ?? null],
         'R20 switcher: from English back to Hungarian drops ?lang= and stays in the HU store');
     preg_match('#<link rel="canonical" href="([^"]*)"#', Seo::head('T', 'D', Template::storeUrl('/cart')), $r20lCanonical);
-    assert_true(str_ends_with((string)($r20lCanonical[1] ?? ''), '/hu/cart'), 'R20 switcher: the canonical of English in the HU store is its HU URL (' . ($r20lCanonical[1] ?? '') . ')');
+    assert_true(str_ends_with((string)($r20lCanonical[1] ?? ''), '/hu/cart?lang=en'), 'R21 switcher: the canonical of English in the HU store is that page (it was the Hungarian one) (' . ($r20lCanonical[1] ?? '') . ')');
 
     unset($_GET['lang']);
     I18n::setLocale('en');
@@ -46,9 +46,9 @@ try {
     Bootstrap::initStoreContext('/cs/', '', 'cz');
     I18n::setLocale('cs');
     $r20lCz = $r20lLinks();
-    assert_equals(['/cs/?page=cart *', '/cs/?page=cart&lang=en', '/cs/?page=cart&lang=sk', '/hu/?page=cart'],
+    assert_equals(['/cs/?page=cart *', '/cs/?page=cart&lang=en', '/cs/?page=cart&lang=sk', null],
         [$r20lCz['CS'] ?? null, $r20lCz['EN'] ?? null, $r20lCz['SK'] ?? null, $r20lCz['HU'] ?? null],
-        'R20 switcher: in the CZ store CS, EN and SK stay in /cs/ (CZK); HU leads to the HU store (' . json_encode($r20lCz) . ')');
+        'R20 switcher: in the CZ store CS, EN and SK stay in /cs/ (CZK); R21: HU is a store, not a language link (' . json_encode($r20lCz) . ')');
 
     // A further language no store defaults to is unchanged: Spanish of the /en/ store.
     Bootstrap::initStoreContext('/en/', '', 'us');

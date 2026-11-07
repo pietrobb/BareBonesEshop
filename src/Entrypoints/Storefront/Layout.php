@@ -62,7 +62,7 @@ $shell = [
     'account_label' => $t($loggedIn ? 'account.title' : 'account.login'),
     'cart_url' => Template::storeUrl('/?page=cart'),
     'cart_count' => $cartCount,
-    'language_links' => $languageLinks,
+    'language_links' => $languageLinks, 'store_links' => $seo['store_links'],
     'navigation' => $navigation,
     'search_query' => Security::str($_GET['q'] ?? ''), // q[]=x is an array, not a query
     'flash' => StorefrontFlash::pull(),

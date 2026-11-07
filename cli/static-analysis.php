@@ -280,7 +280,7 @@ $architectureBudgets = [
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     // +6 lines: the ?page=withdrawal route (R8 electronic withdrawal function, Directive 2011/83/EU art. 11a).
     // +6 lines: the ?page=complaint route (R8 complaints, Directive (EU) 2019/771).
-    /* R9: Impressum page; R10 UX3: ?page=pay; R10 UX8: ?page=order-status and ?page=stock-notify (+11); R11 H1: ?page=account-claim (+6) */ 'src/Entrypoints/Storefront.php' => ['lines' => 187, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R9: Impressum page; R10 UX3: ?page=pay; R10 UX8: ?page=order-status and ?page=stock-notify (+11); R11 H1: ?page=account-claim (+6); R21: cart currency notice on a store change (+1) */ 'src/Entrypoints/Storefront.php' => ['lines' => 188, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.

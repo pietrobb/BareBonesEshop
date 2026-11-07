@@ -1870,6 +1870,8 @@ return [
     'choose_option' => 'Vybrať variant',
     'cart_added_notice' => 'Produkt bol pridaný do košíka.',
     'cart_quantity_clamped' => 'Pridané. Množstvo v košíku je obmedzené na {count}.',
+    'cart_currency_changed' => 'Košík je teraz v mene {currency} ({store}): ceny sú prepočítané podľa tohto obchodu.',
+    'store_switch' => 'Obchod a mena',
     'wishlist.added' => 'Pridané do zoznamu želaní.',
     'wishlist.removed' => 'Odstránené zo zoznamu želaní.',
     'checkout.error.invalid_country' => 'Vyberte platnú krajinu.',

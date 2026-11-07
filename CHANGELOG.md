@@ -59,7 +59,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
-- **Theme assets:** the default theme is version 2.3.4, so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.5 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -86,6 +86,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   counts the snapshots of updates of code only (no database) apart from those with a database: three such updates,
   or their rollbacks, deleted the only database snapshot. `README.md` and the `MaintenanceMode` comment say which step
   lifts which window and that a killed updater's marker blocks for an hour.
+- **Store switch apart from languages, one URL per store language** (review round 21, low). After round 20 the SK and
+  CZ stores no longer linked each other ("CS" in the SK store was Czech in euros), and "HU" in the switcher moved the
+  shopper to the HU store and repriced the cart in forints unannounced. The language links now list only the current
+  store's languages; the other stores are a separate store switch named by country and currency ("CZ · Kč", the store
+  name as title; theme variable `store_links`, `.store-switch` in the default and bookshop headers). A shopper whose
+  cart arrives in a store of another currency is told once ("Your cart is now in HUF"). A further store language that
+  is another store's own (`/product/x?lang=cs` in the SK store, English in the HU store) is canonical to itself (it was
+  the store's default-language page, Slovak) and is announced as hreflang language-region by the store's seller
+  country (`cs-SK`, `en-HU`; `Bootstrap::hreflangAlternates()` returns them as `regional`). `canonicalSecondaryLocale()`
+  is removed: use `secondaryLocale()`. Default theme 2.3.5, bookshop theme 1.0.1.
 - **Admin, documents and languages** (review round 20, low). A withdrawn line of which only some units left (1 of 3)
   says how many were sent and that the rest must not ship; it read "already sent". The invoice's VAT scenario in the
   order detail and the status values in the audit log ("shipped", `{"status":"draft"}`) are shown by their names. The

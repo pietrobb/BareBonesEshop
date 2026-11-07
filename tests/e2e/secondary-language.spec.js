@@ -112,7 +112,7 @@ test('a further language of a prefixed store with a 0-decimal currency shows the
 });
 
 // English is the /en/ store's own language; in /cs/ it is a further language like Spanish (R20: links and the API keep
-// ?lang=en, only the canonical points at /en/). The checkout still prices every choice and charges what it shows.
+// ?lang=en; R21: so does the canonical, hreflang en-CZ). The checkout still prices every choice and charges what it shows.
 test('English in the prefixed CZK store shows the total it charges', async ({ page }, testInfo) => {
   await shopInFurtherLanguage(page, testInfo, {
     prefix: '/cs', lang: 'en', store: 'cz', currency: 'czk', symbol: 'Kč', minorFactor: 100, contact: czContact('en'),
@@ -140,4 +140,22 @@ test('the language switcher of a prefixed store keeps the store, its cart and it
   // The next store link keeps English.
   const home = page.locator('a[href*="/cs/"][href*="lang=en"]').first();
   await expect(home).toHaveCount(1);
+});
+
+// Review round 21: other stores are a separate store switch by country and currency (the SK and CZ stores did not
+// link each other, "HU" repriced the cart unannounced); arriving with a cart in another currency says so.
+test('the store switch moves the cart to another store and says its currency changed', async ({ page }) => {
+  await page.goto('/cs/');
+  const rejectConsent = page.locator('#cc-reject');
+  if (await rejectConsent.isVisible()) await rejectConsent.click();
+  await expect(page.locator('.lang-switch a', { hasText: /^HU$/ })).toHaveCount(0);
+  await page.locator('[data-storefront-action="cart-add"]').first().click();
+  await expect(page.locator('.cart-badge')).toHaveText(/^[1-9]/);
+
+  await page.locator('.store-switch a', { hasText: 'SK · €' }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator('#storefront-flash')).toContainText('EUR');
+  await page.reload();
+  await expect(page.locator('#storefront-flash')).toHaveText('');
+  await expect(page.locator('.store-switch a', { hasText: 'CZ · Kč' })).toHaveAttribute('href', /\/cs\/$/);
 });

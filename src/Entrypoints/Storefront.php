@@ -47,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
 
 if (isset($_GET['cart_recover'])) StorefrontCartAction::recover(Security::str($_GET['cart_recover']));
 $cartCount = StorefrontCartAction::count();
+StorefrontCartAction::noteStoreCurrency($cartCount);
 
 // Route: support both ?page=X and URL-rewritten ?category=slug
 $page = Security::clean($_GET['page'] ?? '');
