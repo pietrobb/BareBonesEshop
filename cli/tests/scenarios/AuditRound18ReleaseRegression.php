@@ -21,6 +21,18 @@ foreach ([
 ] as $r18rNeedle) {
     assert_true(str_contains($r18rNotes, $r18rNeedle), "R18 release: the 2.1.3 upgrade notes cover {$r18rNeedle}");
 }
+// R19: 2.1.3 is installed by the 2.1.2 updater, which reopens the shop after any apply (also a failed automatic
+// rollback) and refuses neither a configuration FAIL nor a MariaDB client by name: the notes must not promise the
+// 2.1.3 updater's behaviour for this step and must tell the operator to close the shop at the web server.
+foreach ([
+    'installed by the 2.1.2 updater', 'close the shop at the web server', 'return 503;', 'automatic rollback also failed',
+    'rolled-back', 'The 2.1.2 updater that installs this release does not refuse', 'The 2.1.2 updater refuses this package',
+    'Maintenance window (from the next update',
+] as $r18rNeedle) {
+    assert_true(str_contains($r18rNotes, $r18rNeedle), "R19 release: the 2.1.3 upgrade notes cover {$r18rNeedle}");
+}
+assert_true(!str_contains($r18rNotes, '2.1.2 installed the package anyway'),
+    'R19 release: the notes do not claim this update is refused on a configuration FAIL');
 // Every migration added after 2.1.2 (whose last one is 20261104120000) is named in the notes.
 foreach (glob($r18rRoot . '/migrations/*.php') ?: [] as $r18rMigration) {
     $r18rName = basename($r18rMigration, '.php');

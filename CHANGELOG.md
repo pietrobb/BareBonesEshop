@@ -6,6 +6,18 @@
 
 Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup.php doctor` after it.
 
+- **This update is installed by the 2.1.2 updater; close the shop at the web server yourself.** `apply` runs the
+  installed `cli/update.php`, so the updater fixes of 2.1.3 (maintenance window, stricter check) take effect only
+  from the next update and for a `rollback` run after this update. The 2.1.2 updater deletes `.maintenance` when
+  `apply` ends, whatever the outcome: after a failed update and also after a failed automatic rollback, which leaves
+  a half-restored shop serving orders; it also stops blocking requests after an hour (a long MySQL dump), and it
+  deletes a `.maintenance` you placed yourself. Before `apply`, stop the job worker and cron and answer 503 at the
+  web server (nginx `return 503;`, Apache `RewriteRule ^ - [R=503,L]`, or take the site offline). If `apply` fails,
+  keep the web server closed: when the output says "automatic rollback also failed", run the rollback command it
+  names (`php cli/update.php rollback --snapshot=... --force --accept-data-loss`) and check that it ends without an
+  error and that `php cli/update.php list` shows that snapshot as `rolled-back`; only then open the web server. A
+  failed `apply` whose automatic rollback succeeded (`auto-rolled-back`) or that stopped before changing a file
+  (`aborted`) left 2.1.2 in place.
 - **Admin amounts are typed in the currency, not in cents.** Variant prices, price lists, promotions and coupons,
   the B2B credit limit, supplier purchase prices and shipping and payment amounts took cents up to 2.1.2: from 2.1.3
   "1290" saves 1 290 €, not 12.90 €. Tell everyone who enters prices to type "12.90"; the stored amounts do not
@@ -14,19 +26,23 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   keeps its price), and a thousands separator must group three digits (`5..0` and `1.29,00` are refused).
 - **MySQL with a MariaDB dump client: install the MySQL client first.** Against a MySQL server `mariadb-dump` (also
   installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package) writes generated columns into the dump and
-  MySQL refuses it on restore. `php cli/update.php doctor`, `check` and `apply` refuse such a client, so the package
-  does not install, and `php cli/migrate.php apply` runs no migration because its pre-migration backup fails. Install
+  MySQL refuses it on restore. The 2.1.2 updater refuses this package when it restores its pre-update dump into the
+  probe database (`doctor` reports the backup probe as FAIL, `apply` stops before changing a file with the MySQL
+  restore error, not the client name). From 2.1.3 on `doctor`, `check` and `apply` name the client, and
+  `php cli/migrate.php apply` runs no migration because its pre-migration backup fails. Install
   the MySQL 8.x client and set `update_mysql_dump_binary` and `update_mysql_client_binary` to it
   (`docs/AI_UPDATE_RUNBOOK.md`); the check names the generated columns concerned (`categories.parent_id_uniq` and
   the invoice uniqueness column). A MariaDB server keeps the MariaDB client.
-- **Stricter update check:** `check` and `apply` refuse while the doctor reports a configuration FAIL (a private
-  path such as `jobs_dir` inside the web root, a v1.x `stores.json` without `private_runtime_dir`); 2.1.2 installed
-  the package anyway. Fix the named settings first. A shop that still has `api.php` gets a `payment_webhooks`
+- **Stricter update check (from the next update):** the 2.1.3 `check` and `apply` refuse while the doctor reports a
+  configuration FAIL (a private path such as `jobs_dir` inside the web root, a v1.x `stores.json` without
+  `private_runtime_dir`). The 2.1.2 updater that installs this release does not refuse: fix every FAIL its
+  `php cli/update.php doctor` reports before `apply`, or the next update will be refused. A shop that still has `api.php` gets a `payment_webhooks`
   warning with the webhook URLs to set in the payment gateways.
 - **Migration** `20261105120000_product_stock_updated_at` adds `products.stock_updated_at`: a sale or stock change
   moves it instead of `updated_at`, and API v1 `updated_after` matches either column. Feeds and sitemaps are rebuilt
   only for a change they show (price, content, going in or out of stock).
-- **Maintenance window:** a refused or failed update step no longer reopens the shop. A rollback refused (without
+- **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
+  step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
   the window it found. A rollback that stopped after it began restoring and a failed `php cli/migrate.php apply` keep
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
