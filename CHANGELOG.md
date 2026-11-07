@@ -100,6 +100,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Invoice, admin and texts** (review round 22, low). A long item name on the PDF invoice wraps inside its column and
+  is printed in full; it was cut at 32 characters and, after round 21 narrowed the column, capitals still ran into the
+  quantity. Text width now follows Helvetica's character widths, and a word wider than its column is split. On a 390 px
+  phone the refused-rows list, the feed's import-mode select, promotions and digital assets no longer scroll sideways
+  (form controls stay inside their cell, long paths and values wrap, the digital-assets table scrolls in its own box).
+  The audit log names payment events in words ("admin.paid" reads "Set in the admin: Paid", "refund.requested" reads
+  "Refund requested"), and amounts inside logged values (an order's `total`, a parcel's `cod_amount`, a credit note's
+  `gross`, a product's `price`) show in the record's currency, not in cents. Re-queued and failed refund notes are
+  written in money, and older ones are read that way. The English order e-mail asks for "this amount and payment
+  reference" (it still said "variable symbol").
 - **The store switch keeps the language, the sitemap lists every language version** (review round 22, low). The
   store switch opened every store in its own language: a shopper reading the HU store in English landed in the SK
   store in Slovak. A store that has the shopper's language now opens in it (`?lang=en`, also Slovak in the CZ store);

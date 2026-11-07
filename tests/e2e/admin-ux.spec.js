@@ -115,7 +115,9 @@ test('admin pages fit a 360px phone without sideways scrolling or serious axe vi
   const order = await page.locator('main a[href*="p=order&id="]').first().getAttribute('href');
   for (const path of ['/admin.php?p=dashboard', '/admin.php?p=orders', `/admin.php?${order.split('?')[1]}`, '/admin.php?p=order_new',
     '/admin.php?p=products', `/admin.php?p=product&id=${product.row.id}`, '/admin.php?p=reports', '/admin.php?p=customers', '/admin.php?p=page_edit',
-    '/admin.php?p=rma', '/admin.php?p=shipping', '/admin.php?p=payments', '/admin.php?p=warehouses', '/admin.php?p=audit']) {
+    '/admin.php?p=rma', '/admin.php?p=shipping', '/admin.php?p=payments', '/admin.php?p=warehouses', '/admin.php?p=audit',
+    // R22: the feed form (its import-mode select), promotions, digital assets and the CSV import page ran off the phone.
+    '/admin.php?p=feed', '/admin.php?p=promotions', '/admin.php?p=digital_assets', '/admin.php?p=import']) {
     await page.goto(path);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `${path} scrolls sideways by ${overflow}px at 360px`).toBeLessThanOrEqual(0);

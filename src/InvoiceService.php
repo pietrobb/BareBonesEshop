@@ -2021,9 +2021,11 @@ final class InvoiceService
             // A discount split per VAT rate is one "Zľava" row per rate: the rate is in the VAT column, never in the name,
             // where "Zľava 23 %" read as a 23 % discount.
             $name = isset($row['label']) ? $L[$row['label']] : (string)$row['name'];
-            $ensureSpace(5, true);
+            // R22: a long name wraps inside its column (it was cut at 32 characters, and capitals still ran into "Qty").
+            $nameLines = $pdf->wrap($name, $col['col_item'][1], 8);
+            $ensureSpace(5 + (count($nameLines) - 1) * 3.2, true);
             $cell = static fn(string $key, string $text) => $pdf->text($col[$key][0], $y, $text, ['size' => 8, 'align' => 'right', 'width' => $col[$key][1]]);
-            $pdf->text(20, $y, mb_substr($name, 0, 32), ['size' => 8]);
+            foreach ($nameLines as $i => $line) $pdf->text($col['col_item'][0], $y + $i * 3.2, $line, ['size' => 8]);
             if (isset($row['qty']) && $row['qty'] !== 0) {
                 $cell('col_qty', (string)$row['qty']);
                 $cell('col_unit_net', I18n::price((int)round($row['net'] / $row['qty']), $currency));
@@ -2031,7 +2033,7 @@ final class InvoiceService
             $cell('col_vat', self::rateLabel((float)$row['rate'], $row));
             $cell('col_net_total', I18n::price($row['net'], $currency));
             $cell('col_total', I18n::price($row['gross'], $currency));
-            $y += 5;
+            $y += 5 + (count($nameLines) - 1) * 3.2;
         }
 
         $pdf->line(20, $y, 190, $y);

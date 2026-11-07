@@ -573,7 +573,7 @@ class PaymentService {
             'amount' => $request['amount'],
             'idempotency_key' => $request['idempotency_key'],
         ], 1);
-        AuditLog::log('order_refund', $orderId, 'refund_pending', 'refund_pending', "Refund of {$request['amount']} re-queued by {$actor}");
+        AuditLog::log('order_refund', $orderId, 'refund_pending', 'refund_pending', 'Refund of ' . AuditLogLabels::amount((int)$request['amount'], $order['currency'] ?? 'eur') . " re-queued by {$actor}");
         return true;
     }
 
@@ -1371,7 +1371,7 @@ class PaymentService {
             if (!$booked && $from === 'refund_pending' && self::isRequestedRefundExecution($orderId, $refundId) && self::canPaymentTransition($from, $to)) {
                 // No money moves: amount 0, so the status row is never read as a capture or a refund.
                 self::applyTransition($order, $to, 'refund.failed', 0, $eventKey, $payload + ['amount' => $amount], $refundId);
-                AuditLog::log('order_refund', $orderId, $from, $to, "{$provider} refund {$refundId} of {$amount} failed");
+                AuditLog::log('order_refund', $orderId, $from, $to, "{$provider} refund {$refundId} of " . AuditLogLabels::amount($amount, $currency) . ' failed');
                 return true;
             }
             // R14 T18: the pending refund of a credit note (item refund) under this provider id is released as well.

@@ -68,7 +68,7 @@ try {
     ], [
         AuditLogLabels::value('order_status', 'shipped'), AuditLogLabels::value('payment_status', 'refunded'), AuditLogLabels::value('invoice_cancelled', 'cancelled'),
         str_contains($r20aProductValue, I18n::t('admin.th.status') . ': ' . I18n::t('admin.product.status.draft')) && !str_contains($r20aProductValue, '"status"'),
-        str_contains($r20aProductValue, 'price: 1290'),
+        str_contains($r20aProductValue, 'price: ' . I18n::price(1290, strtolower(StoreContext::current()->currency()))), // R22: in money
         AuditLogLabels::value('order_status', 'free text'), AuditLogLabels::value('product', '{"x":1}'),
     ], 'R20 audit log: status codes read as their labels; other values stay as stored');
     $r20aOps = (string)file_get_contents($r20aRoot . '/src/Entrypoints/Admin/Operations.php');
