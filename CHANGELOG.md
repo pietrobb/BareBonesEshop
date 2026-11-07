@@ -24,6 +24,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   change. A CZK/HUF amount stored finer than a whole unit is shown with its cents ("12345.67") and kept on save. A
   price above 20 000 000.00 is refused in the admin, the CSV import and feeds (the row or item is reported, the product
   keeps its price), and a thousands separator must group three digits (`5..0` and `1.29,00` are refused).
+- **CSV import and feeds refuse an ambiguous price.** One separator before exactly three digits ("199.000", "2.000",
+  "12,990 Ft", "1.234 Kč") was read as digit grouping (2.1.2: "199.000" in a CZK file became 199 000 Kč); it is now
+  refused with a row or feed item error. Before the first import or sync after the update, check that the ERP
+  exports two decimals or no separator ("199.00", "199000", "12 990"); for a feed with fixed three or more decimals add
+  `"decimal": "."` (or `","` for "1.299,000") to its `price_to_cents` mapping. A feed item with a refused price still
+  updates its stock; the feed status shows `partial: … prices refused`. Look through the errors of the first syncs.
 - **MySQL with a MariaDB dump client: install the MySQL client first.** Against a MySQL server `mariadb-dump` (also
   installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package) writes generated columns into the dump and
   MySQL refuses it on restore. The 2.1.2 updater refuses this package when it restores its pre-update dump into the
@@ -101,13 +107,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   cart and currency; only a language the store does not offer leads to the store that has it. English chosen in the HU
   store also stays on the next page: links, forms and the storefront API keep `?lang=en` even though English is the
   `/en/` store's own language (the canonical URL still leaves English to that store).
-- **Import prices with three decimals** (review round 20, medium). The round 19 rule reading one separator before three
-  digits as digit grouping applied in every currency, so a CSV import or XML feed from an ERP exporting three decimals
-  stored "12.500" as 12 500,00 € instead of 12,50 € and "99.990" as 99 990 €, without a warning. The rule now holds
-  only in a currency shown in whole units (CZK, HUF: "1.234 Kč" is 1 234 Kč); in a currency with cents the separator is
-  the decimal mark. An existing product's price is read in its own currency. A value finer than a cent ("1.234 €",
-  which may mean 1 234 € or 1,23 €; "0.125") is refused with a row or feed item error, as the admin price field refuses
-  it, instead of being rounded; zeros past the cent ("12.500", "19.900000") are still read.
+- **Import and feed prices: no guessing** (review rounds 20 and 21, medium). The round 19 rule read one separator
+  before three digits as digit grouping in every currency, so an ERP exporting three decimals had "12.500" stored as
+  12 500,00 € and "99.990" as 99 990 €, without a warning; reading it as decimals in EUR only (round 20) turned a German
+  or Polish "2.000" into 2,00 € and still grouped "199.000" in CZK into 199 000 Kč next to "1299.000" = 1 299 Kč. Such a
+  value ("199.000", "2.000", "12,990", "1.234") is now refused in every currency with a row or feed item error, as the
+  admin price field refuses it; so is a part finer than a cent ("0.125", "12.3456"). Unambiguous prices are read as
+  before ("1 299,00", "1.299,00", "1,299.00", "12,90", "1299", "1299.000", "0.500"). A feed declares its price format
+  with `"decimal": "."` or `","` on its `price_to_cents` mapping (`{"field": "price", "transform": "price_to_cents",
+  "decimal": "."}`): "12.500" is then 12,50 (or 12 500 with `","`) without an error. A feed item whose price is refused
+  keeps the product's price but still syncs its stock (a stock-only feed no longer reads prices at all), a new product
+  is then not created, and refused prices do not count towards the 100 item errors that stop a sync (400 items with
+  four-decimal prices updated the stock of 51). The feed status says `partial: N errors (M prices refused)` or
+  `stopped after N errors` instead of `ok with N errors`, and the admin's "Sync now" reports such a sync as an error.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose

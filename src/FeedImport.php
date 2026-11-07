@@ -22,6 +22,11 @@ class FeedImport {
     public const MODE_STOCK_ONLY = 'stock_only';
     /** The import modes the admin form offers, Warehouse::saveFeed() accepts and applyItems() implements. */
     public const MODES = [self::MODE_UPSERT, self::MODE_PRICE_STOCK, self::MODE_STOCK_ONLY];
+    /** Item errors (not counting refused prices) after which a sync stops. */
+    private const ERROR_LIMIT = 100;
+    private const PRICE_FIELDS = ['price', 'compare_price'];
+    /** mapFields() key listing the item's refused prices. */
+    private const REFUSED = "\0refused_prices";
 
     /**
      * Sync a single feed of the active store: download → parse → import products → update stock
@@ -108,6 +113,9 @@ class FeedImport {
         $importMode = (string)($feed['import_mode'] ?? '');
         if (!in_array($importMode, self::MODES, true)) throw new InvalidArgumentException("Unknown feed import mode: {$importMode}");
         $fieldMap = json_decode((string)$feed['field_map'], true) ?: [];
+        // R21: a stock-only sync never reads a price (a price it would refuse dropped the item's stock).
+        $itemMap = $importMode !== self::MODE_STOCK_ONLY ? $fieldMap : array_filter($fieldMap,
+            static fn($target): bool => in_array(is_array($target) ? ($target['field'] ?? null) : $target, ['sku', 'stock'], true));
 
         // Import products + collect stock data
         $db = Db::get();
@@ -116,6 +124,9 @@ class FeedImport {
         $listed = [];
         // Rows the parser could not read are still listed by the supplier: nothing may be zeroed then either.
         $complete = empty($result['rows_dropped']);
+        $cutShort = false;
+        $result['prices_refused'] = 0;
+        $itemErrors = count($result['errors']);
 
         foreach ($items as $i => $raw) {
             $db->exec('SAVEPOINT row_import');
@@ -124,13 +135,26 @@ class FeedImport {
                 foreach (self::sourcesOf('sku', $fieldMap) as $source) {
                     if (is_string($raw[$source] ?? null) && trim($raw[$source]) !== '') $listed[trim($raw[$source])] = true;
                 }
-                $mapped = self::mapFields($raw, $fieldMap);
+                $mapped = self::mapFields($raw, $itemMap);
                 if (empty($mapped['sku'])) {
                     $db->exec('RELEASE SAVEPOINT row_import');
                     $result['skipped']++;
                     continue;
                 }
                 $listed[(string)$mapped['sku']] = true;
+                // R21: a price that is not one (ambiguous "199.000", finer than a cent) is reported and left out; the
+                // product keeps its price, its stock still syncs, and it does not count towards the error limit.
+                $refused = self::takePrices($mapped);
+                if ($refused !== []) {
+                    $result['prices_refused']++;
+                    $isNew = $importMode === self::MODE_UPSERT && !self::productInCatalog((string)$mapped['sku'], $db);
+                    $result['errors'][] = "Item #{$i} (SKU {$mapped['sku']}): price refused, " . ($isNew ? 'product not created' : 'price kept')
+                        . ': ' . implode('; ', $refused);
+                    if ($isNew) {
+                        $db->exec('RELEASE SAVEPOINT row_import');
+                        continue;
+                    }
+                }
 
                 if ($importMode === self::MODE_UPSERT) {
                     // Full upsert — create or update product with all fields. The stock goes only into the feed's
@@ -157,8 +181,9 @@ class FeedImport {
             } catch (\Throwable $e) {
                 $result['errors'][] = "Item #{$i}: {$e->getMessage()}";
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
-                if (count($result['errors']) > 100) {
+                if (++$itemErrors > self::ERROR_LIMIT) {
                     $complete = false;
+                    $cutShort = true;
                     break;
                 }
             }
@@ -181,8 +206,13 @@ class FeedImport {
         // Cut short by the error limit or rows lost in parsing: those products are still listed, so nothing is zeroed.
         $result['stock_zeroed'] = $complete ? self::zeroUnlisted($feed, $fieldMap, $listed) : 0;
 
-        // Update feed status
-        $status = empty($result['errors']) ? 'ok' : 'ok with ' . count($result['errors']) . ' errors';
+        // R21: a sync with refused items is not "ok" (it read "ok with N errors"; 51 of 400 items imported looked fine).
+        $result['incomplete'] = $cutShort;
+        $status = 'ok';
+        if ($result['errors'] !== []) {
+            $status = ($cutShort ? 'stopped after ' : 'partial: ') . count($result['errors']) . ' errors'
+                . ($result['prices_refused'] > 0 ? " ({$result['prices_refused']} prices refused)" : '');
+        }
         Warehouse::updateFeedStatus($feedId, $status, $result['imported']);
         return $result;
     }
@@ -259,14 +289,37 @@ class FeedImport {
         return $zero === [] ? 0 : Warehouse::bulkSetStock($warehouseId, $zero);
     }
 
+    /**
+     * The item's prices as cents (a plain mapping carries the feed's text); a value that is not a price is dropped from
+     * $mapped. Returns the reasons of the refused ones, also of those price_to_cents refused in mapFields().
+     * @return list<string>
+     */
+    private static function takePrices(array &$mapped): array {
+        $refused = $mapped[self::REFUSED] ?? [];
+        unset($mapped[self::REFUSED]);
+        foreach (self::PRICE_FIELDS as $field) {
+            if (!isset($mapped[$field]) || is_int($mapped[$field])) continue;
+            try {
+                $mapped[$field] = Import::parsePriceToCents((string)$mapped[$field]);
+            } catch (InvalidArgumentException $e) {
+                unset($mapped[$field]);
+                $refused[] = $e->getMessage();
+            }
+        }
+        return $refused;
+    }
+
+    private static function productInCatalog(string $sku, PDO $db): bool {
+        $stmt = $db->prepare('SELECT 1 FROM products WHERE sku = :sku AND store_id = :catalog');
+        $stmt->execute([':sku' => $sku, ':catalog' => StoreContext::current()->catalogId()]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** True when the SKU is a product or a variant of a product of the active catalog. */
     private static function skuInCatalog(string $sku, PDO $db): bool {
-        $catalog = StoreContext::current()->catalogId();
-        $stmt = $db->prepare('SELECT 1 FROM products WHERE sku = :sku AND store_id = :catalog');
-        $stmt->execute([':sku' => $sku, ':catalog' => $catalog]);
-        if ($stmt->fetchColumn() !== false) return true;
+        if (self::productInCatalog($sku, $db)) return true;
         $stmt = $db->prepare('SELECT 1 FROM variants v JOIN products p ON p.id = v.product_id WHERE v.sku = :sku AND p.store_id = :catalog');
-        $stmt->execute([':sku' => $sku, ':catalog' => $catalog]);
+        $stmt->execute([':sku' => $sku, ':catalog' => StoreContext::current()->catalogId()]);
         return $stmt->fetchColumn() !== false;
     }
 
@@ -280,7 +333,7 @@ class FeedImport {
         $row = $existing->fetch();
         if (!$row) return false;
         $updates = [];
-        $priceCents = isset($mapped['price']) ? Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price'], trim((string)($row['currency'] ?? '')) ?: null)) : null;
+        $priceCents = isset($mapped['price']) ? Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price'])) : null;
         // R18: the same price again is not a change (no updated_at bump, so feeds and sitemaps are not rebuilt).
         if ($priceCents !== null && $priceCents !== (int)$row['price']) {
             $updates[] = 'price = :price';
@@ -525,7 +578,14 @@ class FeedImport {
             if (!$destField) continue;
 
             $transform = $target['transform'] ?? null;
-            $transformed = self::transform($value, $transform, $target);
+            try {
+                $transformed = self::transform($value, $transform, $target);
+            } catch (InvalidArgumentException $e) {
+                // A refused price is left out (and reported by applyItems): the item's stock still syncs.
+                if (!in_array($destField, self::PRICE_FIELDS, true)) throw $e;
+                $mapped[self::REFUSED][] = $e->getMessage();
+                continue;
+            }
 
             if ($destField === 'image') {
                 $append = $target['append'] ?? false;
@@ -550,8 +610,9 @@ class FeedImport {
         if ($transform === null) return $value;
 
         return match ($transform) {
-            // "39,73" → 3973, "1 299,00 Kč" → 129900 (cents)
-            'price_to_cents' => Import::parsePriceToCents((string)$value),
+            // "39,73" → 3973, "1 299,00 Kč" → 129900 (cents); "decimal": "." or "," declares the feed's price format
+            // (R21), so "12.500" is read as 12,50 or 12 500 instead of being refused as ambiguous.
+            'price_to_cents' => Import::parsePriceToCents((string)$value, isset($config['decimal']) ? (string)$config['decimal'] : null),
 
             // "0,23kg" → 230 (grams)
             'weight_to_grams' => (int)round(floatval(str_replace(',', '.', preg_replace('/[^0-9,.]/', '', $value))) * 1000),

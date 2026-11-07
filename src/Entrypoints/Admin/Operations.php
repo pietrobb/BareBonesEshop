@@ -792,7 +792,7 @@ function handleFeedSync(): void {
         if (!empty($result['errors'])) {
             $msg .= strtr(I18n::t('admin.feed.sync_errors'), ['{count}' => (string)count($result['errors'])]);
         }
-        setFlash('ok', $msg);
+        setFlash(empty($result['errors']) ? 'ok' : 'err', $msg); // R21: refused items are not a plain success
     }
 
     header("Location: admin.php?p=feed&id={$id}");
