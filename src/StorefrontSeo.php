@@ -88,22 +88,35 @@ final class StorefrontSeo
 
     /**
      * Every language of every store: each store's default language, then the further store languages
-     * (?lang=xx) that no store has as its default.
+     * (?lang=xx) that no store has as its default. R20: a language the current store offers stays in the current store
+     * (its URL, ?lang=xx for a further one): English in the HU store linked to the default store, and the cart was
+     * repriced in EUR (5 490 Ft became 31,67 €). Only a language the store does not offer leads to another store.
      * @return list<array{url: string, label: string, active: bool}>
      */
     private static function languageLinks(array $alternates): array
     {
+        $current = StoreContext::current();
+        $own = array_map('strtolower', array_map('strval', (array)($current->config()['languages'] ?? [])));
+        $ownPrefix = (string)($current->config()['url_prefix'] ?? '');
+        $url = static function (string $locale, string $prefix, bool $further) use ($alternates, $own, $ownPrefix, $current): string {
+            if (in_array(strtolower($locale), $own, true) || strtolower($locale) === strtolower($current->defaultLocale())) {
+                $here = Template::url($ownPrefix . $alternates['pathNoPrefix']);
+                return strtolower($locale) === strtolower($current->defaultLocale()) ? $here : Bootstrap::withLang($here, $locale);
+            }
+            $there = Template::url($prefix . $alternates['pathNoPrefix']);
+            return $further ? Bootstrap::withLang($there, $locale) : $there;
+        };
         $links = [];
         foreach ($alternates['alternates'] as $locale => $prefix) {
             $links[] = [
-                'url' => Template::url($prefix . $alternates['pathNoPrefix']),
+                'url' => $url((string)$locale, (string)$prefix, false),
                 'label' => strtoupper((string)$locale),
                 'active' => I18n::locale() === $locale,
             ];
         }
         foreach ($alternates['secondary'] as $locale => $prefix) {
             $links[] = [
-                'url' => Bootstrap::withLang(Template::url($prefix . $alternates['pathNoPrefix']), (string)$locale),
+                'url' => $url((string)$locale, (string)$prefix, true),
                 'label' => strtoupper((string)$locale),
                 'active' => I18n::locale() === $locale,
             ];

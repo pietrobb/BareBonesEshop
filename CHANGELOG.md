@@ -68,6 +68,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The language switcher stays in the store** (review round 20, medium). In the HU and CZ stores the EN link led to
+  another store (`/?lang=en` or `/en/`) and the cart was repriced in its currency (5 490 Ft became 31,67 €). A language
+  the current store offers in `languages` now opens the same page of the current store (`/hu/?lang=en`), with the same
+  cart and currency; only a language the store does not offer leads to the store that has it. English chosen in the HU
+  store also stays on the next page: links, forms and the storefront API keep `?lang=en` even though English is the
+  `/en/` store's own language (the canonical URL still leaves English to that store).
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
