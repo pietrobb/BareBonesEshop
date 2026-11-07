@@ -654,7 +654,7 @@ class PaymentService {
                 throw new \LogicException('The provider refund could not be booked');
             }
             $to = (string)(Orders::byId($orderId)['payment_status'] ?? '');
-            AuditLog::log('order_refund', $orderId, 'refund_pending', $to, "Provider refund of {$pending['amount']} confirmed by {$actor}: {$note}");
+            AuditLog::log('order_refund', $orderId, 'refund_pending', $to, 'Provider refund of ' . AuditLogLabels::amount((int)$pending['amount'], $order['currency'] ?? 'eur') . " confirmed by {$actor}: {$note}");
             return true;
         });
         self::closeRefundedOrder($orderId, 'Provider refund confirmed');
@@ -1305,7 +1305,7 @@ class PaymentService {
             } else {
                 throw new \LogicException("Manual refund cannot move payment from '{$from}' to '{$to}'");
             }
-            AuditLog::log('order_refund', $orderId, $from, $to, "Manual refund of {$amount} completed by {$actor}: {$note}");
+            AuditLog::log('order_refund', $orderId, $from, $to, 'Manual refund of ' . AuditLogLabels::amount($amount, $order['currency'] ?? 'eur') . " completed by {$actor}: {$note}");
             return true;
         });
         self::closeRefundedOrder($orderId, 'Manual refund completed');

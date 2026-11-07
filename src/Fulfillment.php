@@ -404,21 +404,64 @@ class Fulfillment {
     public static function unshippedGross(int $orderId): ?int {
         $order = Orders::byId($orderId);
         if (!$order) return null;
-        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
-        $components = is_array($snapshot) ? array_values(array_filter((array)($snapshot['components'] ?? []),
-            static fn($component): bool => is_array($component) && ($component['type'] ?? '') === 'product')) : [];
         $items = Orders::items($orderId);
-        if (count($components) !== count($items)) $components = [];
+        $lines = self::lineGrosses($order, $items);
         $anyShipped = false;
         $gross = 0;
-        foreach ($items as $position => $item) {
+        foreach ($items as $item) {
             $ordered = max(1, (int)$item['quantity']);
             $shipped = min($ordered, self::shippedUnits($item));
             $anyShipped = $anyShipped || $shipped > 0;
-            $line = (int)($components[$position]['gross'] ?? $item['total']);
+            $line = $lines[(int)$item['id']];
             $gross += $line - intdiv($line * $shipped, $ordered);
         }
         return $anyShipped ? $gross : null;
+    }
+
+    /**
+     * R21: gross of the goods one parcel carries, each order line's discounted gross sliced by its units in the parcel
+     * (a bundle unit once each of its components is in it). The cash on delivery a parcel collects (ShippingService).
+     */
+    public static function parcelGoodsGross(array $order, int $shipmentId): int {
+        $inParcel = [];
+        foreach (self::shipmentItems([$shipmentId])[$shipmentId] ?? [] as $row) {
+            $inParcel[(int)$row['order_item_id']][(string)$row['sku']] = ($inParcel[(int)$row['order_item_id']][(string)$row['sku']] ?? 0) + (int)$row['quantity'];
+        }
+        $items = Orders::items((int)$order['id']);
+        $lines = self::lineGrosses($order, $items);
+        $gross = 0;
+        foreach ($items as $item) {
+            $quantities = $inParcel[(int)$item['id']] ?? [];
+            if ($quantities === []) continue;
+            $ordered = max(1, (int)$item['quantity']);
+            $units = $ordered;
+            foreach (Inventory::reservationLines($item) as $line) {
+                $units = min($units, intdiv($quantities[(string)$line['sku']] ?? 0, max(1, (int)($line['quantity_per_bundle'] ?? 1))));
+            }
+            $gross += intdiv($lines[(int)$item['id']] * $units, $ordered);
+        }
+        return $gross;
+    }
+
+    /** R21: every allocated unit of the order is in an active parcel (planned or shipped) and nothing waits for stock. */
+    public static function fullyInParcels(int $orderId): bool {
+        foreach (self::shippable($orderId) as $group) {
+            foreach ($group['lines'] as $line) if ($line['remaining'] > 0) return false;
+        }
+        $stmt = Db::get()->prepare('SELECT COALESCE(SUM(backordered_qty), 0) FROM order_items WHERE order_id = :order');
+        $stmt->execute([':order' => $orderId]);
+        return (int)$stmt->fetchColumn() === 0;
+    }
+
+    /** Each order line's discounted gross by order item id: the financial snapshot (as credit notes slice it), else its total. */
+    private static function lineGrosses(array $order, array $items): array {
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $components = is_array($snapshot) ? array_values(array_filter((array)($snapshot['components'] ?? []),
+            static fn($component): bool => is_array($component) && ($component['type'] ?? '') === 'product')) : [];
+        if (count($components) !== count($items)) $components = [];
+        $lines = [];
+        foreach (array_values($items) as $position => $item) $lines[(int)$item['id']] = (int)($components[$position]['gross'] ?? $item['total']);
+        return $lines;
     }
 
     /** Cancel the order's planned (not yet shipped) shipments: an order cancellation releases their stock. */

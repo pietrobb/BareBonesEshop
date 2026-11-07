@@ -376,35 +376,43 @@ class ShippingService
 
     /**
      * Cash on delivery one parcel (shipment) of the order collects, with or without a carrier API. The amount recorded
-     * on the parcel when it was shipped or labelled wins. Otherwise the whole total of an unpaid cash-on-delivery order
-     * travels on the first active parcel while no other parcel or label collects it; every other parcel is prepaid (0).
+     * on the parcel when it was shipped, or on its active label, wins. R21: otherwise a parcel collects the gross of the
+     * goods it carries (in units the currency shows), and the last parcel still open the rest of the total (shipping and
+     * fees included) once every unit of the order is in a parcel; the first parcel collected the whole total.
      * null = cash on delivery does not concern the parcel (prepaid order, cancelled or unknown parcel).
      */
     public static function parcelCodAmount(array $order, int $shipmentId): ?int
     {
         $db = Db::get();
         $store = StoreContext::current()->id();
+        $orderId = (int)$order['id'];
         $recorded = Db::hasColumn('shipments', 'cod_amount') ? 'cod_amount' : 'NULL AS cod_amount';
         $stmt = $db->prepare("SELECT id, {$recorded} FROM shipments WHERE order_id = :order AND store_id = :store AND status <> 'cancelled' ORDER BY id");
-        $stmt->execute([':order' => (int)$order['id'], ':store' => $store]);
+        $stmt->execute([':order' => $orderId, ':store' => $store]);
         $parcels = array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'cod_amount', 'id');
         if (!array_key_exists($shipmentId, $parcels)) return null;
         if ($parcels[$shipmentId] !== null) return (int)$parcels[$shipmentId];
         if (!OrderWorkflow::isUnpaidCashOnDelivery($order)) return null;
-        foreach ($parcels as $id => $cod) {
-            if ($id !== $shipmentId && (int)$cod > 0) return 0;
-        }
         if (Db::hasColumn('shipping_labels', 'cod_amount')) {
-            $labels = $db->prepare("SELECT shipment_id, cod_amount FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0" . self::LABEL_PARCEL_ACTIVE);
-            $labels->execute([':order' => (int)$order['id'], ':store' => $store]);
+            $labels = $db->prepare("SELECT shipment_id, cod_amount FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount IS NOT NULL" . self::LABEL_PARCEL_ACTIVE . ' ORDER BY id');
+            $labels->execute([':order' => $orderId, ':store' => $store]);
             foreach ($labels->fetchAll(\PDO::FETCH_ASSOC) as $label) {
-                return (int)($label['shipment_id'] ?? 0) === $shipmentId ? (int)$label['cod_amount'] : 0;
+                $labelled = (int)($label['shipment_id'] ?? 0);
+                // A label of the whole order (no parcel) collected everything.
+                if ($labelled === 0 && (int)$label['cod_amount'] > 0) return 0;
+                if (array_key_exists($labelled, $parcels) && $parcels[$labelled] === null) $parcels[$labelled] = (int)$label['cod_amount'];
             }
+            if ($parcels[$shipmentId] !== null) return (int)$parcels[$shipmentId];
         }
-        foreach ($parcels as $id => $cod) {
-            if ($cod === null) return $id === $shipmentId ? (int)$order['total'] : 0;
+        $left = max(0, (int)$order['total'] - (int)array_sum(array_filter($parcels, static fn($cod): bool => $cod !== null)));
+        $currency = (string)($order['currency'] ?? StoreContext::current()->currency());
+        $goods = static fn(int $id): int => min($left, Money::round(Fulfillment::parcelGoodsGross($order, $id), $currency));
+        $open = array_keys(array_filter($parcels, static fn($cod): bool => $cod === null));
+        if (end($open) !== $shipmentId || !Fulfillment::fullyInParcels($orderId)) return $goods($shipmentId);
+        foreach ($open as $id) {
+            if ($id !== $shipmentId) $left -= $goods($id);
         }
-        return 0;
+        return max(0, $left);
     }
 
     /**

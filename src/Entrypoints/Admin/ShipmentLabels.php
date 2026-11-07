@@ -29,7 +29,7 @@ function adminOrderLabelCarriers(array $order, array $carriers): array {
 
 /**
  * Cash on delivery of one parcel, shown whether or not a carrier API is connected: the amount to enter in the carrier's
- * portal on the one parcel that collects the order total, "prepaid" on every other parcel (ShippingService::parcelCodAmount).
+ * portal for what that parcel collects (its goods, the rest on the last one), else "prepaid" (ShippingService::parcelCodAmount).
  */
 function renderShipmentCod(array $order, int $shipmentId): void {
     $cod = ShippingService::parcelCodAmount($order, $shipmentId);

@@ -190,18 +190,22 @@ try {
         }
         return $cod;
     };
-    $r11fPrice = I18n::price($r11fCodTotal, (string)Orders::byId($r11fCodOrderId)['currency']);
-    $r11fPrepaid = I18n::t('admin.shipment.label_prepaid');
-    assert_equals([[$r11fCodTotal, I18n::format('admin.shipment.label_cod', ['amount' => $r11fPrice])], [0, $r11fPrepaid]], $r11fParcelCod(),
-        'R11 H9: without the carrier API one parcel row shows the COD total to enter in the portal, the other says prepaid');
-    assert_true(Fulfillment::ship($r11fShipA, 'packeta', 'Z-R11F-MANUAL'), 'R11 H9 setup: the collecting parcel is shipped by hand (booked in the portal)');
+    // R21: each parcel collects its goods, the last one the rest of the total (carriage and COD fee); together the total.
+    $r11fCurrency = (string)Orders::byId($r11fCodOrderId)['currency'];
+    $r11fCodA = (int)$r11fItems['R11F-A']['total'];
+    $r11fCodB = $r11fCodTotal - $r11fCodA;
+    $r11fCodRow = static fn(int $amount): array => [$amount, I18n::format('admin.shipment.label_cod', ['amount' => I18n::price($amount, $r11fCurrency)])];
+    assert_true($r11fCodA > 0 && $r11fCodB > (int)$r11fItems['R11F-B']['total'], 'R11 H9 setup: the order total is more than parcel A\'s goods, parcel B carries goods and fees');
+    assert_equals([$r11fCodRow($r11fCodA), $r11fCodRow($r11fCodB)], $r11fParcelCod(),
+        'R11 H9/R21: without the carrier API each parcel row shows the COD to enter in the portal: its goods, the rest of the total on the last');
+    assert_true(Fulfillment::ship($r11fShipA, 'packeta', 'Z-R11F-MANUAL'), 'R11 H9 setup: the first parcel is shipped by hand (booked in the portal)');
     $r11fRecorded = array_column(Fulfillment::shipments($r11fCodOrderId), 'cod_amount', 'id');
-    assert_equals([$r11fCodTotal, null], [(int)$r11fRecorded[$r11fShipA], $r11fRecorded[$r11fShipB] ?? null],
+    assert_equals([$r11fCodA, null], [(int)$r11fRecorded[$r11fShipA], $r11fRecorded[$r11fShipB] ?? null],
         'R11 H9: shipping a parcel by hand records the COD it collects on that parcel');
-    assert_equals([0, 0], [ShippingService::parcelCodAmount(Orders::byId($r11fCodOrderId), $r11fShipB), ShippingService::labelCodAmount(Orders::byId($r11fCodOrderId))],
-        'R11 H9: after the hand-shipped parcel collected, no other parcel or label is offered the COD again');
-    assert_equals([[$r11fCodTotal, I18n::format('admin.shipment.label_cod', ['amount' => $r11fPrice])], [0, $r11fPrepaid]], $r11fParcelCod(),
-        'R11 H9: the shipped parcel keeps showing what it collected, the planned one stays prepaid');
+    assert_equals([$r11fCodB, 0], [ShippingService::parcelCodAmount(Orders::byId($r11fCodOrderId), $r11fShipB), ShippingService::labelCodAmount(Orders::byId($r11fCodOrderId))],
+        'R11 H9/R21: after the hand-shipped parcel, the other collects only the rest (never the whole total again); no label of the whole order is offered COD');
+    assert_equals([$r11fCodRow($r11fCodA), $r11fCodRow($r11fCodB)], $r11fParcelCod(),
+        'R11 H9: the shipped parcel keeps showing what it collected, the planned one the rest');
 
     // R15: the form offered every connected carrier, i.e. only in-store pickup: a Packeta COD order got a pickup label.
     $r15lForm = static function () use ($r11fCodOrderId, $r11fShipB): string {
@@ -250,8 +254,8 @@ try {
     $r11fLabelA = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipA);
     $r11fLabelB = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipB);
     $r11fAgain = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipA);
-    assert_equals([$r11fTotal, 0], [(int)$r11fLabelA['cod_amount'], (int)$r11fLabelB['cod_amount']],
-        'R11 H9: the first parcel collects the COD total of the order, the second goes prepaid (the amount is never collected twice)');
+    assert_equals([$r11fCodA, $r11fTotal - $r11fCodA], [(int)$r11fLabelA['cod_amount'], (int)$r11fLabelB['cod_amount']],
+        'R11 H9/R21: the labels collect what each parcel recorded, together the order total once (the first collected the whole total)');
     assert_true($r11fLabelA['awb'] !== $r11fLabelB['awb'] && $r11fAgain['awb'] === $r11fLabelA['awb'] && $r11fLabelCount() === 2,
         'R11 H9: one label per parcel, a repeated request returns the existing label');
     $r11fShipRows = array_column(Fulfillment::shipments($r11fCodOrderId), 'tracking_number', 'id');
