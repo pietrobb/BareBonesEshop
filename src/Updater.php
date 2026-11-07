@@ -404,6 +404,9 @@ final class Updater
         $this->lock();
         try {
             $installed = (string)($this->readJson($this->statePath())['snapshot'] ?? '');
+            // R22: the snapshot whose rollback a failed window names stays; deleted, the shop could never reopen.
+            $due = MaintenanceMode::failed($this->root)
+                && preg_match('/--snapshot=(\S+)/', (string)(MaintenanceMode::marker($this->root)['reason'] ?? ''), $named) ? $named[1] : '';
             $deleted = [];
             $kept = [];
             foreach ($this->listSnapshots() as $snapshot) { // newest first
@@ -415,7 +418,7 @@ final class Updater
                 // (or their rollbacks) deleted the only database snapshot. The newest $keep with a database stay too.
                 $kind = $reason . (is_array($snapshot['database'] ?? null) ? ':database' : ':files');
                 $kept[$kind] = ($kept[$kind] ?? 0) + 1;
-                if ($kept[$kind] <= max(1, $keep) || $id === $installed) continue;
+                if ($kept[$kind] <= max(1, $keep) || $id === $installed || $id === $due) continue;
                 $this->removeTree($this->snapshotDirectory($id));
                 $deleted[] = $id;
             }
@@ -440,6 +443,7 @@ final class Updater
         $prior = $this->priorMaintenance();
         try {
             $metadata = $this->snapshotMetadata($snapshotId);
+            $this->assertNoLaterUpdate($metadata);
             $databaseAt = is_array($metadata['database'] ?? null) ? (string)$metadata['created_at'] : null;
             if ($databaseAt !== null && !$acceptDataLoss) {
                 throw new RuntimeException(self::dataLossWarning($databaseAt)
@@ -494,8 +498,34 @@ final class Updater
                 $rows[] = $meta;
             }
         }
-        usort($rows, static fn(array $a, array $b): int => strcmp((string)($b['created_at'] ?? ''), (string)($a['created_at'] ?? '')));
+        usort($rows, static fn(array $a, array $b): int => self::snapshotOrder($b, $a));
         return $rows;
+    }
+
+    /** Older first: by created_at, then by created_us within the same second (a snapshot before R22 has none). */
+    private static function snapshotOrder(array $a, array $b): int
+    {
+        return strcmp((string)($a['created_at'] ?? ''), (string)($b['created_at'] ?? ''))
+            ?: ((int)($a['created_us'] ?? 0) <=> (int)($b['created_us'] ?? 0));
+    }
+
+    /**
+     * R22: a rollback restores only the files its update changed. Rolled back while a later update is still installed
+     * (or half-applied, after a failed automatic rollback) it left that update's other files in place: a mix of
+     * releases, and after a failed later update the only command .maintenance allowed then mixed them again. The later
+     * updates are rolled back first, newest first.
+     */
+    private function assertNoLaterUpdate(array $metadata): void
+    {
+        foreach ($this->listSnapshots() as $snapshot) { // newest first
+            $id = (string)($snapshot['id'] ?? '');
+            if ($id === (string)$metadata['id'] || self::snapshotOrder($snapshot, $metadata) <= 0) continue;
+            if (($snapshot['reason'] ?? '') !== 'pre-update' || !in_array($snapshot['status'] ?? '', ['prepared', 'applied'], true)) continue;
+            $version = (string)($snapshot['package_version'] ?? '?');
+            throw new RuntimeException("Rollback refused: the update to {$version} (snapshot {$id}) came after this snapshot and is"
+                . " still installed; rolling this one back would leave a mix of releases. Run php cli/update.php rollback"
+                . " --snapshot={$id} first, then this rollback");
+        }
     }
 
     /** config.php paths the current release refuses inside the application root (v1.x shipped them there). */
@@ -700,6 +730,8 @@ final class Updater
         $metadata = [
             'id' => $id,
             'created_at' => gmdate('c'),
+            // R22: orders snapshots taken in the same second (created_at has whole seconds).
+            'created_us' => (int)floor(microtime(true) * 1000000),
             'reason' => $reason,
             'status' => 'prepared',
             'package_version' => $package->version(),
@@ -790,6 +822,29 @@ final class Updater
             $snapshotCreatedAt, intdiv($age, 3600), intdiv($age % 3600, 60));
     }
 
+    /**
+     * The files that run `php cli/update.php` and decide when the shop reopens, in the order a rollback restores them:
+     * after every other file, the command itself last.
+     */
+    private const UPDATER_FILES = ['cli/cli-only.php', 'src/autoload.php', 'src/UpgradeChecks.php', 'src/UpdateKeyRotation.php',
+        'src/UpdatePackage.php', 'src/UpdateDatabaseBackup.php', 'src/MysqlUpdateDatabaseBackup.php', 'src/MaintenanceMode.php', 'src/Updater.php', 'cli/update.php'];
+
+    /**
+     * R22: a rollback stopped half-way had put back the old release's updater first; the next rollback then ran that
+     * updater, which knew nothing of the window and opened the half-restored shop. The updater's own files go last, so
+     * until every other file is back the updater that wrote the window finishes the rollback.
+     * @param list<array> $rows snapshot file rows
+     * @return list<array>
+     */
+    private static function updaterFilesLast(array $rows): array
+    {
+        $rank = array_flip(self::UPDATER_FILES);
+        $indexed = [];
+        foreach (array_values($rows) as $i => $row) $indexed[] = [$rank[(string)($row['path'] ?? '')] ?? -1, $i, $row];
+        usort($indexed, static fn(array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+        return array_column($indexed, 2);
+    }
+
     private function snapshotMetadata(string $snapshotId): array
     {
         if (!preg_match('/^\d{14}-[0-9a-f]{12}$/', $snapshotId)) {
@@ -863,7 +918,7 @@ final class Updater
                 $touched = true;
             }
             // R19: touched once a file actually changed (it was set before the first one, so a failure there closed the shop).
-            foreach ($metadata['files'] as $row) {
+            foreach (self::updaterFilesLast($metadata['files']) as $row) {
                 $path = (string)$row['path'];
                 if (!empty($row['existed'])) {
                     $this->installFile($directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR

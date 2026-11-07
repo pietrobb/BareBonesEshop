@@ -59,6 +59,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
+  Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
 - **Theme assets:** the default theme is version 2.3.5 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
@@ -79,6 +80,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Rollbacks newest first, the updater restored last** (review round 22, low). A rollback stopped half-way had already
+  put back the old release's `cli/update.php` and `src/Updater.php` (the snapshot's file order); the next rollback ran
+  that updater, which did not know the failed window and opened the half-restored shop. The updater's own files are now
+  restored after every other file. A rollback of a snapshot while an update applied after it is still installed, or
+  half-applied after its automatic rollback failed, restored only its own files next to the later release's others;
+  it is refused before it changes anything and names the rollback to run first. `update_snapshots_keep` no longer
+  deletes the snapshot whose rollback a failed `.maintenance` names (an update during that window could delete it, and
+  the shop could not reopen). Snapshots record `created_us` to order those of the same second.
 - **Admin and documents** (review round 21, low). Audit-log refund notes and the amount a Stripe refund webhook
   records were in cents ("Manual refund of 1647000 completed by …" for 16 470 Ft): they are written in the order's
   currency, and older entries are shown that way in the audit log. Cash on delivery of an order shipped in several
