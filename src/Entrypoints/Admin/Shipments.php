@@ -9,10 +9,26 @@ function renderOrderWithdrawals(array $order, array $withdrawals): void {
     // R18: "do not ship" only while the goods are still here; once sent, the customer returns them.
     $orderSent = (string)($order['delivered_at'] ?? '') !== '' || in_array((string)($order['status'] ?? ''), ['shipped', 'delivered', 'returned'], true);
     // R19: on a partly shipped order each withdrawn line says whether it already left (wait for the return) or not (do not ship).
-    $lineSent = static fn(int $itemId): bool => $orderSent || (isset($lines[$itemId]) && Fulfillment::shippedUnits($lines[$itemId]) > 0);
+    // R20: units of the line that left; a line partly shipped (1 of 3) is neither "already sent" nor "not sent yet".
+    $sentUnits = static fn(int $itemId): int => !isset($lines[$itemId]) ? ($orderSent ? PHP_INT_MAX : 0)
+        : ($orderSent ? (int)$lines[$itemId]['quantity'] : Fulfillment::shippedUnits($lines[$itemId]));
+    $lineState = static function (int $itemId) use ($lines, $sentUnits): string {
+        $sent = $sentUnits($itemId);
+        if ($sent <= 0) return 'not_sent';
+        return isset($lines[$itemId]) && $sent < (int)$lines[$itemId]['quantity'] ? 'partly_sent' : 'sent';
+    };
+    $lineText = static function (int $itemId) use ($lines, $sentUnits, $lineState): string {
+        $state = $lineState($itemId);
+        if ($state !== 'partly_sent') return I18n::t('admin.withdrawal.line_' . $state);
+        return strtr(I18n::t('admin.withdrawal.line_partly_sent'), ['{sent}' => (string)$sentUnits($itemId), '{qty}' => (string)(int)$lines[$itemId]['quantity']]);
+    };
     $notices = [];
     foreach ($withdrawals as $withdrawal) {
-        foreach (array_keys((array)(json_decode((string)$withdrawal['items'], true) ?: [])) as $itemId) $notices[$lineSent((int)$itemId) ? 'admin.withdrawal.notice_sent' : 'admin.withdrawal.notice'] = true;
+        foreach (array_keys((array)(json_decode((string)$withdrawal['items'], true) ?: [])) as $itemId) {
+            $state = $lineState((int)$itemId);
+            if ($state !== 'not_sent') $notices['admin.withdrawal.notice_sent'] = true;
+            if ($state !== 'sent') $notices['admin.withdrawal.notice'] = true;
+        }
     }
     if (!$notices) $notices[$orderSent ? 'admin.withdrawal.notice_sent' : 'admin.withdrawal.notice'] = true;
     ?>
@@ -29,7 +45,7 @@ function renderOrderWithdrawals(array $order, array $withdrawals): void {
                 <td><ul class="muted" style="margin:0;padding-left:16px">
                     <?php foreach ((array)(json_decode((string)$withdrawal['items'], true) ?: []) as $itemId => $qty): ?>
                     <li><?= esc((string)($lines[(int)$itemId]['name'] ?? ('#' . (int)$itemId))) ?> (<?= (int)$qty ?>×)
-                        — <?= esc(I18n::t($lineSent((int)$itemId) ? 'admin.withdrawal.line_sent' : 'admin.withdrawal.line_not_sent')) ?></li>
+                        — <?= esc($lineText((int)$itemId)) ?></li>
                     <?php endforeach; ?>
                 </ul></td>
                 <td><?= esc((string)($withdrawal['reason'] ?? '')) ?: '—' ?></td>

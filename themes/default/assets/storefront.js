@@ -28,15 +28,13 @@
     })[character]);
   }
 
-  // Amounts are in the cart's currency, rounded like the server (stores.json decimals, e.g. 0 for CZK/HUF).
+  // Amounts are in the cart's currency, written like the server's I18n::price (config.priceFormat from stores.json):
+  // the browser's own currency format put "HUF 7,980" next to the page's "5 490 Ft".
   function formatCents(cents) {
-    const decimals = Number.isInteger(config.currencyDecimals) ? config.currencyDecimals : undefined;
-    return (cents / 100).toLocaleString(config.locale || document.documentElement.lang, {
-      style: 'currency',
-      currency: String(config.currency).toUpperCase(),
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals
-    });
+    const format = config.priceFormat;
+    const [whole, fraction] = (Math.abs(cents) / 100).toFixed(format.decimals).split('.');
+    const number = `${cents < 0 ? '-' : ''}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, format.thousands)}${fraction ? format.decimal + fraction : ''}`;
+    return format.position === 'before' ? format.symbol + number : `${number} ${format.symbol}`;
   }
 
   // Goods after the discount: checkout prices free shipping thresholds and payment fees on this amount.

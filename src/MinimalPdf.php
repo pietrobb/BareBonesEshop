@@ -265,6 +265,18 @@ final class MinimalPdf
         return strtr($out, ['\\' => '\\\\', '(' => '\\(', ')' => '\\)', "\r" => '\\r', "\n" => '\\n']);
     }
 
+    /** Lines of $str that each fit $width mm (split at spaces; a single word longer than the width stays whole). */
+    public function wrap(string $str, float $width, float $sizePt, bool $bold = false): array
+    {
+        $lines = [];
+        foreach (preg_split('/\s+/u', trim($str)) ?: [] as $word) {
+            $last = array_key_last($lines);
+            if ($last !== null && $this->approxTextWidth($lines[$last] . ' ' . $word, $sizePt, $bold) <= $width) $lines[$last] .= ' ' . $word;
+            else $lines[] = $word;
+        }
+        return $lines ?: [''];
+    }
+
     private function approxTextWidth(string $s, float $sizePt, bool $bold): float
     {
         // Rough heuristic: avg char width = 0.5 × size pt for Helvetica.

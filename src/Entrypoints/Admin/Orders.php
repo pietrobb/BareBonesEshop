@@ -496,7 +496,7 @@ function pageOrder(): void {
             <tr>
                 <td><?= esc($inv['number']) ?></td>
                 <td><?= esc(adminCodeLabel('admin.invoice.type.', (string)($inv['type'] ?? 'invoice'))) ?></td>
-                <td><span class="badge badge-vat-<?= esc($inv['vat_scenario'] ?? '') ?>"><?= esc($inv['vat_scenario'] ?? '—') ?></span></td>
+                <td><span class="badge badge-vat-<?= esc($inv['vat_scenario'] ?? '') ?>"><?= esc(($inv['vat_scenario'] ?? '') !== '' ? adminCodeLabel('admin.vat_scenario.', (string)$inv['vat_scenario']) : '—') ?></span></td>
                 <td><?= esc(I18n::date((string)$inv['issued_at'])) ?></td>
                 <td><?= esc(I18n::date((string)$inv['due_date'])) ?></td>
                 <td><?= I18n::price((int)$inv['total_gross'], $inv['currency']) ?></td>

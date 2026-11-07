@@ -115,6 +115,8 @@ $runtimeConfig = [
     'locale' => I18n::locale(),
     'currency' => strtoupper($runtimeCurrency),
     'currencyDecimals' => (int)(Bootstrap::stores()['currencies'][$runtimeCurrency]['decimals'] ?? 2),
+    // R20: the totals storefront.js rewrites read like the server's ("5 490 Ft"), not the browser's ("HUF 7,980").
+    'priceFormat' => I18n::priceFormat(strtolower($runtimeCurrency)),
     'text' => [
         'added' => I18n::t('added_to_cart'),
         'selectVariant' => I18n::t('select_variant'),

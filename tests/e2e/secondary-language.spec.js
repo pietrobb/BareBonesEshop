@@ -78,8 +78,11 @@ async function shopInFurtherLanguage(page, testInfo, { prefix, lang, apiLang = l
     await expect(offline).toHaveCount(1);
     await offline.check();
   }
-  // The script formats with Intl in the page language: es/en show the code (7243 CZK, CZK 7,243), cs the symbol.
-  await expect(page.locator('#summary-total')).toContainText(new RegExp(`${symbol}|${currency.toUpperCase()}`));
+  // R20: the script writes the total like the server's prices in every page language ("7 243 Kč", "26,82 €"), not the
+  // browser's currency format ("CZK 7,243" next to "5 490 Ft").
+  const amount = minorFactor === 1 ? '\\d{1,3}( \\d{3})*,\\d{2}' : '\\d{1,3}( \\d{3})*';
+  await expect(page.locator('#summary-total')).toHaveText(new RegExp(`^${amount} ${symbol}$`));
+  await expect(page.locator('#summary-shipping')).toHaveText(new RegExp(`^(${amount} ${symbol}|\\D+)$`));
   const shown = (await page.locator('#summary-total').textContent()).replace(/\D/g, '');
   await page.locator('form.checkout-form button.btn-checkout').click();
   await expect(page).toHaveURL(new RegExp(`^[^?]*${prefix}/\\?page=order-done`));

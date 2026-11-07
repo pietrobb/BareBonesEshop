@@ -206,18 +206,22 @@ class I18n {
 
     /** Format price according to currency config */
     public static function price(int $cents, ?string $currency = null): string {
+        $format = self::priceFormat($currency);
+        $formatted = number_format($cents / 100, $format['decimals'], $format['decimal'], $format['thousands']);
+
+        if ($format['position'] === 'before') {
+            return $format['symbol'] . $formatted;
+        }
+        return $formatted . ' ' . $format['symbol'];
+    }
+
+    /** R20: how price() writes an amount of $currency — storefront.js formats the checkout totals the same way. */
+    public static function priceFormat(?string $currency = null): array {
         $stores = self::stores();
         $currency = $currency ?? ($stores['default_currency'] ?? 'eur');
         $cur = $stores['currencies'][$currency] ?? ['symbol' => '€', 'decimals' => 2, 'position' => 'after'];
-
-        $decSep = ($currency === 'usd') ? '.' : ',';
-        $thousSep = ($currency === 'usd') ? ',' : ' ';
-        $formatted = number_format($cents / 100, $cur['decimals'], $decSep, $thousSep);
-
-        if ($cur['position'] === 'before') {
-            return $cur['symbol'] . $formatted;
-        }
-        return $formatted . ' ' . $cur['symbol'];
+        return ['symbol' => (string)$cur['symbol'], 'decimals' => (int)$cur['decimals'], 'position' => (string)$cur['position'],
+            'decimal' => $currency === 'usd' ? '.' : ',', 'thousands' => $currency === 'usd' ? ',' : ' '];
     }
 
     // ============================================================

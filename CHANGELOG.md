@@ -48,7 +48,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
-- **Theme assets:** the default theme is version 2.3.3, so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.4, so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -68,6 +68,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Admin, documents and languages** (review round 20, low). A withdrawn line of which only some units left (1 of 3)
+  says how many were sent and that the rest must not ship; it read "already sent". The invoice's VAT scenario in the
+  order detail and the status values in the audit log ("shipped", `{"status":"draft"}`) are shown by their names. The
+  PDF credit note labels the corrected invoice's date apart from its own ("Dátum vystavenia faktúry"), and an items
+  header label wider than its column wraps (the English "Unit price excl. VAT" ran into "Qty"). The shipping and payment
+  methods seeded into the CZ, HU and PL stores are named in the page language on a page in another language ("GLS
+  futár" on an English page); in the store's own language and once renamed they stay as stored. The checkout totals
+  that `storefront.js` rewrites use the shop's price format (`I18n::price`, now also in the page config as
+  `priceFormat`): "HUF 7,980" stood next to "5 490 Ft". Default theme 2.3.4.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
