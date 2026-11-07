@@ -420,6 +420,7 @@ final class Updater
         $touched = false;
         $restored = false;
         $halfDone = null;
+        $stillClosed = null;
         $prior = $this->priorMaintenance();
         try {
             $metadata = $this->snapshotMetadata($snapshotId);
@@ -441,13 +442,21 @@ final class Updater
             $restored = true;
             $this->setSnapshotStatus($snapshotId, 'rolled-back', null, $discarded);
             $notice = $this->reportDiscardedWrites($discarded, 'manual rollback', $result['numbering_raised']);
-            return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice];
+            // R20: as for an update of code only, a rollback that restored no database left a schema a migration stopped
+            // half-way on as it was, so the shop stays closed for what the marker says (it was opened).
+            $stillClosed = $databaseAt === null && $prior !== null && ($prior['marker']['failed'] ?? false) === true
+                && str_starts_with((string)($prior['marker']['reason'] ?? ''), 'cli/migrate.php')
+                ? (string)$prior['marker']['reason'] : null;
+            return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice,
+                'still_closed' => $stillClosed];
         } finally {
             // R18: only a completed restore lifts the window. A refused rollback (no --accept-data-loss, unknown
             // snapshot, changed files) puts back the window it found — failed, or the fresh one of an updater killed
             // half-way — or none; one that stopped after changing files or the database keeps the shop closed (no mix
             // of old and new files) and says what to run.
-            if ($restored) {
+            if ($restored && $stillClosed !== null) {
+                $this->restoreMaintenance($prior);
+            } elseif ($restored) {
                 MaintenanceMode::leave($this->root);
             } elseif ($entered && $touched && $halfDone !== null) {
                 MaintenanceMode::fail($this->root, $halfDone);

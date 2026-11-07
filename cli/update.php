@@ -172,6 +172,9 @@ try {
         if (($result['notice'] ?? null) !== null) {
             fwrite(STDERR, "WARNING: {$result['notice']}\n");
         }
+        if (($result['still_closed'] ?? null) !== null) {
+            fwrite(STDERR, "WARNING: the shop stays closed: a migration failed and this rollback restored no database ({$result['still_closed']})\n");
+        }
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }
