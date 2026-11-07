@@ -48,10 +48,15 @@ try {
     // The HU store with a catalog of its own (HUF): "12.500" there is 12 500 Ft.
     StoreContext::activate(StoreContext::resolve($r20dSample, null, null, 'hu', 'storefront'));
     Import::importProduct(['sku' => 'R20D-HUF-CSV', 'name' => 'R20 HUF CSV', 'price' => '12.500', 'stock' => '1', 'category' => 'R20D HUF']);
+    // The same XML feed into the HUF catalog: "99.990" there is 99 990 Ft.
+    $r20dHuFeed = Warehouse::feedById(Warehouse::saveFeed(['code' => 'r20d-hu', 'name' => 'R20D HU', 'warehouse_id' => Warehouse::save(['code' => 'r20d-erp-hu', 'name' => 'R20D ERP HU', 'is_default' => 0]),
+        'url' => 'https://example.com/feed-hu.xml', 'format' => 'xml', 'import_mode' => FeedImport::MODE_UPSERT,
+        'field_map' => ['ITEM_ID' => 'sku', 'PRODUCTNAME' => 'name', 'PRICE_VAT' => ['field' => 'price', 'transform' => 'price_to_cents'], 'CATEGORYTEXT' => 'category', 'STOCK' => 'stock']]));
+    $r20dErrors = array_merge($r20dErrors, FeedImport::importDocument($r20dHuFeed, $r20dXml('R20D-HUF-FEED'))['errors']);
 
     $r20dRows = array_map(static fn(array $r): string => $r['sku'] . ' ' . $r['currency'] . ' ' . $r['price'] . ' ' . ($r['compare_price'] ?? '-'),
         $r20dDb->query("SELECT sku, currency, price, compare_price FROM products WHERE sku LIKE 'R20D-%' ORDER BY sku")->fetchAll());
-    assert_equals(['R20D-EUR-CSV eur 2490 9999', 'R20D-EUR-FEED eur 9999 -', 'R20D-EUR-FEED2 eur 9999 -', 'R20D-HUF-CSV huf 1250000 -'], $r20dRows,
+    assert_equals(['R20D-EUR-CSV eur 2490 9999', 'R20D-EUR-FEED eur 9999 -', 'R20D-EUR-FEED2 eur 9999 -', 'R20D-HUF-CSV huf 1250000 -', 'R20D-HUF-FEED huf 9999000 -'], $r20dRows,
         'R20 import: an ERP CSV/XML feed "12.500"/"99.990" is 12,50/99,99 € (was 12 500/99 990 €), "12.500" in a HUF catalog is 12 500 Ft ('
         . json_encode($r20dErrors) . ')');
 } finally {
