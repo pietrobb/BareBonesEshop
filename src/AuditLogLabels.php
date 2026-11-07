@@ -45,7 +45,7 @@ final class AuditLogLabels {
     public static function note(string $entity, int $entityId, ?string $note, ?callable $orderCurrency = null): string {
         $note = (string)$note;
         if (!in_array($entity, ['order_refund', 'order_status'], true)) return $note;
-        $orderCurrency ??= static fn(int $orderId): ?string => self::orderCurrency($orderId);
+        $orderCurrency ??= static fn(int $orderId): string => self::orderCurrency($orderId);
         if (preg_match('/^((?:Provider|Manual) refund of )(\d+)( (?:confirmed|completed) by .*)$/s', $note, $m) === 1) {
             return $m[1] . self::amount((int)$m[2], $orderCurrency($entityId)) . $m[3];
         }
