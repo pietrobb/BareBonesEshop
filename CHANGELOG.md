@@ -99,6 +99,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The store switch keeps the language, the sitemap lists every language version** (review round 22, low). The
+  store switch opened every store in its own language: a shopper reading the HU store in English landed in the SK
+  store in Slovak. A store that has the shopper's language now opens in it (`?lang=en`, also Slovak in the CZ store);
+  one that does not opens in its own. The sitemap listed only each store's default language, while the page's
+  hreflang also announces the further store languages (`cs-SK`, `en-HU`, `es` of the /en/ store): each is a `<loc>`
+  of its own and an alternate of every entry, with the same URL as the page's hreflang (`/hu/…?lang=en`).
 - **Admin and documents** (review round 21, low). Audit-log refund notes and the amount a Stripe refund webhook
   records were in cents ("Manual refund of 1647000 completed by …" for 16 470 Ft): they are written in the order's
   currency, and older entries are shown that way in the audit log. Cash on delivery of an order shipped in several
