@@ -204,8 +204,8 @@ function pageAudit(): void {
                 <td><?= esc(adminCodeLabel('admin.audit.entity.', (string)$log['entity'])) ?></td>
                 <td><?= (int)$log['entity_id'] ?></td>
                 <td><?= esc(adminCodeLabel('admin.audit.action.', (string)$log['action'])) ?></td>
-                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(substr($log['old_value'] ?? '', 0, 80)) ?></td>
-                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(substr($log['new_value'] ?? '', 0, 80)) ?></td>
+                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['old_value'] ?? null), 0, 80)) ?></td>
+                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['new_value'] ?? null), 0, 80)) ?></td>
                 <td><?= esc($log['note'] ?? '') ?></td>
                 <td><?= esc($log['actor']) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>

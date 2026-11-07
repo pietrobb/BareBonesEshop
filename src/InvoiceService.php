@@ -1967,7 +1967,8 @@ final class InvoiceService
         $source = $creditNote && !empty($invoice['refers_to_invoice_id']) ? self::byId((int)$invoice['refers_to_invoice_id']) : null;
         if ($source !== null) {
             $pdf->text(20, $y + 9, $L['refers_to'] . ' ' . $source['number'], ['size' => 9]);
-            $pdf->text(20, $y + 14, $L['issued_at'] . ': ' . $date($source['issued_at']), ['size' => 9]);
+            // R20: the corrected invoice's date has its own label — two "Dátum vystavenia" read as two dates of one document.
+            $pdf->text(20, $y + 14, $L['refers_to_issued_at'] . ': ' . $date($source['issued_at']), ['size' => 9]);
         }
 
         $y += 25;
@@ -1987,14 +1988,16 @@ final class InvoiceService
         $y += 6;
 
         // Items header (repeated on every continuation page)
+        // R20: a label wider than its column wraps onto a second line — the English "Unit price excl. VAT" ran into "Qty".
         $itemsHeader = static function () use ($pdf, $L, &$y): void {
-            $pdf->text(20, $y, $L['col_item'], ['size' => 8, 'bold' => true]);
-            $pdf->text(80, $y, $L['col_qty'], ['size' => 8, 'bold' => true, 'align' => 'right', 'width' => 12]);
-            $pdf->text(94, $y, $L['col_unit_net'], ['size' => 8, 'bold' => true, 'align' => 'right', 'width' => 26]);
-            $pdf->text(122, $y, $L['col_vat'], ['size' => 8, 'bold' => true, 'align' => 'right', 'width' => 12]);
-            $pdf->text(136, $y, $L['col_net_total'], ['size' => 8, 'bold' => true, 'align' => 'right', 'width' => 26]);
-            $pdf->text(164, $y, $L['col_total'], ['size' => 8, 'bold' => true, 'align' => 'right', 'width' => 26]);
-            $y += 4;
+            $lines = 1;
+            foreach ([[20, 'col_item', 58, 'left'], [80, 'col_qty', 12, 'right'], [94, 'col_unit_net', 26, 'right'], [122, 'col_vat', 12, 'right'],
+                [136, 'col_net_total', 26, 'right'], [164, 'col_total', 26, 'right']] as [$x, $key, $width, $align]) {
+                $cell = $pdf->wrap($L[$key], $width, 8, true);
+                foreach ($cell as $i => $text) $pdf->text($x, $y + $i * 3.2, $text, ['size' => 8, 'bold' => true, 'align' => $align, 'width' => $width]);
+                $lines = max($lines, count($cell));
+            }
+            $y += 4 + ($lines - 1) * 3.2;
             $pdf->line(20, $y, 190, $y);
             $y += 4;
         };
@@ -2147,7 +2150,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný doklad k faktúre č.', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby', 'cancellation' => 'Storno faktúry',
+                'refers_to' => 'Opravný doklad k faktúre č.', 'refers_to_issued_at' => 'Dátum vystavenia faktúry', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby', 'cancellation' => 'Storno faktúry',
                 'discount' => 'Zľava',
                 'payment_fee' => 'Poplatok za platbu',
                 'rounding' => 'Zaokrúhlenie',
@@ -2169,7 +2172,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby', 'cancellation' => 'Storno faktury',
+                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'refers_to_issued_at' => 'Datum vystavení faktury', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby', 'cancellation' => 'Storno faktury',
                 'discount' => 'Sleva',
                 'payment_fee' => 'Poplatek za platbu',
                 'rounding' => 'Zaokrouhlení',
@@ -2191,7 +2194,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
-                'refers_to' => 'Korekta faktury nr', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności', 'cancellation' => 'Anulowanie faktury',
+                'refers_to' => 'Korekta faktury nr', 'refers_to_issued_at' => 'Data wystawienia faktury', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności', 'cancellation' => 'Anulowanie faktury',
                 'discount' => 'Rabat',
                 'payment_fee' => 'Opłata za płatność',
                 'rounding' => 'Zaokrąglenie',
@@ -2213,7 +2216,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
-                'refers_to' => 'Az alábbi számla helyesbítése:', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés', 'cancellation' => 'Számla sztornó',
+                'refers_to' => 'Az alábbi számla helyesbítése:', 'refers_to_issued_at' => 'A számla kiállítása', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés', 'cancellation' => 'Számla sztornó',
                 'discount' => 'Kedvezmény',
                 'payment_fee' => 'Fizetési díj',
                 'rounding' => 'Kerekítés',
@@ -2235,7 +2238,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Rechnungskorrektur Nr.',
-                'refers_to' => 'Korrektur zur Rechnung Nr.', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung', 'cancellation' => 'Rechnungsstorno',
+                'refers_to' => 'Korrektur zur Rechnung Nr.', 'refers_to_issued_at' => 'Datum der Rechnung', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung', 'cancellation' => 'Rechnungsstorno',
                 'discount' => 'Rabatt',
                 'payment_fee' => 'Zahlungsgebühr',
                 'rounding' => 'Rundung',
@@ -2256,7 +2259,7 @@ final class InvoiceService
                 'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
                 'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
-                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'cancellation' => 'Anulación de factura', 'discount' => 'Descuento',
+                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'refers_to_issued_at' => 'Fecha de la factura', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'cancellation' => 'Anulación de factura', 'discount' => 'Descuento',
                 'payment_fee' => 'Comisión de pago', 'rounding' => 'Redondeo', 'col_unit_net' => 'Precio unit. sin IVA', 'col_net_total' => 'Sin IVA',
             ],
             'en' => [
@@ -2273,7 +2276,7 @@ final class InvoiceService
                 'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
                 'reverse_charge_services_note' => 'Reverse charge — VAT to be accounted for by the recipient (Article 196 of Directive 2006/112/EC)',
                 'credit_title' => 'Credit note No.',
-                'refers_to' => 'Corrects invoice No.', 'credit_total' => 'Total credited', 'refund' => 'Refund', 'cancellation' => 'Invoice cancellation',
+                'refers_to' => 'Corrects invoice No.', 'refers_to_issued_at' => 'Invoice date', 'credit_total' => 'Total credited', 'refund' => 'Refund', 'cancellation' => 'Invoice cancellation',
                 'discount' => 'Discount',
                 'payment_fee' => 'Payment fee',
                 'rounding' => 'Rounding',

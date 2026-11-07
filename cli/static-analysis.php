@@ -208,7 +208,8 @@ $architectureBudgets = [
     // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
     // +1 coupling R14 UX5: the payments page warns that bank transfer is hidden at checkout without a store IBAN (BankTransferInstructions).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 21],
+    // coupling +1 R20: the audit log shows its values through AuditLogLabels.
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 22],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
@@ -256,7 +257,8 @@ $architectureBudgets = [
     // +2 lines R18 acceptance: a withdrawal on a shipped or delivered order waits for the return.
     // +10 lines R19 medium: on a partly shipped order each withdrawn line says whether it already left or must not ship.
     // +2 lines, +1 coupling (ShippingService) R19 low: the carrier field starts with the carrier the customer chose.
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 299, 'functions' => 11, 'max_function_lines' => 107, 'coupling' => 13],
+    // +16 lines R20: a withdrawn line shipped in part (1 of 3) has its own state and text.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 315, 'functions' => 11, 'max_function_lines' => 107, 'coupling' => 13],
     // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected) and the
     // cash on delivery of every parcel, shown also when no carrier API is connected.
     // +14 lines, +1 function R15: only the carrier the customer chose is offered (adminOrderLabelCarriers).
@@ -301,7 +303,7 @@ $architectureBudgets = [
     'src/Entrypoints/Storefront/AccountClaimPages.php' => ['lines' => 33, 'functions' => 1, 'max_function_lines' => 28, 'coupling' => 5],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
-    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link; R19: cart_full text */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 148, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link; R19: cart_full text; R20: priceFormat */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 150, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // R10 UX8: guest order status lookup, back-in-stock form, checkout/confirmation account views; the rules live in BackInStock and GuestCheckoutAccount.
     // +4 lines R11 H1: the confirmation page's offer e-mails the account link instead of taking a password.
     // +26 lines, +1 function R15: the back-in-stock confirmation page (double opt-in); the rules live in BackInStock.
