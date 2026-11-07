@@ -176,7 +176,7 @@ input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5r
 .report-bar{margin-left:.5rem;width:8rem;vertical-align:middle}details>summary{cursor:pointer;font-weight:600;margin:.5rem 0}
 .store-switcher{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center;padding:0 1rem .75rem;font-size:.75rem;color:#cbd5e1}.store-switcher select{flex:1;min-width:0}
 .table-scroll{overflow-x:auto;max-width:100%}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
-@media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem;min-width:0}.grid-2{grid-template-columns:minmax(0,1fr)}.sales-toolbar{align-items:stretch}.sales-toolbar>*{max-width:100%}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
+@media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}nav .store-switcher{order:-1;flex:0 0 auto;flex-wrap:nowrap;padding:0 .5rem 0 0}nav .store-switcher select{flex:0 0 auto;min-width:9rem}main{padding:1rem;min-width:0}.grid-2{grid-template-columns:minmax(0,1fr)}.sales-toolbar{align-items:stretch}.sales-toolbar>*{max-width:100%}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
 </style>
 </head>
 <body>

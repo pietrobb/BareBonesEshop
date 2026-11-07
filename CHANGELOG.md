@@ -32,7 +32,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
-- **Theme assets:** the default theme is version 2.3.2, so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.3, so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -291,6 +291,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   out after the confirmation; the five newest confirmation links stay valid together (24 hours). Low: the forgot
   password answer no longer takes longer for an address with an account (the mail goes out after the response), and a
   throttled mail sent after the response no longer logs "headers already sent".
+- **Admin and documents in words** (review round 19, low). The audit log names what changed ("Payment link sent", not
+  `payment_link_sent`), the order detail names the e-mail template and the invoice type ("Credit note"), and the
+  template editor's title and its saved/reset message name the template. "Create and send" and "Ship" start with the
+  carrier the customer chose (a parcel was saved without one). At 390 px the account's order table scrolls inside its
+  card instead of the whole page, and the admin's store switcher comes first in the navigation with a readable width
+  (default theme 2.3.3). The PDF credit note's dates sit under the title (a long title, e.g. "Factura rectificativa
+  n.º …", ran into them). "A field is too long" now names the field and its maximum. An English delivery note names
+  the country in English ("Slovakia", not "Slovensko").
 
 ## 2.1.2 — 2026-11-05
 

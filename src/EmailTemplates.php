@@ -337,7 +337,14 @@ class EmailTemplates {
             Logger::error('email template save failed', ['template' => $template, 'locale' => $locale, 'error' => $e->getMessage()]);
             return self::result(false, I18n::t('admin.email.msg.save_failed'));
         }
-        return self::result(true, I18n::format('admin.email.msg.saved', ['template' => $template, 'locale' => $locale]));
+        return self::result(true, I18n::format('admin.email.msg.saved', ['template' => self::label($template), 'locale' => $locale]));
+    }
+
+    /** R19: the template in the admin's words ("order confirmation"), its code only when there is no text for it. */
+    public static function label(string $template): string {
+        $key = 'admin.email.tpl.' . $template;
+        $text = I18n::t($key);
+        return $text === $key || $text === '' ? $template : $text;
     }
 
     /**
@@ -426,7 +433,7 @@ class EmailTemplates {
     public static function reset(string $template, string $locale): array {
         if (!self::editable($template, $locale)) return self::result(false, I18n::t('admin.email.msg.unknown'));
         $old = self::override($template, $locale);
-        if ($old === null) return self::result(true, I18n::format('admin.email.msg.reset', ['template' => $template, 'locale' => $locale]));
+        if ($old === null) return self::result(true, I18n::format('admin.email.msg.reset', ['template' => self::label($template), 'locale' => $locale]));
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -441,7 +448,7 @@ class EmailTemplates {
             Logger::error('email template reset failed', ['template' => $template, 'locale' => $locale, 'error' => $e->getMessage()]);
             return self::result(false, I18n::t('admin.email.msg.save_failed'));
         }
-        return self::result(true, I18n::format('admin.email.msg.reset', ['template' => $template, 'locale' => $locale]));
+        return self::result(true, I18n::format('admin.email.msg.reset', ['template' => self::label($template), 'locale' => $locale]));
     }
 
     /** Rendered sample message for the preview; null parts take the stored template (override or file). */
