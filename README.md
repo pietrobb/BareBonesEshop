@@ -505,9 +505,12 @@ application root): web requests get 503 and the worker and feed sync skip their 
 The updater holds a lock on that file for as long as it runs, so the window also
 holds when the shop checks it from another container on the same volume, and it
 ends when that process ends. `php cli/migrate.php apply` uses the same window; a
-migration that fails, or an update whose automatic rollback fails, leaves the shop
-in maintenance (the file says what to run) until the next successful
-`migrate.php apply`, update or rollback.
+migration that fails, an update whose automatic rollback fails, or a rollback that
+stops after it began restoring leaves the shop in maintenance (the file says what to
+run). A failed migration is lifted only by a successful `migrate.php apply`, an update
+that runs the migrations or a rollback that restores the database; an update or
+rollback of code only leaves that schema as it was and keeps the shop closed (it
+warns). A failed update or rollback is lifted by the command the file names.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The
