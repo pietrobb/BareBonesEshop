@@ -1,13 +1,19 @@
 <?php
 /** Shared admin presentation helpers. */
 
-function setFlash(string $type, string $msg): void {
-    $_SESSION['flash'] = ['type' => $type, 'msg' => $msg];
+/** R21: $details (e.g. the refused rows of an import and why) are listed under the message, the first 20 of them. */
+function setFlash(string $type, string $msg, array $details = []): void {
+    $more = count($details) - 20;
+    $details = array_map('strval', array_slice(array_values($details), 0, 20));
+    if ($more > 0) $details[] = strtr(I18n::t('admin.common.flash_more'), ['{count}' => (string)$more]);
+    $_SESSION['flash'] = ['type' => $type, 'msg' => $msg, 'details' => $details];
 }
 function flash(): void {
     if (!empty($_SESSION['flash'])) {
         $f = $_SESSION['flash'];
-        echo '<div class="flash flash-' . esc($f['type']) . '">' . esc($f['msg']) . '</div>';
+        $details = array_map(static fn(string $line): string => '<li>' . esc($line) . '</li>', (array)($f['details'] ?? []));
+        echo '<div class="flash flash-' . esc($f['type']) . '">' . esc($f['msg'])
+            . ($details !== [] ? '<ul class="flash-details">' . implode('', $details) . '</ul>' : '') . '</div>';
         unset($_SESSION['flash']);
     }
 }

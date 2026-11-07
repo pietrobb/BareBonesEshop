@@ -243,7 +243,7 @@ function handleImportUpload(): void {
     if ($result['success'] && $errCount === 0) {
         setFlash('ok', strtr(I18n::t('admin.import.done'), ['{count}' => (string)$result['imported']]) . $encodingNote);
     } else {
-        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => (string)$errCount]) . $encodingNote);
+        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => (string)$errCount]) . $encodingNote, $result['errors']);
     }
 
     header("Location: admin.php?p=import");
@@ -482,6 +482,10 @@ function pageFeed(): void {
         <p><?= esc(I18n::t('admin.feed.time')) ?>: <?= $f['last_sync'] ? esc($f['last_sync']) : esc(I18n::t('admin.common.never')) ?></p>
         <p><?= esc(I18n::t('admin.th.status')) ?>: <?= esc($f['last_status'] ?? '—') ?></p>
         <p><?= esc(I18n::t('admin.nav.products')) ?>: <?= (int)$f['last_count'] ?></p>
+        <?php if ($feedErrors = Warehouse::feedLastErrors($f)): ?>
+        <h4><?= esc(I18n::t('admin.feed.last_errors')) ?></h4>
+        <ul class="feed-errors"><?php foreach ($feedErrors as $feedError): ?><li><?= esc($feedError) ?></li><?php endforeach; ?></ul>
+        <?php endif; ?>
         <form method="post" action="admin.php?p=feeds&action=sync" style="margin-top:.5rem">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <input type="hidden" name="feed_id" value="<?= $f['id'] ?>">
@@ -792,7 +796,7 @@ function handleFeedSync(): void {
         if (!empty($result['errors'])) {
             $msg .= strtr(I18n::t('admin.feed.sync_errors'), ['{count}' => (string)count($result['errors'])]);
         }
-        setFlash(empty($result['errors']) ? 'ok' : 'err', $msg); // R21: refused items are not a plain success
+        setFlash(empty($result['errors']) ? 'ok' : 'err', $msg, $result['errors'] ?? []); // R21: which items, and why
     }
 
     header("Location: admin.php?p=feed&id={$id}");

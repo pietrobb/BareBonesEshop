@@ -209,7 +209,8 @@ $architectureBudgets = [
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
     // +1 coupling R14 UX5: the payments page warns that bank transfer is hidden at checkout without a store IBAN (BankTransferInstructions).
     // coupling +1 R20: the audit log shows its values through AuditLogLabels.
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 22],
+    // +4 lines R21: the feed page lists the items its last sync refused.
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 804, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 22],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
@@ -238,7 +239,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Request.php' => ['lines' => 90, 'functions' => 1, 'max_function_lines' => 9, 'coupling' => 2],
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
-    'src/Entrypoints/Admin/Shared.php' => ['lines' => 58, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
+    // +5 lines R21: a flash message lists its details (the rows an import or feed sync refused, and why).
+    'src/Entrypoints/Admin/Shared.php' => ['lines' => 63, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
     // R10 UX10: the admin layout script (delegated handlers, moved from Admin.php) + wide tables scroll in their own keyboard-reachable box on a phone.
     'src/Entrypoints/Admin/LayoutScript.php' => ['lines' => 70, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 1],
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.

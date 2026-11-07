@@ -736,9 +736,20 @@ class Warehouse {
         return $stmt->rowCount() > 0;
     }
 
-    public static function updateFeedStatus(int $feedId, string $status, int $count): void {
+    /** Item errors a feed keeps from its last sync (R21: the admin sees which items were refused, not just how many). */
+    public const FEED_ERRORS_KEPT = 100;
+
+    public static function updateFeedStatus(int $feedId, string $status, int $count, array $errors = []): void {
         $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
-        Db::get()->prepare("UPDATE feeds SET last_sync = {$now}, last_status = :status, last_count = :cnt WHERE id = :id")
-           ->execute([':status' => $status, ':cnt' => $count, ':id' => $feedId]);
+        $kept = array_map(static fn($e): string => mb_substr((string)$e, 0, 500), array_slice(array_values($errors), 0, self::FEED_ERRORS_KEPT));
+        if (count($errors) > self::FEED_ERRORS_KEPT) $kept[] = '… +' . (count($errors) - self::FEED_ERRORS_KEPT);
+        Db::get()->prepare("UPDATE feeds SET last_sync = {$now}, last_status = :status, last_count = :cnt, last_errors = :errors WHERE id = :id")
+           ->execute([':status' => $status, ':cnt' => $count, ':errors' => $kept === [] ? null : json_encode($kept, JSON_UNESCAPED_UNICODE), ':id' => $feedId]);
+    }
+
+    /** @return list<string> */
+    public static function feedLastErrors(array $feed): array {
+        $errors = json_decode((string)($feed['last_errors'] ?? ''), true);
+        return is_array($errors) ? array_map('strval', $errors) : [];
     }
 }
