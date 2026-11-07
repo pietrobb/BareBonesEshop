@@ -339,7 +339,7 @@ function pageWarehouse(): void {
                     <td><?= esc($f['name']) ?></td>
                     <td><?= esc($f['format']) ?></td>
                     <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">' . esc(I18n::t('admin.common.never')) . '</span>' ?></td>
-                    <td><?= esc($f['last_status'] ?? '—') ?></td>
+                    <td><?= esc(FeedMessages::status((string)($f['last_status'] ?? '—'))) ?></td>
                 </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -413,7 +413,7 @@ function pageFeeds(): void {
                 <td><?= esc($f['format']) ?></td>
                 <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">' . esc(I18n::t('admin.common.never')) . '</span>' ?></td>
                 <td><?= (int)$f['last_count'] ?></td>
-                <td><?= $f['enabled'] ? esc($f['last_status'] ?? '—') : '<span class="muted">' . esc(I18n::t('admin.feed.disabled')) . '</span>' ?></td>
+                <td><?= $f['enabled'] ? esc(FeedMessages::status((string)($f['last_status'] ?? '—'))) : '<span class="muted">' . esc(I18n::t('admin.feed.disabled')) . '</span>' ?></td>
                 <td>
                     <form method="post" action="admin.php?p=feeds&action=sync" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -480,11 +480,11 @@ function pageFeed(): void {
     <div class="card" style="margin-top:1rem">
         <h3><?= esc(I18n::t('admin.feed.last_sync')) ?></h3>
         <p><?= esc(I18n::t('admin.feed.time')) ?>: <?= $f['last_sync'] ? esc($f['last_sync']) : esc(I18n::t('admin.common.never')) ?></p>
-        <p><?= esc(I18n::t('admin.th.status')) ?>: <?= esc($f['last_status'] ?? '—') ?></p>
+        <p><?= esc(I18n::t('admin.th.status')) ?>: <?= esc(FeedMessages::status((string)($f['last_status'] ?? '—'))) ?></p>
         <p><?= esc(I18n::t('admin.nav.products')) ?>: <?= (int)$f['last_count'] ?></p>
         <?php if ($feedErrors = Warehouse::feedLastErrors($f)): ?>
         <h4><?= esc(I18n::t('admin.feed.last_errors')) ?></h4>
-        <ul class="feed-errors"><?php foreach ($feedErrors as $feedError): ?><li><?= esc($feedError) ?></li><?php endforeach; ?></ul>
+        <ul class="feed-errors"><?php foreach ($feedErrors as $feedError): ?><li><?= esc(FeedMessages::error((string)$feedError)) ?></li><?php endforeach; ?></ul>
         <?php endif; ?>
         <form method="post" action="admin.php?p=feeds&action=sync" style="margin-top:.5rem">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -503,6 +503,11 @@ function handleFeedSave(): void {
     $fieldMap = json_decode($fieldMapRaw, true);
     if ($fieldMap === null && $fieldMapRaw !== '{}') {
         setFlash('err', I18n::t('admin.feed.invalid_json') . ' ' . json_last_error_msg());
+        header("Location: admin.php?p=feed" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+    if (is_array($fieldMap) && ($badDecimal = FeedImport::badDecimalMapping($fieldMap)) !== null) {
+        setFlash('err', strtr(I18n::t('admin.feed.bad_decimal'), ['{field}' => $badDecimal]));
         header("Location: admin.php?p=feed" . ($id ? "&id={$id}" : ''));
         exit;
     }
@@ -796,7 +801,7 @@ function handleFeedSync(): void {
         if (!empty($result['errors'])) {
             $msg .= strtr(I18n::t('admin.feed.sync_errors'), ['{count}' => (string)count($result['errors'])]);
         }
-        setFlash(empty($result['errors']) ? 'ok' : 'err', $msg, $result['errors'] ?? []); // R21: which items, and why
+        setFlash(empty($result['errors']) ? 'ok' : 'err', $msg, array_map(FeedMessages::error(...), $result['errors'] ?? [])); // R21: which items, and why (R22: in the admin's language)
     }
 
     header("Location: admin.php?p=feed&id={$id}");

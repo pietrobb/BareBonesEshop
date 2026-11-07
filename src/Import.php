@@ -733,13 +733,14 @@ class Import {
                     [$grouping, $decimal] = [$decimal, ''];
                 } elseif (preg_match('/^-?[1-9]\d{0,2}[.,]\d{3}$/', $s)) {
                     // "0.125" (a leading zero) and "1299.000" (four digits before it) are decimals; "199.000" is not known.
-                    throw new \InvalidArgumentException("Not a price: {$shown} (ambiguous: write e.g. 199.00 or 199000, or declare the feed's decimal mark)");
+                    throw new \InvalidArgumentException("Not a price: {$shown} (ambiguous: write e.g. 199.00 or 199000)");
                 }
             }
             if ($grouping !== null) {
                 $whole = $decimal === '' ? $s : substr($s, 0, (int)strrpos($s, $decimal));
                 $sep = preg_quote($grouping, '/');
-                if (!preg_match('/^-?\d{1,3}(?:' . $sep . '\d{3})+$/', $whole)) throw new \InvalidArgumentException("Not a price: {$shown}");
+                // R22: grouped digits never start with a zero: with the decimal mark "," a "0.500" is not 500,00.
+                if (!preg_match('/^-?[1-9]\d{0,2}(?:' . $sep . '\d{3})+$/', $whole)) throw new \InvalidArgumentException("Not a price: {$shown}");
                 $s = str_replace($grouping, '', $s);
             }
             if ($decimal !== '') $s = str_replace($decimal, '.', $s);
