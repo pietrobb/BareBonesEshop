@@ -840,7 +840,7 @@ final class Updater
     {
         $rank = array_flip(self::UPDATER_FILES);
         $indexed = [];
-        foreach (array_values($rows) as $i => $row) $indexed[] = [$rank[(string)($row['path'] ?? '')] ?? -1, $i, $row];
+        foreach ($rows as $i => $row) $indexed[] = [$rank[(string)($row['path'] ?? '')] ?? -1, $i, $row];
         usort($indexed, static fn(array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
         return array_column($indexed, 2);
     }
