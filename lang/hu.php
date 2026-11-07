@@ -1841,6 +1841,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'choose_option' => 'Változat kiválasztása',
     'cart_added_notice' => 'A termék a kosárba került.',
     'cart_quantity_clamped' => 'Hozzáadva. A kosárban lévő mennyiség legfeljebb {count} lehet.',
+    'cart_currency_changed' => 'A kosár most {currency} pénznemben van ({store}): ennek az üzletnek az árai érvényesek.',
+    'store_switch' => 'Üzlet és pénznem',
     'wishlist.added' => 'Hozzáadva a kívánságlistához.',
     'wishlist.removed' => 'Eltávolítva a kívánságlistáról.',
     'checkout.error.invalid_country' => 'Válasszon érvényes országot.',

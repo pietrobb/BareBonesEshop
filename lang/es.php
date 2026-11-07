@@ -1813,6 +1813,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'choose_option' => 'Elegir opción',
     'cart_added_notice' => 'El producto se ha añadido al carrito.',
     'cart_quantity_clamped' => 'Añadido. La cantidad en el carrito está limitada a {count}.',
+    'cart_currency_changed' => 'Su carrito está ahora en {currency} ({store}): se aplican los precios de esta tienda.',
+    'store_switch' => 'Tienda y moneda',
     'wishlist.added' => 'Añadido a su lista de deseos.',
     'wishlist.removed' => 'Eliminado de su lista de deseos.',
     'checkout.error.invalid_country' => 'Seleccione un país válido.',

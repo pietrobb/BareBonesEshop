@@ -132,16 +132,16 @@ try {
     assert_true(str_contains($fr4Api, 'if (!CheckoutService::couponAttemptAllowed()) {') && str_contains($fr4Checkout, '!CheckoutService::formCouponAllowed($couponCode)')
         && !str_contains($fr4Api, "rateLimit('validate_coupon'"), 'FR4 2: the coupon API and the HTML checkout form spend the same coupon budget');
 
-    // 3. ?lang= of a language that is another store's default is not canonical here (hreflang points at that store).
+    // 3. A locale that is another store's default is no ?lang= canonical here unless the request chose it (R21: ?lang=cs
+    // in the SK store is its own page, hreflang cs-SK, see AuditRound21LangSeoRegression).
     $fr4Secondary = [];
-    // R20: links keep such a language (Bootstrap::secondaryLocale), only the canonical leaves it to that store.
-    foreach (['cs', 'en', 'sk'] as $locale) { I18n::setLocale($locale); $fr4Secondary[] = Bootstrap::canonicalSecondaryLocale(); }
+    foreach (['cs', 'en', 'sk'] as $locale) { I18n::setLocale($locale); $fr4Secondary[] = Bootstrap::secondaryLocale(); }
     Bootstrap::initStoreContext('/en/', '', 'us');
     I18n::setLocale('es');
-    $fr4Secondary[] = Bootstrap::canonicalSecondaryLocale();
+    $fr4Secondary[] = Bootstrap::secondaryLocale();
     Bootstrap::initStoreContext('/', '', 'default');
     I18n::setLocale($fr4SavedLocale);
-    assert_equals([null, null, null, 'es'], $fr4Secondary, 'FR4 3: only a language no store defaults to gets a ?lang= canonical');
+    assert_equals([null, null, null, 'es'], $fr4Secondary, 'FR4 3: without ?lang= only a language no store defaults to gets a ?lang= canonical');
 
     // 4. The account downloads page uses the download rules: a partial refund keeps uncredited lines.
     $o4 = $fr4Order('delivered', 'partially_refunded', 'stripe', 'pi_fr4_4');

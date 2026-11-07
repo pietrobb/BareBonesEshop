@@ -1861,6 +1861,8 @@ return [
     'choose_option' => 'Choose options',
     'cart_added_notice' => 'The product was added to your cart.',
     'cart_quantity_clamped' => 'Added. The quantity in your cart is limited to {count}.',
+    'cart_currency_changed' => 'Your cart is now in {currency} ({store}): prices are those of this shop.',
+    'store_switch' => 'Shop and currency',
     'wishlist.added' => 'Added to your wishlist.',
     'wishlist.removed' => 'Removed from your wishlist.',
     'checkout.error.invalid_country' => 'Select a valid country.',

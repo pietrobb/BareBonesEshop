@@ -1841,6 +1841,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'choose_option' => 'Vybrat variantu',
     'cart_added_notice' => 'Produkt byl přidán do košíku.',
     'cart_quantity_clamped' => 'Přidáno. Množství v košíku je omezeno na {count}.',
+    'cart_currency_changed' => 'Košík je nyní v měně {currency} ({store}): ceny jsou přepočítané podle tohoto obchodu.',
+    'store_switch' => 'Obchod a měna',
     'wishlist.added' => 'Přidáno do seznamu přání.',
     'wishlist.removed' => 'Odebráno ze seznamu přání.',
     'checkout.error.invalid_country' => 'Vyberte platnou zemi.',

@@ -13,8 +13,9 @@ class Seo {
         }
         // Without app_url the links stay relative, but keep the deployment base path (subdirectory installs).
         if ($base === '') $base = Template::baseUrl();
-        // A store's further language (?lang=xx, Bootstrap::initLocale) is its own indexable URL.
-        $secondary = Bootstrap::canonicalSecondaryLocale();
+        // A store's further language (?lang=xx, Bootstrap::initLocale) is its own indexable URL. R21: also another store's
+        // own language (Czech in the SK store): its canonical was the store's default-language page (Slovak).
+        $secondary = Bootstrap::secondaryLocale();
         $canonical = $base . ($secondary !== null ? Bootstrap::withLang($path, $secondary) : $path);
         $e = static fn(string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $lines = [
@@ -35,6 +36,10 @@ class Seo {
         foreach ($alternates['secondary'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . $e((string)$locale) . '" href="'
                 . $e($base . Bootstrap::withLang((string)$prefix . $pathOf($locale), (string)$locale)) . '">';
+        }
+        foreach ($alternates['regional'] as $code => $target) {
+            $lines[] = '<link rel="alternate" hreflang="' . $e((string)$code) . '" href="'
+                . $e($base . Bootstrap::withLang($target['prefix'] . $pathOf($target['locale']), $target['locale'])) . '">';
         }
         $xDefaultLocale = array_search($alternates['xDefaultPrefix'], $alternates['alternates'], true);
         $lines[] = '<link rel="alternate" hreflang="x-default" href="'

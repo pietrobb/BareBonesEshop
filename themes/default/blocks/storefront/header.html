@@ -1,6 +1,7 @@
 <header>
   <div class="header-top"><div class="wrap">
     <div class="lang-switch">{{#each language_links}}<a href="{{url}}"{{#if active}} class="active"{{/if}}>{{label}}</a>{{/each}}</div>
+    {{#if store_links}}<nav class="store-switch" aria-label="{{t.store_switch}}">{{#each store_links}}<a href="{{url}}" title="{{title}}"{{#if active}} class="active" aria-current="true"{{/if}}>{{label}}</a>{{/each}}</nav>{{/if}}
     <a href="{{account_url}}" title="{{account_label}}">{{account_label}}</a>
     <a href="{{cart_url}}" class="cart-icon" title="{{t.cart}}">&#128722;{{#if cart_count}}<span class="cart-badge">{{cart_count}}</span>{{/if}}</a>
   </div></div>

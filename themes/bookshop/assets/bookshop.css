@@ -16,8 +16,8 @@ main{padding:28px 0 8px}
 .bk-topbar .wrap{display:flex;justify-content:space-between;align-items:center;gap:16px;min-height:36px;flex-wrap:wrap}
 .bk-topbar__note{margin:0}
 .bk-topbar__links{display:flex;gap:16px;align-items:center}
-.bk-topbar a,.bk-topbar .lang-switch a{color:#f3efe7;min-height:24px;display:inline-flex;align-items:center}
-.bk-topbar a:hover,.bk-topbar .lang-switch a.active{color:#fff;text-decoration:underline;border-color:transparent}
+.bk-topbar a,.bk-topbar .lang-switch a,.bk-topbar .store-switch a{color:#f3efe7;min-height:24px;display:inline-flex;align-items:center}
+.bk-topbar a:hover,.bk-topbar .lang-switch a.active,.bk-topbar .store-switch a.active{color:#fff;text-decoration:underline;border-color:transparent}
 .bk-masthead .wrap{display:flex;align-items:center;gap:24px;padding-top:18px;padding-bottom:18px;flex-wrap:wrap}
 .bk-logo{display:inline-flex;align-items:center;gap:10px;font:600 1.75rem/1 var(--bk-serif);color:var(--bk-ink);text-decoration:none}
 .bk-logo:hover{color:var(--bk-accent)}.bk-logo__mark{color:var(--bk-accent);flex:none}.bk-logo img{max-height:48px;width:auto}

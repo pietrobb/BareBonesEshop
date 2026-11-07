@@ -140,6 +140,8 @@ class Bootstrap {
      *   'secondary'      => [locale => url_prefix, ...] the further `languages` of a store, served as
      *                       <prefix><path>?lang=<locale> (initLocale); a locale that is some store's
      *                       default_locale is left to that store, so every hreflang code has one URL
+     *   'regional'       => [locale-COUNTRY => ['prefix' => url_prefix, 'locale' => locale], ...] the remaining store
+     *                       languages (<prefix><path>?lang=<locale>), qualified by the store's legal.country
      * Pass an explicit $uri to override $_SERVER['REQUEST_URI'] (tests).
      */
     public static function hreflangAlternates(?string $uri = null): array {
@@ -155,6 +157,19 @@ class Bootstrap {
             foreach ((array)($store['languages'] ?? []) as $locale) {
                 $locale = strtolower((string)$locale);
                 if (!isset($alternates[$locale]) && !isset($secondary[$locale])) $secondary[$locale] = $store['url_prefix'] ?? '';
+            }
+        }
+        // R21: every other store language is its own page too (English in the HU store, Czech in the SK store); it is
+        // announced language-region qualified by the store's seller country (en-HU), so each code still has one URL.
+        $regional = [];
+        foreach ($public as $store) {
+            $country = strtoupper((string)($store['legal']['country'] ?? ''));
+            if (!preg_match('/^[A-Z]{2}$/', $country)) continue;
+            $prefix = $store['url_prefix'] ?? '';
+            foreach ((array)($store['languages'] ?? []) as $locale) {
+                $locale = strtolower((string)$locale);
+                if (($alternates[$locale] ?? $secondary[$locale] ?? null) === $prefix) continue;
+                $regional[$locale . '-' . $country] ??= ['prefix' => $prefix, 'locale' => $locale];
             }
         }
 
@@ -176,6 +191,7 @@ class Bootstrap {
             'pathNoPrefix'   => $pathNoPrefix,
             'xDefaultPrefix' => $xDefaultPrefix,
             'secondary'      => $secondary,
+            'regional'       => $regional,
         ];
     }
 
@@ -205,12 +221,5 @@ class Bootstrap {
         // Another store's own language counts only as this request chose it (initLocale): ?lang=en in the HU store.
         $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
         return !in_array($locale, $storeDefaults, true) || strtolower(Security::str($_GET['lang'] ?? '')) === $locale ? $locale : null;
-    }
-
-    /** secondaryLocale() as a canonical URL shows it: another store's default language is that store's URL (its hreflang alternate). */
-    public static function canonicalSecondaryLocale(): ?string {
-        $locale = self::secondaryLocale();
-        $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
-        return $locale !== null && !in_array($locale, $storeDefaults, true) ? $locale : null;
     }
 }

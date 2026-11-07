@@ -12,7 +12,7 @@ final class StorefrontSeo
     /**
      * @param array|null $viewModel canonical view model carrying page.seo (home, product, CMS page)
      * @param array|null $category  the resolved category row on a category page, null when not found
-     * @return array{head: string, language_links: list<array{url: string, label: string, active: bool}>}
+     * @return array{head: string, language_links: list<array{url: string, label: string, active: bool}>, store_links: list<array{url: string, label: string, title: string, active: bool}>}
      */
     public static function document(string $page, string $title, ?array $viewModel, ?array $category = null): array
     {
@@ -37,6 +37,7 @@ final class StorefrontSeo
         return [
             'head' => $head . ($jsonLd !== '' ? "\n" . $jsonLd : ''),
             'language_links' => self::languageLinks($alternates),
+            'store_links' => self::storeLinks($alternates),
         ];
     }
 
@@ -81,47 +82,58 @@ final class StorefrontSeo
             $lines[] = '<link rel="alternate" hreflang="' . esc((string)$locale) . '" href="'
                 . esc(Template::absoluteUrl(Bootstrap::withLang(Template::url($prefix . $alternates['pathNoPrefix']), (string)$locale))) . '">';
         }
+        foreach ($alternates['regional'] as $code => $target) {
+            $lines[] = '<link rel="alternate" hreflang="' . esc((string)$code) . '" href="'
+                . esc(Template::absoluteUrl(Bootstrap::withLang(Template::url($target['prefix'] . $alternates['pathNoPrefix']), $target['locale']))) . '">';
+        }
         $lines[] = '<link rel="alternate" hreflang="x-default" href="'
             . esc(Template::absoluteUrl(Template::url($alternates['xDefaultPrefix'] . $alternates['pathNoPrefix']))) . '">';
         return implode("\n", $lines);
     }
 
     /**
-     * Every language of every store: each store's default language, then the further store languages
-     * (?lang=xx) that no store has as its default. R20: a language the current store offers stays in the current store
-     * (its URL, ?lang=xx for a further one): English in the HU store linked to the default store, and the cart was
-     * repriced in EUR (5 490 Ft became 31,67 €). Only a language the store does not offer leads to another store.
+     * The languages of the current store, all on its own URL: the default without ?lang=, a further one with it (R20:
+     * English in the HU store stays in the HU store and its currency). R21: languages of other stores are no longer
+     * language links: Czech of the SK store and the CZ store were both "CS" (one in euros, the SK and CZ stores no
+     * longer linked each other), and "HU" moved the cart to the HU store and forints unannounced. See storeLinks().
      * @return list<array{url: string, label: string, active: bool}>
      */
     private static function languageLinks(array $alternates): array
     {
         $current = StoreContext::current();
-        $own = array_map('strtolower', array_map('strval', (array)($current->config()['languages'] ?? [])));
-        $ownPrefix = (string)($current->config()['url_prefix'] ?? '');
-        $url = static function (string $locale, string $prefix, bool $further) use ($alternates, $own, $ownPrefix, $current): string {
-            if (in_array(strtolower($locale), $own, true) || strtolower($locale) === strtolower($current->defaultLocale())) {
-                $here = Template::url($ownPrefix . $alternates['pathNoPrefix']);
-                return strtolower($locale) === strtolower($current->defaultLocale()) ? $here : Bootstrap::withLang($here, $locale);
-            }
-            $there = Template::url($prefix . $alternates['pathNoPrefix']);
-            return $further ? Bootstrap::withLang($there, $locale) : $there;
-        };
+        $default = strtolower($current->defaultLocale());
+        $here = Template::url((string)($current->config()['url_prefix'] ?? '') . $alternates['pathNoPrefix']);
+        $further = array_map(static fn($locale): string => strtolower((string)$locale), (array)($current->config()['languages'] ?? []));
+        return array_map(static fn(string $locale): array => [
+            'url' => $locale === $default ? $here : Bootstrap::withLang($here, $locale),
+            'label' => strtoupper($locale),
+            'active' => I18n::locale() === $locale,
+        ], array_values(array_unique(array_merge([$default], $further))));
+    }
+
+    /**
+     * R21: every public store by country and currency ("CZ · Kč", the store name as title), on the same page in that
+     * store's own language. Changing the store changes the currency the cart is priced in, so it is a separate choice
+     * (StorefrontCartAction::noteStoreCurrency() tells a shopper with a cart). Empty with a single public store.
+     * @return list<array{url: string, label: string, title: string, active: bool}>
+     */
+    private static function storeLinks(array $alternates): array
+    {
+        $config = Bootstrap::stores();
+        $currentId = StoreContext::current()->id();
         $links = [];
-        foreach ($alternates['alternates'] as $locale => $prefix) {
+        foreach (is_array($config['stores'] ?? null) ? $config['stores'] : [] as $id => $store) {
+            if (!is_array($store) || !StoreContext::isPublicConfig($store)) continue;
+            $country = strtoupper((string)($store['legal']['country'] ?? ''));
+            $name = (string)($store['name'] ?? $id);
             $links[] = [
-                'url' => $url((string)$locale, (string)$prefix, false),
-                'label' => strtoupper((string)$locale),
-                'active' => I18n::locale() === $locale,
+                'url' => Template::url((string)($store['url_prefix'] ?? '') . $alternates['pathNoPrefix']),
+                'label' => preg_match('/^[A-Z]{2}$/', $country) ? $country . ' · ' . I18n::priceFormat(strtolower((string)($store['currency'] ?? '')))['symbol'] : $name,
+                'title' => $name,
+                'active' => (string)($store['id'] ?? $id) === $currentId,
             ];
         }
-        foreach ($alternates['secondary'] as $locale => $prefix) {
-            $links[] = [
-                'url' => $url((string)$locale, (string)$prefix, true),
-                'label' => strtoupper((string)$locale),
-                'active' => I18n::locale() === $locale,
-            ];
-        }
-        return $links;
+        return count($links) > 1 ? $links : [];
     }
 
     /** Organization/WebSite of the current store on its home page; the category trail on a category page. */

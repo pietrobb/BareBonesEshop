@@ -1841,6 +1841,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'choose_option' => 'Wybierz wariant',
     'cart_added_notice' => 'Produkt został dodany do koszyka.',
     'cart_quantity_clamped' => 'Dodano. Ilość w koszyku jest ograniczona do {count}.',
+    'cart_currency_changed' => 'Koszyk jest teraz w walucie {currency} ({store}): obowiązują ceny tego sklepu.',
+    'store_switch' => 'Sklep i waluta',
     'wishlist.added' => 'Dodano do listy życzeń.',
     'wishlist.removed' => 'Usunięto z listy życzeń.',
     'checkout.error.invalid_country' => 'Wybierz prawidłowy kraj.',
