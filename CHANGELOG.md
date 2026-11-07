@@ -28,7 +28,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package) writes generated columns into the dump and
   MySQL refuses it on restore. The 2.1.2 updater refuses this package when it restores its pre-update dump into the
   probe database (`doctor` reports the backup probe as FAIL, `apply` stops before changing a file with the MySQL
-  restore error, not the client name). From 2.1.3 on `doctor`, `check` and `apply` name the client, and
+  restore error, not the client name), but only when the dump holds a row of `categories` or `invoices`, the two
+  tables with a generated column: a shop with no category and no invoice yet passes the probe and is updated, and
+  its later snapshots stop restoring once it has one. Install the MySQL client before the update either way. From
+  2.1.3 on `doctor`, `check` and `apply` name the client whether or not those tables hold rows, and
   `php cli/migrate.php apply` runs no migration because its pre-migration backup fails. Install
   the MySQL 8.x client and set `update_mysql_dump_binary` and `update_mysql_client_binary` to it
   (`docs/AI_UPDATE_RUNBOOK.md`); the check names the generated columns concerned (`categories.parent_id_uniq` and
@@ -72,6 +75,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   confirmed sent the welcome e-mail again; now only the link that confirms the address does. Tests: the web worker
   test's `php -S` server inherits the suite's environment, so it no longer opens the developer's `config.php` and
   database.
+- **A rollback of code only keeps a failed migration's window** (review round 20, low). Like an update of code only,
+  a rollback that restores no database leaves the schema of a `php cli/migrate.php apply` stopped half-way as it was,
+  so the shop stays closed and `update.php rollback` warns (it reopened the shop). A rollback that restores the
+  database still lifts the window. `README.md` and the runbook say which step lifts which window, and the upgrade
+  note on a MariaDB dump client says that the 2.1.2 updater refuses it only when `categories` or `invoices` hold rows.
 - **Feed and sitemap cache** (review round 20, low). The catalog fingerprint read every product row (a count and the
   round 19 price sums) on every feed and sitemap request, also when the file came from the cache: about 0.1 s on SQLite
   and 0.7 s on MySQL with 200 000 products. It now reads only indexes (the newest product id and `updated_at`); a
@@ -88,7 +96,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   digits as digit grouping applied in every currency, so a CSV import or XML feed from an ERP exporting three decimals
   stored "12.500" as 12 500,00 € instead of 12,50 € and "99.990" as 99 990 €, without a warning. The rule now holds
   only in a currency shown in whole units (CZK, HUF: "1.234 Kč" is 1 234 Kč); in a currency with cents the separator is
-  the decimal mark. An existing product's price is read in its own currency.
+  the decimal mark. An existing product's price is read in its own currency. A value finer than a cent ("1.234 €",
+  which may mean 1 234 € or 1,23 €; "0.125") is refused with a row or feed item error, as the admin price field refuses
+  it, instead of being rounded; zeros past the cent ("12.500", "19.900000") are still read.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose

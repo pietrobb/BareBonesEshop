@@ -7,11 +7,11 @@
 // the providers belong to.
 echo "\n--- R19: imported products take the catalog's currency, '1.234' is 1 234, provider amounts in the providers' currency ---\n";
 
-assert_equals([123400, 123400, 1299000, 1299000, 1990, 123450, 13, 12345600],
+assert_equals([123400, 123400, 1299000, 1299000, 1990, 123450, 12345600],
     [Import::parsePriceToCents('1.234', 'czk'), Import::parsePriceToCents('1.234 Kč', 'czk'), Import::parsePriceToCents('12,990 Ft', 'huf'),
         Import::parsePriceToCents('12 990 Ft', 'huf'), Import::parsePriceToCents('19.90', 'huf'), Import::parsePriceToCents('1.234,50', 'czk'),
-        Import::parsePriceToCents('0.125', 'czk'), Import::parsePriceToCents('123.456', 'huf')],
-    'R19 import: in CZK/HUF a single separator before three digits groups them ("1.234 Kč" is 1 234, was 1,23); "0.125" keeps its decimal mark (R20: only there)');
+        Import::parsePriceToCents('123.456', 'huf')],
+    'R19 import: in CZK/HUF a single separator before three digits groups them ("1.234 Kč" is 1 234, was 1,23); "0.125" is refused (R20)');
 
 $r19cStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r19cSavedStores = $r19cStoresProp->getValue();
