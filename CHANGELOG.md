@@ -57,6 +57,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
   snapshot misses a file is refused before it changes anything and gives the shop back the window it had (it was marked
   failed and stayed closed). `docs/AI_UPDATE_RUNBOOK.md` describes the maintenance window instead of saying there is none.
+- **Cart and manual payment limits** (review round 19, low). Adding to the cart stops at 100 different items, as a
+  restore already did (the storefront says the cart is full). A restore that lists the same new item twice counts it
+  once (2 × 30 gave 60). On the order detail, "Paid" with the amount `0` is refused (it paid the whole order; an empty
+  amount still means the order total), and an amount above the order total is recorded with a warning naming the excess.
 - **The merchant's withdrawal e-mail names only the withdrawn items** (review round 19, medium). It listed every line
   of the order and the order total; it now lists the lines of that statement and their sum (new template variable
   `{{withdrawal_total}}`; `{{order_total}}` is still the whole order for customised templates). On a partly shipped
@@ -270,6 +274,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
   notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
   `starter.json` when built from a tag.
+- **The test suite leaves the developer's database alone** (review round 19, medium). The suite config kept the
+  developer's `db_sqlite_path`, so the processes the suite starts opened that database and marked its `event_outbox`
+  rows delivered; a theme-check fixture appended its log lines to the developer's `application.jsonl`. The suite's
+  database is now the one in its own private directory, child processes included.
 - **Imported products are priced in their catalog's currency** (review round 19, medium). A product created by a CSV
   import, the API, a feed or an ERP sync in a HUF or CZK catalog was stored as EUR ("12 990 Ft" became 12 990,00 €)
   and could not be sold in its store; it now takes the currency of the store the catalog belongs to, and an existing

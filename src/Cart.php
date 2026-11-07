@@ -6,7 +6,7 @@
 class Cart {
     /** Most units of one line: every add/update path (JSON API, storefront form, reorder, restore) is capped here. */
     public const MAX_QTY = 99;
-    /** Most lines a cart restore brings back (R18: one request sent 20 000). */
+    /** Most lines a cart holds: adding (R19) and restoring (R18: one request sent 20 000). */
     public const MAX_LINES = 100;
     /** Entries of a restore request that are read at all (duplicates and invalid ones included). */
     public const MAX_RESTORE_LINES = 200;
@@ -74,6 +74,8 @@ class Cart {
         if ($error !== null) return ['ok' => false, 'error' => $error];
         $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
         $previous = $_SESSION['cart'][$key] ?? null;
+        // R19: a new line only while the cart holds fewer than MAX_LINES (cart_add took any number of lines).
+        if ($previous === null && count(self::get()) >= self::MAX_LINES) return ['ok' => false, 'error' => 'cart_full'];
         $requested = (int)(self::get()[$key]['qty'] ?? 0) + max(1, $qty);
         self::add($productId, $variantId, max(1, min(self::MAX_QTY, $qty)));
         $summary = self::enriched();
@@ -477,7 +479,8 @@ class Cart {
             $variantId = isset($item['variant_id']) && $item['variant_id']
                 ? Security::int($item['variant_id']) : null;
             $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
-            if ($productId <= 0 || isset($restored[$key])) continue;
+            // R19: a new line is recorded as null, which isset() missed: a duplicate entry added its quantity again (2 × 30 → 60).
+            if ($productId <= 0 || array_key_exists($key, $restored)) continue;
             $previous = $_SESSION['cart'][$key] ?? null;
             if ($previous === null && $lines >= self::MAX_LINES) break;
             // A product with variants is skipped without one of its own variants (no base-price line).
