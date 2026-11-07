@@ -15,6 +15,16 @@ class Str {
         return mb_strtolower(trim($email), 'UTF-8');
     }
 
+    /**
+     * R22: at most $max characters of $s for a message, with "…" and the full length when cut. A feed value quoted
+     * whole in an error (a 1 MB price) made a 9 MB admin page.
+     */
+    public static function clip(string $s, int $max = 300): string {
+        if (!mb_check_encoding($s, 'UTF-8')) $s = mb_convert_encoding($s, 'UTF-8', 'UTF-8');
+        $length = mb_strlen($s, 'UTF-8');
+        return $length <= $max ? $s : mb_substr($s, 0, $max, 'UTF-8') . "… ({$length} characters)";
+    }
+
     /** Diacritics map for Central European languages (SK/CZ/DE/PL) */
     private static array $diacritics = [
         'á'=>'a','ä'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ĺ'=>'l','ľ'=>'l',

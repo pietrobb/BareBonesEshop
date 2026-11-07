@@ -127,7 +127,7 @@ class Import {
                 $imported++;
             } catch (\Throwable $e) {
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
-                $errors[] = "Line {$lineNum} (SKU: " . ($data['sku'] ?? '?') . "): " . $e->getMessage();
+                $errors[] = Str::clip("Line {$lineNum} (SKU: " . Str::clip((string)($data['sku'] ?? '?'), 64) . "): " . $e->getMessage());
             }
         }
 
@@ -706,10 +706,11 @@ class Import {
         } else {
             $raw = trim((string)$price);
             if ($raw === '') return 0;
+            $shown = Str::clip($raw, 60);
             // Currency signs and codes around the number, the Czech/Slovak ",-" for whole amounts, digit grouping.
             $s = trim(preg_replace('/\p{Sc}|(?<![\p{L}\d])(?:[A-Za-z]{3}|K[čc]|z[łl]|Ft|kr|lei)(?![\p{L}\d])/u', '', $raw) ?? '');
             $s = preg_replace("/[\\s\\x{00A0}\\x{202F}']+/u", '', preg_replace('/[.,]-$/', '', $s) ?? '') ?? '';
-            if (!preg_match('/^-?\d[\d.,]*$/', $s)) throw new \InvalidArgumentException("Not a price: {$raw}");
+            if (!preg_match('/^-?\d[\d.,]*$/', $s)) throw new \InvalidArgumentException("Not a price: {$shown}");
             $lastComma = strrpos($s, ',');
             $lastDot = strrpos($s, '.');
             $grouping = null;
@@ -719,7 +720,7 @@ class Import {
                 $other = $decimal === ',' ? '.' : ',';
                 $lastDecimal = strrpos($s, $decimal);
                 if (substr_count($s, $decimal) > 1 || ($lastDecimal !== false && strrpos($s, $other) > $lastDecimal)) {
-                    throw new \InvalidArgumentException("Not a price: {$raw} (the decimal mark is \"{$decimal}\")");
+                    throw new \InvalidArgumentException("Not a price: {$shown} (the decimal mark is \"{$decimal}\")");
                 }
                 if (str_contains($s, $other)) $grouping = $other;
                 if ($lastDecimal === false) $decimal = '';
@@ -732,21 +733,21 @@ class Import {
                     [$grouping, $decimal] = [$decimal, ''];
                 } elseif (preg_match('/^-?[1-9]\d{0,2}[.,]\d{3}$/', $s)) {
                     // "0.125" (a leading zero) and "1299.000" (four digits before it) are decimals; "199.000" is not known.
-                    throw new \InvalidArgumentException("Not a price: {$raw} (ambiguous: write e.g. 199.00 or 199000, or declare the feed's decimal mark)");
+                    throw new \InvalidArgumentException("Not a price: {$shown} (ambiguous: write e.g. 199.00 or 199000, or declare the feed's decimal mark)");
                 }
             }
             if ($grouping !== null) {
                 $whole = $decimal === '' ? $s : substr($s, 0, (int)strrpos($s, $decimal));
                 $sep = preg_quote($grouping, '/');
-                if (!preg_match('/^-?\d{1,3}(?:' . $sep . '\d{3})+$/', $whole)) throw new \InvalidArgumentException("Not a price: {$raw}");
+                if (!preg_match('/^-?\d{1,3}(?:' . $sep . '\d{3})+$/', $whole)) throw new \InvalidArgumentException("Not a price: {$shown}");
                 $s = str_replace($grouping, '', $s);
             }
             if ($decimal !== '') $s = str_replace($decimal, '.', $s);
-            if (!preg_match('/^-?\d+(?:\.(\d+))?$/', $s, $digits)) throw new \InvalidArgumentException("Not a price: {$raw}");
+            if (!preg_match('/^-?\d+(?:\.(\d+))?$/', $s, $digits)) throw new \InvalidArgumentException("Not a price: {$shown}");
             // R20: as in the admin price field, a part finer than a cent is refused, not rounded: "1.234 €" may be 1 234 €
             // or 1,234 €. Zeros past the cent are an ERP's fixed three decimals ("12.500" is 12,50).
             if (isset($digits[1]) && rtrim(substr($digits[1], 2), '0') !== '') {
-                throw new \InvalidArgumentException("Not a price: {$raw} (finer than a cent, write e.g. 1234.00 or 1.23)");
+                throw new \InvalidArgumentException("Not a price: {$shown} (finer than a cent, write e.g. 1234.00 or 1.23)");
             }
             // Bounded before the int cast, which wraps a float beyond PHP_INT_MAX (to 0 and the like).
             $float = round((float)$s * 100);
@@ -779,7 +780,7 @@ class Import {
     private static function centsField(mixed $value, string $field): int {
         if (is_string($value) && preg_match('/^\d{1,10}$/', $value)) $value = (int)$value;
         if (!is_int($value) || $value < 0 || $value > self::MAX_CENTS) {
-            throw new \InvalidArgumentException("Invalid {$field}: " . (is_scalar($value) ? var_export($value, true) : get_debug_type($value)) . ' (integer cents expected)');
+            throw new \InvalidArgumentException("Invalid {$field}: " . (is_scalar($value) ? Str::clip(var_export($value, true), 60) : get_debug_type($value)) . ' (integer cents expected)');
         }
         return $value;
     }
