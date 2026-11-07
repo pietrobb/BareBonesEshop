@@ -99,6 +99,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Feed messages only where a price was kept, `decimal` checked, the feed status translated** (review round 22,
+  low). "Price kept" was listed for SKUs that are not in the catalog (skipped anyway in "price and stock") and when the
+  price was updated and only the compare price was refused, which filled a supplier feed's error list. A SKU not in
+  the catalog gets no message, "price and stock" (which never writes a compare price) does not report one, and a
+  refused compare price says "compare price kept". Saving a feed refuses a `decimal` other than `","` or `"."`, or one
+  on a mapping that is not `price_to_cents` (it was saved and refused every price at the next sync); the README
+  documents it under "Supplier feeds". A CSV import's ambiguous price no longer advises declaring the feed's decimal
+  mark (a CSV import has no such setting); a feed's still names `decimal`. With `"decimal": ","` a `0.500` was read as
+  500,00: grouped digits never start with a zero, so it is refused. The feed status and the refused items are shown
+  in the admin's language (they were English in the SK and HU admin); CLI and logs keep the English text.
 - **Admin and documents** (review round 21, low). Audit-log refund notes and the amount a Stripe refund webhook
   records were in cents ("Manual refund of 1647000 completed by …" for 16 470 Ft): they are written in the order's
   currency, and older entries are shown that way in the audit log. Cash on delivery of an order shipped in several

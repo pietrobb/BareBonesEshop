@@ -146,11 +146,14 @@ class FeedImport {
                 // R21: a price that is not one (ambiguous "199.000", finer than a cent) is reported and left out; the
                 // product keeps its price, its stock still syncs, and it does not count towards the error limit.
                 $refused = self::takePrices($mapped);
-                if ($refused !== []) {
+                // R22: "price and stock" never writes a compare price, and a SKU not in the catalog is skipped below:
+                // "price kept" was listed for products that do not exist and when the price itself was updated.
+                if ($importMode === self::MODE_PRICE_STOCK) unset($refused['compare_price']);
+                $isNew = $refused !== [] && !self::productInCatalog((string)$mapped['sku'], $db);
+                if ($refused !== [] && ($importMode === self::MODE_UPSERT || !$isNew)) {
                     $result['prices_refused']++;
-                    $isNew = $importMode === self::MODE_UPSERT && !self::productInCatalog((string)$mapped['sku'], $db);
-                    $result['errors'][] = "Item #{$i} (SKU {$mapped['sku']}): price refused, " . ($isNew ? 'product not created' : 'price kept')
-                        . ': ' . implode('; ', $refused);
+                    $outcome = $isNew ? 'product not created' : (isset($refused['price']) ? 'price kept' : 'compare price kept');
+                    $result['errors'][] = "Item #{$i} (SKU {$mapped['sku']}): price refused, {$outcome}: " . implode('; ', $refused);
                     if ($isNew) {
                         $db->exec('RELEASE SAVEPOINT row_import');
                         continue;
@@ -291,8 +294,8 @@ class FeedImport {
 
     /**
      * The item's prices as cents (a plain mapping carries the feed's text); a value that is not a price is dropped from
-     * $mapped. Returns the reasons of the refused ones, also of those price_to_cents refused in mapFields().
-     * @return list<string>
+     * $mapped. Returns the reasons of the refused ones by field, also of those price_to_cents refused in mapFields().
+     * @return array<string, string>
      */
     private static function takePrices(array &$mapped): array {
         $refused = $mapped[self::REFUSED] ?? [];
@@ -303,10 +306,30 @@ class FeedImport {
                 $mapped[$field] = Import::parsePriceToCents((string)$mapped[$field]);
             } catch (InvalidArgumentException $e) {
                 unset($mapped[$field]);
-                $refused[] = $e->getMessage();
+                $refused[$field] = self::refusal($e);
             }
         }
         return $refused;
+    }
+
+    /** R22: the hint to declare the decimal mark belongs to a feed; a CSV import has no such setting. */
+    private static function refusal(InvalidArgumentException $e): string {
+        $message = $e->getMessage();
+        return str_ends_with($message, ' or 199000)')
+            ? substr($message, 0, -1) . ', or declare the feed\'s decimal mark: "transform": "price_to_cents", "decimal": "," or ".")'
+            : $message;
+    }
+
+    /**
+     * R22: a "decimal" the price reading does not know was saved and only refused every price at the next sync. Returns
+     * the feed field whose mapping declares an unknown decimal mark, or one on a mapping that is not price_to_cents.
+     */
+    public static function badDecimalMapping(array $fieldMap): ?string {
+        foreach ($fieldMap as $source => $target) {
+            if (!is_array($target) || !array_key_exists('decimal', $target)) continue;
+            if (!in_array($target['decimal'], ['.', ','], true) || ($target['transform'] ?? null) !== 'price_to_cents') return (string)$source;
+        }
+        return null;
     }
 
     private static function productInCatalog(string $sku, PDO $db): bool {
@@ -583,7 +606,7 @@ class FeedImport {
             } catch (InvalidArgumentException $e) {
                 // A refused price is left out (and reported by applyItems): the item's stock still syncs.
                 if (!in_array($destField, self::PRICE_FIELDS, true)) throw $e;
-                $mapped[self::REFUSED][] = $e->getMessage();
+                $mapped[self::REFUSED][$destField] = self::refusal($e);
                 continue;
             }
 
