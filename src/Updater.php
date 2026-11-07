@@ -831,8 +831,9 @@ final class Updater
 
     /**
      * R22: a rollback stopped half-way had put back the old release's updater first; the next rollback then ran that
-     * updater, which knew nothing of the window and opened the half-restored shop. The updater's own files go last, so
-     * until every other file is back the updater that wrote the window finishes the rollback.
+     * updater, which knew nothing of the window and opened the half-restored shop. The updater's own files go last, after
+     * every other file, the version state and the SQLite database, so until the rest is back the updater that wrote the
+     * window finishes the rollback.
      * @param list<array> $rows snapshot file rows
      * @return list<array>
      */
@@ -918,16 +919,21 @@ final class Updater
                 $touched = true;
             }
             // R19: touched once a file actually changed (it was set before the first one, so a failure there closed the shop).
-            foreach (self::updaterFilesLast($metadata['files']) as $row) {
-                $path = (string)$row['path'];
-                if (!empty($row['existed'])) {
-                    $this->installFile($directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR
-                        . str_replace('/', DIRECTORY_SEPARATOR, $path), $path);
-                } else {
-                    $this->deleteFile($path);
+            $restoreFiles = function (array $rows) use ($directory, &$touched): void {
+                foreach ($rows as $row) {
+                    $path = (string)$row['path'];
+                    if (!empty($row['existed'])) {
+                        $this->installFile($directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR
+                            . str_replace('/', DIRECTORY_SEPARATOR, $path), $path);
+                    } else {
+                        $this->deleteFile($path);
+                    }
+                    $touched = true;
                 }
-                $touched = true;
-            }
+            };
+            $ordered = self::updaterFilesLast($metadata['files']);
+            $isUpdaterFile = static fn(array $row): bool => in_array((string)($row['path'] ?? ''), self::UPDATER_FILES, true);
+            $restoreFiles(array_values(array_filter($ordered, static fn(array $row): bool => !$isUpdaterFile($row))));
 
             $statePath = $this->statePath();
             if (!empty($metadata['state_existed'])) {
@@ -951,6 +957,9 @@ final class Updater
                         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), $numbering);
                 }
             }
+
+            // Last of all, after the version state and the SQLite database: the updater's own files.
+            $restoreFiles(array_values(array_filter($ordered, $isUpdaterFile)));
         };
 
         if ($sqliteSource === null) {

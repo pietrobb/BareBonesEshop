@@ -110,7 +110,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Rollbacks newest first, the updater restored last** (review round 22, low). A rollback stopped half-way had already
   put back the old release's `cli/update.php` and `src/Updater.php` (the snapshot's file order); the next rollback ran
   that updater, which did not know the failed window and opened the half-restored shop. The updater's own files are now
-  restored after every other file. A rollback of a snapshot while an update applied after it is still installed, or
+  restored after every other file, the version state and the SQLite database, so a rollback stopped at the state or
+  the database step also leaves the updater that wrote the window. A rollback of a snapshot while an update applied after it is still installed, or
   half-applied after its automatic rollback failed, restored only its own files next to the later release's others;
   it is refused before it changes anything and names the rollback to run first. `update_snapshots_keep` no longer
   deletes the snapshot whose rollback a failed `.maintenance` names (an update during that window could delete it, and
