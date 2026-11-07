@@ -166,6 +166,8 @@ $aunCacheDir = new ReflectionProperty(Cache::class, 'cacheDir');
 if (PHP_VERSION_ID < 80100) $aunCacheDir->setAccessible(true);
 $aunPreviousCacheDir = $aunCacheDir->getValue();
 Cache::setDir($aunRoot . '/cache');
+// R20: an entry built in the second of the latest catalog change is rebuilt after it; build after it.
+for ($aunWait = 0; $aunWait < 40 && PublicFeedCache::catalogState()['racy']; $aunWait++) usleep(100000);
 $aunCalls = 0;
 $aunWriter = static function ($out) use (&$aunCalls): void { $aunCalls++; fwrite($out, "<urlset>{$aunCalls}</urlset>"); };
 $aunSend = static function () use ($aunWriter): string { ob_start(); PublicFeedCache::send('aun-sitemap.xml', 'https://shop.example', $aunWriter); return (string)ob_get_clean(); };

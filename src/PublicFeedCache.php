@@ -2,8 +2,9 @@
 /**
  * Cached public catalog artifacts (sitemap parts, merchant feeds) in the active store's cache
  * namespace. An entry is rebuilt when its TTL lapses, after Cache::flush(), as soon as the
- * catalog fingerprint changes (a product/category/CMS page is added, removed or saved — every
- * product and page write bumps updated_at; categories are checksummed), or after Cache::catalogChanged()
+ * catalog fingerprint changes (a product/category/CMS page is added or saved — every product and page
+ * write bumps updated_at; categories are checksummed; R20: an entry built in the second of the latest
+ * change is rebuilt after that second), or after Cache::catalogChanged()
  * of the store's catalog (a product or variant going in or out of stock, a price-list change).
  * R17: a sale that leaves a product in stock changes neither: it moves products.stock_updated_at, not
  * updated_at, so feeds and sitemaps are not rebuilt after every order. Promotions and other stock
@@ -26,7 +27,12 @@ final class PublicFeedCache
     {
         if (!preg_match('/^[a-z0-9][a-z0-9._-]{0,120}$/', $name)) throw new InvalidArgumentException('Invalid feed cache name');
         $key = 'public/' . $name;
-        $fingerprint = hash('sha256', $variant . "\n" . self::catalogFingerprint() . "\n" . Cache::catalogVersion());
+        $state = self::catalogState();
+        $fingerprint = hash('sha256', $variant . "\n" . $state['fingerprint'] . "\n" . Cache::catalogVersion());
+        // R20: an entry built in the second of the latest change is marked: a change later in that second (a rename,
+        // a product taken off sale) leaves MAX(updated_at) as it was, so the marked entry is rebuilt once that second
+        // is over (it was served until the TTL ran out).
+        if ($state['racy']) $fingerprint .= ' racy';
         $file = self::current($key, $ttl, $fingerprint);
         if ($file === null) {
             $lock = self::lock($key);
@@ -97,28 +103,50 @@ final class PublicFeedCache
         }
     }
 
-    /**
-     * Change marker over every store's catalog and CMS pages; '' when tables are missing.
-     * Products and pages carry updated_at. Categories have no updated_at column, so their rows
-     * are folded into a checksum (rename, slug, parent, translation and meta edits change it).
-     * R19: updated_at has whole seconds, so a price saved in the same second as the change the feed was
-     * built after did not change it (the old price was served for up to the TTL); the price sums do.
-     */
+    /** Change marker over every store's catalog and CMS pages (catalogState()); '' when tables are missing. */
     public static function catalogFingerprint(): string
+    {
+        return self::catalogState()['fingerprint'];
+    }
+
+    /** Seconds a latest change may be stamped ahead of the database clock (a timestamp written by PHP) and still count as now. */
+    private const CLOCK_SKEW = 5;
+
+    /**
+     * Products and pages carry updated_at. Categories have no updated_at column, so their rows are folded into a
+     * checksum (rename, slug, parent, translation and meta edits change it). A product deleted in the admin marks the
+     * catalog changed (Cache::catalogVersion()).
+     * R20: read from indexes only (MAX of the primary key and of updated_at); COUNT(*) and the R19 price sums read
+     * every product row on every feed and sitemap request, cached or not (0.7 s on MySQL with 200 000 products).
+     * updated_at has whole seconds: 'racy' says the latest change is in the current second (of the database clock),
+     * so a further change in it would not move the marker.
+     * @return array{fingerprint: string, racy: bool}
+     */
+    public static function catalogState(): array
     {
         try {
             $db = Db::get();
-            $row = $db->query('SELECT
-                    (SELECT COUNT(*) FROM products) AS product_count,
-                    (SELECT MAX(updated_at) FROM products) AS product_updated,
-                    (SELECT SUM(price) + SUM(COALESCE(compare_price, 0)) FROM products) AS product_prices,
-                    (SELECT COUNT(*) FROM pages) AS page_count,
-                    (SELECT MAX(updated_at) FROM pages) AS page_updated')->fetch(PDO::FETCH_NUM);
-            if (!is_array($row)) return '';
-            return implode('|', array_map('strval', $row)) . '|' . self::categoryChecksum($db);
+            $row = $db->query(self::stateSql())->fetch(PDO::FETCH_NUM);
+            if (!is_array($row)) return ['fingerprint' => '', 'racy' => false];
+            $now = strtotime((string)array_pop($row));
+            $latest = max(array_map(static fn(mixed $at): int => is_string($at) && $at !== '' ? (int)strtotime($at) : 0, [$row[1], $row[3]]));
+            return [
+                'fingerprint' => implode('|', array_map('strval', $row)) . '|' . self::categoryChecksum($db),
+                'racy' => $now !== false && $latest >= $now && $latest <= $now + self::CLOCK_SKEW,
+            ];
         } catch (PDOException) {
-            return '';
+            return ['fingerprint' => '', 'racy' => false];
         }
+    }
+
+    private static function stateSql(): string
+    {
+        return 'SELECT
+                (SELECT MAX(id) FROM products) AS product_last,
+                (SELECT MAX(updated_at) FROM products) AS product_updated,
+                (SELECT COUNT(*) FROM pages) AS page_count,
+                (SELECT MAX(updated_at) FROM pages) AS page_updated,
+                ' . Db::now() . ' AS db_now';
     }
 
     private static function categoryChecksum(PDO $db): string

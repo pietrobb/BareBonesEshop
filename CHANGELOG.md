@@ -68,6 +68,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Feed and sitemap cache** (review round 20, low). The catalog fingerprint read every product row (a count and the
+  round 19 price sums) on every feed and sitemap request, also when the file came from the cache: about 0.1 s on SQLite
+  and 0.7 s on MySQL with 200 000 products. It now reads only indexes (the newest product id and `updated_at`); a
+  product deleted in the admin marks the catalog changed. A product renamed, repriced or taken off sale in the same
+  second as another change (`updated_at` has whole seconds) reached the feed only after the 15-minute cache time: an
+  entry built in the second of the latest change is now rebuilt once that second is over.
 - **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
   window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
   the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose

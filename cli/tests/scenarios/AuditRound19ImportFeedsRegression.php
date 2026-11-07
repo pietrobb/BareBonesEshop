@@ -19,6 +19,8 @@ try {
     $r19fWarehouse = (int)$pdo->query("SELECT id FROM warehouses WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
     $pdo->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', ?, 'R19F-STOCK', 5, 0)")->execute([$r19fWarehouse]);
     Cache::setDir($r19fRoot . '/cache');
+    // R20: an entry built in the second of the suite's latest catalog change is rebuilt after it; build after it.
+    for ($r19fWait = 0; $r19fWait < 40 && PublicFeedCache::catalogState()['racy']; $r19fWait++) usleep(100000);
     $r19fCalls = 0;
     $r19fWriter = static function ($out) use (&$r19fCalls): void { $r19fCalls++; fwrite($out, "<feed>{$r19fCalls}</feed>"); };
     $r19fSend = static function () use ($r19fWriter): string {
@@ -52,11 +54,14 @@ try {
     assert_equals([$r19fBefore + 1, $r19fBefore + 1], [$r19fAfterIn, $r19fCalls],
         'R19 feeds: an ERP sync bringing the product back in stock rebuilds the feed, one keeping it in stock does not');
 
-    // A price saved in the same second as the change the feed was built after (same updated_at) rebuilds it.
-    $r19fSecond = (string)$r19fRow()[0];
+    // A price saved in the same second as the change the feed was built after (same updated_at) rebuilds it once that
+    // second is over (R20: the entry built in the second of the latest change is marked, no longer the price sums).
+    $r19fSecond = (string)$pdo->query('SELECT ' . (Db::isSqlite() ? "datetime('now', '+1 second')" : 'NOW() + INTERVAL 1 SECOND'))->fetchColumn();
+    $pdo->prepare('UPDATE products SET updated_at = ? WHERE id = 9983')->execute([$r19fSecond]);
     $r19fSend();
     $r19fBefore = $r19fCalls;
     $pdo->prepare('UPDATE products SET price = 1400, updated_at = ? WHERE id = 9983')->execute([$r19fSecond]);
+    for ($r19fWait = 0; $r19fWait < 40 && (string)$pdo->query('SELECT ' . Db::now())->fetchColumn() <= $r19fSecond; $r19fWait++) usleep(100000);
     assert_equals('<feed>' . ($r19fBefore + 1) . '</feed>', $r19fSend(),
         'R19 feeds: a price change within the second of the previous change rebuilds the feed (was: old price for up to 15 minutes)');
 } catch (Throwable $e) {
