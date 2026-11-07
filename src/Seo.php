@@ -14,7 +14,7 @@ class Seo {
         // Without app_url the links stay relative, but keep the deployment base path (subdirectory installs).
         if ($base === '') $base = Template::baseUrl();
         // A store's further language (?lang=xx, Bootstrap::initLocale) is its own indexable URL.
-        $secondary = Bootstrap::secondaryLocale();
+        $secondary = Bootstrap::canonicalSecondaryLocale();
         $canonical = $base . ($secondary !== null ? Bootstrap::withLang($path, $secondary) : $path);
         $e = static fn(string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $lines = [

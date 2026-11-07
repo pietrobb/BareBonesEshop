@@ -68,6 +68,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The language switcher stays in the store** (review round 20, medium). In the HU and CZ stores the EN link led to
+  another store (`/?lang=en` or `/en/`) and the cart was repriced in its currency (5 490 Ft became 31,67 €). A language
+  the current store offers in `languages` now opens the same page of the current store (`/hu/?lang=en`), with the same
+  cart and currency; only a language the store does not offer leads to the store that has it. English chosen in the HU
+  store also stays on the next page: links, forms and the storefront API keep `?lang=en` even though English is the
+  `/en/` store's own language (the canonical URL still leaves English to that store).
 - **Import prices with three decimals** (review round 20, medium). The round 19 rule reading one separator before three
   digits as digit grouping applied in every currency, so a CSV import or XML feed from an ERP exporting three decimals
   stored "12.500" as 12 500,00 € instead of 12,50 € and "99.990" as 99 990 €, without a warning. The rule now holds
