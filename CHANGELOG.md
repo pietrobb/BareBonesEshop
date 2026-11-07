@@ -79,6 +79,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **No off-site link from the store switch, error messages of bounded length** (review round 22, low). On
+  `/cs//evil.example/` (a 404) the store switch linked the SK store as `//evil.example/`, a protocol-relative link to
+  another site: the store prefix was cut from a path with a doubled slash (older, round 21 extended it to every store
+  with a prefix). Repeated slashes in the request path are collapsed, and a path left after the prefix never starts
+  with `//` or `/\` (store and language links, canonical, hreflang). An import, feed or ERP sync error quoted the
+  refused value whole: a feed with a 1 MB price made a 9 MB admin page. The value is quoted with at most 60 characters
+  and its length, a SKU with 64, each error line with 300 (`Str::clip()`), and each line of an admin message too.
 - **Admin and documents** (review round 21, low). Audit-log refund notes and the amount a Stripe refund webhook
   records were in cents ("Manual refund of 1647000 completed by …" for 16 470 Ft): they are written in the order's
   currency, and older entries are shown that way in the audit log. Cash on delivery of an order shipped in several

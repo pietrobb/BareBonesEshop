@@ -149,8 +149,8 @@ class FeedImport {
                 if ($refused !== []) {
                     $result['prices_refused']++;
                     $isNew = $importMode === self::MODE_UPSERT && !self::productInCatalog((string)$mapped['sku'], $db);
-                    $result['errors'][] = "Item #{$i} (SKU {$mapped['sku']}): price refused, " . ($isNew ? 'product not created' : 'price kept')
-                        . ': ' . implode('; ', $refused);
+                    $result['errors'][] = Str::clip("Item #{$i} (SKU " . Str::clip((string)$mapped['sku'], 64) . '): price refused, '
+                        . ($isNew ? 'product not created' : 'price kept') . ': ' . implode('; ', $refused));
                     if ($isNew) {
                         $db->exec('RELEASE SAVEPOINT row_import');
                         continue;
@@ -180,7 +180,7 @@ class FeedImport {
 
                 $db->exec('RELEASE SAVEPOINT row_import');
             } catch (\Throwable $e) {
-                $result['errors'][] = "Item #{$i}: {$e->getMessage()}";
+                $result['errors'][] = Str::clip("Item #{$i}: {$e->getMessage()}");
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
                 if (++$itemErrors > self::ERROR_LIMIT) {
                     $complete = false;
