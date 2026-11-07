@@ -514,7 +514,12 @@ successful `migrate.php apply`, an update that runs the migrations or a rollback
 restores the database; an update or rollback of code only leaves that schema as it
 was and keeps the shop closed (it warns). A failed update or rollback is lifted only
 by the rollback the file names (`--snapshot=...`); any other update or rollback keeps
-the shop closed and warns.
+the shop closed and warns, and `update_snapshots_keep` never deletes the snapshot the
+file names. Updates are rolled back newest first: a rollback is refused while an
+update applied after its snapshot (or one half-applied, whose automatic rollback
+failed) is still installed, and it names the rollback to run first. A rollback puts
+the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so one
+that stops half-way is finished by the updater that started it.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The
