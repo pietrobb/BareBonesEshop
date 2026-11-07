@@ -71,6 +71,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **One welcome e-mail per account** (review round 20, low). Every further confirmation link of an account already
+  confirmed sent the welcome e-mail again; now only the link that confirms the address does. Tests: the web worker
+  test's `php -S` server inherits the suite's environment, so it no longer opens the developer's `config.php` and
+  database.
 - **A rollback of code only keeps a failed migration's window** (review round 20, low). Like an update of code only,
   a rollback that restores no database leaves the schema of a `php cli/migrate.php apply` stopped half-way as it was,
   so the shop stays closed and `update.php rollback` warns (it reopened the shop). A rollback that restores the
