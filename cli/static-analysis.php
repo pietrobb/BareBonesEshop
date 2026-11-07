@@ -222,7 +222,8 @@ $architectureBudgets = [
     // +4 lines, +1 coupling R11: payment and refund amounts are typed in the order currency, not in cents (Money).
     // +2 lines R15: the status select starts on an empty "choose" option (it preselected Cancelled for some orders).
     // +2 lines R16: a payment returned by hand offers no "Request refund" (nothing executes it) and its manual refund form names a request left in flight.
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 937, 'functions' => 16, 'max_function_lines' => 316, 'coupling' => 23],
+    // +9 lines R19: "Paid" with the amount 0 is refused, an amount above the order total is recorded with a warning.
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 946, 'functions' => 16, 'max_function_lines' => 316, 'coupling' => 23],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
@@ -299,7 +300,7 @@ $architectureBudgets = [
     'src/Entrypoints/Storefront/AccountClaimPages.php' => ['lines' => 33, 'functions' => 1, 'max_function_lines' => 28, 'coupling' => 5],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
-    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 147, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link; R19: cart_full text */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 148, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // R10 UX8: guest order status lookup, back-in-stock form, checkout/confirmation account views; the rules live in BackInStock and GuestCheckoutAccount.
     // +4 lines R11 H1: the confirmation page's offer e-mails the account link instead of taking a password.
     // +26 lines, +1 function R15: the back-in-stock confirmation page (double opt-in); the rules live in BackInStock.

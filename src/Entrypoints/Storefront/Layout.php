@@ -123,6 +123,7 @@ $runtimeConfig = [
         'variant_invalid' => I18n::t('variant_invalid'),
         'product_invalid' => I18n::t('product_invalid'),
         'product_unavailable' => I18n::t('product_unavailable'),
+        'cart_full' => I18n::t('cart_full'),
         'free' => I18n::t('free'),
         'quantityClamped' => I18n::t('cart_quantity_clamped'),
         'shippingLoading' => I18n::t('shipping_loading'),

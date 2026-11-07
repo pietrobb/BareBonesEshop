@@ -52,6 +52,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Cart and manual payment limits** (review round 19, low). Adding to the cart stops at 100 different items, as a
+  restore already did (the storefront says the cart is full). A restore that lists the same new item twice counts it
+  once (2 × 30 gave 60). On the order detail, "Paid" with the amount `0` is refused (it paid the whole order; an empty
+  amount still means the order total), and an amount above the order total is recorded with a warning naming the excess.
 - **The merchant's withdrawal e-mail names only the withdrawn items** (review round 19, medium). It listed every line
   of the order and the order total; it now lists the lines of that statement and their sum (new template variable
   `{{withdrawal_total}}`; `{{order_total}}` is still the whole order for customised templates). On a partly shipped

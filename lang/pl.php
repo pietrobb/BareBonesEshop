@@ -699,6 +699,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_error' => 'Błąd podczas zmiany statusu płatności.',
     'admin.order.msg.paid_on_cancelled' => 'Zamówienie jest anulowane i pozostaje anulowane: płatność została zarejestrowana, trzeba ją zwrócić klientowi i zgłoszono incydent.',
     'admin.order.msg.paid_partial' => '{amount} to mniej niż kwota zamówienia {total} (brakuje {missing}): częściowa płatność nie opłaca zamówienia. Zarejestruj płatność, gdy wpłynie pełna kwota.',
+    'admin.order.msg.paid_zero' => 'Kwota 0 nie jest płatnością. Wpisz otrzymaną kwotę lub zostaw pole puste dla pełnej kwoty zamówienia.',
+    'admin.order.msg.paid_over' => 'Zarejestrowano {amount}, o {over} więcej niż kwota zamówienia {total}: zwróć różnicę klientowi.',
     'admin.order.msg.refund_amount' => 'Kwota zwrotu musi mieścić się w dostępnym saldzie.',
     'admin.order.msg.refund_requested' => 'Utworzono żądanie zwrotu.',
     'admin.order.msg.manual_refund_recorded' => 'Ręczny zwrot został zapisany.',
@@ -1791,6 +1793,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'powered_by' => 'Napędzane przez BareBones E-shop', 'added_to_cart' => 'Dodano ✓',
     'select_variant' => 'Wybierz wariant.', 'cart_error' => 'Nie udało się dodać produktu.', 'variant_required' => 'Wybierz wariant.',
     'variant_invalid' => 'Wybrany wariant jest nieprawidłowy.', 'product_invalid' => 'Produkt jest niedostępny.', 'product_unavailable' => 'Ten wybór jest niedostępny.',
+    'cart_full' => 'Koszyk może zawierać najwyżej 100 różnych pozycji.',
     'shipping_loading' => 'Ładowanie metod dostawy…', 'shipping_unavailable' => 'Dostawa jest niedostępna.', 'select_shipping_first' => 'Najpierw wybierz dostawę.',
     'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.

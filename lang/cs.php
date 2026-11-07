@@ -699,6 +699,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.payment_error' => 'Chyba při změně stavu platby.',
     'admin.order.msg.paid_on_cancelled' => 'Objednávka je zrušená a zůstává zrušená: platba byla zaznamenána, je třeba ji vrátit zákazníkovi a byl nahlášen incident.',
     'admin.order.msg.paid_partial' => '{amount} je méně než částka objednávky {total} (chybí {missing}): částečná platba objednávku nezaplatí. Platbu zaznamenejte, až dorazí celá částka.',
+    'admin.order.msg.paid_zero' => 'Částka 0 není platba. Zadejte přijatou částku, nebo pole nechte prázdné pro celou částku objednávky.',
+    'admin.order.msg.paid_over' => 'Zaznamenáno {amount}, o {over} více než částka objednávky {total}: rozdíl zákazníkovi vraťte.',
     'admin.order.msg.refund_amount' => 'Částka refundace musí být v rozsahu dostupného zůstatku.',
     'admin.order.msg.refund_requested' => 'Požadavek na refundaci byl vytvořen.',
     'admin.order.msg.manual_refund_recorded' => 'Ruční refundace byla zaznamenána.',
@@ -1791,6 +1793,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'powered_by' => 'Pohání BareBones E-shop', 'added_to_cart' => 'Přidáno ✓',
     'select_variant' => 'Vyberte variantu.', 'cart_error' => 'Položku se nepodařilo přidat.', 'variant_required' => 'Vyberte variantu.',
     'variant_invalid' => 'Vybraná varianta není platná.', 'product_invalid' => 'Produkt není dostupný.', 'product_unavailable' => 'Tento výběr není dostupný.',
+    'cart_full' => 'Košík může obsahovat nejvýše 100 různých položek.',
     'shipping_loading' => 'Načítám možnosti dopravy…', 'shipping_unavailable' => 'Doručení není dostupné.', 'select_shipping_first' => 'Nejprve vyberte dopravu.',
     'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.
