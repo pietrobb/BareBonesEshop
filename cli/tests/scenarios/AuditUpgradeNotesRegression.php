@@ -166,6 +166,8 @@ $aunCacheDir = new ReflectionProperty(Cache::class, 'cacheDir');
 if (PHP_VERSION_ID < 80100) $aunCacheDir->setAccessible(true);
 $aunPreviousCacheDir = $aunCacheDir->getValue();
 Cache::setDir($aunRoot . '/cache');
+// R20: an entry built in the second of the latest catalog change is rebuilt after it; build after it.
+for ($aunWait = 0; $aunWait < 40 && PublicFeedCache::catalogState()['racy']; $aunWait++) usleep(100000);
 $aunCalls = 0;
 $aunWriter = static function ($out) use (&$aunCalls): void { $aunCalls++; fwrite($out, "<urlset>{$aunCalls}</urlset>"); };
 $aunSend = static function () use ($aunWriter): string { ob_start(); PublicFeedCache::send('aun-sitemap.xml', 'https://shop.example', $aunWriter); return (string)ob_get_clean(); };
@@ -175,9 +177,9 @@ assert_true($aunFirst === '<urlset>1</urlset>' && $aunSecond === $aunFirst && $a
 assert_true(is_file(Cache::path('public/aun-sitemap.xml.lock')), 'Feed cache: regeneration is serialised on a per-entry lock file');
 $aunCategory = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
 $aunName = (string)$pdo->query('SELECT name FROM categories WHERE id = ' . $aunCategory)->fetchColumn();
-$aunPrint = PublicFeedCache::catalogFingerprint();
+$aunPrint = PublicFeedCache::catalogState()['fingerprint'];
 $pdo->prepare('UPDATE categories SET name = :n WHERE id = :id')->execute([':n' => $aunName . ' (renamed)', ':id' => $aunCategory]);
-assert_true(PublicFeedCache::catalogFingerprint() !== $aunPrint, 'Feed cache: renaming a category changes the fingerprint (COUNT/MAX(id) did not)');
+assert_true(PublicFeedCache::catalogState()['fingerprint'] !== $aunPrint, 'Feed cache: renaming a category changes the fingerprint (COUNT/MAX(id) did not)');
 assert_equals('<urlset>2</urlset>', $aunSend(), 'Feed cache: a category edit rebuilds the cached feed');
 $pdo->prepare('UPDATE categories SET name = :n WHERE id = :id')->execute([':n' => $aunName, ':id' => $aunCategory]);
 Cache::setRenameHookForTesting(static fn(string $from, string $to): bool => false);
