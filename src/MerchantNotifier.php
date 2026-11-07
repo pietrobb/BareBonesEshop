@@ -27,6 +27,8 @@ class MerchantNotifier {
             if (!self::claim($orderId, $event, $recipient)) continue;
             try {
                 $items = Orders::items($orderId);
+                // A withdrawal notice names only the lines of that statement and their sum, not the whole order.
+                if ($kind === 'withdrawal') $items = self::withdrawnItems($orderId, (int)(explode(':', $event, 2)[1] ?? 0), $items);
                 $result = MailService::send($template, $recipient, (string)($order['locale'] ?? ''), [
                     'event' => $event,
                     'order_number' => (string)$order['order_number'],
@@ -38,6 +40,7 @@ class MerchantNotifier {
                     'payment_method' => $paymentLabel,
                     'awaiting_payment' => ($order['payment_status'] ?? '') !== 'paid',
                     'admin_url' => self::adminOrderUrl($cfg, $orderId),
+                    'withdrawal_total' => I18n::price(array_sum(array_map(static fn(array $item): int => (int)$item['total'], $items)), $order['currency'] ?? null),
                     'items' => array_map(static fn(array $item): array => [
                         'name' => $item['name'],
                         'sku' => $item['sku'],
@@ -66,6 +69,14 @@ class MerchantNotifier {
             array_map(static fn($email): string => trim((string)$email), $recipients),
             static fn(string $email): bool => (bool)filter_var($email, FILTER_VALIDATE_EMAIL)
         )));
+    }
+
+    /** The order lines a withdrawal statement covers (withdrawal_requests.items maps order_item id => quantity). */
+    private static function withdrawnItems(int $orderId, int $statementId, array $items): array {
+        $stmt = Db::get()->prepare('SELECT items FROM withdrawal_requests WHERE id = ? AND order_id = ?');
+        $stmt->execute([$statementId, $orderId]);
+        $withdrawn = (array)(json_decode((string)$stmt->fetchColumn(), true) ?: []);
+        return array_values(array_filter($items, static fn(array $item): bool => array_key_exists((string)$item['id'], $withdrawn)));
     }
 
     private static function adminOrderUrl(array $cfg, int $orderId): string {

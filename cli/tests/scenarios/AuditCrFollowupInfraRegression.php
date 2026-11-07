@@ -108,7 +108,18 @@ foreach (['handleSearchReindex', 'handlePaymentRefund', 'handleErpOrderPush', 'h
 //    that cannot be read at all fails it. Root reads everything, so the backup runs in a child
 //    process that drops to "nobody" when started as root. The child loads a copy of the app code
 //    from the fixture, so a checkout under a directory "nobody" cannot traverse does not matter.
+// R19: "nobody" must reach the fixture too: under a temp directory it cannot traverse (TMPDIR=/root/tmp in a container
+// running as root) the child could not open its database. As root the fixture then goes to /tmp.
 $crfBk = $crfRoot . '/backup';
+if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+    $crfReachable = static function (string $dir): bool {
+        for (; $dir !== dirname($dir); $dir = dirname($dir)) if ((fileperms($dir) & 0001) === 0) return false;
+        return true;
+    };
+    if (!$crfReachable($crfRoot) && is_dir('/tmp') && $crfReachable('/tmp')) {
+        $crfBk = '/tmp/' . basename($crfRoot) . '-backup';
+    }
+}
 foreach (['/src/uploads/many', '/src/uploads/locked-dir', '/work'] as $crfDir) mkdir($crfBk . $crfDir, 0777, true);
 foreach (['src', 'adapters'] as $crfCodeDir) {
     $crfCodeSrc = dirname(TEST_CLI_DIR) . '/' . $crfCodeDir;
@@ -130,8 +141,8 @@ chmod($crfBk . '/src/uploads/secret.jpg', 0000);
 chmod($crfBk . '/src/uploads/locked-dir', 0000);
 file_put_contents($crfBk . '/child.php', '<?php
 require __DIR__ . "/app/src/autoload.php";
-if (function_exists("posix_geteuid") && posix_geteuid() === 0) { posix_setgid(65534); posix_setuid(65534); }
 $root = $argv[1];
+if (function_exists("posix_geteuid") && posix_geteuid() === 0) { posix_setgid(65534); posix_setuid(65534); putenv("TMPDIR=" . $root . "/work"); }
 $simulated = !is_readable($root . "/src/uploads/secret.jpg");
 $pdo = new PDO("sqlite:" . $root . "/work/live.db", null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $pdo->exec("CREATE TABLE IF NOT EXISTS x (id INTEGER PRIMARY KEY)");
@@ -292,3 +303,4 @@ mkdir($crfApp . '/db', 0700);
 assert_equals($crfApp . '/db/' . Migrator::LOCK_FILENAME, Migrator::defaultLockFile($crfApp, ['private_runtime_dir' => $crfApp . '/private']), 'CR follow-up migrator: a writable db/ keeps the lock where it was');
 
 $crfRm($crfRoot);
+if (!str_starts_with($crfBk, $crfRoot)) $crfRm($crfBk);

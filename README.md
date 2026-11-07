@@ -582,6 +582,8 @@ In an existing clone without the `vendor/bbf` submodule run `git submodule updat
 
 The runner creates its SQLite database and fixtures in the system temp directory
 (`sys_get_temp_dir()`), not in the checkout, and deletes the database when it finishes.
+The processes it starts use that database and a private directory of their own too, not the
+database, jobs, invoices and logs named in your `config.php`.
 
 - Exit code is **0** when all tests pass, **1** on any failure.
 - The **HTTP smoke** block self-skips when no server is reachable at
