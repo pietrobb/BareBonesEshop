@@ -33,7 +33,8 @@ try {
     $_SERVER['REQUEST_URI'] = '/cs//evil.example/';
     $r22sDoc = StorefrontSeo::document('404', 'Not found', null);
     $r22sSk = array_values(array_filter($r22sDoc['store_links'], static fn(array $l): bool => str_starts_with($l['label'], 'SK')));
-    assert_equals(['/evil.example/'], array_map(static fn(array $l): string => substr($l['url'], strlen(Template::baseUrl())), $r22sSk),
+    // The SK store has Czech, so the switch keeps it (R22 #362): "?lang=cs".
+    assert_equals(['/evil.example/?lang=cs'], array_map(static fn(array $l): string => substr($l['url'], strlen(Template::baseUrl())), $r22sSk),
         'R22 links: the CZ 404 page links the SK store on its own site, not "//evil.example/"');
     assert_true(!str_contains((string)$r22sDoc['head'], '//evil.example'), 'R22 links: canonical and hreflang carry no doubled slash');
 } catch (Throwable $e) {

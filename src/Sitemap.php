@@ -2,7 +2,7 @@
 /**
  * Sitemap — dynamic multi-locale XML sitemap generator.
  *
- * Emits one <url> entry per (canonical path × store locale), each carrying the
+ * Emits one <url> entry per (canonical path × store locale, and × further store language as ?lang=), each carrying the
  * full set of <xhtml:link rel="alternate" hreflang="…"> alternates plus an
  * x-default, so search engines see every localized variant of every page.
  *
@@ -156,10 +156,24 @@ class Sitemap {
         $defaultStore = (string)(Bootstrap::stores()['default_store'] ?? '');
         $wrapper = strlen(self::URLSET_OPEN) + strlen(self::URLSET_CLOSE);
         [$number, $count, $bytes] = [1, 0, $wrapper];
-        foreach (self::entries($stores) as $urls) {
-            $links = '';
+        $versions = self::languageVersions($stores);
+        foreach (self::entries($stores) as [$path, $storeIds, $localized]) {
+            $pathIn = static fn(string $locale): string => $localized[$locale] ?? $path;
+            $urls = [];
             $alternates = [];
-            foreach ($urls as $storeId => $altUrl) $alternates[$stores[$storeId]['locale']] ??= $altUrl;
+            foreach ($storeIds as $storeId) {
+                $urls[$storeId] = $stores[$storeId]['prefix'] . $pathIn($stores[$storeId]['locale']);
+                $alternates[$stores[$storeId]['locale']] ??= $urls[$storeId];
+            }
+            // R22: a store's further languages are pages of their own (?lang=), announced by the page's hreflang
+            // (Seo::head()); the sitemap listed only each store's default language.
+            $languageUrls = [];
+            foreach ($storeIds as $storeId) {
+                foreach ($versions[$storeId] ?? [] as $code => $locale) {
+                    $languageUrls[] = $alternates[$code] ??= Bootstrap::withLang($stores[$storeId]['prefix'] . $pathIn($locale), $locale);
+                }
+            }
+            $links = '';
             foreach ($alternates as $altLocale => $altUrl) {
                 $links .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
                     . '" href="' . $e($base . $altUrl) . "\"/>\n";
@@ -167,7 +181,7 @@ class Sitemap {
             if (isset($urls[$defaultStore])) {
                 $links .= '    <xhtml:link rel="alternate" hreflang="x-default" href="' . $e($base . $urls[$defaultStore]) . "\"/>\n";
             }
-            foreach ($urls as $url) {
+            foreach (array_merge(array_values($urls), $languageUrls) as $url) {
                 $entry = "  <url>\n" . '    <loc>' . $e($base . $url) . "</loc>\n" . $links . "  </url>\n";
                 if ($count > 0 && ($count >= self::$maxUrls || $bytes + strlen($entry) > self::$maxBytes)) {
                     [$number, $count, $bytes] = [$number + 1, 0, $wrapper];
@@ -183,28 +197,42 @@ class Sitemap {
     private const PRODUCT_CHUNK = 1000;
 
     /**
-     * Every sitemap path, streamed: store id => URL path (store prefix + localized path) of each store serving it.
-     * Homepage, then categories, products and CMS pages by slug. Products are read in keyset chunks, never all
-     * at once: 200k products × several stores used to exhaust the memory limit.
-     * @return Generator<int, array<string, string>>
+     * R22: hreflang code => locale of each store's further languages, as Bootstrap::hreflangAlternates() announces
+     * them on the page: a language no store has as its own by its locale, the others language-region qualified.
+     * @return array<string, array<string, string>> store id => [hreflang code => locale]
+     */
+    private static function languageVersions(array $stores): array {
+        $byPrefix = [];
+        foreach ($stores as $storeId => $store) $byPrefix[$store['prefix']] ??= (string)$storeId;
+        $hreflang = Bootstrap::hreflangAlternates('/');
+        $versions = [];
+        foreach ($hreflang['secondary'] as $locale => $prefix) {
+            if (isset($byPrefix[$prefix])) $versions[$byPrefix[$prefix]][(string)$locale] = (string)$locale;
+        }
+        foreach ($hreflang['regional'] as $code => $target) {
+            if (isset($byPrefix[$target['prefix']])) $versions[$byPrefix[$target['prefix']]][(string)$code] = (string)$target['locale'];
+        }
+        return $versions;
+    }
+
+    /**
+     * Every sitemap path, streamed: [prefix-less path, ids of the stores serving it, path per locale where a translated
+     * slug differs]. Homepage, then categories, products and CMS pages by slug. Products are read in keyset chunks,
+     * never all at once: 200k products × several stores used to exhaust the memory limit.
+     * @return Generator<int, array{0: string, 1: list<string>, 2: array<string, string>}>
      */
     private static function entries(array $stores): Generator {
         $owners = static function (string $kind) use ($stores): array {
             $byOwner = [];
-            foreach ($stores as $storeId => $store) $byOwner[$store[$kind]][] = $storeId;
+            foreach ($stores as $storeId => $store) $byOwner[$store[$kind]][] = (string)$storeId;
             return $byOwner;
         };
-        $urls = static function (string $path, array $storeIds, ?array $localized = null) use ($stores): array {
-            $urls = [];
-            foreach ($storeIds as $storeId) $urls[$storeId] = $stores[$storeId]['prefix'] . ($localized[$stores[$storeId]['locale']] ?? $path);
-            return $urls;
-        };
-        yield $urls('/', array_keys($stores));
+        yield ['/', array_map('strval', array_keys($stores)), []];
 
         $catalogs = $owners('catalog');
         foreach (self::slugOwners("SELECT DISTINCT slug, store_id FROM categories WHERE slug IS NOT NULL AND slug != ''", array_keys($catalogs)) as $slug => $catalogIds) {
             $serving = array_merge(...array_map(static fn(string $catalog): array => $catalogs[$catalog], $catalogIds));
-            yield $urls(UrlAliases::outbound('/category/' . $slug), self::inStoreOrder($serving, $stores));
+            yield [UrlAliases::outbound('/category/' . $slug), self::inStoreOrder($serving, $stores), []];
         }
         foreach (self::products(array_keys($catalogs)) as $row) {
             $translations = str_contains((string)$row['translations'], '"slug"') ? json_decode((string)$row['translations'], true) : null;
@@ -213,12 +241,12 @@ class Sitemap {
                 $slug = is_array($fields) ? (string)($fields['slug'] ?? '') : '';
                 if ($slug !== '' && $slug !== $row['slug']) $localized[(string)$locale] = UrlAliases::outbound('/product/' . rawurlencode($slug));
             }
-            yield $urls(UrlAliases::outbound('/product/' . $row['slug']), $catalogs[(string)$row['store_id']], $localized);
+            yield [UrlAliases::outbound('/product/' . $row['slug']), $catalogs[(string)$row['store_id']], $localized];
         }
         $pageOwners = $owners('id');
         foreach (self::slugOwners("SELECT DISTINCT slug, store_id FROM pages WHERE status = 'active' AND slug IS NOT NULL AND slug != ''", array_keys($pageOwners)) as $slug => $ownerIds) {
             $serving = array_merge(...array_map(static fn(string $owner): array => $pageOwners[$owner], $ownerIds));
-            yield $urls(UrlAliases::outbound('/page/' . $slug), self::inStoreOrder($serving, $stores));
+            yield [UrlAliases::outbound('/page/' . $slug), self::inStoreOrder($serving, $stores), []];
         }
     }
 
