@@ -134,10 +134,11 @@ try {
 
     // 3. ?lang= of a language that is another store's default is not canonical here (hreflang points at that store).
     $fr4Secondary = [];
-    foreach (['cs', 'en', 'sk'] as $locale) { I18n::setLocale($locale); $fr4Secondary[] = Bootstrap::secondaryLocale(); }
+    // R20: links keep such a language (Bootstrap::secondaryLocale), only the canonical leaves it to that store.
+    foreach (['cs', 'en', 'sk'] as $locale) { I18n::setLocale($locale); $fr4Secondary[] = Bootstrap::canonicalSecondaryLocale(); }
     Bootstrap::initStoreContext('/en/', '', 'us');
     I18n::setLocale('es');
-    $fr4Secondary[] = Bootstrap::secondaryLocale();
+    $fr4Secondary[] = Bootstrap::canonicalSecondaryLocale();
     Bootstrap::initStoreContext('/', '', 'default');
     I18n::setLocale($fr4SavedLocale);
     assert_equals([null, null, null, 'es'], $fr4Secondary, 'FR4 3: only a language no store defaults to gets a ?lang= canonical');
@@ -160,11 +161,13 @@ try {
 
     // 6. A managed menu item entered with the store prefix keeps one prefix.
     Bootstrap::initStoreContext('/cs/', '', 'cz');
+    I18n::setLocale('cs');
     $fr4Base = Template::baseUrl();
     assert_equals([$fr4Base . '/cs/page/x', $fr4Base . '/cs/page/x', $fr4Base . '/cs/', $fr4Base . '/cs/csx/page', 'https://example.test/a', '#top', '?page=cart'],
         array_map([Template::class, 'menuUrl'], ['/cs/page/x', '/page/x', '/cs', '/csx/page', 'https://example.test/a', '#top', '?page=cart']),
         'FR4 6: menu URLs get the store prefix once (/cs/page/x was /cs/cs/page/x)');
     Bootstrap::initStoreContext('/', '', 'default');
+    I18n::setLocale($fr4SavedLocale);
 
     // 7. ERP sync without a lock it can open fails loudly instead of exiting 0 forever.
     $fr4Sync = (string)file_get_contents(TEST_CLI_DIR . '/sync.php');
