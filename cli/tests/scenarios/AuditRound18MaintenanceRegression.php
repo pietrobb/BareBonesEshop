@@ -73,15 +73,14 @@ try {
     file_put_contents($r18mShop . '/src/Core.php', "core v2\n");
     MaintenanceMode::leave($r18mShop);
 
-    // 4. A rollback that stops after it began restoring keeps the shop closed and says what to run.
+    // 4. R19: a snapshot missing its only file is refused before anything changes, so the shop is not closed by it
+    //    (R18 marked this "half-way"; a rollback that really restored a file and then failed: AuditRound19UpdaterMaintenance).
     $r18mCopy = $r18mRoot . '/private/snapshots/' . $r18mSnapshot . '/files/src/Core.php';
     rename($r18mCopy, $r18mCopy . '.away');
     $r18mHalfway = $r18mError(static fn() => $r18mUpdater->rollback($r18mSnapshot, false, true));
-    [$r18mActive, $r18mFailed, $r18mReason] = $r18mState();
-    assert_true(str_contains($r18mHalfway, 'Snapshot file missing') && $r18mActive && $r18mFailed
-        && str_contains($r18mReason, "rollback {$r18mSnapshot} failed half-way")
-        && str_contains($r18mReason, "rollback --snapshot={$r18mSnapshot} --force --accept-data-loss"),
-        'R18 rollback: a rollback that failed half-way keeps the shop in maintenance and names the command (' . $r18mReason . ')');
+    assert_equals([true, false, "core v2\n"], [str_contains($r18mHalfway, 'Snapshot file missing'), is_file(MaintenanceMode::path($r18mShop)),
+        (string)file_get_contents($r18mShop . '/src/Core.php')],
+        'R18 rollback: a rollback refused for a missing snapshot file changed nothing and leaves the shop open (' . $r18mHalfway . ')');
 
     // 5. Once the cause is fixed, the rollback it names completes and lifts the window.
     rename($r18mCopy . '.away', $r18mCopy);

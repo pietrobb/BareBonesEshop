@@ -460,7 +460,7 @@ function pageOrder(): void {
             <tr><th><?= esc(I18n::t('admin.common.template')) ?></th><th><?= esc(I18n::t('admin.order.locale')) ?></th><th><?= esc(I18n::t('admin.order.subject')) ?></th><th><?= esc(I18n::t('admin.order.adapter')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.sent')) ?></th><th></th></tr>
             <?php foreach ($emails as $em): ?>
             <tr>
-                <td><?= esc($em['template']) ?></td>
+                <td><?= esc(adminCodeLabel('admin.email.tpl.', (string)$em['template'])) ?></td>
                 <td><?= esc($em['locale']) ?></td>
                 <td class="muted"><?= esc($em['subject']) ?></td>
                 <td><?= esc($em['adapter']) ?></td>
@@ -495,7 +495,7 @@ function pageOrder(): void {
             <?php foreach ($invoices as $inv): ?>
             <tr>
                 <td><?= esc($inv['number']) ?></td>
-                <td><?= esc($inv['type'] ?? 'invoice') ?></td>
+                <td><?= esc(adminCodeLabel('admin.invoice.type.', (string)($inv['type'] ?? 'invoice'))) ?></td>
                 <td><span class="badge badge-vat-<?= esc($inv['vat_scenario'] ?? '') ?>"><?= esc($inv['vat_scenario'] ?? '—') ?></span></td>
                 <td><?= esc(I18n::date((string)$inv['issued_at'])) ?></td>
                 <td><?= esc(I18n::date((string)$inv['due_date'])) ?></td>
@@ -725,6 +725,11 @@ function handleOrderPaymentTransition(): void {
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
+    if (PaymentService::adminPaymentZero($newStatus, (string)($_POST['amount'] ?? ''), $amount)) {
+        setFlash('err', I18n::t('admin.order.msg.paid_zero'));
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
     $shortfall = PaymentService::adminPaymentShortfall($order, $newStatus, $amount);
     if ($shortfall > 0) {
         $currency = (string)$order['currency'];
@@ -738,7 +743,11 @@ function handleOrderPaymentTransition(): void {
         if (PaymentService::recordAdminPayment($order, $newStatus, $amount, $note, Security::adminUser())) {
             setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
         } else {
-            setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));
+            $message = I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]);
+            $over = PaymentService::adminPaymentExcess($order, $newStatus, $amount);
+            if ($over > 0) $message .= ' ' . I18n::format('admin.order.msg.paid_over', ['amount' => I18n::price($amount, (string)$order['currency']),
+                'total' => I18n::price((int)$order['total'], (string)$order['currency']), 'over' => I18n::price($over, (string)$order['currency'])]);
+            setFlash('ok', $message);
         }
     } catch (\Throwable $e) {
         Logger::phpLog("Payment status change error [{$orderId}]: " . $e->getMessage());

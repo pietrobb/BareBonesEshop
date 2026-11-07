@@ -1513,7 +1513,8 @@ $rtResult = Import::csv($rtFile);
 $rtAfter = $rtRow('SA-BOOK');
 $rtChanged = array_keys(array_diff_assoc(array_map('strval', $rtAfter), array_map('strval', $rtBefore)));
 assert_true($rtResult['success'] && !$rtResult['errors'], 'CSV round trip: the edited export imports cleanly');
-assert_true(!array_diff($rtChanged, ['stock', 'stock_low_threshold', 'updated_at']) && in_array('stock', $rtChanged, true) && in_array('stock_low_threshold', $rtChanged, true),
+// A stock change may also move stock_updated_at (R17); it equals the old value only when both land in the same second.
+assert_true(!array_diff($rtChanged, ['stock', 'stock_low_threshold', 'updated_at', 'stock_updated_at']) && in_array('stock', $rtChanged, true) && in_array('stock_low_threshold', $rtChanged, true),
     'CSV round trip: editing stock and a limit changes only those columns (changed: ' . implode(', ', $rtChanged) . ')');
 assert_equals([9, 10], [(int)$rtAfter['stock'], (int)$rtAfter['stock_low_threshold']], 'CSV round trip: the edited stock and limit are stored');
 assert_equals(9, Warehouse::totalAvailable('SA-BOOK'), 'CSV round trip: the stock change is booked in the warehouse ledger');

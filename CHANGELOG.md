@@ -48,7 +48,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
-- **Theme assets:** the default theme is version 2.3.2, so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.3, so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -68,6 +68,20 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Updater maintenance window** (review round 19, low). A successful update of code only no longer lifts the failed
+  window of a migration that stopped half-way (the shop reopened on an unfinished schema); `update.php apply` warns that
+  the shop stays closed, and an update that runs the migrations or `php cli/migrate.php apply` lifts it. A rollback whose
+  snapshot misses a file is refused before it changes anything and gives the shop back the window it had (it was marked
+  failed and stayed closed). `docs/AI_UPDATE_RUNBOOK.md` describes the maintenance window instead of saying there is none.
+- **Cart and manual payment limits** (review round 19, low). Adding to the cart stops at 100 different items, as a
+  restore already did (the storefront says the cart is full). A restore that lists the same new item twice counts it
+  once (2 × 30 gave 60). On the order detail, "Paid" with the amount `0` is refused (it paid the whole order; an empty
+  amount still means the order total), and an amount above the order total is recorded with a warning naming the excess.
+- **The merchant's withdrawal e-mail names only the withdrawn items** (review round 19, medium). It listed every line
+  of the order and the order total; it now lists the lines of that statement and their sum (new template variable
+  `{{withdrawal_total}}`; `{{order_total}}` is still the whole order for customised templates). On a partly shipped
+  order the admin marks each withdrawn line as already sent (wait for the return) or not sent (do not ship), instead of
+  "do not ship" for all of them, and the acknowledgement column shows the e-mail status in words.
 - **Checkout, cookie consent and search suggestions work in a further store language** (review round 19, medium).
   In a language that is not the store's own (`?lang=en` in the Slovak store, `?lang=en` in the Hungarian one) the
   page hands `storefront.js` an API address that already ends in `?lang=en`; the script put the action after it
@@ -276,12 +290,36 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   right after the install. A shop installed from the v2.1.2 bookshop package does this once by hand (see the release
   notes of `bookshop-demo-v2.1.2`). `demo/bookshop/package.php` records the commit, not the tag object, in
   `starter.json` when built from a tag.
+- **A stock change by a CSV import no longer rebuilds the feeds** (review round 19, medium). A CSV import that moved
+  a product's stock (5 → 7 pieces) bumped its `updated_at`, so every feed and sitemap was rebuilt; it now moves
+  `stock_updated_at` only, and the feeds are rebuilt when a CSV import or an ERP product sync takes a product into or
+  out of stock (the ERP sync did not mark them changed then). Low: a price saved within the same second as the
+  change a feed was built after is in the feed at once (was: the old price for up to 15 minutes).
+- **The test suite leaves the developer's database alone** (review round 19, medium). The suite config kept the
+  developer's `db_sqlite_path`, so the processes the suite starts opened that database and marked its `event_outbox`
+  rows delivered; a theme-check fixture appended its log lines to the developer's `application.jsonl`. The suite's
+  database is now the one in its own private directory, child processes included.
+- **Imported products are priced in their catalog's currency** (review round 19, medium). A product created by a CSV
+  import, the API, a feed or an ERP sync in a HUF or CZK catalog was stored as EUR ("12 990 Ft" became 12 990,00 €)
+  and could not be sold in its store; it now takes the currency of the store the catalog belongs to, and an existing
+  product keeps its currency when it is imported again. Products already created this way keep their EUR price;
+  check them in **Catalog → Products**. Also: an import price like "1.234 Kč" (one separator before three digits) is
+  1 234, not 1,23; the shipping and payment pages show and check their amounts in the currency of the store owning
+  the providers (a USD store using the default store's providers saw them as dollars).
 - **Sign-up no longer loops** (review round 19, medium). The page after sign-up and the welcome mail said "you can sign
   in now", but an unconfirmed account cannot sign in, and every attempt mailed a new link that cancelled the earlier
   one, so the link from the first mail failed. The page now asks to confirm the address first; the welcome mail goes
   out after the confirmation; the five newest confirmation links stay valid together (24 hours). Low: the forgot
   password answer no longer takes longer for an address with an account (the mail goes out after the response), and a
   throttled mail sent after the response no longer logs "headers already sent".
+- **Admin and documents in words** (review round 19, low). The audit log names what changed ("Payment link sent", not
+  `payment_link_sent`), the order detail names the e-mail template and the invoice type ("Credit note"), and the
+  template editor's title and its saved/reset message name the template. "Create and send" and "Ship" start with the
+  carrier the customer chose (a parcel was saved without one). At 390 px the account's order table scrolls inside its
+  card instead of the whole page, and the admin's store switcher comes first in the navigation with a readable width
+  (default theme 2.3.3). The PDF credit note's dates sit under the title (a long title, e.g. "Factura rectificativa
+  n.º …", ran into them). "A field is too long" now names the field and its maximum. An English delivery note names
+  the country in English ("Slovakia", not "Slovensko").
 
 ## 2.1.2 — 2026-11-05
 

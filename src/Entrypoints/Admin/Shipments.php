@@ -5,13 +5,22 @@ require_once __DIR__ . '/ShipmentLabels.php';
 /** The consumer's withdrawal statements (storefront withdrawal form): received when, for which lines, why. */
 function renderOrderWithdrawals(array $order, array $withdrawals): void {
     if (!$withdrawals) return;
-    $names = array_column(Orders::items((int)$order['id']), 'name', 'id');
+    $lines = array_column(Orders::items((int)$order['id']), null, 'id');
     // R18: "do not ship" only while the goods are still here; once sent, the customer returns them.
-    $sent = (string)($order['delivered_at'] ?? '') !== '' || in_array((string)($order['status'] ?? ''), ['shipped', 'delivered', 'returned'], true);
+    $orderSent = (string)($order['delivered_at'] ?? '') !== '' || in_array((string)($order['status'] ?? ''), ['shipped', 'delivered', 'returned'], true);
+    // R19: on a partly shipped order each withdrawn line says whether it already left (wait for the return) or not (do not ship).
+    $lineSent = static fn(int $itemId): bool => $orderSent || (isset($lines[$itemId]) && Fulfillment::shippedUnits($lines[$itemId]) > 0);
+    $notices = [];
+    foreach ($withdrawals as $withdrawal) {
+        foreach (array_keys((array)(json_decode((string)$withdrawal['items'], true) ?: [])) as $itemId) $notices[$lineSent((int)$itemId) ? 'admin.withdrawal.notice_sent' : 'admin.withdrawal.notice'] = true;
+    }
+    if (!$notices) $notices[$orderSent ? 'admin.withdrawal.notice_sent' : 'admin.withdrawal.notice'] = true;
     ?>
     <div class="card" id="withdrawals" data-withdrawals style="border-left:4px solid #c62828">
         <h3><?= esc(I18n::t('admin.withdrawal.heading')) ?></h3>
-        <p><?= esc(I18n::t($sent ? 'admin.withdrawal.notice_sent' : 'admin.withdrawal.notice')) ?></p>
+        <?php foreach (['admin.withdrawal.notice', 'admin.withdrawal.notice_sent'] as $notice): if (isset($notices[$notice])): ?>
+        <p><?= esc(I18n::t($notice)) ?></p>
+        <?php endif; endforeach; ?>
         <table>
             <tr><th><?= esc(I18n::t('admin.withdrawal.received_at')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.withdrawal.reason')) ?></th><th><?= esc(I18n::t('admin.withdrawal.confirmation')) ?></th></tr>
             <?php foreach ($withdrawals as $withdrawal): ?>
@@ -19,11 +28,12 @@ function renderOrderWithdrawals(array $order, array $withdrawals): void {
                 <td><?= esc(I18n::dateTime((string)$withdrawal['received_at'])) ?></td>
                 <td><ul class="muted" style="margin:0;padding-left:16px">
                     <?php foreach ((array)(json_decode((string)$withdrawal['items'], true) ?: []) as $itemId => $qty): ?>
-                    <li><?= esc((string)($names[(int)$itemId] ?? ('#' . (int)$itemId))) ?> (<?= (int)$qty ?>×)</li>
+                    <li><?= esc((string)($lines[(int)$itemId]['name'] ?? ('#' . (int)$itemId))) ?> (<?= (int)$qty ?>×)
+                        — <?= esc(I18n::t($lineSent((int)$itemId) ? 'admin.withdrawal.line_sent' : 'admin.withdrawal.line_not_sent')) ?></li>
                     <?php endforeach; ?>
                 </ul></td>
                 <td><?= esc((string)($withdrawal['reason'] ?? '')) ?: '—' ?></td>
-                <td class="muted"><?= esc((string)($withdrawal['confirmation_status'] ?? '')) ?: '—' ?></td>
+                <td class="muted"><?= ($withdrawal['confirmation_status'] ?? '') !== '' ? esc(adminCodeLabel('admin.email.status.', (string)$withdrawal['confirmation_status'])) : '—' ?></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -50,6 +60,8 @@ function renderOrderShipments(array $order): void {
         static fn(array $g): bool => array_sum(array_column($g['lines'], 'remaining')) > 0)) : [];
     [$labelCarriers, $labels] = adminShipmentLabelState($orderId, $open);
     $warehouses = adminShipmentWarehouseNames();
+    // R19: shipping now fills in the carrier the customer chose (the shipment was saved without one).
+    $orderCarrier = (string)(ShippingService::orderCarrier($order) ?? '');
     $warehouseLabel = static fn(?int $id): string => $id === null ? I18n::t('admin.shipment.no_warehouse') : ($warehouses[$id] ?? ('#' . $id));
     $action = static fn(string $name): string => 'admin.php?p=order&amp;id=' . $orderId . '&amp;action=' . $name;
     $trackingFields = static function(array $shipment = []): void { ?>
@@ -83,7 +95,7 @@ function renderOrderShipments(array $order): void {
                     <form method="post" action="<?= $action('shipment_ship') ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="shipment_id" value="<?= $shipmentId ?>">
-                        <?php $trackingFields($shipment); ?>
+                        <?php $trackingFields(['carrier' => (string)($shipment['carrier'] ?? '') ?: $orderCarrier] + $shipment); ?>
                         <?= $withdrawalAck ?>
                         <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.ship')) ?></button>
                     </form>
@@ -129,7 +141,7 @@ function renderOrderShipments(array $order): void {
                 </tr>
                 <?php endforeach; ?>
             </table>
-            <p style="margin-top:.5rem"><?php $trackingFields(); ?></p>
+            <p style="margin-top:.5rem"><?php $trackingFields(['carrier' => $orderCarrier]); ?></p>
             <?= $withdrawalAck ?>
             <button class="btn btn-primary btn-sm" type="submit" name="ship_now" value="1"><?= esc(I18n::t('admin.shipment.create_and_ship')) ?></button>
             <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.create_planned')) ?></button>

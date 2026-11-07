@@ -93,7 +93,7 @@ assert_true(!str_contains($securitySource, "['cache_dir'] ?? __DIR__ . '/../cach
 echo "--- Test 1: Database Connection ---\n";
 
 // Fresh DB for testing
-$testDbPath = test_fixture_path('suite');
+$testDbPath = TEST_DATA_DIR . '/private/db/shop.sqlite'; // the suite config's db_sqlite_path: child processes open it too
 if (file_exists($testDbPath)) unlink($testDbPath);
 
 $pdo = new PDO('sqlite:' . $testDbPath, null, null, [

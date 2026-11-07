@@ -1956,19 +1956,21 @@ final class InvoiceService
         $documentTitle = $creditNote ? $L['credit_title'] : $L['title'];
         $pdf->text(20, $y, $documentTitle . ' ' . $invoice['number'], ['size' => 18, 'bold' => true]);
 
-        // Right-aligned dates
+        // R19: the dates sit under the title row — a long credit-note title ("Factura rectificativa n.º …", ~130 mm at
+        // 18 pt) ran into them, and the "corrects invoice" line ran into the due date.
         $date = static fn(mixed $ymd): string => I18n::date((string)$ymd, $locale);
-        $pdf->text(120, $y, $L['issued_at'] . ': ' . $date($invoice['issued_at']), ['size' => 9]);
-        $pdf->text(120, $y + 5, $L['delivery_date'] . ': ' . $date($invoice['delivery_date']), ['size' => 9]);
-        $pdf->text(120, $y + 10, $L['due_date'] . ': ' . $date($invoice['due_date']), ['size' => 9]);
+        $pdf->text(120, $y + 9, $L['issued_at'] . ': ' . $date($invoice['issued_at']), ['size' => 9]);
+        $pdf->text(120, $y + 14, $L['delivery_date'] . ': ' . $date($invoice['delivery_date']), ['size' => 9]);
+        $pdf->text(120, $y + 19, $L['due_date'] . ': ' . $date($invoice['due_date']), ['size' => 9]);
 
-        // A credit note names the invoice it corrects.
+        // A credit note names the invoice it corrects (left column, two short lines).
         $source = $creditNote && !empty($invoice['refers_to_invoice_id']) ? self::byId((int)$invoice['refers_to_invoice_id']) : null;
         if ($source !== null) {
-            $pdf->text(20, $y + 10, $L['refers_to'] . ' ' . $source['number'] . ' (' . $L['issued_at'] . ': ' . $date($source['issued_at']) . ')', ['size' => 9]);
+            $pdf->text(20, $y + 9, $L['refers_to'] . ' ' . $source['number'], ['size' => 9]);
+            $pdf->text(20, $y + 14, $L['issued_at'] . ': ' . $date($source['issued_at']), ['size' => 9]);
         }
 
-        $y += 22;
+        $y += 25;
         $pdf->line(20, $y, 190, $y);
         $y += 5;
 

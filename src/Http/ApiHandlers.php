@@ -618,7 +618,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // R18: unbounded lengths reached VARCHAR(191) columns (MySQL refused the order: an incident, not a message).
     foreach (CheckoutService::FIELD_MAX_LENGTH as $field => $max) {
         if (is_string($input[$field] ?? null) && mb_strlen(trim($input[$field])) > $max) {
-            return checkoutRefusal('checkout.error.field_too_long', 422, ['field' => $field, 'max_length' => $max]);
+            // R19: the message names the field ("Some field is too long" did not say which).
+            return ['error' => I18n::format('checkout.error.field_too_long_named', ['field' => I18n::t($field === 'company' ? 'checkout_company' : $field), 'max' => $max])]
+                + checkoutRefusal('checkout.error.field_too_long', 422, ['field' => $field, 'max_length' => $max]);
         }
     }
     $name = trim(Security::str($input['name'] ?? ''));

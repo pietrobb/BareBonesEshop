@@ -39,6 +39,17 @@ class ShippingService
         'UA' => 'Україна', 'US' => 'United States',
     ];
 
+    /** R19: English names for documents printed in English (an EN delivery note said "Slovensko"). */
+    private const COUNTRY_NAMES_EN = [
+        'AT' => 'Austria', 'BE' => 'Belgium', 'BG' => 'Bulgaria', 'CH' => 'Switzerland', 'CY' => 'Cyprus',
+        'CZ' => 'Czechia', 'DE' => 'Germany', 'DK' => 'Denmark', 'EE' => 'Estonia', 'ES' => 'Spain', 'FI' => 'Finland',
+        'FR' => 'France', 'GB' => 'United Kingdom', 'GR' => 'Greece', 'HR' => 'Croatia', 'HU' => 'Hungary',
+        'IE' => 'Ireland', 'IS' => 'Iceland', 'IT' => 'Italy', 'LI' => 'Liechtenstein', 'LT' => 'Lithuania',
+        'LU' => 'Luxembourg', 'LV' => 'Latvia', 'MT' => 'Malta', 'NL' => 'Netherlands', 'NO' => 'Norway', 'PL' => 'Poland',
+        'PT' => 'Portugal', 'RO' => 'Romania', 'SE' => 'Sweden', 'SI' => 'Slovenia', 'SK' => 'Slovakia',
+        'UA' => 'Ukraine', 'US' => 'United States',
+    ];
+
     /**
      * Countries the checkout offers: the store's database shipping zones plus the shipping.json
      * zones, as code => name sorted by code. Wildcard zones name no country; with nothing
@@ -67,6 +78,14 @@ class ShippingService
     {
         $code = strtoupper(trim($code));
         return self::COUNTRY_NAMES[$code] ?? $code;
+    }
+
+    /** A country's name on a document in $locale: English in English, otherwise the name in the country's own language. */
+    public static function countryNameIn(string $code, string $locale): string
+    {
+        $code = strtoupper(trim($code));
+        if ($locale === 'en' && isset(self::COUNTRY_NAMES_EN[$code])) return self::COUNTRY_NAMES_EN[$code];
+        return self::countryName($code);
     }
 
     /** Override adapters for testing */

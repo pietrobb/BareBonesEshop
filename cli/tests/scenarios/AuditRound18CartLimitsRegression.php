@@ -43,7 +43,8 @@ try {
     $r18cStreet = CheckoutService::execute(['name' => 'R18', 'email' => 'r18c@example.test', 'country' => 'SK', 'street' => str_repeat('x', 201)]);
     // An invalid country stops the checkout right after the length check: no order is placed (the session may hold a cart).
     $r18cMax = CheckoutService::execute(['name' => str_repeat('Á', 191), 'email' => 'r18c@example.test', 'country' => 'X1', 'street' => str_repeat('x', 200)]);
-    assert_equals(['checkout.error.field_too_long', 'name', 191, I18n::t('checkout.error.field_too_long'), 'checkout.error.field_too_long', 'street'],
+    // R19: the message names the field ("Full Name is too long (at most 191 characters).").
+    assert_equals(['checkout.error.field_too_long', 'name', 191, I18n::format('checkout.error.field_too_long_named', ['field' => I18n::t('name'), 'max' => 191]), 'checkout.error.field_too_long', 'street'],
         [$r18cLong['error_code'] ?? '', $r18cLong['field'] ?? '', $r18cLong['max_length'] ?? 0, $r18cLong['error'] ?? '', $r18cStreet['error_code'] ?? '', $r18cStreet['field'] ?? ''],
         'R18 checkout: a name or street longer than its maximum is refused with field_too_long, naming the field');
     assert_true(($r18cMax['error_code'] ?? '') === 'checkout.error.invalid_country' && I18n::t('checkout.error.field_too_long') !== 'checkout.error.field_too_long',

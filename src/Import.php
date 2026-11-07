@@ -329,8 +329,12 @@ class Import {
             $assignments = implode(', ', array_map(static fn(string $c): string => "{$c} = :{$c}", array_keys($changes)));
             $params = [':id' => (int)$existing['id']];
             foreach ($changes as $column => $value) $params[":{$column}"] = $value;
-            $db->prepare("UPDATE products SET {$assignments}, updated_at = " . Db::now() . " WHERE id = :id")->execute($params);
+            // R19: a stock-only change moves stock_updated_at, not updated_at (the feed and sitemap fingerprint): 5 → 7 pieces
+            // rebuilt every feed. Going in or out of stock is shown by the feeds, so that marks them changed.
+            $touched = array_keys($changes) === ['stock'] ? 'stock_updated_at' : 'updated_at';
+            $db->prepare("UPDATE products SET {$assignments}, {$touched} = " . Db::now() . " WHERE id = :id")->execute($params);
             if (isset($changes['price'])) PriceHistory::record([(int)$existing['id']], $db);
+            if ($touched === 'stock_updated_at' && ((int)$existing['stock'] > 0) !== ((int)$changes['stock'] > 0)) Cache::catalogChanged();
         }
         if (isset($changes['attrs'])) self::syncProductAttrs((int)$existing['id'], $attrs, $db);
 
@@ -348,6 +352,9 @@ class Import {
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
         $catalog = self::assertSkuInCatalog((string)$data['sku'], $db);
+        $stockBefore = $db->prepare('SELECT stock FROM products WHERE sku = :sku AND store_id = :catalog');
+        $stockBefore->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
+        $stockBefore = $stockBefore->fetchColumn();
         // MySQL's ON DUPLICATE KEY fires on any unique key: a slug held by another SKU would overwrite that product.
         $data['slug'] = self::freeProductSlug((string)$data['slug'], (string)$data['sku'], $db);
         $data['description'] = Security::sanitizeRichHtml((string)($data['description'] ?? ''));
@@ -374,13 +381,16 @@ class Import {
                 "stock_updated_at = CASE WHEN {$same('stock')} THEN stock_updated_at ELSE {$now} END"],
             array_map(static fn(string $column): string => "{$column} = {$new($column)}", array_keys($columns))
         );
-        $stmt = $db->prepare('INSERT INTO products (store_id, sku, ' . implode(', ', array_keys($columns)) . ')
-            VALUES (:catalog, :sku, ' . implode(', ', array_map(static fn(string $p): string => ":{$p}", $columns)) . ')
+        // R19: a new product is priced in its catalog's currency (a CSV, API or feed product in a HUF catalog was stored as
+        // EUR, 12 990 Ft became 12 990,00 €); an existing product keeps its currency.
+        $stmt = $db->prepare('INSERT INTO products (store_id, sku, currency, ' . implode(', ', array_keys($columns)) . ')
+            VALUES (:catalog, :sku, :currency, ' . implode(', ', array_map(static fn(string $p): string => ":{$p}", $columns)) . ')
             ' . ($sqlite ? 'ON CONFLICT(sku) DO UPDATE SET ' : 'ON DUPLICATE KEY UPDATE ') . implode(', ', $assignments));
 
         $stmt->execute([
             ':catalog'      => $catalog,
             ':sku'          => $data['sku'],
+            ':currency'     => Warehouse::catalogCurrency($catalog),
             ':slug'         => $data['slug'],
             ':ptype'        => $data['product_type'] ?? 'simple',
             ':name'         => $data['name'],
@@ -401,6 +411,8 @@ class Import {
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
         PriceHistory::record([(int)$id->fetchColumn()], $db);
+        // R19: a stock-only change keeps updated_at (above); going in or out of stock is shown by the feeds.
+        if ($stockBefore !== false && ((int)$stockBefore > 0) !== ((int)$data['stock'] > 0)) Cache::catalogChanged($catalog);
     }
 
     /** $slug, or "$slug-2", "$slug-3"… when another SKU already owns it (product slugs are unique across catalogs). */
@@ -678,7 +690,8 @@ class Import {
      * the decimal mark; one kind repeated is a thousands separator. An int is already cents. An empty value is 0;
      * anything else that is not a price, and a negative price, is refused.
      * R18: above MAX_CENTS is refused ("184467440737095516.16" overflowed to 0 and imported an active product for
-     * free), and a thousands separator must group three digits ("5..0" is not 50.00).
+     * free), and a thousands separator must group three digits ("5..0" is not 50.00). R19: a single separator before
+     * exactly three digits is digit grouping ("1.234" → 123400).
      */
     public static function parsePriceToCents($price): int {
         if (is_int($price)) {
@@ -698,7 +711,9 @@ class Import {
                 $grouping = $decimal === ',' ? '.' : ',';
             } else {
                 $decimal = $lastComma !== false ? ',' : '.';
-                if (substr_count($s, $decimal) > 1) [$grouping, $decimal] = [$decimal, ''];
+                // R19: one separator before exactly three digits groups them ("1.234 Kč", "12,990 Ft" are 1 234 and 12 990,
+                // not 1,23 and 12,99); "0.125" keeps its decimal mark.
+                if (substr_count($s, $decimal) > 1 || preg_match('/^-?[1-9]\d{0,2}[.,]\d{3}$/', $s)) [$grouping, $decimal] = [$decimal, ''];
             }
             if ($grouping !== null) {
                 $whole = $decimal === '' ? $s : substr($s, 0, (int)strrpos($s, $decimal));

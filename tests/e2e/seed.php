@@ -22,11 +22,13 @@ foreach (['default' => 'SK31 1200 0000 1987 4263 7541', 'cz' => 'CZ65 0800 0000 
     $e2eStores['stores'][$e2eStore]['legal']['iban'] = $e2eIban;
     $e2eStoresChanged = true;
 }
-// Spanish is no store's own language: on the default store it is a further language (?lang=es), which
-// secondary-language.spec.js shops in.
-if (isset($e2eStores['stores']['default']) && !in_array('es', (array)($e2eStores['stores']['default']['languages'] ?? []), true)) {
-    $e2eStores['stores']['default']['languages'][] = 'es';
-    $e2eStoresChanged = true;
+// Spanish is no store's own language: on the default store and on the prefixed CZK store (/cs/) it is a further
+// language (?lang=es), which secondary-language.spec.js shops in.
+foreach (['default', 'cz'] as $e2eStore) {
+    if (isset($e2eStores['stores'][$e2eStore]) && !in_array('es', (array)($e2eStores['stores'][$e2eStore]['languages'] ?? []), true)) {
+        $e2eStores['stores'][$e2eStore]['languages'][] = 'es';
+        $e2eStoresChanged = true;
+    }
 }
 if ($e2eStoresChanged) {
     $e2eStoresPath = DataOverrides::storesWritePath() ?? throw new RuntimeException('No writable stores.json location for the E2E shop');

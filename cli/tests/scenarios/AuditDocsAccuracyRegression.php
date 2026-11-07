@@ -104,7 +104,7 @@ $r10dExample = (string)file_get_contents($a112Root . '/config.example.php');
 assert_true(preg_match("~'db_sqlite_path' => dirname\(__DIR__\) \. '/(bareboneseshop-private/db/shop\.sqlite)'~", $r10dExample, $r10dPath) === 1
     && str_contains($a112Readme, '`../' . $r10dPath[1] . '`') && !str_contains($a112Readme, 'default `db/shop.sqlite`'),
     'R10 docs README: db_sqlite_path is documented as config.example.php sets it, not as a db/shop.sqlite default');
-assert_true(str_contains((string)file_get_contents($a112Root . '/cli/tests/scenarios/FoundationScenario.php'), "\$testDbPath = test_fixture_path('suite');")
+assert_true(str_contains((string)file_get_contents($a112Root . '/cli/tests/scenarios/FoundationScenario.php'), "\$testDbPath = TEST_DATA_DIR . '/private/db/shop.sqlite';")
     && str_contains($a112Readme, 'system temp directory') && !str_contains($a112Readme, 'db/test.sqlite') && !preg_match('/^mkdir -p db\b/m', $a112Readme),
     'R10 docs README: the test database lives in the system temp directory, no db/ directory is needed');
 assert_true(!str_contains($a112Readme, 'multi-step checkout') && str_contains($a112Readme, 'single-page checkout'), 'R10 docs README: checkout is described as the single page it is');

@@ -212,6 +212,9 @@ try {
     };
     ShippingService::setAdapters(['pickup' => new PersonalPickup(), 'packeta' => new PacketaShipping(), 'gls' => new GlsShipping()]);
     $r15lRow = $r15lForm();
+    // R19: "Create and send" / "Ship" saved the parcel without a carrier; the field now starts with the order's carrier.
+    assert_true(str_contains($r15lRow, 'name="carrier" maxlength="100" value="packeta"'),
+        'R19 shipments: a planned parcel of a Packeta order offers Packeta as its carrier');
     assert_equals(['packeta', ['packeta'], false, true],
         [ShippingService::orderCarrier(Orders::byId($r11fCodOrderId)), array_keys(adminOrderLabelCarriers(Orders::byId($r11fCodOrderId), ShippingService::labelCarriers())),
             str_contains($r15lRow, 'data-shipment-label-form'), str_contains($r15lRow, 'data-label-unavailable="packeta"')],

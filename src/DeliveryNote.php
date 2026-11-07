@@ -68,7 +68,7 @@ final class DeliveryNote {
         foreach (CheckoutService::companyLines($address) as $line) $lines[] = $line;
         $lines[] = (string)($address['street'] ?? $address['address'] ?? '');
         $lines[] = trim(($address['zip'] ?? '') . ' ' . ($address['city'] ?? ''));
-        $lines[] = ShippingService::countryName((string)($address['country'] ?? ''));
+        $lines[] = ShippingService::countryNameIn((string)($address['country'] ?? ''), I18n::locale());
         $lines[] = (string)($note['order']['customer_phone'] ?? '');
         return array_values(array_filter(array_map('trim', $lines), static fn(string $line): bool => $line !== ''));
     }

@@ -243,6 +243,7 @@ final class Updater
         $halfDone = null;
         $entered = false;
         $installed = false;
+        $keepClosed = null;
         $prior = $this->priorMaintenance();
         try {
             $report = $this->check($package);
@@ -303,6 +304,12 @@ final class Updater
                 'already_current' => count($report['current']),
                 'retired' => $this->retireObsoleteFiles($snapshot['id']),
             ];
+            // R19: a failed window found before (a migration stopped half-way) is lifted only by an update that ran the
+            // migrations; one of code only left the schema as it was and keeps the shop closed for what the marker says.
+            if ($prior !== null && ($prior['marker']['failed'] ?? false) === true && !$package->runsMigrations()) {
+                $keepClosed = (string)($prior['marker']['reason'] ?? '');
+                $result['still_closed'] = $keepClosed;
+            }
             $installed = true;
             return $result;
         } catch (Throwable $e) {
@@ -342,7 +349,7 @@ final class Updater
             // or the fresh marker of an updater killed half-way) or none.
             if ($halfDone !== null) {
                 MaintenanceMode::fail($this->root, $halfDone);
-            } elseif ($installed) {
+            } elseif ($installed && $keepClosed === null) {
                 MaintenanceMode::leave($this->root);
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
@@ -803,6 +810,18 @@ final class Updater
             throw new RuntimeException('MySQL rollback requires the configured dump/restore adapter');
         }
         $sqliteSource = $database !== null && !$isMysql ? $this->verifiedSqliteSnapshot($directory, $database) : null;
+        // R19: every source is checked before the first change, so a snapshot missing one changed nothing and the shop
+        // gets back the window it had (it was marked failed, closed until an operator acted).
+        foreach ($metadata['files'] as $row) {
+            if (empty($row['existed'])) continue;
+            $source = $directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, (string)$row['path']);
+            if (!is_file($source) || is_link($source)) {
+                throw new RuntimeException("Snapshot file missing: {$row['path']}");
+            }
+        }
+        if (!empty($metadata['state_existed']) && !is_file($directory . DIRECTORY_SEPARATOR . 'version-state.json')) {
+            throw new RuntimeException('Snapshot version state is missing');
+        }
 
         $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource, $numbering, &$numberingRaised, &$touched): void {
             if ($isMysql) {
@@ -818,34 +837,31 @@ final class Updater
                     if ($e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP) $touched = true;
                     throw $e;
                 }
+                $touched = true;
             }
-            $touched = true;
+            // R19: touched once a file actually changed (it was set before the first one, so a failure there closed the shop).
             foreach ($metadata['files'] as $row) {
                 $path = (string)$row['path'];
                 if (!empty($row['existed'])) {
-                    $source = $directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR
-                        . str_replace('/', DIRECTORY_SEPARATOR, $path);
-                    if (!is_file($source) || is_link($source)) {
-                        throw new RuntimeException("Snapshot file missing: {$path}");
-                    }
-                    $this->installFile($source, $path);
+                    $this->installFile($directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR
+                        . str_replace('/', DIRECTORY_SEPARATOR, $path), $path);
                 } else {
                     $this->deleteFile($path);
                 }
+                $touched = true;
             }
 
             $statePath = $this->statePath();
             if (!empty($metadata['state_existed'])) {
-                $source = $directory . DIRECTORY_SEPARATOR . 'version-state.json';
-                if (!is_file($source)) {
-                    throw new RuntimeException('Snapshot version state is missing');
-                }
-                $this->installAbsoluteFile($source, $statePath);
-            } elseif (is_file($statePath) && !unlink($statePath)) {
-                throw new RuntimeException('Cannot remove installed version state during rollback');
+                $this->installAbsoluteFile($directory . DIRECTORY_SEPARATOR . 'version-state.json', $statePath);
+                $touched = true;
+            } elseif (is_file($statePath)) {
+                if (!unlink($statePath)) throw new RuntimeException('Cannot remove installed version state during rollback');
+                $touched = true;
             }
 
             if ($sqliteSource !== null) {
+                $touched = true;
                 $livePath = (string)$database['live_path'];
                 @unlink($livePath . '-wal');
                 @unlink($livePath . '-shm');
