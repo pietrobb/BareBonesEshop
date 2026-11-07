@@ -36,7 +36,11 @@ try {
     $r21uUpdate = $r21uUpdater->apply($r21uPackage());
     assert_equals([[true, true, $r21uHalf], $r21uHalf], [$r21uState(), $r21uUpdate['still_closed'] ?? null],
         'R21 update: an update keeps the window of a half-done rollback of a snapshot it does not restore');
-    // The rollback the marker names lifts it.
+    // R22: the named rollback waits until that later update is rolled back (newest first, no mix of releases); that
+    // rollback keeps the window, and the rollback the marker names then lifts it.
+    $r21uLater = $r21uUpdater->rollback((string)$r21uUpdate['snapshot'], true, true);
+    assert_equals([[true, true, $r21uHalf], $r21uHalf], [$r21uState(), $r21uLater['still_closed'] ?? null],
+        'R21 rollback: rolling back the later update keeps the half-done rollback\'s window');
     $r21uNamed = $r21uUpdater->rollback($r21uFirst, true, true);
     assert_equals([false, null], [is_file(MaintenanceMode::path($r21uShop)), $r21uNamed['still_closed'] ?? null],
         'R21 rollback: the rollback .maintenance names lifts its window');

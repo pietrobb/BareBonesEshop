@@ -24,12 +24,32 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   change. A CZK/HUF amount stored finer than a whole unit is shown with its cents ("12345.67") and kept on save. A
   price above 20 000 000.00 is refused in the admin, the CSV import and feeds (the row or item is reported, the product
   keeps its price), and a thousands separator must group three digits (`5..0` and `1.29,00` are refused).
-- **CSV import and feeds refuse an ambiguous price.** One separator before exactly three digits ("199.000", "2.000",
-  "12,990 Ft", "1.234 Kč") was read as digit grouping (2.1.2: "199.000" in a CZK file became 199 000 Kč); it is now
-  refused with a row or feed item error. Before the first import or sync after the update, check that the ERP
-  exports two decimals or no separator ("199.00", "199000", "12 990"); for a feed with fixed three or more decimals add
-  `"decimal": "."` (or `","` for "1.299,000") to its `price_to_cents` mapping. A feed item with a refused price still
-  updates its stock; the feed status shows `partial: … prices refused`. Look through the errors of the first syncs.
+- **CSV import and feeds refuse an ambiguous price.** 2.1.2 read a single separator always as the decimal mark:
+  "199.000" was 199,00, "12.990" was 12,99 and "2.000" was 2,00 in every currency (only a repeated one, "1.299.000",
+  was digit grouping). From 2.1.3 one separator before exactly three digits ("199.000", "2.000", "12,990 Ft",
+  "1.234 Kč") is refused with a row or feed item error, because it may as well mean thousands; the product keeps its
+  price, and a feed item still updates its stock (the feed status shows `partial: … prices refused`). Before the first
+  import or sync after the update, check which of these is your case:
+  - **An export with three decimals** (common for CZK and HUF ERPs: "199.000" meaning 199 Kč) was read correctly by
+    2.1.2. From 2.1.3 its prices below 1 000 are refused and stay frozen (a supplier change from 199 to 189 Kč is not
+    applied), while prices from 1 000 up ("1299.000") still update, so the gap is easy to miss. Add `"decimal": "."`
+    (or `","` for "199,000") to the feed's `price_to_cents` mapping (see "Import and feed prices" below); a CSV
+    import has no such setting, so export the CSV with two decimals ("199.00") or none.
+  - **An export that meant a separator as thousands** ("12.990 Ft", German "2.000" €) was stored 1 000 times too low by
+    2.1.2 (12,99 Ft, 2,00 €), and those products sell at that price now. From 2.1.3 such a value is refused and the
+    wrong price stays. Find the affected products (Products, sort by price; prices far below the usual), export the
+    prices without a separator ("12990") or set `"decimal": ","` on the feed, and run the import or sync again.
+
+  Look through the errors of the first imports and syncs (the import message and the feed page list the refused rows).
+- **ERP product sync takes only integer cents.** 2.1.2 stored the `price` and `compare_price` an ERP adapter returned as
+  sent. From 2.1.3 each must be an integer or a string of digits in cents (`1990` or `"1990"`); a decimal number
+  (`1990.0`, `19.90`), a sign (`"+1250"`), a separator or text refuses that product, which is counted as refused and not
+  written. An ERP whose adapter returns prices as decimal numbers updates no product after the update: before it, make
+  the adapter return integer cents (`(int)round($price * 100)` for a price in units) and run one sync by hand.
+- **Custom themes: the store switch is a new header variable.** From 2.1.3 `language_links` lists only the current
+  store's languages; the links to the other stores (SK, CZ, HU) are in `store_links` (label "CZ · Kč", `title`,
+  `active`). A theme whose header renders only `language_links` loses the navigation between stores: add the
+  `store_links` loop from `themes/default/blocks/storefront/header.html` (and the `.store-switch` style) to it.
 - **MySQL with a MariaDB dump client: install the MySQL client first.** Against a MySQL server `mariadb-dump` (also
   installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package) writes generated columns into the dump and
   MySQL refuses it on restore. The 2.1.2 updater refuses this package when it restores its pre-update dump into the
@@ -59,6 +79,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the shop on 503 until the command named in `.maintenance` succeeds: run that command, do not delete the file of a
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
+  Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
 - **Theme assets:** the default theme is version 2.3.5 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
@@ -86,6 +107,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   with `//` or `/\` (store and language links, canonical, hreflang). An import, feed or ERP sync error quoted the
   refused value whole: a feed with a 1 MB price made a 9 MB admin page. The value is quoted with at most 60 characters
   and its length, a SKU with 64, each error line with 300 (`Str::clip()`), and each line of an admin message too.
+- **Rollbacks newest first, the updater restored last** (review round 22, low). A rollback stopped half-way had already
+  put back the old release's `cli/update.php` and `src/Updater.php` (the snapshot's file order); the next rollback ran
+  that updater, which did not know the failed window and opened the half-restored shop. The updater's own files are now
+  restored after every other file. A rollback of a snapshot while an update applied after it is still installed, or
+  half-applied after its automatic rollback failed, restored only its own files next to the later release's others;
+  it is refused before it changes anything and names the rollback to run first. `update_snapshots_keep` no longer
+  deletes the snapshot whose rollback a failed `.maintenance` names (an update during that window could delete it, and
+  the shop could not reopen). Snapshots record `created_us` to order those of the same second.
 - **Admin and documents** (review round 21, low). Audit-log refund notes and the amount a Stripe refund webhook
   records were in cents ("Manual refund of 1647000 completed by …" for 16 470 Ft): they are written in the order's
   currency, and older entries are shown that way in the audit log. Cash on delivery of an order shipped in several
@@ -142,7 +171,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   cart and currency; only a language the store does not offer leads to the store that has it. English chosen in the HU
   store also stays on the next page: links, forms and the storefront API keep `?lang=en` even though English is the
   `/en/` store's own language (the canonical URL still leaves English to that store).
-- **Import and feed prices: no guessing** (review rounds 20 and 21, medium). The round 19 rule read one separator
+- **Import and feed prices: no guessing** (review rounds 20 and 21, medium). Rounds 19 and 20 were not released: 2.1.2
+  read one separator always as the decimal mark (see the upgrade notes). The round 19 rule read one separator
   before three digits as digit grouping in every currency, so an ERP exporting three decimals had "12.500" stored as
   12 500,00 € and "99.990" as 99 990 €, without a warning; reading it as decimals in EUR only (round 20) turned a German
   or Polish "2.000" into 2,00 € and still grouped "199.000" in CZK into 199 000 Kč next to "1299.000" = 1 299 Kč. Such a
