@@ -26,6 +26,13 @@ final class MinimalPdf
     private const PAGE_W_MM = 210.0;
     private const PAGE_H_MM = 297.0;
     private const MM_TO_PT  = 2.834645669; // 72 / 25.4
+    /** Helvetica advance widths (AFM, 1/1000 em) of HELVETICA_CHARS, position by position. */
+    private const HELVETICA_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;-/()%\'';
+    private const HELVETICA_WIDTHS = [
+        667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611,
+        556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500,
+        556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 278, 278, 278, 333, 278, 333, 333, 889, 191,
+    ];
 
     /** Standard glyph names of U+0100..U+017F (Latin Extended-A), in code point order. */
     private const LATIN_EXT_A = [
@@ -270,6 +277,13 @@ final class MinimalPdf
     {
         $lines = [];
         foreach (preg_split('/\s+/u', trim($str)) ?: [] as $word) {
+            // R22: a word wider than the column is split, it never runs into the next column.
+            while (mb_strlen($word, 'UTF-8') > 1 && $this->approxTextWidth($word, $sizePt, $bold) > $width) {
+                $fit = 1;
+                while ($this->approxTextWidth(mb_substr($word, 0, $fit + 1, 'UTF-8'), $sizePt, $bold) <= $width) $fit++;
+                $lines[] = mb_substr($word, 0, $fit, 'UTF-8');
+                $word = mb_substr($word, $fit, null, 'UTF-8');
+            }
             $last = array_key_last($lines);
             if ($last !== null && $this->approxTextWidth($lines[$last] . ' ' . $word, $sizePt, $bold) <= $width) $lines[$last] .= ' ' . $word;
             else $lines[] = $word;
@@ -279,8 +293,14 @@ final class MinimalPdf
 
     private function approxTextWidth(string $s, float $sizePt, bool $bold): float
     {
-        // Rough heuristic: avg char width = 0.5 × size pt for Helvetica.
-        $factor = $bold ? 0.55 : 0.5;
-        return mb_strlen($s, 'UTF-8') * $sizePt * $factor / self::MM_TO_PT;
+        // R22: Helvetica's own advance widths (1/1000 em) — capitals are wider than the old flat 0.5 em, so
+        // "STÔL W25 …" overflowed its column. A letter outside ASCII is counted as a capital or a lower-case letter.
+        $em = 0;
+        foreach (mb_str_split($s, 1, 'UTF-8') as $c) {
+            $i = strpos(self::HELVETICA_CHARS, $c);
+            $em += $i !== false ? self::HELVETICA_WIDTHS[$i]
+                : (strlen($c) === 1 ? 556 : (mb_strtolower($c, 'UTF-8') !== $c ? 722 : 556));
+        }
+        return $em / 1000 * ($bold ? 1.08 : 1.0) * $sizePt / self::MM_TO_PT;
     }
 }

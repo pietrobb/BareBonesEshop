@@ -388,7 +388,7 @@ function pageDigitalAssets(): void {
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.save')) ?></button>
         </form>
     </div>
-    <div class="card">
+    <div class="card table-scroll">
         <h3><?= esc(I18n::t('admin.digital.mappings')) ?></h3>
         <?php if (!$assets): ?><p class="muted"><?= esc(I18n::t('admin.digital.empty')) ?></p><?php else: ?>
         <table>
