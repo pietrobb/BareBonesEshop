@@ -79,6 +79,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Admin and documents** (review round 21, low). Audit-log refund notes and the amount a Stripe refund webhook
+  records were in cents ("Manual refund of 1647000 completed by …" for 16 470 Ft): they are written in the order's
+  currency, and older entries are shown that way in the audit log. Cash on delivery of an order shipped in several
+  parcels: each parcel collects its own goods and the last one the rest of the total (shipping, fees); the first parcel
+  no longer carries the whole COD amount (the label, the admin parcel row and the carrier portal amount agree). The
+  bank-transfer reference in the order and reminder e-mails is labelled like the storefront in each language: English
+  "Payment reference", not the Slovak/Czech "Variable symbol" (German, Spanish, Hungarian and Polish had calques too).
+  The PDF invoice items table gives the item column 12 mm less, so "Unit price excl. VAT" (and "Einzelpreis netto",
+  "Precio unit. sin IVA") fits on one line.
 - **A half-done rollback keeps the shop closed until that rollback succeeds** (review round 21, low). After an update
   whose automatic rollback failed, or a rollback that stopped half-way, a completed rollback of code only of another
   snapshot reopened the shop although `.maintenance` still named the rollback that was due. Such a window is now lifted

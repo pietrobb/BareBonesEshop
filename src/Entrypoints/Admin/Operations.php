@@ -204,9 +204,9 @@ function pageAudit(): void {
                 <td><?= esc(adminCodeLabel('admin.audit.entity.', (string)$log['entity'])) ?></td>
                 <td><?= (int)$log['entity_id'] ?></td>
                 <td><?= esc(adminCodeLabel('admin.audit.action.', (string)$log['action'])) ?></td>
-                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['old_value'] ?? null), 0, 80)) ?></td>
-                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['new_value'] ?? null), 0, 80)) ?></td>
-                <td><?= esc($log['note'] ?? '') ?></td>
+                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['old_value'] ?? null, (int)$log['entity_id']), 0, 80)) ?></td>
+                <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['new_value'] ?? null, (int)$log['entity_id']), 0, 80)) ?></td>
+                <td><?= esc(AuditLogLabels::note((string)$log['entity'], (int)$log['entity_id'], $log['note'] ?? null)) ?></td>
                 <td><?= esc($log['actor']) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>
             </tr>

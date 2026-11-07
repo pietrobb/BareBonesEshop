@@ -1172,7 +1172,7 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
     $orderTotal = (int)$order['total'];
 
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
-        "Stripe refund: {$refundedAmount}/{$orderTotal} cents");
+        'Stripe refund: ' . AuditLogLabels::amount($refundedAmount, $order['currency'] ?? 'eur') . ' of ' . AuditLogLabels::amount($orderTotal, $order['currency'] ?? 'eur'));
 
     $fullRefund = $refundedAmount >= $orderTotal;
     $chargeId = (string)($charge['id'] ?? $paymentIntent);
@@ -1194,7 +1194,7 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
     if ($fullRefund && PaymentService::refundableBalance($orderId) === 0) {
         $order = Orders::byId($orderId) ?: $order;
         if (OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
-            OrderWorkflow::transition($orderId, 'refunded', "Stripe full refund: {$refundedAmount} cents");
+            OrderWorkflow::transition($orderId, 'refunded', 'Stripe full refund: ' . AuditLogLabels::amount((int)$refundedAmount, $order['currency'] ?? 'eur'));
         } else {
             FulfillmentDispatcher::queue('refunded', $order);
         }

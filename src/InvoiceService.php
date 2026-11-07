@@ -29,6 +29,9 @@ final class InvoiceService
     private static ?array $storesOverride = null;
     /** Lowest baseline (mm from the top of A4) for invoice body text; the register note sits at 285 mm. */
     private const PDF_CONTENT_BOTTOM_MM = 278.0;
+    /** Items table columns of the PDF: label key => [x, width] in mm, shared by the header and the rows. */
+    private const PDF_ITEM_COLUMNS = ['col_item' => [20, 46], 'col_qty' => [68, 12], 'col_unit_net' => [82, 32], 'col_vat' => [116, 12],
+        'col_net_total' => [130, 28], 'col_total' => [160, 30]];
 
     /** Days an e-mailed invoice link stays valid. */
     public const DOWNLOAD_LINK_TTL_DAYS = 30;
@@ -1989,12 +1992,13 @@ final class InvoiceService
 
         // Items header (repeated on every continuation page)
         // R20: a label wider than its column wraps onto a second line — the English "Unit price excl. VAT" ran into "Qty".
-        $itemsHeader = static function () use ($pdf, $L, &$y): void {
+        // R21: the item column gives up 12 mm so "Unit price excl. VAT" / "Einzelpreis netto" fit on one line (no needless wrap).
+        $col = self::PDF_ITEM_COLUMNS;
+        $itemsHeader = static function () use ($pdf, $L, $col, &$y): void {
             $lines = 1;
-            foreach ([[20, 'col_item', 58, 'left'], [80, 'col_qty', 12, 'right'], [94, 'col_unit_net', 26, 'right'], [122, 'col_vat', 12, 'right'],
-                [136, 'col_net_total', 26, 'right'], [164, 'col_total', 26, 'right']] as [$x, $key, $width, $align]) {
+            foreach ($col as $key => [$x, $width]) {
                 $cell = $pdf->wrap($L[$key], $width, 8, true);
-                foreach ($cell as $i => $text) $pdf->text($x, $y + $i * 3.2, $text, ['size' => 8, 'bold' => true, 'align' => $align, 'width' => $width]);
+                foreach ($cell as $i => $text) $pdf->text($x, $y + $i * 3.2, $text, ['size' => 8, 'bold' => true, 'align' => $key === 'col_item' ? 'left' : 'right', 'width' => $width]);
                 $lines = max($lines, count($cell));
             }
             $y += 4 + ($lines - 1) * 3.2;
@@ -2018,14 +2022,15 @@ final class InvoiceService
             // where "Zľava 23 %" read as a 23 % discount.
             $name = isset($row['label']) ? $L[$row['label']] : (string)$row['name'];
             $ensureSpace(5, true);
-            $pdf->text(20, $y, mb_substr($name, 0, 34), ['size' => 8]);
+            $cell = static fn(string $key, string $text) => $pdf->text($col[$key][0], $y, $text, ['size' => 8, 'align' => 'right', 'width' => $col[$key][1]]);
+            $pdf->text(20, $y, mb_substr($name, 0, 32), ['size' => 8]);
             if (isset($row['qty']) && $row['qty'] !== 0) {
-                $pdf->text(80, $y, (string)$row['qty'], ['size' => 8, 'align' => 'right', 'width' => 12]);
-                $pdf->text(94, $y, I18n::price((int)round($row['net'] / $row['qty']), $currency), ['size' => 8, 'align' => 'right', 'width' => 26]);
+                $cell('col_qty', (string)$row['qty']);
+                $cell('col_unit_net', I18n::price((int)round($row['net'] / $row['qty']), $currency));
             }
-            $pdf->text(122, $y, self::rateLabel((float)$row['rate'], $row), ['size' => 8, 'align' => 'right', 'width' => 12]);
-            $pdf->text(136, $y, I18n::price($row['net'], $currency), ['size' => 8, 'align' => 'right', 'width' => 26]);
-            $pdf->text(164, $y, I18n::price($row['gross'], $currency), ['size' => 8, 'align' => 'right', 'width' => 26]);
+            $cell('col_vat', self::rateLabel((float)$row['rate'], $row));
+            $cell('col_net_total', I18n::price($row['net'], $currency));
+            $cell('col_total', I18n::price($row['gross'], $currency));
             $y += 5;
         }
 

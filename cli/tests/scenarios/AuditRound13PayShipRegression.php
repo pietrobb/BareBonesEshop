@@ -132,13 +132,17 @@ try {
     $r13pTotal = (int)Orders::byId($r13pOrder)['total'];
     [$r13pShipA, $r13pShipB] = $r13pParcels($r13pOrder);
     $r13pLabelA = ShippingService::generateLabel($r13pOrder, 'r13p-carrier', $r13pShipA);
-    assert_equals($r13pTotal, (int)$r13pLabelA['cod_amount'], 'R13 T4 setup: the first parcel label collects the order total');
+    // R21: a parcel collects its goods (A 10,00 €, B 5,00 €), the last open one the rest once every unit is in a parcel.
+    assert_equals(1000, (int)$r13pLabelA['cod_amount'], 'R13 T4 setup: the first parcel label collects its goods (R21: it collected the order total)');
     assert_true(Fulfillment::cancel($r13pShipA), 'R13 T4 setup: the labelled parcel is cancelled');
     $r13pRow = Orders::byId($r13pOrder);
-    assert_equals([$r13pTotal, $r13pTotal], [ShippingService::parcelCodAmount($r13pRow, $r13pShipB), ShippingService::labelCodAmount($r13pRow)],
-        'R13 T4: after the collecting parcel is cancelled, the remaining parcel collects the COD (was 0: the cancelled parcel\'s label kept it)');
+    assert_equals([500, $r13pTotal], [ShippingService::parcelCodAmount($r13pRow, $r13pShipB), ShippingService::labelCodAmount($r13pRow)],
+        'R13 T4: after the labelled parcel is cancelled, the remaining parcel collects its goods (A waits for a new parcel) and a whole-order label the total (was 0: the cancelled parcel\'s label kept it)');
     $r13pLabelB = ShippingService::generateLabel($r13pOrder, 'r13p-carrier', $r13pShipB);
-    assert_equals($r13pTotal, (int)$r13pLabelB['cod_amount'], 'R13 T4: the label of the remaining parcel collects the order total');
+    assert_equals(500, (int)$r13pLabelB['cod_amount'], 'R13 T4: the label of the remaining parcel collects its goods');
+    $r13pShipA2 = Fulfillment::createShipment($r13pOrder, Fulfillment::shippable($r13pOrder)[0]['warehouse_id'] ?? null,
+        [['order_item_id' => (int)array_column(Orders::items($r13pOrder), null, 'sku')['R13P-A']['id'], 'sku' => 'R13P-A', 'quantity' => 1]], 'r13p-a2-' . $r13pOrder);
+    assert_equals($r13pTotal - 500, ShippingService::parcelCodAmount(Orders::byId($r13pOrder), $r13pShipA2), 'R21 COD: the new parcel of A is the last one and collects the rest of the total');
 
     // T9: the carrier is called with no transaction open; inside one generateLabel refuses before calling it.
     assert_equals([false, false], $r13pCarrier->calledInTransaction, 'R13 T9: the carrier API was called with no database transaction open');
@@ -160,7 +164,7 @@ try {
         'R13 T9: the admin label action runs without the order transaction around the carrier call');
     $r13pLabel2 = ShippingService::generateLabel($r13pOrder2, 'r13p-carrier', $r13pShip2A);
     $r13pShipRows = array_column(Fulfillment::shipments($r13pOrder2), null, 'id');
-    assert_equals([$r13pLabel2['awb'], (int)Orders::byId($r13pOrder2)['total']],
+    assert_equals([$r13pLabel2['awb'], 1000],
         [$r13pShipRows[$r13pShip2A]['tracking_number'] ?? null, (int)($r13pShipRows[$r13pShip2A]['cod_amount'] ?? 0)],
         'R13 T9: the label is recorded on the parcel with its COD after the carrier answered');
     assert_equals($r13pLabel2['awb'], ShippingService::generateLabel($r13pOrder2, 'r13p-carrier', $r13pShip2A)['awb'],
