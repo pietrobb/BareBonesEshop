@@ -37,6 +37,8 @@ try {
         VALUES (9981, 'default', ?, 'R18PF stock', 'r18pf-stock', 'R18PF-STOCK', 'simple', 1500, 'eur', 'active', 5, 'deny', '2020-01-01 00:00:00')")->execute([$r18pfCategory]);
     $pdo->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', ?, 'R18PF-STOCK', 5, 0)")->execute([$r18pfWarehouse]);
     Cache::setDir($r18pfRoot . '/cache');
+    // R20: an entry built in the second of the suite's latest catalog change is rebuilt after it; build after it.
+    for ($r18pfWait = 0; $r18pfWait < 40 && PublicFeedCache::catalogState()['racy']; $r18pfWait++) usleep(100000);
     $r18pfCalls = 0;
     $r18pfWriter = static function ($out) use (&$r18pfCalls): void { $r18pfCalls++; fwrite($out, "<feed>{$r18pfCalls}</feed>"); };
     $r18pfSend = static function () use ($r18pfWriter): string {
@@ -85,6 +87,7 @@ try {
         'R18 feeds: a price feed with the same price keeps updated_at (was: bumped on every sync), a new price is saved');
 
     // Going out of stock still rebuilds the feed (availability), and so does a plain catalogChanged().
+    for ($r18pfWait = 0; $r18pfWait < 40 && PublicFeedCache::catalogState()['racy']; $r18pfWait++) usleep(100000);
     $r18pfSend();
     $r18pfBefore = $r18pfCalls;
     Warehouse::bulkSetStock($r18pfWarehouse, ['R18PF-STOCK' => 0]);
