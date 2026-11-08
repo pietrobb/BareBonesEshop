@@ -128,6 +128,34 @@ if (!$yes && !$quiet) {
     if (strtolower($line) !== 'yes') { $emit('Aborted.'); exit(1); }
 }
 
+// R23: the shop (503) and the worker stay closed while the database and files are replaced, as during an update. A
+// window that an update or migration holds is not taken over; a failed one stays after the restore (it is not fixed).
+$root = dirname(__DIR__);
+if (MaintenanceMode::active($root) && !MaintenanceMode::failed($root)) {
+    fwrite(STDERR, 'REFUSED: another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
+        . "); wait until that update or migration ends, then retry.\n");
+    exit(1);
+}
+$priorFailure = MaintenanceMode::failed($root) ? (string)(MaintenanceMode::marker($root)['reason'] ?? '') : null;
+$restoreCommand = 'php cli/restore.php ' . escapeshellarg($remotePath) . ($filesOnly ? ' --files-only' : ($withFiles ? ' --files' : ''));
+MaintenanceMode::enter($root, 'cli/restore.php ' . $remotePath);
+// Killed from here on, the shop stays closed with what to run (no finally runs).
+MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again");
+$endWindow = static function (?string $halfDone) use ($root, $priorFailure): void {
+    if ($halfDone !== null) {
+        MaintenanceMode::fail($root, $halfDone);
+        fwrite(STDERR, "The shop stays in maintenance (503) until that is resolved.\n");
+    } elseif ($priorFailure !== null) {
+        MaintenanceMode::fail($root, $priorFailure);
+    } else {
+        MaintenanceMode::leave($root);
+    }
+};
+/** Whether a failed restore left something half-replaced (its own automatic rollback failed, or some files are written). */
+$leftHalfDone = static fn(Throwable $e): bool => $e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP
+    || str_contains($e->getMessage(), 'automatic rollback failed')
+    || preg_match('/\d+ file\(s\) were already written/', $e->getMessage()) === 1;
+
 if (!$filesOnly) {
     try {
         $res = BackupService::restore($remotePath, [
@@ -136,6 +164,7 @@ if (!$filesOnly) {
         ]);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'RESTORE FAILED: ' . $e->getMessage() . "\n");
+        $endWindow($leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null);
         exit(4);
     }
 
@@ -154,6 +183,7 @@ if ($withFiles) {
         $files = BackupService::restoreFiles($remotePath, ['force' => $force]);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'FILES RESTORE FAILED: ' . $e->getMessage() . "\n");
+        $endWindow($leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null);
         exit(5);
     }
     $emit('FILES OK ' . $files['archive']);
@@ -164,4 +194,5 @@ if ($withFiles) {
         fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");
     }
 }
+$endWindow(null);
 exit(0);
