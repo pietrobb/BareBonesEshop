@@ -127,7 +127,7 @@ class Sitemap {
         $parts = max(1, $parts);
         if ($part < 0 || $part > $parts || ($part > 0 && $parts === 1)) throw new OutOfRangeException('Unknown sitemap part');
         if ($part === 0 && $parts > 1) {
-            $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
+            $e = static fn(string $s): string => htmlspecialchars(MarketingFeed::xmlText($s), ENT_XML1 | ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
             fwrite($out, '<?xml version="1.0" encoding="UTF-8"?>' . "\n");
             fwrite($out, '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n");
             for ($number = 1; $number <= $parts; $number++) {
@@ -152,7 +152,8 @@ class Sitemap {
      * @return Generator<int, array{0: int, 1: string}>
      */
     private static function partEntries(array $stores, string $base): Generator {
-        $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
+        // R23: quotes are escaped too (a CSV slug with " ended the href attribute and broke the sitemap).
+        $e = static fn(string $s): string => htmlspecialchars(MarketingFeed::xmlText($s), ENT_XML1 | ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $defaultStore = (string)(Bootstrap::stores()['default_store'] ?? '');
         $wrapper = strlen(self::URLSET_OPEN) + strlen(self::URLSET_CLOSE);
         [$number, $count, $bytes] = [1, 0, $wrapper];

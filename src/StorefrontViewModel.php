@@ -21,7 +21,9 @@ final class StorefrontViewModel
         $requested = is_string($_GET['variant'] ?? null) && ctype_digit($_GET['variant']) ? (int)$_GET['variant'] : 0;
         $price = self::price($source);
         $purchasable = array_keys(array_filter($variants, static fn(array $v): bool => $v['availability']['purchasable']));
-        $chosen = array_values(array_filter($purchasable, static fn(int $i): bool => $variants[$i]['id'] === $requested))[0] ?? null;
+        // R23: also one that cannot be bought now: the feed lists it out of stock at its price, and the page showed
+        // another variant's price instead.
+        $chosen = array_values(array_filter(array_keys($variants), static fn(int $i): bool => $variants[$i]['id'] === $requested))[0] ?? null;
         if ($chosen !== null) {
             $price = self::price(['price' => $variants[$chosen]['price_amount_minor'], 'currency' => strtolower($variants[$chosen]['currency'])]);
         }
