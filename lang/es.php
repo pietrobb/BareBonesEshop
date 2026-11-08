@@ -2024,6 +2024,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.entity.customer_group' => 'Grupo de clientes',
     'admin.audit.entity.digital_asset' => 'Archivo digital',
     'admin.audit.entity.email_template' => 'Plantilla de correo',
+    'admin.audit.entity.mail_settings' => 'Envío de correo',
     'admin.audit.entity.feed' => 'Feed',
     'admin.audit.entity.import' => 'Importación',
     'admin.audit.entity.inventory' => 'Existencias',

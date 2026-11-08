@@ -2052,6 +2052,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.entity.customer_group' => 'Vásárlói csoport',
     'admin.audit.entity.digital_asset' => 'Digitális fájl',
     'admin.audit.entity.email_template' => 'E-mail-sablon',
+    'admin.audit.entity.mail_settings' => 'E-mail-kézbesítés',
     'admin.audit.entity.feed' => 'Feed',
     'admin.audit.entity.import' => 'Importálás',
     'admin.audit.entity.inventory' => 'Készlet',

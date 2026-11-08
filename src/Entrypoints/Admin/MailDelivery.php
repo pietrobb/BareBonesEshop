@@ -24,7 +24,10 @@ function pageMailDelivery(): void {
         foreach ($attributes as $attribute => $attributeValue) $html .= ' ' . $attribute . '="' . esc((string)$attributeValue) . '"';
         if (isset($locked[$name])) $html .= ' disabled';
         $html .= '>';
-        if (isset($locked[$name])) $html .= '<p class="muted" data-mail-env="' . esc($locked[$name]) . '">' . esc(I18n::format('admin.mail.env_locked', ['name' => $locked[$name]])) . '</p>';
+        if (isset($locked[$name])) {
+            $note = esc(I18n::format('admin.mail.env_locked', ['name' => $locked[$name]]));
+            $html .= '<p class="muted" data-mail-env="' . esc($locked[$name]) . '">' . $note . '</p>';
+        }
         return $html . '</div>';
     };
     ?>

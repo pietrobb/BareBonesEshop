@@ -2081,6 +2081,7 @@ return [
     'admin.audit.entity.customer_group' => 'Skupina zákazníkov',
     'admin.audit.entity.digital_asset' => 'Digitálny súbor',
     'admin.audit.entity.email_template' => 'Šablóna e-mailu',
+    'admin.audit.entity.mail_settings' => 'Doručovanie e-mailov',
     'admin.audit.entity.feed' => 'Feed',
     'admin.audit.entity.import' => 'Import',
     'admin.audit.entity.inventory' => 'Zásoba',

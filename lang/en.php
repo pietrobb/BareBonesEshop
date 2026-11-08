@@ -2072,6 +2072,7 @@ return [
     'admin.audit.entity.customer_group' => 'Customer group',
     'admin.audit.entity.digital_asset' => 'Digital file',
     'admin.audit.entity.email_template' => 'E-mail template',
+    'admin.audit.entity.mail_settings' => 'E-mail delivery',
     'admin.audit.entity.feed' => 'Feed',
     'admin.audit.entity.import' => 'Import',
     'admin.audit.entity.inventory' => 'Stock',

@@ -2052,6 +2052,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.entity.customer_group' => 'Skupina zákazníků',
     'admin.audit.entity.digital_asset' => 'Digitální soubor',
     'admin.audit.entity.email_template' => 'Šablona e-mailu',
+    'admin.audit.entity.mail_settings' => 'Doručování e-mailů',
     'admin.audit.entity.feed' => 'Feed',
     'admin.audit.entity.import' => 'Import',
     'admin.audit.entity.inventory' => 'Zásoba',
