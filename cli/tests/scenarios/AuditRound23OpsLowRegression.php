@@ -63,7 +63,8 @@ try {
     }
     $r23oDeleted = CheckoutSession::cleanup(90);
     $r23oLeft = $pdo->query("SELECT session_id FROM checkout_sessions WHERE order_id = {$r23oOrder} ORDER BY session_id")->fetchAll(PDO::FETCH_COLUMN);
-    assert_equals([3, ['conf', 'cs_old', 'live-link']], [$r23oDeleted, $r23oLeft],
+    // At least this order's three: in the full suite the shared database also holds lapsed links of earlier scenarios.
+    assert_equals([true, ['conf', 'cs_old', 'live-link']], [$r23oDeleted >= 3, $r23oLeft],
         'R23 retention: expired payment/account links and old confirmations are deleted, live ones and gateway sessions stay (was: never deleted)');
     CheckoutSession::keepNewest($r23oOrder, 'pay_link_page', 5);
     foreach (range(1, 8) as $i) $r23oAdd->execute([$r23oOrder, 'pay_link_page', "page-{$i}", $r23oAt(0)]);
