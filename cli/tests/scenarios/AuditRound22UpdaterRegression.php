@@ -107,7 +107,8 @@ try {
         $id = sprintf('2026110700000%d-%012x', $i, 0x220 + $i);
         mkdir($r22uState . '/snapshots/' . $id, 0700, true);
         file_put_contents($r22uState . '/snapshots/' . $id . '/snapshot.json', json_encode(['id' => $id, 'reason' => 'pre-update',
-            'status' => $i === 1 ? 'prepared' : 'applied', 'created_at' => "2026-11-07T00:00:0{$i}+00:00", 'database' => ['driver' => 'sqlite']]));
+            // R23: snapshot 2 was rolled back (a still installed update above the named one would be kept too).
+            'status' => [1 => 'prepared', 2 => 'rolled-back', 3 => 'applied'][$i], 'created_at' => "2026-11-07T00:00:0{$i}+00:00", 'database' => ['driver' => 'sqlite']]));
         $r22uIds[$i] = $id;
     }
     MaintenanceMode::fail($r22uApp, "update 22.0.1 failed and its automatic rollback failed; run php cli/update.php rollback --snapshot={$r22uIds[1]} --force --accept-data-loss");
