@@ -584,7 +584,9 @@ class FeedImport {
 
         foreach ($fieldMap as $srcField => $target) {
             $value = $raw[$srcField] ?? null;
-            if ($value === null || $value === '') continue;
+            // R23: a CSV cell of spaces is empty as well (an XML value is trimmed when read): a price "  " was read as 0,
+            // so an existing product became free and a new one was created free with the sync "ok".
+            if ($value === null || (is_string($value) && trim($value) === '')) continue;
 
             // Simple mapping: "ITEM_ID": "sku"
             if (is_string($target)) {
