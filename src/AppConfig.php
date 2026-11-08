@@ -91,7 +91,7 @@ final class AppConfig
         'gopay_goid', 'gopay_client_id', 'gopay_client_secret', 'gopay_env',
         'comgate_merchant', 'comgate_secret', 'comgate_test',
         'thepay_merchant_id', 'thepay_project_id', 'thepay_password', 'thepay_env',
-        'payu_client_id', 'payu_client_secret', 'payu_second_key', 'payu_pos_id', 'payu_env',
+        'payu_client_id', 'payu_client_secret', 'payu_second_key', 'payu_pos_id', 'payu_env', 'payu_signature_algorithm',
         'shipping_webhook_secrets',
     ];
 }

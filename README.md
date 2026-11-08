@@ -673,6 +673,10 @@ external machine API:
 | `/api/v1/csp-report` | browser CSP violation reports | none (rate limited) |
 | `/api/v1/products`, `/orders`, ... | external machine API ([`docs/openapi.yaml`](docs/openapi.yaml)) | API key, scopes |
 
+PayU signs notifications with MD5 or SHA-256, whichever the POS is set to. Once the POS signs with SHA-256 (PayU
+panel), set `payu_signature_algorithm = 'sha256'` (or `PAY_PAYU_SIGNATURE_ALGORITHM=sha256`): MD5-signed
+notifications are then refused. Until then `cli/doctor.php` warns that MD5 is still accepted.
+
 **Operations** — store-scoped provider registry for concurrent payment, shipping,
 ERP, mail, and tax adapters; legacy single-adapter config remains supported. The
 file queue freezes provider codes in order snapshots so retries use the original
