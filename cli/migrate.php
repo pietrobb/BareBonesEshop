@@ -100,8 +100,9 @@ try {
             $priorFailure = MaintenanceMode::failed($root, 'cli/migrate.php') ? (string)(MaintenanceMode::marker($root)['reason'] ?? '') : null;
             $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, &$schemaTouched, $preApplyHook, $root): void {
                 // R23: an update, rollback or other migration that is running holds its window; migrating under it and
-                // lifting it at the end opened the shop in the middle of that step.
-                if (!$ownMaintenance && MaintenanceMode::heldElsewhere($root) && !MaintenanceMode::failed($root)) {
+                // lifting it at the end opened the shop in the middle of that step. Held is held, failed-marked or not:
+                // a running step marks its window failed (arm()) before its first change.
+                if (!$ownMaintenance && MaintenanceMode::heldElsewhere($root)) {
                     throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
                         . '); no migration ran. Wait until that step ends, then run php cli/migrate.php apply again');
                 }

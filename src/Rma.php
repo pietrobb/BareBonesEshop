@@ -484,7 +484,7 @@ class Rma {
 
     /**
      * R14 T18: the provider declined an item refund (or its pending refund failed later). The refund is marked failed and
-     * its credit note cancelled, so the returned units and the money count as not refunded again and the merchant can
+     * its credit note reversed (R23), so the returned units and the money count as not refunded again and the merchant can
      * refund them anew. Was: the refund stayed pending forever and blocked both. False when it is no longer pending.
      */
     public static function failRefund(int $refundId, string $note): bool {
@@ -500,8 +500,12 @@ class Rma {
             $claim->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
             $released = $refund !== false && $claim->rowCount() === 1;
             if ($released) {
-                InvoiceService::cancel((int)$refund['credit_note_id'], $note);
+                // R23: the numbered credit note is reversed by a new document (it may be in a filed VAT/OSS period), and the
+                // payment leaves refund_pending (it stayed there and refused the next refund from the admin).
+                // A credit note without its source invoice (none in practice) is still cancelled as before.
+                if (InvoiceService::reverseCredit((int)$refund['credit_note_id'], $note) === null) InvoiceService::cancel((int)$refund['credit_note_id'], $note);
                 AuditLog::log('order_refund', (int)$refund['order_id'], 'pending', 'failed', $note);
+                PaymentService::releaseFailedItemRefund((int)$refund['order_id'], $refundId);
             }
             if ($own) $db->commit();
             return $released;

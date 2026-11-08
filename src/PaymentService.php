@@ -1387,6 +1387,23 @@ class PaymentService {
         return $released;
     }
 
+    /**
+     * R23: a declined item refund (Rma::failRefund()) released its credit note, but the payment stayed refund_pending, and
+     * the admin's next refund was refused. With no other refund in flight it returns to paid / partially_refunded.
+     */
+    public static function releaseFailedItemRefund(int $orderId, int $itemRefundId): bool {
+        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $itemRefundId): bool {
+            if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::requestedRefundInFlight($order) > 0) return false;
+            $pending = Db::get()->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' LIMIT 1");
+            $pending->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+            if ($pending->fetchColumn()) return false;
+            $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
+            if (!self::canPaymentTransition('refund_pending', $to)) return false;
+            // No money moves: amount 0, so the status row is never read as a capture or a refund.
+            return self::applyTransition($order, $to, 'refund.failed', 0, 'item-refund-failed:' . $itemRefundId, ['item_refund_id' => $itemRefundId]);
+        });
+    }
+
     /** Whether the provider answered this order's refund request (not a credit note's item refund) as pending under $refundId. */
     private static function isRequestedRefundExecution(int $orderId, string $refundId): bool {
         if ($refundId === '') return false;

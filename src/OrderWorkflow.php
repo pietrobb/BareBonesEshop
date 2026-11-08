@@ -261,8 +261,12 @@ class OrderWorkflow {
         Fulfillment::cancelPlanned((int)$order['id']);
         Orders::restoreStock($order['id']);
         Pricing::releaseCouponUse((int)$order['id']);
+        // R23: its carrier labels are cancelled at the carrier after the commit (the worker calls the carrier).
+        $active = Db::tableExists('shipping_labels')
+            ? array_filter(ShippingService::labels((int)$order['id']), static fn(array $label): bool => ($label['status'] ?? '') !== 'cancelled') : [];
+        $labels = $active !== [] ? [['shipping_labels_cancel', ['order_id' => $order['id']], 3]] : [];
 
-        return array_merge([
+        return array_merge($labels, [
             ['email_send', [
                 'template' => 'order_cancelled',
                 'to'       => $order['customer_email'],
