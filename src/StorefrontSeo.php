@@ -73,21 +73,23 @@ final class StorefrontSeo
 
     private static function hreflang(array $alternates): string
     {
+        // R23: each alternate on its store's own domain.
+        $href = static fn(string $code, string $url): string => esc(Bootstrap::storeHref((string)($alternates['stores'][$code] ?? ''), $url, true));
         $lines = [];
         foreach ($alternates['alternates'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . esc((string)$locale) . '" href="'
-                . esc(Template::absoluteUrl(Template::url($prefix . $alternates['pathNoPrefix']))) . '">';
+                . $href((string)$locale, Template::url($prefix . $alternates['pathNoPrefix'])) . '">';
         }
         foreach ($alternates['secondary'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . esc((string)$locale) . '" href="'
-                . esc(Template::absoluteUrl(Bootstrap::withLang(Template::url($prefix . $alternates['pathNoPrefix']), (string)$locale))) . '">';
+                . $href((string)$locale, Bootstrap::withLang(Template::url($prefix . $alternates['pathNoPrefix']), (string)$locale)) . '">';
         }
         foreach ($alternates['regional'] as $code => $target) {
             $lines[] = '<link rel="alternate" hreflang="' . esc((string)$code) . '" href="'
-                . esc(Template::absoluteUrl(Bootstrap::withLang(Template::url($target['prefix'] . $alternates['pathNoPrefix']), $target['locale']))) . '">';
+                . $href((string)$code, Bootstrap::withLang(Template::url($target['prefix'] . $alternates['pathNoPrefix']), $target['locale'])) . '">';
         }
         $lines[] = '<link rel="alternate" hreflang="x-default" href="'
-            . esc(Template::absoluteUrl(Template::url($alternates['xDefaultPrefix'] . $alternates['pathNoPrefix']))) . '">';
+            . esc(Bootstrap::storeHref($alternates['xDefaultStore'], Template::url($alternates['xDefaultPrefix'] . $alternates['pathNoPrefix']), true)) . '">';
         return implode("\n", $lines);
     }
 
@@ -133,7 +135,8 @@ final class StorefrontSeo
             $further = array_map(static fn($language): string => strtolower((string)$language), (array)($store['languages'] ?? []));
             $keepsLocale = $locale !== strtolower((string)($store['default_locale'] ?? 'en')) && in_array($locale, $further, true);
             $links[] = [
-                'url' => $keepsLocale ? Bootstrap::withLang($url, $locale) : $url,
+                // R23: a store on its own domain is linked there (was: its prefix on the current host, i.e. this store).
+                'url' => Bootstrap::storeHref((string)$id, $keepsLocale ? Bootstrap::withLang($url, $locale) : $url),
                 'label' => preg_match('/^[A-Z]{2}$/', $country) ? $country . ' · ' . I18n::priceFormat(strtolower((string)($store['currency'] ?? '')))['symbol'] : $name,
                 'title' => $name,
                 'active' => (string)($store['id'] ?? $id) === $currentId,
