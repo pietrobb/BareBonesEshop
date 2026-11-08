@@ -110,6 +110,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the web user can write to. With `fs.protected_hardlinks=0` the web user could hard-link e.g. `/etc/shadow` under that
   name between the inode check and the call. The owner is now set through the still open file (`/proc/self/fd`);
   without `/proc`, only when the kernel protects hard links, otherwise the update or restore refuses.
+- **Stores on their own domains** (review round 23, medium). The store switch and the hreflang links built every
+  store's URL from its prefix on the current host: with the Czech store on its own domain, "CZ · Kč" on the Slovak
+  site opened the Slovak store in euros, and `hreflang="cs"` pointed to the Slovak host. A store with `domains` is now
+  linked on its first domain (app_url's scheme and path), both from the switch and in hreflang, x-default and the
+  canonical URL; the stores without a domain are linked on app_url from it. The sitemap of each host lists the URLs of
+  the stores served there and links every alternate on its store's domain (it listed all stores on one domain).
+  Two stores on their own domains may now both use the empty `url_prefix`: the Czech version of the Slovak store
+  (`cs-SK`) was dropped from hreflang and the sitemap when they did.
 - **Carrier labels of a cancelled order** (review round 23, medium). Cancelling a whole order cancelled its planned
   parcels in the shop only: their labels stayed active at the carrier, cash on delivery included, so the carrier still
   picked the goods up and collected. The cancellation now queues the job `shipping_labels_cancel`, and the worker
