@@ -12,6 +12,7 @@ class Seo {
             throw new RuntimeException('app_url must be an absolute HTTP(S) URL');
         }
         // Without app_url the links stay relative, but keep the deployment base path (subdirectory installs).
+        if ($base === '') $base = Template::baseUrl();
         // R23: with app_url, a store on its own domain is announced there (Bootstrap::storeBase), this page included.
         $baseOf = static fn(string $storeId): string => Bootstrap::storeBase($storeId) ?? $base;
         // A store's further language (?lang=xx, Bootstrap::initLocale) is its own indexable URL. R21: also another store's
