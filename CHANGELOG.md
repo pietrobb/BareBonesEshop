@@ -100,6 +100,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Snapshot pruning leaves no hole in the rollback chain** (review round 23, low). Code-only and database snapshots
+  are counted apart, so pruning could delete a code-only snapshot between two kept ones; rolling back from the newest
+  then reached the older snapshot and left the deleted update's files in place, a mix of releases. Every update still
+  installed above the oldest kept snapshot now stays; rolled-back snapshots and the chain below the oldest kept one
+  are pruned as before.
+- **Root updater and restore can no longer be tricked into giving away a hard-linked file** (review round 23, low,
+  G5). Run as root, they gave a staged copy the owner of the file it replaces with `lchown` on its name, in a directory
+  the web user can write to. With `fs.protected_hardlinks=0` the web user could hard-link e.g. `/etc/shadow` under that
+  name between the inode check and the call. The owner is now set through the still open file (`/proc/self/fd`);
+  without `/proc`, only when the kernel protects hard links, otherwise the update or restore refuses.
 - **Stores on their own domains** (review round 23, medium). The store switch and the hreflang links built every
   store's URL from its prefix on the current host: with the Czech store on its own domain, "CZ · Kč" on the Slovak
   site opened the Slovak store in euros, and `hreflang="cs"` pointed to the Slovak host. A store with `domains` is now

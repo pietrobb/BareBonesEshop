@@ -150,7 +150,9 @@ try {
     foreach (range(1, 5) as $i) {
         $r4Ids[$i] = sprintf('2026010100000%d-%012x', $i, $i);
         mkdir($r4State . '/snapshots/' . $r4Ids[$i], 0700, true);
-        file_put_contents($r4State . '/snapshots/' . $r4Ids[$i] . '/snapshot.json', json_encode(['id' => $r4Ids[$i], 'reason' => 'pre-update', 'status' => 'applied', 'created_at' => "2026-01-01T00:00:0{$i}+00:00"]));
+        // R23: the middle updates were rolled back; a still installed update above a kept snapshot is kept too.
+        file_put_contents($r4State . '/snapshots/' . $r4Ids[$i] . '/snapshot.json', json_encode(['id' => $r4Ids[$i], 'reason' => 'pre-update',
+            'status' => in_array($i, [2, 3], true) ? 'rolled-back' : 'applied', 'created_at' => "2026-01-01T00:00:0{$i}+00:00"]));
     }
     $r4Manual = '20251201000000-00000000000a';
     mkdir($r4State . '/snapshots/' . $r4Manual, 0700, true);
