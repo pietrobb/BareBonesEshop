@@ -372,7 +372,7 @@ class Setup
         return ['status' => $gap['count'] === 0 ? 'pass' : 'warn', 'name' => 'stores.currency_prices.' . $storeId, 'message' => $gap['count'] === 0
             ? "Store {$storeId} has a {$currency} price for everything it offers."
             : "Store {$storeId} sells in {$currency}, but {$gap['count']} active product(s)/variant(s) have no {$currency} price and are not for sale there (e.g. " . implode(', ', $gap['skus']) . ').',
-            'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Pricing → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
+            'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
     }
 
     /**
@@ -498,10 +498,10 @@ class Setup
     private static function providerChecks(array $config, callable $add): void
     {
         $mail = self::mailProvider($config);
-        $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
+        $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Enter the SMTP server in Admin → E-mail delivery (or set MAIL_ADAPTER=smtp/ses) and send a test e-mail before launch.' : '');
         [$senderLevel, $senderMessage] = UpgradeChecks::mailSender();
         $add($senderLevel === 'ok' ? 'pass' : $senderLevel, 'provider.mail_from', $senderMessage,
-            $senderLevel === 'ok' ? '' : 'Set MAIL_FROM in the environment to an address on the shop\'s own domain (with SPF/DKIM for it).');
+            $senderLevel === 'ok' ? '' : 'Enter a sender on the shop\'s own domain in Admin → E-mail delivery or MAIL_FROM (with SPF/DKIM for it).');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
         $invalidWebhooks = Webhook::invalidEndpoints($config);
@@ -569,10 +569,10 @@ class Setup
             'Check that the carrier signs "<timestamp>.<body>" with X-Shipping-Timestamp, then set shipping_webhook_require_timestamp => true in config.php; set false only for a carrier that can sign nothing but the body.');
     }
 
-    /** The provider MailService really uses: MAIL_ADAPTER wins over provider_defaults.mail. */
+    /** The provider MailService really uses: MAIL_ADAPTER, then Admin → E-mail delivery, then provider_defaults.mail. */
     public static function mailProvider(array $config): string
     {
-        return strtolower((string)(getenv('MAIL_ADAPTER') ?: ($config['provider_defaults']['mail'] ?? '') ?: 'log'));
+        return MailSettings::providerCode($config);
     }
 
     /** Somebody can sign in to the back-office: an active account (or the legacy hash) and an MFA key that opens its secret. */

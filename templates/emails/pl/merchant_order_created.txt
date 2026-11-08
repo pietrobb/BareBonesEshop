@@ -1,7 +1,7 @@
 Nowe zamówienie {{order_number}}
 Klient: {{customer_name}} ({{customer_email}})
 Razem: {{order_total}}
-Płatność: {{payment_method}} — {{payment_status}}
+Płatność: {{#if payment_method}}{{payment_method}} — {{/if}}{{payment_status}}
 {{#if awaiting_payment}}Zamówienie nie jest jeszcze opłacone.
 {{/if}}
 {{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}

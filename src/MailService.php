@@ -38,6 +38,9 @@ class MailService {
     public static function sender(?array $config = null): string {
         $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: '')));
         if ($from !== '') return $from;
+        // R23: the sender saved in Admin → E-mail delivery (or the web installer).
+        $saved = MailSettings::from($config);
+        if ($saved !== '') return $saved;
         $host = strtolower((string)parse_url((string)(($config ?? Security::config())['app_url'] ?? ''), PHP_URL_HOST));
         if ($host === '' || !str_contains($host, '.') || filter_var($host, FILTER_VALIDATE_IP) || preg_match(self::RESERVED_DOMAIN, $host)) {
             return self::DEFAULT_FROM;

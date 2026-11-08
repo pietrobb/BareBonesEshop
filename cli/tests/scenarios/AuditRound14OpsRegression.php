@@ -48,8 +48,9 @@ if (function_exists('sodium_crypto_sign_keypair')) {
 
 // #5. Rollback as root: no chown/chgrp/chmod by path on the staged copy; the inode is checked before lchown.
 $r14oUpdaterSource = (string)file_get_contents($r14oRepo . '/src/Updater.php');
-assert_true(!preg_match('/@?\b(chown|chgrp)\s*\(/', $r14oUpdaterSource) && str_contains($r14oUpdaterSource, 'lchown('),
-    'R14 #5: Updater never chown/chgrp by path (only lchown/lchgrp on the inode it created)');
+// R23 G5: lchown by name became FileOwnership::handOver through the open descriptor (hard links too).
+assert_true(!preg_match('/@?\b(l?chown|l?chgrp)\s*\(/', $r14oUpdaterSource) && str_contains($r14oUpdaterSource, 'FileOwnership::handOver('),
+    'R14 #5: Updater never chown/chgrp by path (only on the inode it created, through FileOwnership)');
 $r14oHasInode = method_exists('Updater', 'assertStagedInode');
 assert_true($r14oHasInode, 'R14 #5: the updater checks the staged inode before handing it over');
 if ($r14oHasInode && DIRECTORY_SEPARATOR === '/') {

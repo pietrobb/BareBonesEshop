@@ -7,9 +7,11 @@
 a(z) <strong>{{order_number}}</strong> rendeléshez.</p>
 <table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
   <tr><td>Kiállítás dátuma</td><td>{{issued_at}}</td></tr>
-  <tr><td>Fizetési határidő</td><td>{{due_date}}</td></tr>
-  <tr><td>Fizetendő összeg</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+{{#if invoice_due}}  <tr><td>Fizetési határidő</td><td>{{due_date}}</td></tr>
+  <tr><td>Fizetendő összeg</td><td><strong>{{total_gross_formatted}}</strong></td></tr>{{/if}}
+{{#if invoice_paid}}  <tr><td>Összesen (kifizetve)</td><td><strong>{{total_gross_formatted}}</strong></td></tr>{{/if}}
 </table>
+{{#if invoice_paid}}<p><strong>Kifizetve – nincs teendő.</strong></p>{{/if}}
 <p>A PDF számlát mellékeltük. Online elérés:
 <a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
 <p>Köszönjük a vásárlást,<br/>{{seller_name}}</p>

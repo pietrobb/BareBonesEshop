@@ -118,7 +118,12 @@ the hosting panel where there is no shell); it keeps `config.php` and the privat
 unpack as 0755 and files as 0644. A package built from a branch instead of a release tag records no
 version: run `php cli/update.php baseline --version=<release it was built from>` once before the first update.
 
-E-mails are only logged until you configure SMTP in `config.php`. To build the package yourself:
+E-mails are only logged (to `logs/emails.log`, with a copy of each message as an `.eml` file in
+`logs/emails/`) until you enter an SMTP server: in the installer's *Sending e-mail* section or later in
+Admin → E-mail delivery, which also sends a test e-mail. The password is stored encrypted in the private
+data folder and never shown again. Environment variables (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+`SMTP_ENCRYPTION`, `MAIL_FROM`, `MAIL_ADAPTER`) win over the admin values, which win over the `smtp_*` keys
+of `config.php`. To build the package yourself:
 `php demo/bookshop/package.php --out=/tmp` (needs git and the `vendor/bbf` submodule). The same
 `install.php` also installs a plain checkout without a shell; it then starts with an empty catalog.
 
@@ -284,8 +289,10 @@ existing financial snapshot remains the authority for totals and tax.
 DB price lists take precedence over the legacy `pricing.json` group fallback.
 A store whose currency differs from its shared catalog's (the sample CZK store on
 the EUR catalog) sells a product in its own currency once one of its price lists
-in that currency prices the product (Admin → Price lists); unpriced products stay
-in the catalog currency, and a cart holds one currency.
+in that currency prices the product (Admin → Price lists). A product without a price
+in the store's currency is not for sale in that store (the cart refuses it and the
+store's feeds leave it out); `cli/doctor.php` and saving the store in the admin
+list such products. A cart holds one currency.
 Promotion priority is deterministic; `exclusive` stops after the first applied
 rule and `stack` continues in priority order. Supported cart actions include fixed
 or basis-point discounts, free shipping, buy-X-get-Y, and explicit gift
@@ -670,6 +677,10 @@ external machine API:
 | `/api/v1/webhooks/shipping/<carrier>` | carrier tracking notifications | carrier signature |
 | `/api/v1/csp-report` | browser CSP violation reports | none (rate limited) |
 | `/api/v1/products`, `/orders`, ... | external machine API ([`docs/openapi.yaml`](docs/openapi.yaml)) | API key, scopes |
+
+PayU signs notifications with MD5 or SHA-256, whichever the POS is set to. Once the POS signs with SHA-256 (PayU
+panel), set `payu_signature_algorithm = 'sha256'` (or `PAY_PAYU_SIGNATURE_ALGORITHM=sha256`): MD5-signed
+notifications are then refused. Until then `cli/doctor.php` warns that MD5 is still accepted.
 
 **Operations** — store-scoped provider registry for concurrent payment, shipping,
 ERP, mail, and tax adapters; legacy single-adapter config remains supported. The

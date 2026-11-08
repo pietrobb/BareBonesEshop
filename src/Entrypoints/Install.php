@@ -42,10 +42,10 @@ $exposed = [];
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if (!hash_equals((string)$_SESSION['install_token'], (string)($_POST['token'] ?? ''))) {
         $errors['form'] = 'The form expired. Check the values and send it again.';
-        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'token' => 1, 'install_key' => 1]));
+        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'smtp_pass' => 1, 'token' => 1, 'install_key' => 1]));
     } elseif (!WebInstaller::keyMatches($installRoot, (string)($_POST['install_key'] ?? ''))) {
         $errors['install_key'] = 'This is not the key in ' . WebInstaller::KEY_FILE . '.';
-        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'token' => 1, 'install_key' => 1]));
+        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'smtp_pass' => 1, 'token' => 1, 'install_key' => 1]));
     } else {
         [$values, $validationErrors] = WebInstaller::validate($_POST, $installRoot);
         $errors += $validationErrors;
@@ -99,6 +99,12 @@ $page('Install ' . ($values['shop_name'] !== '' ? $values['shop_name'] : 'your s
     . $field('bic', 'BIC / SWIFT (optional)', 'text', 'Shown with the IBAN for payments from abroad, e.g. TATRSKBX.')
     . '<p>Card payments with Stripe (optional, test mode): enter all three values or leave them empty.</p>' . $groupError('stripe')
     . $field('stripe_secret_key', 'Stripe secret key (sk_test_…)') . $field('stripe_publishable_key', 'Stripe publishable key (pk_test_…)') . $field('stripe_webhook_secret', 'Stripe webhook signing secret (whsec_…)') . '</fieldset>'
+    . '<fieldset><legend>Sending e-mail (optional)</legend>'
+    . '<p>Order confirmations and invoices go out through your mail server (the hosting\'s SMTP or a service such as Mailgun). Leave the server empty and e-mails are only logged until you enter it in Admin → E-mail delivery.</p>'
+    . $field('smtp_host', 'SMTP server', 'text', 'e.g. smtp.example.com') . $field('smtp_port', 'Port', 'text', 'Empty: 587 for tls, 465 for ssl.')
+    . $field('smtp_encryption', 'Encryption', 'text', 'tls (STARTTLS, the default), ssl, or none for a local relay without login.')
+    . $field('smtp_user', 'SMTP user name', 'text', '', 'off') . $field('smtp_pass', 'SMTP password', 'password', 'Stored encrypted; it is never shown again.', 'new-password')
+    . $field('mail_from', 'Sender address', 'email', 'An address on the shop\'s own domain. Empty: noreply@ the shop\'s domain.', 'email') . '</fieldset>'
     . '<fieldset><legend>Administrator</legend>' . $field('admin_user', 'User name', 'text', '', 'username') . $field('admin_password', 'Password', 'password', 'At least 12 characters.', 'new-password')
     . $field('admin_password_repeat', 'Password again', 'password', '', 'new-password') . '</fieldset>'
     . '<button type="submit">Install the shop</button></form>');

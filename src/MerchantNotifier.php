@@ -21,7 +21,10 @@ class MerchantNotifier {
             'complaint' => 'merchant_complaint_received',
             default => 'merchant_order_paid',
         });
-        $paymentLabel = PaymentService::orderLabel($order) ?: (string)($order['payment_method'] ?? '');
+        $locale = (string)($order['locale'] ?? '');
+        $paymentLabel = PaymentService::orderLabel($order, $locale !== '' ? $locale : null) ?: (string)($order['payment_method'] ?? '');
+        // R23 UX: the payment state in the e-mail's language ("Zaplatená"), not the code ("paid", "— pending").
+        $paymentStatus = OrderStatusLabels::paymentOf($order, $locale);
         $sent = 0;
         foreach ($recipients as $recipient) {
             if (!self::claim($orderId, $event, $recipient)) continue;
@@ -29,14 +32,14 @@ class MerchantNotifier {
                 $items = Orders::items($orderId);
                 // A withdrawal notice names only the lines of that statement and their sum, not the whole order.
                 if ($kind === 'withdrawal') $items = self::withdrawnItems($orderId, (int)(explode(':', $event, 2)[1] ?? 0), $items);
-                $result = MailService::send($template, $recipient, (string)($order['locale'] ?? ''), [
+                $result = MailService::send($template, $recipient, $locale, [
                     'event' => $event,
                     'order_number' => (string)$order['order_number'],
                     'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),
                     'customer_name' => (string)$order['customer_name'],
                     'customer_email' => (string)$order['customer_email'],
                     'payment_id' => (string)($order['payment_id'] ?? ''),
-                    'payment_status' => (string)($order['payment_status'] ?? ''),
+                    'payment_status' => $paymentStatus,
                     'payment_method' => $paymentLabel,
                     'awaiting_payment' => ($order['payment_status'] ?? '') !== 'paid',
                     'admin_url' => self::adminOrderUrl($cfg, $orderId),

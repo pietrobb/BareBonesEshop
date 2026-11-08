@@ -44,5 +44,6 @@ return [
     'admin_users' => 'admins.manage',
     'my_account' => '', // R14 UX4: any signed-in admin, own password and TOTP only
     'email_templates' => 'emails.manage',
+    'mail'       => 'mail.manage', // SMTP login of the whole installation: owner only
     'stores'     => 'stores.manage',
 ];

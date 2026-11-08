@@ -33,6 +33,7 @@ return [
     ['complaints', 'rma.manage', 'admin.nav.complaints', []],
     ['customers', 'customers.view', 'admin.nav.customers', ['customer']],
     ['email_templates', 'emails.manage', 'admin.nav.email_templates', []],
+    ['mail', 'mail.manage', 'admin.nav.mail', []],
     ['admin_users', 'admins.manage', 'admin.title.admin_users', []],
     ['stores', 'stores.manage', 'admin.nav.stores', []],
 ];

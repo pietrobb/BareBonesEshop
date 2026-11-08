@@ -83,7 +83,7 @@ function handleStoreSettingsSave(): void {
         $GLOBALS['adminStoreDraft'][$storeId] = array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);
         return;
     }
-    setFlash('ok', I18n::format('admin.stores.saved', ['store' => $storeId]));
+    setFlash(empty($result['warning']) ? 'ok' : 'warn', trim(I18n::format('admin.stores.saved', ['store' => $storeId]) . ' ' . ($result['warning'] ?? '')));
     header('Location: admin.php?p=stores#store-' . rawurlencode($storeId));
     exit;
 }

@@ -56,5 +56,6 @@ return [
     'admin_users' => ['AdminUsers'],
     'my_account' => ['MyAccount'],
     'email_templates' => ['EmailTemplates'],
+    'mail'       => ['MailDelivery'],
     'stores'     => ['StoreSettings', 'StoreManagement'],
 ];

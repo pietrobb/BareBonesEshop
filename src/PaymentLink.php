@@ -12,6 +12,7 @@ final class PaymentLink {
     private const PROVIDER = 'pay_link';
     /** A "Pay" button rendered on a page (status lookup, failed-payment confirmation): it promises nothing, holds nothing. */
     private const PAGE_PROVIDER = 'pay_link_page';
+    private const PAGE_LINKS_KEPT = 5;
     /** Longer than any gateway call can take (PHP max_execution_time); a claim this old belongs to a request that died. */
     private const CLAIM_LEASE = 300;
 
@@ -31,6 +32,8 @@ final class PaymentLink {
     public static function issue(array $order, bool $mailed = false): string {
         $token = bin2hex(random_bytes(24));
         CheckoutSession::bind((int)$order['id'], hash('sha256', $token), $mailed ? self::PROVIDER : self::PAGE_PROVIDER);
+        // R23: every order lookup added a row; the newest few stay valid (open tabs), older page links lapse now.
+        if (!$mailed) CheckoutSession::keepNewest((int)$order['id'], self::PAGE_PROVIDER, self::PAGE_LINKS_KEPT);
         return Template::withOrderLang(self::baseUrl() . '/?page=pay&token=' . $token, $order);
     }
 
