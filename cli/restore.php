@@ -130,8 +130,10 @@ if (!$yes && !$quiet) {
 
 // R23: the shop (503) and the worker stay closed while the database and files are replaced, as during an update. A
 // window that an update or migration holds is not taken over; a failed one stays after the restore (it is not fixed).
+// Whether that step still runs is told by its lock, not the failed flag: a running step marks its window failed (arm())
+// before its first change, so only a failed window that no process holds was left by a dead one.
 $root = dirname(__DIR__);
-if (MaintenanceMode::active($root) && !MaintenanceMode::failed($root)) {
+if (MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
     fwrite(STDERR, 'REFUSED: another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);
@@ -145,6 +147,8 @@ $endWindow = static function (?string $halfDone) use ($root, $priorFailure): voi
     if ($halfDone !== null) {
         MaintenanceMode::fail($root, $halfDone);
         fwrite(STDERR, "The shop stays in maintenance (503) until that is resolved.\n");
+    } elseif (!MaintenanceMode::owned($root)) {
+        // Another step took the window over meanwhile; it is that step's to lift.
     } elseif ($priorFailure !== null) {
         MaintenanceMode::fail($root, $priorFailure);
     } else {
