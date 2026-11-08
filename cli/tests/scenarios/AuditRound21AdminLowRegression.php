@@ -16,12 +16,13 @@ try {
     $r21aCurrency = static fn(int $orderId): ?string => $orderId === 7 ? 'huf' : null;
     assert_equals([
         $r21aHuf, I18n::price(1290, 'eur'),
-        'Manual refund of ' . $r21aHuf . ' completed by admin@example.test: bank 12',
-        'Provider refund of ' . $r21aHuf . ' confirmed by admin: seen in portal',
-        'Stripe full refund: ' . $r21aHuf,
-        'Stripe refund: ' . I18n::price(500000, 'huf') . ' of ' . $r21aHuf,
+        // R23: in the admin's language.
+        I18n::format('admin.audit.note.refund_manual', ['amount' => $r21aHuf, 'detail' => 'admin@example.test: bank 12']),
+        I18n::format('admin.audit.note.refund_provider', ['amount' => $r21aHuf, 'detail' => 'admin: seen in portal']),
+        I18n::format('admin.audit.note.stripe_full_refund', ['amount' => $r21aHuf]),
+        I18n::format('admin.audit.note.stripe_refund', ['amount' => I18n::price(500000, 'huf'), 'total' => $r21aHuf]),
         'Manual refund of 1647000 completed by x: y',
-        'Admin status change',
+        I18n::t('admin.audit.note.status_change'),
     ], [
         AuditLogLabels::amount(1647000, 'HUF'), AuditLogLabels::amount(1290, null),
         AuditLogLabels::note('order_refund', 7, 'Manual refund of 1647000 completed by admin@example.test: bank 12', $r21aCurrency),

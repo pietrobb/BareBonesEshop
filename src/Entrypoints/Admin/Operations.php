@@ -32,11 +32,18 @@ function pageDashboard(): void {
     <?php if (Security::adminRole() === 'owner'): $checklist = SetupChecklist::summary(); // doctor output names server paths: owner only ?>
     <div class="card" id="setup-checklist">
         <h3><?= esc(I18n::t('admin.dashboard.checklist')) ?></h3>
-        <p><?= esc($checklist['items'] === [] ? I18n::t('admin.dashboard.checklist_ok') : str_replace(['{fail}', '{warn}'], [(string)$checklist['counts']['fail'], (string)$checklist['counts']['warn']], I18n::t('admin.dashboard.checklist_counts'))) ?></p>
+        <p><?= esc($checklist['items'] === [] ? I18n::t('admin.dashboard.checklist_ok') : I18n::format('admin.dashboard.checklist_counts', [
+            'problems' => I18n::plural('admin.dashboard.checklist_problems', $checklist['counts']['fail']),
+            'warnings' => I18n::plural('admin.dashboard.checklist_warnings', $checklist['counts']['warn'])])) ?></p>
         <?php if ($checklist['items']): ?><ul class="setup-checklist"><?php foreach ($checklist['items'] as $item): ?>
-            <li><span class="badge badge-<?= $item['status'] === 'fail' ? 'failed' : 'pending' ?>"><?= esc(I18n::t('admin.dashboard.checklist_' . $item['status'])) ?></span> <?= esc($item['message']) ?>
+            <li data-check="<?= esc($item['name']) ?>"><span class="badge badge-<?= $item['status'] === 'fail' ? 'failed' : 'pending' ?>"><?= esc(I18n::t('admin.dashboard.checklist_' . $item['status'])) ?></span>
+            <?php if ($item['title'] !== null): ?><strong><?= esc($item['title']) ?></strong>
+            <?php if ($item['page'] !== null): ?><a class="btn btn-sm" href="admin.php?p=<?= esc($item['page']) ?>"><?= esc(I18n::t('admin.dashboard.checklist_fix')) ?></a><?php endif; ?>
+            <details><summary class="muted"><?= esc(I18n::t('admin.dashboard.checklist_detail')) ?></summary><span lang="en"><?= esc($item['message']) ?><?php if ($item['action'] !== ''): ?><br><span class="muted"><?= esc($item['action']) ?></span><?php endif; ?></span></details>
+            <?php else: ?><?= esc($item['message']) ?>
             <?php if ($item['page'] !== null): ?><a class="btn btn-sm" href="admin.php?p=<?= esc($item['page']) ?>"><?= esc(I18n::t('admin.dashboard.checklist_fix')) ?></a>
-            <?php elseif ($item['action'] !== ''): ?><br><span class="muted"><?= esc($item['action']) ?></span><?php endif; ?></li>
+            <?php elseif ($item['action'] !== ''): ?><br><span class="muted"><?= esc($item['action']) ?></span><?php endif; ?>
+            <?php endif; ?></li>
         <?php endforeach; ?></ul><?php endif; ?>
     </div>
     <?php endif; ?>

@@ -247,11 +247,12 @@ final class WebInstaller
         $text = static fn(string $key): string => trim((string)($input[$key] ?? ''));
         $v = [];
         foreach (['shop_name', 'app_url', 'private_parent', 'email', 'company', 'street', 'city', 'zip', 'country', 'vat_id', 'iban', 'timezone', 'admin_user', 'stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret',
-            'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_user', 'mail_from'] as $key) {
+            'ico', 'dic', 'bic', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_user', 'mail_from'] as $key) {
             $v[$key] = $text($key);
         }
         $v['country'] = strtoupper($v['country']);
         $v['iban'] = strtoupper((string)preg_replace('/\s+/', '', $v['iban']));
+        $v['bic'] = strtoupper((string)preg_replace('/\s+/', '', $v['bic']));
         $v['admin_user'] = strtolower($v['admin_user']);
         $v['admin_password'] = (string)($input['admin_password'] ?? '');
         $v['pay_cod'] = !empty($input['pay_cod']);
@@ -268,6 +269,11 @@ final class WebInstaller
         if (!in_array($v['timezone'], DateTimeZone::listIdentifiers(), true)) $errors['timezone'] = 'Enter a time zone such as Europe/Bratislava.';
         if (!$v['pay_cod'] && !$v['pay_bank'] && $v['stripe_secret_key'] === '') $errors['payments'] = 'Choose at least one payment method.';
         if (($v['pay_bank'] || $v['iban'] !== '') && !BankTransferInstructions::validIban($v['iban'])) $errors['iban'] = 'Bank transfer needs a valid IBAN.';
+        // R23 UX: the company and tax numbers and the BIC the invoices and the bank transfer instructions print.
+        if ($v['bic'] !== '' && !BankTransferInstructions::validBic($v['bic'])) $errors['bic'] = 'Enter a BIC of 8 or 11 characters, e.g. TATRSKBX.';
+        foreach (['ico' => 'company number', 'dic' => 'tax number'] as $key => $label) {
+            if (mb_strlen($v[$key]) > 32 || preg_match('/[\x00-\x1F\x7F]/', $v[$key])) $errors[$key] = "Enter the {$label} (at most 32 characters).";
+        }
         $errors += self::stripeErrors($v);
         if (preg_match('/^[a-z0-9][a-z0-9._-]{2,63}$/', $v['admin_user']) !== 1) $errors['admin_user'] = 'Use 3-64 letters, digits, dots, dashes or underscores.';
         if (strlen($v['admin_password']) < 12 || strlen($v['admin_password']) > 1024) $errors['admin_password'] = 'The password needs at least 12 characters.';
@@ -574,6 +580,9 @@ final class WebInstaller
             'vat_registered' => $v['vat_id'] !== '', 'ic_dph' => $v['vat_id'], 'iban' => $v['iban'], 'email' => $v['email'],
             'invoice_prefix' => (string)($legal['invoice_prefix'] ?? ''), 'payment_terms_days' => (int)($legal['payment_terms_days'] ?? 14),
         ];
+        foreach (['ico', 'dic', 'bic'] as $key) {
+            if ((string)($v[$key] ?? '') !== '') $store['legal'][$key] = (string)$v[$key];
+        }
         $stores['stores'][$id] = $store;
         // The installer sets up one seller. Other stores still naming the example seller go offline until the merchant
         // enters theirs in Admin → Stores and seller (as setup apply does with the hidden sample stores).

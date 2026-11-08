@@ -62,7 +62,7 @@ try {
         assert_equals([
             strtr(I18n::t('admin.audit.event.admin'), ['{status}' => OrderStatusLabels::payment('paid')]),
             I18n::t('admin.audit.event.refund.requested'), I18n::t('admin.audit.event.cod.collected'),
-            I18n::t('admin.audit.event.admin.offline_payment_received'), 'stripe.unknown_event', 'Admin status change',
+            I18n::t('admin.audit.event.admin.offline_payment_received'), 'stripe.unknown_event', I18n::t('admin.audit.note.status_change'),
             'Refund of ' . $r22lHuf . ' re-queued by admin@example.test',
             'stripe refund re_1 of ' . $r22lHuf . ' failed',
             'total: ' . $r22lHuf . '; items: [{"sku":"A/1","price":"' . I18n::price(500000, 'huf') . '","qty":2}]',

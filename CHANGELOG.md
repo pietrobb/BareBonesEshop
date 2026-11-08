@@ -100,6 +100,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Admin language** (review round 23, UX). The dashboard's setup checklist titles its checks in the admin's language
+  (they were the doctor's English text; an unknown check still shows that text) and counts "1 problem", not
+  "1 problems", in every language. The audit log shows the notes it writes ("Created in the admin", refunds, status
+  changes, …) in the admin's language; stored entries are unchanged. Attribute types and payment methods in the admin
+  forms follow the admin language (they were Slovak everywhere). The web installer asks for the seller's BIC, company ID
+  (IČO) and tax ID (DIČ), checked like in Admin → Stores.
 - **Payment QR in the payer's standard** (review round 23, UX). The bank-transfer QR was PAY by square only, the
   Slovak standard: a German customer's banking app could not read it, and a CZK order had no QR at all. Now a CZK
   order gets the Czech SPAYD (QR Platba), a EUR order from a Slovak address keeps PAY by square, and a EUR order
