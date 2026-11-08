@@ -41,6 +41,29 @@ final class QrCode {
             . '<rect width="100%" height="100%" fill="#fff"/><path d="' . $path . '" fill="#000"/></svg>';
     }
 
+    /**
+     * R23: the same symbol as a greyscale PNG (4-module quiet zone) for an e-mail attachment, where inline SVG and data:
+     * images are not shown. '' without zlib.
+     */
+    public static function png(string $text, int $moduleSize = 6): string {
+        if (!function_exists('gzcompress')) return '';
+        $matrix = self::matrix($text);
+        $dim = (count($matrix) + 8) * $moduleSize;
+        $white = str_repeat("\xFF", $dim);
+        $raw = '';
+        for ($y = 0; $y < $dim; $y++) {
+            $row = intdiv($y, $moduleSize) - 4;
+            $line = $white;
+            foreach ($matrix[$row] ?? [] as $x => $dark) {
+                if ($dark) $line = substr_replace($line, str_repeat("\x00", $moduleSize), ($x + 4) * $moduleSize, $moduleSize);
+            }
+            $raw .= "\x00" . $line; // filter type 0 per scanline
+        }
+        $chunk = static fn(string $type, string $data): string => pack('N', strlen($data)) . $type . $data . pack('N', crc32($type . $data));
+        return "\x89PNG\r\n\x1A\n" . $chunk('IHDR', pack('NNCCCCC', $dim, $dim, 8, 0, 0, 0, 0))
+            . $chunk('IDAT', (string)gzcompress($raw, 9)) . $chunk('IEND', '');
+    }
+
     /** @return array<int,array<int,bool>> dark modules, row by row */
     public static function matrix(string $text): array {
         $alnum = $text !== '' && strspn($text, self::ALNUM) === strlen($text);

@@ -52,8 +52,8 @@ final class PayBySquare {
         return rtrim(rtrim($text, '0'), '.');
     }
 
-    /** Banking apps expect plain ASCII text without tabs. */
-    private static function text(string $value): string {
+    /** Banking apps expect plain ASCII text without tabs (also the EPC and SPAYD texts of PaymentQr). */
+    public static function text(string $value): string {
         static $from = ['á','ä','à','â','ã','å','ą','č','ć','ç','ď','é','ě','ë','è','ê','ę','í','ì','î','ï','ĺ','ľ','ł','ň','ń','ñ','ó','ô','ö','ő','ò','õ','ŕ','ř','š','ś','ß','ť','ú','ů','ü','ű','ù','û','ý','ÿ','ž','ź','ż'];
         static $to = ['a','a','a','a','a','a','a','c','c','c','d','e','e','e','e','e','e','i','i','i','i','l','l','l','n','n','n','o','o','o','o','o','o','r','r','s','s','ss','t','u','u','u','u','u','u','y','y','z','z','z'];
         $upperFrom = array_map(static fn(string $c): string => mb_strtoupper($c, 'UTF-8'), $from);

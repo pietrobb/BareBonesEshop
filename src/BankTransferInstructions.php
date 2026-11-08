@@ -3,7 +3,7 @@
  * What a customer needs to pay an order by bank transfer: the store's account
  * (stores.json legal.iban / legal.bic / legal.name), the exact amount and currency,
  * the variable symbol the merchant matches the transfer by (the order ID) and a
- * PAY by square QR code with the same data.
+ * payment QR code with the same data in the payer's standard (PaymentQr).
  *
  * Shown only while a bank-transfer order still waits for money and the store has a
  * valid IBAN; paid, cancelled or expired orders get no payment instructions.
@@ -28,12 +28,14 @@ final class BankTransferInstructions {
         $due = self::dueAt($order);
         $storeId = self::storeOf($order);
         $beneficiary = (string)($legal['name'] ?? '');
-        // PAY by square is the Slovak banks' standard and they accept it for EUR only; other currencies get text instructions.
-        $payBySquare = $currency !== 'eur' ? '' : PayBySquare::encode([
+        // R23: the QR the payer's bank reads (PaymentQr): SPAYD for CZK, PAY by square for EUR from Slovakia, the SEPA
+        // EPC code for EUR from elsewhere; other currencies get text instructions only.
+        $qr = PaymentQr::for([
             'iban' => $iban, 'bic' => $bic, 'amount' => $amount, 'currency' => $currency,
             'variable_symbol' => $variableSymbol, 'due_date' => ShopTime::date('Ymd', $due, $storeId),
             'note' => (string)$order['order_number'], 'beneficiary' => $beneficiary,
-        ]);
+        ], self::payerCountry($order, $legal));
+        $suffix = PaymentQr::labelSuffix($qr['format']);
         return [
             'beneficiary' => $beneficiary,
             'bank' => (string)($legal['bank'] ?? ''),
@@ -47,9 +49,28 @@ final class BankTransferInstructions {
             'message' => (string)$order['order_number'],
             'due_date' => ShopTime::date('Y-m-d', $due, $storeId),
             'due_date_display' => I18n::date(ShopTime::date('Y-m-d', $due, $storeId)),
-            'pay_by_square' => $payBySquare,
-            'qr_svg' => $payBySquare === '' ? '' : QrCode::svg($payBySquare, I18n::t('bank_transfer.qr_label')),
+            'pay_by_square' => $qr['format'] === PaymentQr::PAY_BY_SQUARE ? $qr['payload'] : '',
+            'qr_format' => $qr['format'],
+            'qr_payload' => $qr['payload'],
+            'qr_hint' => $qr['format'] === '' ? '' : I18n::t('bank_transfer.qr_hint' . $suffix),
+            'qr_svg' => $qr['payload'] === '' ? '' : QrCode::svg($qr['payload'], I18n::t('bank_transfer.qr_label' . $suffix)),
         ];
+    }
+
+    /** The payer's country: the order's address, else the store's own country (the customers it sells to). */
+    private static function payerCountry(array $order, array $legal): string {
+        $address = json_decode((string)($order['shipping_addr'] ?? ''), true);
+        $country = strtoupper(trim((string)(is_array($address) ? ($address['country'] ?? '') : '')));
+        return $country !== '' ? $country : strtoupper(trim((string)($legal['country'] ?? '')));
+    }
+
+    /** R23: the QR as a PNG attachment for the e-mails (no inline SVG there), null when the order has none. */
+    public static function qrAttachment(array $order, ?array $legal = null): ?array {
+        $bank = self::forApi($order, $legal);
+        $payload = (string)($bank['qr_payload'] ?? '');
+        $png = $payload === '' ? '' : QrCode::png($payload);
+        return $png === '' ? null : ['filename' => 'payment-qr-' . preg_replace('/[^A-Za-z0-9_-]/', '', (string)$order['order_number']) . '.png',
+            'content_type' => 'image/png', 'data' => $png];
     }
 
     /** Rendered instructions block for storefront pages, '' when there is nothing to pay by transfer. */
@@ -60,6 +81,7 @@ final class BankTransferInstructions {
         foreach (['title', 'intro', 'beneficiary', 'iban', 'bic', 'amount', 'variable_symbol', 'message', 'due_date', 'qr_hint'] as $key) {
             $labels[$key] = I18n::t('bank_transfer.' . $key);
         }
+        if ($instructions['qr_hint'] !== '') $labels['qr_hint'] = $instructions['qr_hint'];
         return Template::render('storefront/bank-transfer', ['bt' => $instructions, 't' => $labels]);
     }
 
