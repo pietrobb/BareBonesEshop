@@ -18,7 +18,7 @@ final class SetupChecklist
     ];
 
     /**
-     * @return array{counts: array{fail: int, warn: int}, items: list<array{status: string, name: string, message: string, action: string, page: ?string}>}
+     * @return array{counts: array{fail: int, warn: int}, items: list<array{status: string, name: string, title: ?string, message: string, action: string, page: ?string}>}
      */
     public static function summary(?array $doctor = null): array
     {
@@ -41,7 +41,7 @@ final class SetupChecklist
             $name = (string)($check['name'] ?? '');
             if (!isset($counts[$status]) || !self::concernsCurrentStore($name)) continue;
             $counts[$status]++;
-            $items[] = ['status' => $status, 'name' => $name, 'message' => (string)($check['message'] ?? ''),
+            $items[] = ['status' => $status, 'name' => $name, 'title' => self::title($name), 'message' => (string)($check['message'] ?? ''),
                 'action' => (string)($check['action'] ?? ''), 'page' => self::fixPage($name)];
         }
         usort($items, static fn(array $a, array $b): int => [$a['status'] !== 'fail', $a['name']] <=> [$b['status'] !== 'fail', $b['name']]);
@@ -54,6 +54,31 @@ final class SetupChecklist
         if (!preg_match('/^stores\.(?:legal|currency_prices)\.(.+)$/', $checkName, $m)) return true;
         return $m[1] === StoreContext::current()->id();
     }
+
+    /**
+     * R23 UX: what a failing or warning check means, in the admin's language (admin.doctor.<check>; {item} is the store,
+     * provider, extension or path the check names). Null for a check without a translation: its doctor text is shown.
+     */
+    public static function title(string $checkName): ?string
+    {
+        $group = $checkName;
+        $item = '';
+        foreach (self::ITEM_GROUPS as $prefix) {
+            if (str_starts_with($checkName, $prefix) && strlen($checkName) > strlen($prefix)) {
+                [$group, $item] = [rtrim($prefix, '.'), substr($checkName, strlen($prefix))];
+                break;
+            }
+        }
+        if ($item === '' && str_starts_with($checkName, 'runtime.') && !in_array($checkName, ['runtime.php', 'runtime.vendor_bbf'], true)) {
+            [$group, $item] = ['runtime.path', substr($checkName, strlen('runtime.'))];
+        }
+        $key = 'admin.doctor.' . str_replace('.', '_', $group);
+        $text = I18n::format($key, ['item' => $item]);
+        return $text === $key ? null : $text;
+    }
+
+    /** Check-name prefixes followed by the store, provider or extension the check is about. */
+    private const ITEM_GROUPS = ['stores.legal.', 'stores.url_prefix.', 'stores.timezone.', 'stores.currency_prices.', 'payment.provider.', 'runtime.extension.'];
 
     public static function fixPage(string $checkName): ?string
     {

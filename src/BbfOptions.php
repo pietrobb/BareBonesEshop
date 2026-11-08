@@ -11,27 +11,22 @@ class BbfOptions {
             'bbf_brands' => array_map(static fn(array $r): array => ['value' => (string)$r['id'], 'label' => $r['name']],
                 CatalogScope::rows('SELECT id, name FROM brands WHERE store_id = :catalog AND active = 1 ORDER BY name')),
             'bbf_product_types' => self::productTypes(),
-            'bbf_attr_types' => [
-                ['value' => 'enum', 'label' => 'Enum (zoznam hodnôt)'],
-                ['value' => 'number', 'label' => 'Číslo'],
-                ['value' => 'boolean', 'label' => 'Áno/Nie'],
-            ],
-            'bbf_page_statuses' => [
-                ['value' => 'active', 'label' => 'Active'],
-                ['value' => 'draft', 'label' => 'Draft'],
-            ],
-            'bbf_product_statuses' => [
-                ['value' => 'active', 'label' => 'Active'],
-                ['value' => 'draft', 'label' => 'Draft'],
-                ['value' => 'archived', 'label' => 'Archived'],
-            ],
+            // R23 UX: labels in the admin's language (the attribute types and payment methods were Slovak in every admin).
+            'bbf_attr_types' => self::labelled(['enum', 'number', 'boolean'], 'admin.attr.type.'),
+            'bbf_page_statuses' => self::labelled(['active', 'draft'], 'admin.product.status.'),
+            'bbf_product_statuses' => self::labelled(['active', 'draft', 'archived'], 'admin.product.status.'),
             'bbf_payment_methods' => [
-                ['value' => 'cod', 'label' => 'Dobierka'],
-                ['value' => 'transfer', 'label' => 'Bankový prevod'],
-                ['value' => 'card', 'label' => 'Kartou online'],
+                ['value' => 'cod', 'label' => I18n::t('methods.payment.cod')],
+                ['value' => 'transfer', 'label' => I18n::t('methods.payment.bank_transfer')],
+                ['value' => 'card', 'label' => I18n::t('methods.payment.card')],
             ],
             default => null,
         };
+    }
+
+    /** @return list<array{value: string, label: string}> */
+    private static function labelled(array $values, string $prefix): array {
+        return array_map(static fn(string $value): array => ['value' => $value, 'label' => mb_strtoupper(mb_substr(I18n::t($prefix . $value), 0, 1)) . mb_substr(I18n::t($prefix . $value), 1)], $values);
     }
 
     /** Resolve an options_from URL like "/api/v1/options/categories". */

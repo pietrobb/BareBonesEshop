@@ -89,25 +89,60 @@ final class AuditLogLabels {
         $note = (string)$note;
         // R22: a payment status change is noted with its event code ("admin.paid", "refund.requested"): in words.
         if ($entity === 'payment_status' && preg_match('/^[a-z_]+(?:\.[a-z_]+)+$/', $note) === 1) return self::event($note);
+        // R23 UX: the notes the code writes (in English) in the admin's language; the log keeps what was written.
+        if (isset(self::NOTES[$note])) return I18n::t('admin.audit.note.' . self::NOTES[$note]);
+        foreach (self::NOTE_PREFIXES as $prefix => $key) {
+            if (str_starts_with($note, $prefix) && strlen($note) > strlen($prefix)) return I18n::format('admin.audit.note.' . $key, ['detail' => substr($note, strlen($prefix))]);
+        }
+        if (preg_match('/^Admin [a-z][a-z -]* delete$/', $note) === 1) return I18n::t('admin.audit.note.deleted');
+        if (preg_match('/^Admin (?:' . self::SAVED_ENTITIES . ')$/', $note) === 1) return I18n::t('admin.audit.note.saved');
+        if (preg_match('/^Admin [a-z_]+: (.+)$/s', $note, $m) === 1) return I18n::format('admin.audit.note.saved_detail', ['detail' => $m[1]]);
+        if (preg_match('/^(\S+) capture of an earlier payment attempt$/', $note, $m) === 1) return I18n::format('admin.audit.note.earlier_attempt', ['provider' => $m[1]]);
         if (!in_array($entity, ['order_refund', 'order_status'], true)) return $note;
         $orderCurrency ??= static fn(int $orderId): string => self::orderCurrency($orderId);
-        // R22: written in cents before 2.1.3 as well.
-        if (preg_match('/^(Refund of )(\d+)( re-queued by .*)$/s', $note, $m) === 1
-            || preg_match('/^(\S+ refund \S+ of )(\d+)( failed)$/', $note, $m) === 1) {
-            return $m[1] . self::amount((int)$m[2], $orderCurrency($entityId)) . $m[3];
+        // An amount written in cents before 2.1.3 (R22) or already formatted: in the order's currency either way.
+        $money = static fn(string $amount): string => ctype_digit($amount) ? self::amount((int)$amount, $orderCurrency($entityId)) : $amount;
+        if (preg_match('/^Refund of (.+?) re-queued by (.*)$/s', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.refund_requeued', ['amount' => $money($m[1]), 'actor' => $m[2]]);
         }
-        if (preg_match('/^((?:Provider|Manual) refund of )(\d+)( (?:confirmed|completed) by .*)$/s', $note, $m) === 1) {
-            return $m[1] . self::amount((int)$m[2], $orderCurrency($entityId)) . $m[3];
+        if (preg_match('/^(\S+) refund (\S+) of (.+) failed$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.refund_failed', ['provider' => $m[1], 'id' => $m[2], 'amount' => $money($m[3])]);
         }
-        if (preg_match('/^Stripe full refund: (\d+) cents$/', $note, $m) === 1) {
-            return 'Stripe full refund: ' . self::amount((int)$m[1], $orderCurrency($entityId));
+        if (preg_match('/^(Provider|Manual) refund of (.+?) (?:confirmed|completed) by (.*)$/s', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.refund_' . strtolower($m[1]), ['amount' => $money($m[2]), 'detail' => $m[3]]);
         }
-        if (preg_match('~^Stripe refund: (\d+)/(\d+) cents$~', $note, $m) === 1) {
-            $currency = $orderCurrency($entityId);
-            return 'Stripe refund: ' . self::amount((int)$m[1], $currency) . ' of ' . self::amount((int)$m[2], $currency);
+        if (preg_match('/^Stripe full refund: (.+?)(?: cents)?$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.stripe_full_refund', ['amount' => $money($m[1])]);
+        }
+        if (preg_match('~^Stripe refund: (\d+)/(\d+) cents$~', $note, $m) === 1 || preg_match('~^Stripe refund: (.+) of (.+)$~', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.stripe_refund', ['amount' => $money($m[1]), 'total' => $money($m[2])]);
         }
         return $note;
     }
+
+    /** R23 UX: fixed audit notes => admin.audit.note.<key>. */
+    private const NOTES = [
+        'Admin create' => 'created', 'Content deleted' => 'deleted', 'Admin bulk delete' => 'deleted', 'Admin duplicate' => 'duplicated',
+        'Order created' => 'order_created', 'Synthetic smoke order created' => 'smoke_order', 'Synthetic smoke checkout closed' => 'smoke_closed',
+        'Manual order entered in the admin' => 'manual_order', 'Order items edited by admin' => 'items_edited', 'Item credit issued' => 'item_credit',
+        'Invoice issued' => 'invoice_issued', 'CSV import' => 'csv_import', 'Cache flushed' => 'cache_flushed',
+        'Re-authentication locked after repeated wrong passwords; session ended' => 'reauth_locked',
+        'Admin price list prices' => 'prices', 'Admin supplier products' => 'supplier_products', 'Admin purchase order receipt' => 'receipt',
+        'Admin variants' => 'variants', 'Admin digital asset toggle' => 'toggled', 'Admin review moderation' => 'moderated',
+        'Admin customer status' => 'status', 'Admin shipment label' => 'label', 'Admin shipment shipped' => 'shipped',
+        'Admin shipment tracking' => 'tracking', 'Admin shipment cancelled' => 'shipment_cancelled', 'Admin feed sync' => 'feed_sync',
+        'Admin e-mail template override' => 'template_saved', 'Admin e-mail template reset' => 'template_reset', 'Admin B2B assignment' => 'b2b_assignment',
+        'Admin status change' => 'status_change',
+    ];
+    /** "Admin <entity>" notes of a plain admin save. */
+    private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';
+    /** R23 UX: notes "<prefix><detail>" => admin.audit.note.<key> with {detail}. Longer prefixes first. */
+    private const NOTE_PREFIXES = [
+        'Admin edit: ' => 'edited', 'Admin bulk price ' => 'bulk_price', 'Admin bulk ' => 'bulk', 'Refund: ' => 'refund',
+        'Credit note reversed: ' => 'credit_reversed', 'Capture under another provider reference: ' => 'other_reference',
+        'Payment captured on a cancelled order: ' => 'captured_cancelled', 'API v1 client ' => 'api_client',
+        'New payment session ' => 'payment_session', 'Payment link e-mailed by ' => 'payment_link_sent', 'Stripe dispute: ' => 'dispute',
+    ];
 
     /** "admin.paid" → "Set in the admin: Paid"; a known event by its label; a provider's own event code as it is. */
     private static function event(string $code): string {

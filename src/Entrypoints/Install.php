@@ -92,9 +92,11 @@ $page('Install ' . ($values['shop_name'] !== '' ? $values['shop_name'] : 'your s
     . $field('private_parent', 'Private data folder', 'text', 'The shop creates bareboneseshop-private/ here for the database, eBook files, invoices and logs. It must not be reachable from the web.') . '</fieldset>'
     . '<fieldset><legend>Seller (shown on invoices and the imprint)</legend>' . $field('company', 'Company or your name', 'text', '', 'organization') . $field('street', 'Street', 'text', '', 'street-address')
     . $field('city', 'City', 'text', '', 'address-level2') . $field('zip', 'Postcode', 'text', '', 'postal-code') . $field('country', 'Country code', 'text', 'Two letters, e.g. SK, CZ, GB.', 'country')
-    . $field('email', 'E-mail', 'email', 'Shown to buyers; new orders are reported here.', 'email') . $field('vat_id', 'VAT ID (optional)', 'text', 'Leave empty if you are not VAT registered.') . '</fieldset>'
+    . $field('email', 'E-mail', 'email', 'Shown to buyers; new orders are reported here.', 'email') . $field('vat_id', 'VAT ID (optional)', 'text', 'Leave empty if you are not VAT registered.')
+    . $field('ico', 'Company number (IČO, optional)', 'text', 'Printed on invoices, e.g. 12345678.') . $field('dic', 'Tax number (DIČ, optional)', 'text', 'Printed on invoices, e.g. 2020123456.') . '</fieldset>'
     . '<fieldset><legend>Payments</legend>' . $groupError('payments') . $checkbox('pay_cod', 'Cash on delivery') . $checkbox('pay_bank', 'Bank transfer')
     . $field('iban', 'IBAN for bank transfers', 'text', 'Buyers get it with a QR payment code.')
+    . $field('bic', 'BIC / SWIFT (optional)', 'text', 'Shown with the IBAN for payments from abroad, e.g. TATRSKBX.')
     . '<p>Card payments with Stripe (optional, test mode): enter all three values or leave them empty.</p>' . $groupError('stripe')
     . $field('stripe_secret_key', 'Stripe secret key (sk_test_…)') . $field('stripe_publishable_key', 'Stripe publishable key (pk_test_…)') . $field('stripe_webhook_secret', 'Stripe webhook signing secret (whsec_…)') . '</fieldset>'
     . '<fieldset><legend>Administrator</legend>' . $field('admin_user', 'User name', 'text', '', 'username') . $field('admin_password', 'Password', 'password', 'At least 12 characters.', 'new-password')
