@@ -100,6 +100,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Security** (review round 23, low). The CSP report endpoint counts an IPv6 reporter per /64 network: one client
+  that took a new address of its /64 for every forged form-action report counted as several reporters and raised
+  the critical alarm alone (IPv4 still counts per address, an IPv4-mapped address as that IPv4 address). The log
+  masks `pwd=…`, `private_key` / `private-key` values and an `Authorization` header without a scheme
+  (`Authorization: <token>`), which reached the log in clear (T15). PayU: the new `payu_signature_algorithm =
+  'sha256'` (`PAY_PAYU_SIGNATURE_ALGORITHM`) refuses MD5-signed notifications once the POS signs with SHA-256; until
+  it is set `cli/doctor.php` warns that MD5 is still accepted (T20, README).
 - **Feeds** (review round 23, medium). A CSV supplier feed's price of only spaces is a missing price: an existing
   product keeps its price (it became 0) and a new one is not created ("Missing required field: price" in the sync
   status; it was created free and the sync said "ok"). A control character in a product name (`\x01`, `\x0B`, e.g. from

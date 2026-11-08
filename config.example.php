@@ -277,6 +277,9 @@ return [
     'payu_second_key'    => '',
     'payu_pos_id'        => '',
     'payu_env'           => 'sandbox', // 'production' uses secure.payu.com
+    // 'sha256': accept only SHA-256 notification signatures (set the POS to SHA-256 in the PayU panel first);
+    // empty accepts MD5 too.
+    'payu_signature_algorithm' => '',
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.
