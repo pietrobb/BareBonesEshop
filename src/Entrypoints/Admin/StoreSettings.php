@@ -83,16 +83,7 @@ function handleStoreSettingsSave(): void {
         $GLOBALS['adminStoreDraft'][$storeId] = array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);
         return;
     }
-    $saved = (array)(StoreSettings::load()['stores'][$storeId] ?? []);
-    // R23 UX: a public store whose currency is not its catalog's sells only what is priced in that currency.
-    $gap = StoreContext::isPublicConfig($saved) ? StoreCurrencyCoverage::unpriced(Db::get(), $storeId, $saved) : ['count' => 0, 'skus' => []];
-    if ($gap['count'] > 0) {
-        setFlash('warn', I18n::format('admin.stores.saved', ['store' => $storeId]) . ' ' . I18n::format('admin.stores.unpriced', [
-            'currency' => strtoupper((string)($saved['currency'] ?? '')), 'count' => (string)$gap['count'], 'skus' => implode(', ', $gap['skus']),
-        ]));
-    } else {
-        setFlash('ok', I18n::format('admin.stores.saved', ['store' => $storeId]));
-    }
+    setFlash(empty($result['warning']) ? 'ok' : 'warn', trim(I18n::format('admin.stores.saved', ['store' => $storeId]) . ' ' . ($result['warning'] ?? '')));
     header('Location: admin.php?p=stores#store-' . rawurlencode($storeId));
     exit;
 }
