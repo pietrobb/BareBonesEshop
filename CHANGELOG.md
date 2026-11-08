@@ -100,6 +100,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Sample stores in other currencies sell the seeded products** (review round 23, UX). `cli/seed.php` creates a
+  price list in each sample store's currency (cz CZK in whole korunas, pl PLN, hu HUF, us USD; fixed sample rates)
+  and prices every seeded product in it; these stores used to sell none of the seeded EUR products. A second seed
+  run reuses the lists. Saving a public store whose products have no price in its currency shows a warning with the
+  count, examples and where to price them (Admin → Price lists); it saved silently. Docs: the README said such
+  products "stay in the catalog currency" (they are not for sale in that store), the promotion hint asked for
+  amounts in cents in every language (they are typed in the currency, e.g. 4.90), and the doctor pointed to a
+  non-existent Admin → Pricing section.
 - **Feeds** (review round 23, medium). A CSV supplier feed's price of only spaces is a missing price: an existing
   product keeps its price (it became 0) and a new one is not created ("Missing required field: price" in the sync
   status; it was created free and the sync said "ok"). A control character in a product name (`\x01`, `\x0B`, e.g. from
