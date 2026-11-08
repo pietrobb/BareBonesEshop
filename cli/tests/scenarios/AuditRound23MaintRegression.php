@@ -39,12 +39,14 @@ $r23mPhp = static function (array $args, ?string $cwd = null): array {
 file_put_contents($r23mBase . '/hold.php', '<?php
 require ' . var_export($r23mRepo . '/src/autoload.php', true) . ';
 MaintenanceMode::enter($argv[1], $argv[2]);
+// The armed phase: the step is changing files or the database, so its window says failed while it still holds it.
+if (($argv[3] ?? "") === "arm") MaintenanceMode::arm($argv[1], $argv[2]);
 echo "entered\n";
 fgets(STDIN);
 exit(1);
 ');
-$r23mHold = static function (string $root, string $reason) use ($r23mBase): array {
-    $process = proc_open([PHP_BINARY, $r23mBase . '/hold.php', $root, $reason], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+$r23mHold = static function (string $root, string $reason, string $phase = 'enter') use ($r23mBase): array {
+    $process = proc_open([PHP_BINARY, $r23mBase . '/hold.php', $root, $reason, $phase], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     $entered = trim((string)fgets($pipes[1]));
     return ['process' => $process, 'pipes' => $pipes, 'entered' => $entered];
 };
@@ -106,6 +108,14 @@ echo "returned\n";
         str_contains($r23mRefused, 'Another maintenance window is open'), $r23mRead(), $r23mReason($r23mShop)],
         'R23 updater: while a migration holds the window, an update is refused and changes nothing (was: it took the window over and lifted it at the end)');
     $r23mRelease($r23mHeld, $r23mShop);
+    // The same while that migration is in its armed phase (its window says failed while it runs): still refused.
+    $r23mArmedReason = 'cli/migrate.php was interrupted during a migration — the shop stays in maintenance; fix the cause and run php cli/migrate.php apply again';
+    $r23mHeld = $r23mHold($r23mShop, $r23mArmedReason, 'arm');
+    $r23mRefused = $r23mError(static fn() => $r23mUpdater->apply(new UpdatePackage($r23mRoot . '/package-2', null, true)));
+    $r23mArmedState = [$r23mHeld['entered'], str_contains($r23mRefused, 'Another maintenance window is open'), $r23mRead(), $r23mReason($r23mShop)];
+    $r23mRelease($r23mHeld, $r23mShop);
+    assert_equals(['entered', true, 'a1', $r23mArmedReason], $r23mArmedState,
+        'R23 updater: while a migration holds its armed (failed-marked) window, an update is refused and changes nothing (was: taken for a dead run\'s window) — ' . $r23mRefused);
     $r23mUpdater->apply(new UpdatePackage($r23mRoot . '/package-2', null, true));
     assert_equals(['a2', false], [$r23mRead(), $r23mMarked($r23mShop)], 'R23 updater: once that step ended the update runs');
 
@@ -173,6 +183,14 @@ try {
     $r23mRelease($r23mHeld, $r23mApp);
     assert_equals(['entered', true, true, false, 'update 23.0.1'], $r23mUnderState,
         'R23 migrate: while an update holds the window, cli/migrate.php refuses and leaves that window alone (was: migrated under it and lifted it) — ' . trim(substr($r23mUnder['output'], -160)));
+    $r23mUpdateArmed = 'update 23.0.1 was interrupted before it finished; run php cli/update.php rollback --snapshot=r23x --force --accept-data-loss';
+    $r23mHeld = $r23mHold($r23mApp, $r23mUpdateArmed, 'arm');
+    $r23mUnder = $r23mPhp([$r23mApp . '/cli/migrate.php', 'apply']);
+    $r23mUnderState = [$r23mHeld['entered'], $r23mUnder['exit'] !== 0, str_contains($r23mUnder['output'], 'Another maintenance window is open'),
+        $r23mTable(), $r23mReason($r23mApp)];
+    $r23mRelease($r23mHeld, $r23mApp);
+    assert_equals(['entered', true, true, false, $r23mUpdateArmed], $r23mUnderState,
+        'R23 migrate: while an update is in its armed phase (window marked failed, still held), cli/migrate.php refuses too (was: migrated under it) — ' . trim(substr($r23mUnder['output'], -160)));
 
     // 4b. Killed during a migration: the shop stays closed past the hour with what to run.
     file_put_contents($r23mProbe, "<?php return new class { public function up(PDO \$db, bool \$isSqlite): void { echo \"r23 migrating\\n\"; exit(7); } };\n");
@@ -219,6 +237,13 @@ try {
     $r23mRelease($r23mHeld, $r23mApp);
     assert_equals([1, true, 'update 23.0.3'], $r23mBlockedState,
         'R23 restore: while an update holds the window, cli/restore.php is refused and leaves it alone (was: replaced the database under it) — ' . trim(substr($r23mBlocked['output'], -160)));
+    $r23mUpdateArmed = 'update 23.0.3 was interrupted before it finished; run php cli/update.php rollback --snapshot=r23x --force --accept-data-loss';
+    $r23mHeld = $r23mHold($r23mApp, $r23mUpdateArmed, 'arm');
+    $r23mBlocked = $r23mPhp([$r23mApp . '/cli/restore.php', '--latest', '--yes']);
+    $r23mBlockedState = [$r23mHeld['entered'], $r23mBlocked['exit'], str_contains($r23mBlocked['output'], 'another maintenance window is open'), $r23mReason($r23mApp)];
+    $r23mRelease($r23mHeld, $r23mApp);
+    assert_equals(['entered', 1, true, $r23mUpdateArmed], $r23mBlockedState,
+        'R23 restore: while an update is in its armed phase (window marked failed, still held), cli/restore.php is refused too (was: taken for a dead run\'s window, restored under the update and took its window over) — ' . trim(substr($r23mBlocked['output'], -160)));
     $r23mRestored = $r23mPhp([$r23mApp . '/cli/restore.php', '--latest', '--yes']);
     assert_equals([0, false], [$r23mRestored['exit'], $r23mMarked($r23mApp)],
         'R23 restore: a completed restore lifts its own window — ' . trim(substr($r23mRestored['output'], -160)));
