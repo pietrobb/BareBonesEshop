@@ -100,6 +100,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Refunds** (review round 23, medium). After the provider declined an item refund the payment stayed `refund_pending`
+  for good and the next refund from the admin was refused; it now returns to paid (or partially refunded) when no
+  other refund is in flight. The numbered credit note of a failed refund is no longer cancelled (it may be in a VAT or
+  OSS return already filed): a reversal of it is issued in the credit note series, with its own PDF, and the OSS report
+  adds it back in its own period. Low: with three or more VAT rates a refund credit note no longer credits a cent more
+  at one rate than the invoice has left there; a refund booked without a gateway refund id (GoPay, ThePay, Comgate)
+  gets its credit note at once instead of waiting 30 minutes for an unrelated item refund of the same amount and failing.
 - **Feeds** (review round 23, medium). A CSV supplier feed's price of only spaces is a missing price: an existing
   product keeps its price (it became 0) and a new one is not created ("Missing required field: price" in the sync
   status; it was created free and the sync said "ok"). A control character in a product name (`\x01`, `\x0B`, e.g. from
