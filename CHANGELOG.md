@@ -100,6 +100,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Sample stores in other currencies sell the seeded products** (review round 23, UX). `cli/seed.php` creates a
+  price list in each sample store's currency (cz CZK in whole korunas, pl PLN, hu HUF, us USD; fixed sample rates)
+  and prices every seeded product in it; these stores used to sell none of the seeded EUR products. A second seed
+  run reuses the lists. Saving a public store whose products have no price in its currency shows a warning with the
+  count, examples and where to price them (Admin → Price lists); it saved silently. Docs: the README said such
+  products "stay in the catalog currency" (they are not for sale in that store), the promotion hint asked for
+  amounts in cents in every language (they are typed in the currency, e.g. 4.90), and the doctor pointed to a
+  non-existent Admin → Pricing section.
 - **Security** (review round 23, low). The CSP report endpoint counts an IPv6 reporter per /64 network: one client
   that took a new address of its /64 for every forged form-action report counted as several reporters and raised
   the critical alarm alone (IPv4 still counts per address, an IPv4-mapped address as that IPv4 address). The log

@@ -41,10 +41,17 @@ final class StoreSettings {
 
     /**
      * Validate the posted form and write it into stores.{$storeId}.
-     * @return array{ok: bool, errors: list<string>}  errors are I18n-formatted messages
+     * @return array{ok: bool, errors: list<string>, warning?: string}  errors are I18n-formatted messages; warning: R23, the
+     *         saved store is public but has products without a price in its currency (not for sale there)
      */
     public static function save(string $storeId, array $input): array {
-        return self::locked(static fn(): array => self::saveLocked($storeId, $input));
+        $result = self::locked(static fn(): array => self::saveLocked($storeId, $input));
+        if (!$result['ok']) return $result;
+        $store = (array)(self::load()['stores'][$storeId] ?? []);
+        $gap = StoreContext::isPublicConfig($store) ? StoreCurrencyCoverage::unpriced(Db::get(), $storeId, $store) : ['count' => 0, 'skus' => []];
+        return $result + ['warning' => $gap['count'] === 0 ? '' : I18n::format('admin.stores.unpriced', [
+            'currency' => strtoupper((string)($store['currency'] ?? '')), 'count' => (string)$gap['count'], 'skus' => implode(', ', $gap['skus']),
+        ])];
     }
 
     /** Two admins saving at once: each re-reads under the lock, so neither edit is lost. */

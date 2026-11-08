@@ -161,7 +161,7 @@ tr:hover{background:#f8fafc}
 .btn-primary:hover,.bbf-submit:hover{background:#1d4ed8}.btn-danger{background:#dc2626;color:#fff;border-color:#dc2626}
 .btn-sm{padding:.2rem .5rem;font-size:.75rem}
 .flash{padding:.75rem 1rem;border-radius:6px;margin-bottom:1rem;overflow-wrap:anywhere}code{overflow-wrap:anywhere}
-.flash-ok{background:#d1fae5;color:#065f46}.flash-err{background:#fee2e2;color:#991b1b}
+.flash-ok{background:#d1fae5;color:#065f46}.flash-err{background:#fee2e2;color:#991b1b}.flash-warn{background:#fef3c7;color:#92400e}
 input,select,textarea{padding:.4rem .6rem;border:1px solid #d1d5db;border-radius:4px;font-size:.9rem;max-width:100%}
 input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5rem;height:1.5rem;margin:0 .25rem 0 0;vertical-align:middle}textarea{resize:vertical}
 .form-row{margin-bottom:.75rem}.form-row label{display:block;font-weight:600;font-size:.85rem;margin-bottom:2px}

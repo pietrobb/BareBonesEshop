@@ -186,7 +186,14 @@ try {
     $r9oAudit = $r9oPdo->query("SELECT new_value FROM audit_log WHERE entity = 'store_settings' ORDER BY id DESC")->fetchColumn();
     assert_equals('Kníhkupectvo Rubin s.r.o.', json_decode((string)$r9oAudit, true)['legal']['name'] ?? null, 'R9 store settings: the change is in the audit log');
     $r9oCheck('R9 store settings: the saved store shows as ready with the saved data',
-        $r9oRun('owner', ['p' => 'stores']), ['Store default saved.', 'data-store-status="ready"', 'value="Kníhkupectvo Rubin s.r.o."']);
+        $r9oRun('owner', ['p' => 'stores']), ['Store default saved.', 'data-store-status="ready"', 'value="Kníhkupectvo Rubin s.r.o."'], ['class="flash flash-warn"']);
+    // R23 UX: publishing the CZK store of the EUR catalog warned about nothing, although it sold none of the EUR products.
+    $r9oPdo->exec("INSERT INTO products (sku, slug, name, category_id, price, currency, status, store_id) VALUES ('R23C-EUR', 'r23c-eur', 'R23C EUR', 0, 1290, 'eur', 'active', 'default')");
+    $r9oCzGap = StoreCurrencyCoverage::unpriced($r9oPdo, 'cz', $r9oStores()['stores']['cz']);
+    $r9oRun('owner', ['p' => 'stores', 'action' => 'save', 'store' => 'cz'], $r9oForm($r9oReal, ['public' => '1', 'country' => 'CZ', 'ic_dph' => 'CZ12345678', 'iban' => 'CZ65 0800 0000 1920 0014 5399']));
+    assert_true(StoreContext::isPublicConfig($r9oStores()['stores']['cz']) && $r9oCzGap['count'] > 0, 'R23 UX: the cz store is published (unpriced: ' . $r9oCzGap['count'] . ')');
+    $r9oCheck('R23 UX: saving a public store warns which products have no price in its currency and where to price them',
+        $r9oRun('owner', ['p' => 'stores', 'lang' => 'en']), ['class="flash flash-warn"', 'Store cz saved.', "{$r9oCzGap['count']} active product(s)/variant(s) have no CZK price", 'Admin → Price lists', $r9oCzGap['skus'][0] ?? '?']);
 
     $r9oDenied = $r9oRun('manager', ['p' => 'stores']);
     assert_true($r9oDenied['code'] === 403 && !str_contains($r9oDenied['out'], 'data-store-settings'), 'R9 store settings: without stores.manage (manager) the page answers 403 (code=' . var_export($r9oDenied['code'], true) . ')');

@@ -372,7 +372,7 @@ class Setup
         return ['status' => $gap['count'] === 0 ? 'pass' : 'warn', 'name' => 'stores.currency_prices.' . $storeId, 'message' => $gap['count'] === 0
             ? "Store {$storeId} has a {$currency} price for everything it offers."
             : "Store {$storeId} sells in {$currency}, but {$gap['count']} active product(s)/variant(s) have no {$currency} price and are not for sale there (e.g. " . implode(', ', $gap['skus']) . ').',
-            'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Pricing → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
+            'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
     }
 
     /**
