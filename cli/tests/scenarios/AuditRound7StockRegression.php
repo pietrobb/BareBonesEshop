@@ -107,7 +107,10 @@ Rma::receive((int)$r7sRmaId, [(int)Rma::items((int)$r7sRmaId)[0]['id'] => ['quan
 assert_equals(3, Warehouse::totalAvailable('R7S-CXL'), 'R7 cancel: the returned shipped unit is restocked (the cancellation did not restore it)');
 // Round 8: a cancelled order never gets a delivered_at, so the customer's return window of its shipped units had no end.
 $r7sCxlRow = Orders::byId($r7sCxl);
-assert_equals([true, false], [Rma::withinReturnWindow($r7sCxlRow, time() + 13 * 86400), Rma::withinReturnWindow($r7sCxlRow, time() + 15 * 86400)],
+// R23 T21: 13 and 15 calendar days on the shop's clock (noon). 15 × 24 h ahead across the autumn clock change lands
+// at 23:xx of day 14 when the test runs between 00:00 and 00:59, still inside the window (it failed for two weeks).
+$r7sDaysAhead = static fn(int $days): int => (new DateTimeImmutable('@' . time()))->setTimezone(ShopTime::zone())->setTime(12, 0)->modify("+{$days} days")->getTimestamp();
+assert_equals([true, false], [Rma::withinReturnWindow($r7sCxlRow, $r7sDaysAhead(13)), Rma::withinReturnWindow($r7sCxlRow, $r7sDaysAhead(15))],
     'R8 return window: the shipped units of a cancelled order can be returned 14 days from their shipment (was unlimited)');
 $pdo->exec("UPDATE shipments SET delivered_at = '" . gmdate('Y-m-d H:i:s', time() + 10 * 86400) . "' WHERE id = " . (int)$r7sShipments[0]);
 assert_true(Rma::withinReturnWindow($r7sCxlRow, time() + 20 * 86400), 'R8 return window: a delivery reported by the carrier starts the window instead of the shipment');

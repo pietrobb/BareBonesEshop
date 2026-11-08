@@ -203,6 +203,55 @@ if ($db->inTransaction()) $db->commit();
 echo "\nUpdating category counts...\n";
 Import::recountCategories($db);
 
+// R23: a sample store in another currency than its catalog (cz CZK, pl PLN, hu HUF, us USD on the EUR catalog) sells
+// only what one of its price lists prices in its currency (Pricing::soldInStore): without these lists they sold nothing.
+echo "\nPricing the sample stores in their currencies...\n";
+$sampleRates = ['eur' => 1.0, 'czk' => 25.0, 'pln' => 4.3, 'huf' => 395.0, 'usd' => 1.08];
+$storesCfg = StoreSettings::load();
+foreach ((array)($storesCfg['stores'] ?? []) as $storeId => $store) {
+    if (!is_array($store)) continue;
+    $storeId = (string)$storeId;
+    $catalog = (string)($store['catalog_scope'] ?? $storeId);
+    $currency = strtolower((string)($store['currency'] ?? ''));
+    $catalogCurrency = strtolower(Warehouse::catalogCurrency($catalog));
+    if ($currency === '' || $currency === $catalogCurrency) continue;
+    if (!isset($sampleRates[$currency], $sampleRates[$catalogCurrency])) {
+        echo "  {$storeId}: no sample rate for {$catalogCurrency} → {$currency}, not priced\n";
+        continue;
+    }
+    $rate = $sampleRates[$currency] / $sampleRates[$catalogCurrency];
+    $wholeUnits = (int)($storesCfg['currencies'][$currency]['decimals'] ?? 2) === 0;
+    $code = 'sample-' . $currency;
+    $find = $db->prepare('SELECT id FROM price_lists WHERE store_id = ? AND code = ?');
+    $find->execute([$storeId, $code]);
+    $listId = (int)$find->fetchColumn();
+    if ($listId === 0) {
+        $db->prepare('INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active) VALUES (?, ?, ?, ?, NULL, 0, 1)')
+            ->execute([$storeId, $code, 'Sample ' . strtoupper($currency) . ' prices', strtoupper($currency)]);
+        $listId = (int)$db->lastInsertId();
+    }
+    $db->beginTransaction();
+    $db->prepare('DELETE FROM price_list_prices WHERE price_list_id = ?')->execute([$listId]);
+    $row = $db->prepare('INSERT INTO price_list_prices (price_list_id, product_id, variant_id, min_qty, price, compare_price) VALUES (?, ?, NULL, 1, ?, ?)');
+    $convert = static function (?int $cents) use ($rate, $wholeUnits): ?int {
+        if ($cents === null || $cents <= 0) return null;
+        return $wholeUnits ? max(100, (int)round($cents * $rate / 100) * 100) : max(1, (int)round($cents * $rate));
+    };
+    $products = $db->prepare("SELECT id, price, compare_price FROM products WHERE store_id = ? AND status = 'active' AND LOWER(currency) = ?");
+    $products->execute([$catalog, $catalogCurrency]);
+    $priced = 0;
+    foreach ($products->fetchAll(PDO::FETCH_ASSOC) as $product) {
+        $price = $convert((int)$product['price']);
+        if ($price === null) continue;
+        $compare = $convert($product['compare_price'] === null ? null : (int)$product['compare_price']);
+        $row->execute([$listId, (int)$product['id'], $price, $compare !== null && $compare > $price ? $compare : null]);
+        $priced++;
+    }
+    $db->commit();
+    echo "  {$storeId}: {$priced} products in " . strtoupper($currency) . " (price list {$code})\n";
+}
+Cache::catalogChanged();
+
 $elapsed = round((microtime(true) - $start) * 1000);
 $totalProducts = (int)$db->query("SELECT COUNT(*) FROM products")->fetchColumn();
 echo "\nDone! {$totalProducts} products in {$elapsed}ms.\n";

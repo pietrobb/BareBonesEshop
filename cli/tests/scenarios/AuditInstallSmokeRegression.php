@@ -159,6 +159,21 @@ try {
     assert_equals($a111OwnerBefore, $a111OwnerRow(), 'R6 install re-run leaves the existing owner (password, MFA, recovery codes) unchanged');
     $a111Seed = $a111Php(['cli/seed.php', '--count=3']);
     assert_equals(0, $a111Seed['code'], 'A11.1 README optional seed step works after install' . ($a111Seed['code'] !== 0 ? ': ' . substr($a111Seed['out'] . $a111Seed['err'], -400) : ''));
+    // R23 UX: the sample CZK, PLN, HUF and USD stores sold none of the seeded EUR products (no price in their currency).
+    $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $a111Gaps = [];
+    foreach ($a111Stores['stores'] as $a111Id => $a111Store) $a111Gaps[$a111Id] = StoreCurrencyCoverage::unpriced($a111SeedDb, (string)$a111Id, $a111Store)['count'];
+    $a111Czk = $a111SeedDb->query("SELECT pp.price, p.price AS eur FROM price_list_prices pp JOIN price_lists pl ON pl.id = pp.price_list_id JOIN products p ON p.id = pp.product_id
+        WHERE pl.store_id = 'cz' AND pl.currency = 'CZK' ORDER BY p.id LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $a111SeedDb = null;
+    assert_true(array_filter($a111Gaps) === [] && count($a111Gaps) >= 6 && (int)($a111Czk['price'] ?? 1) % 100 === 0 && (int)($a111Czk['price'] ?? 0) > (int)($a111Czk['eur'] ?? 0) * 20,
+        'R23 UX: cli/seed.php prices every seeded product in the CZK, PLN, HUF and USD sample stores (whole korunas for CZK): ' . json_encode([$a111Gaps, $a111Czk]));
+    $a111SeedAgain = $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+    $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+    assert_true($a111SeedAgain['code'] === 0 && (int)$a111SeedDb->query("SELECT COUNT(*) FROM price_lists WHERE store_id = 'cz' AND code = 'sample-czk'")->fetchColumn() === 1
+        && StoreCurrencyCoverage::unpriced($a111SeedDb, 'hu', $a111Stores['stores']['hu'])['count'] === 0, 'R23 UX: a second seed run (--fresh) reuses the sample price lists and prices the new products too: '
+        . json_encode([$a111SeedAgain['code'], substr($a111SeedAgain['out'] . $a111SeedAgain['err'], -400), $a111SeedDb->query("SELECT store_id, code FROM price_lists")->fetchAll(PDO::FETCH_NUM)]));
+    $a111SeedDb = null;
 
     // Documented subcommand CLIs: getopt() used to drop every option after the subcommand.
     $a111Client = $a111Php(['cli/api-client.php', 'create', '--name=ERP', '--store=default', '--scopes=products:read,orders:read']);

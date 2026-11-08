@@ -54,6 +54,7 @@ final class PaymentReadiness
                 $checks[] = match (true) {
                     $missing !== [] => ['fail', $name, "Payment provider {$provider} lacks " . implode(', ', $missing) . " ({$used}): checkout cannot start these payments.", 'Set the listed keys in config.php or the environment, or deactivate the method.'],
                     $testMode !== null => ['warn', $name, "Payment provider {$provider} runs in test mode ({$testMode}; {$used}): orders are marked paid without real money. Fine for staging, never for a live shop.", "Switch {$provider} to production ({$testMode}) before taking real orders."],
+                    $provider === 'payu' && !in_array(strtolower(trim((string)(getenv('PAY_PAYU_SIGNATURE_ALGORITHM') ?: ($config['payu_signature_algorithm'] ?? '')))), ['sha256', 'sha-256'], true) => ['warn', $name, "Payment provider payu has its credentials ({$used}) but accepts MD5-signed notifications, a weak hash.", "Switch the POS to SHA-256 signatures in the PayU panel, then set payu_signature_algorithm = 'sha256' (PAY_PAYU_SIGNATURE_ALGORITHM)."],
                     default => ['pass', $name, "Payment provider {$provider} has its credentials ({$used}).", ''],
                 };
             }

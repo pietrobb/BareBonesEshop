@@ -330,7 +330,13 @@ class ApiV1 {
                 'weight_g' => $body['weight_g'] ?? 0, 'stock' => (string)($body['stock'] ?? 0)];
             if ($comparePrice !== null) $row['compare_price'] = $comparePrice;
             if ($slug !== null) $row['slug'] = $slug;
-            Import::importProduct($row, $db);
+            // R23: create only; a concurrent create of the same SKU (MySQL) waits and gets 409 instead of overwriting it.
+            try {
+                Import::importProduct($row, $db, true);
+            } catch (DomainException | PDOException $e) {
+                if ($e instanceof PDOException && !str_starts_with((string)$e->getCode(), '23')) throw $e;
+                return self::error(409, 'sku_exists', 'A product or variant already uses this SKU') + ['store' => false];
+            }
             $productId = (int)self::catalogSku($sku);
             if ($categoryId !== null) {
                 $db->prepare('UPDATE products SET category_id = :category WHERE id = :id')->execute([':category' => $categoryId, ':id' => $productId]);
