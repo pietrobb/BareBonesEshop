@@ -106,6 +106,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   changes, …) in the admin's language; stored entries are unchanged. Attribute types and payment methods in the admin
   forms follow the admin language (they were Slovak everywhere). The web installer asks for the seller's BIC, company ID
   (IČO) and tax ID (DIČ), checked like in Admin → Stores.
+- **Carrier labels of a cancelled order** (review round 23, medium). Cancelling a whole order cancelled its planned
+  parcels in the shop only: their labels stayed active at the carrier, cash on delivery included, so the carrier still
+  picked the goods up and collected. The cancellation now queues the job `shipping_labels_cancel`, and the worker
+  cancels the labels of the cancelled parcels (and a label of the order itself when nothing shipped) at the carrier.
+  A label the carrier does not cancel is a critical incident, e-mailed to the merchant when incident alerts are on, and
+  stays listed in red on the admin order until it is handled. Low: cancelling a parcel now takes the order lock, so on
+  MySQL a label created at the same moment can no longer stay active on the cancelled parcel; a label the carrier
+  returns after the whole order was cancelled is cancelled at the carrier instead of being recorded as active.
 - **Refunds** (review round 23, medium). After the provider declined an item refund the payment stayed `refund_pending`
   for good and the next refund from the admin was refused; it now returns to paid (or partially refunded) when no
   other refund is in flight. The numbered credit note of a failed refund is no longer cancelled (it may be in a VAT or
