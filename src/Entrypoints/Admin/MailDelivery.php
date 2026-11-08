@@ -25,8 +25,8 @@ function pageMailDelivery(): void {
         if (isset($locked[$name])) $html .= ' disabled';
         $html .= '>';
         if (isset($locked[$name])) {
-            $note = esc(I18n::format('admin.mail.env_locked', ['name' => $locked[$name]]));
-            $html .= '<p class="muted" data-mail-env="' . esc($locked[$name]) . '">' . $note . '</p>';
+            $note = I18n::format('admin.mail.env_locked', ['name' => $locked[$name]]);
+            $html .= '<p class="muted" data-mail-env="' . esc($locked[$name]) . '">' . esc($note) . '</p>';
         }
         return $html . '</div>';
     };
