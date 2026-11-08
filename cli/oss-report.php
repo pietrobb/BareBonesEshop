@@ -135,7 +135,7 @@ function collect(string $from, string $to, ?string $storeCode): array
 
     $sql = "
         SELECT i.id, i.number, i.issued_at, i.currency, i.customer_snapshot,
-               i.vat_breakdown, i.financial_snapshot, i.type, i.vat_scenario
+               i.vat_breakdown, i.financial_snapshot, i.type, i.vat_scenario, i.credit_snapshot
         FROM invoices i
         $where
     ";
@@ -152,10 +152,12 @@ function collect(string $from, string $to, ?string $storeCode): array
         $creditNote = (string)($row['type'] ?? 'invoice') === 'credit_note';
         if ($creditNote) {
             // A credit note carries its source invoice's snapshot for reference; what it credits is its own
-            // breakdown, and it always reduces the period's OSS base and VAT.
+            // breakdown, and it always reduces the period's OSS base and VAT. R23: the reversal of a credit note whose
+            // refund failed (InvoiceService::reverseCredit()) adds it back in its own period.
+            $sign = (json_decode((string)($row['credit_snapshot'] ?? ''), true)['kind'] ?? null) === 'reversal' ? 1 : -1;
             $rates = [];
             foreach ((json_decode((string)($row['vat_breakdown'] ?? '{}'), true) ?: []) as $rateKey => $group) {
-                $rates[$rateKey] = ['net' => -abs((int)($group['net'] ?? 0)), 'vat' => -abs((int)($group['vat'] ?? 0))]
+                $rates[$rateKey] = ['net' => $sign * abs((int)($group['net'] ?? 0)), 'vat' => $sign * abs((int)($group['vat'] ?? 0))]
                     + array_intersect_key((array)$group, ['country' => true, 'supply' => true]);
             }
         } elseif ($financialJson !== '') {

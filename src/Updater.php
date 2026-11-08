@@ -349,6 +349,8 @@ final class Updater
             // or the fresh marker of an updater killed half-way) or none.
             if ($halfDone !== null) {
                 MaintenanceMode::fail($this->root, $halfDone);
+            } elseif ($entered && !MaintenanceMode::owned($this->root)) {
+                // R23: another step took the window over meanwhile; it is that step's to lift.
             } elseif ($installed && $keepClosed === null) {
                 MaintenanceMode::leave($this->root);
             } elseif ($entered) {
@@ -367,8 +369,9 @@ final class Updater
     {
         if (!MaintenanceMode::active($this->root)) return null;
         // R23: a window another process holds open (cli/migrate.php running) is not taken over: lifted at the end of
-        // this step, it opened the shop while that migration still ran.
-        if (MaintenanceMode::heldElsewhere($this->root) && !MaintenanceMode::failed($this->root)) {
+        // this step, it opened the shop while that migration still ran. Held is held, failed-marked or not: a running
+        // step marks its window failed (arm()) before its first change; only an unheld failed window is a dead run's.
+        if (MaintenanceMode::heldElsewhere($this->root)) {
             $this->unlock();
             throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? '')
                 . '); wait until that step ends, then retry');
@@ -493,12 +496,14 @@ final class Updater
             // snapshot, changed files) puts back the window it found — failed, or the fresh one of an updater killed
             // half-way — or none; one that stopped after changing files or the database keeps the shop closed (no mix
             // of old and new files) and says what to run.
-            if ($restored && $stillClosed !== null) {
+            if (!$restored && $entered && $touched && $halfDone !== null) {
+                MaintenanceMode::fail($this->root, $halfDone);
+            } elseif ($entered && !MaintenanceMode::owned($this->root)) {
+                // R23: another step took the window over meanwhile; it is that step's to lift.
+            } elseif ($restored && $stillClosed !== null) {
                 $this->restoreMaintenance($prior);
             } elseif ($restored) {
                 MaintenanceMode::leave($this->root);
-            } elseif ($entered && $touched && $halfDone !== null) {
-                MaintenanceMode::fail($this->root, $halfDone);
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }
