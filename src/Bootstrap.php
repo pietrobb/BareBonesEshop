@@ -145,34 +145,46 @@ class Bootstrap {
      *                       default_locale is left to that store, so every hreflang code has one URL
      *   'regional'       => [locale-COUNTRY => ['prefix' => url_prefix, 'locale' => locale], ...] the remaining store
      *                       languages (<prefix><path>?lang=<locale>), qualified by the store's legal.country
+     *   'stores'         => [hreflang code => store id] of every alternate above, and 'xDefaultStore' (R23: a store
+     *                       on its own domain is linked there, see storeBase())
      * Pass an explicit $uri to override $_SERVER['REQUEST_URI'] (tests).
      */
     public static function hreflangAlternates(?string $uri = null): array {
         $storesCfg = self::stores();
         $public = array_filter(is_array($storesCfg['stores'] ?? null) ? $storesCfg['stores'] : [], static fn($store): bool => is_array($store) && StoreContext::isPublicConfig($store));
         $alternates = [];
-        foreach ($public as $store) {
+        $storeOf = [];
+        foreach ($public as $id => $store) {
             $locale = $store['default_locale'] ?? 'en';
             $alternates[$locale] = $store['url_prefix'] ?? '';
+            $storeOf[$locale] = (string)$id;
         }
         $secondary = [];
-        foreach ($public as $store) {
+        foreach ($public as $id => $store) {
             foreach ((array)($store['languages'] ?? []) as $locale) {
                 $locale = strtolower((string)$locale);
-                if (!isset($alternates[$locale]) && !isset($secondary[$locale])) $secondary[$locale] = $store['url_prefix'] ?? '';
+                if (!isset($alternates[$locale]) && !isset($secondary[$locale])) {
+                    $secondary[$locale] = $store['url_prefix'] ?? '';
+                    $storeOf[$locale] = (string)$id;
+                }
             }
         }
         // R21: every other store language is its own page too (English in the HU store, Czech in the SK store); it is
         // announced language-region qualified by the store's seller country (en-HU), so each code still has one URL.
         $regional = [];
-        foreach ($public as $store) {
+        foreach ($public as $id => $store) {
             $country = strtoupper((string)($store['legal']['country'] ?? ''));
             if (!preg_match('/^[A-Z]{2}$/', $country)) continue;
             $prefix = $store['url_prefix'] ?? '';
             foreach ((array)($store['languages'] ?? []) as $locale) {
                 $locale = strtolower((string)$locale);
-                if (($alternates[$locale] ?? $secondary[$locale] ?? null) === $prefix) continue;
-                $regional[$locale . '-' . $country] ??= ['prefix' => $prefix, 'locale' => $locale];
+                // The language is already announced on this store's own URL (R23: by store, two stores on their own
+                // domains may share the empty prefix).
+                if (($storeOf[$locale] ?? null) === (string)$id) continue;
+                if (!isset($regional[$locale . '-' . $country])) {
+                    $regional[$locale . '-' . $country] = ['prefix' => $prefix, 'locale' => $locale];
+                    $storeOf[$locale . '-' . $country] = (string)$id;
+                }
             }
         }
 
@@ -197,7 +209,32 @@ class Bootstrap {
             'xDefaultPrefix' => $xDefaultPrefix,
             'secondary'      => $secondary,
             'regional'       => $regional,
+            'stores'         => $storeOf,
+            'xDefaultStore'  => (string)$defaultStore,
         ];
+    }
+
+    /**
+     * R23: absolute base URL of a store's pages: app_url moved to the store's own domain (Security::storeAppUrl()), the
+     * app_url itself for a store without one (or unknown). Null without app_url: the links stay relative.
+     */
+    public static function storeBase(string $storeId): ?string {
+        $store = self::stores()['stores'][$storeId] ?? null;
+        $appUrl = Security::configuredAppUrl();
+        if ($appUrl === null) return null;
+        return is_array($store) ? Security::storeAppUrl($appUrl, $store) : $appUrl;
+    }
+
+    /**
+     * R23: a local URL (Template::url output) of $storeId's pages as a link from the current page: relative while that
+     * store lives on the current store's base URL, absolute on its own domain otherwise (the CZ store on shop.cz linked
+     * from shop.sk opened the SK store under the CZ prefix, in euros). $absolute: always absolute (hreflang, canonical).
+     */
+    public static function storeHref(string $storeId, string $url, bool $absolute = false): string {
+        $base = self::storeBase($storeId);
+        if ($base === null) return $url;
+        if (!$absolute && $base === Security::currentStoreAppUrl()) return $url;
+        return $base . Template::seoPath($url);
     }
 
     /** Set ?lang=<locale> (or &lang=) on a local URL, replacing a lang it already has; a #fragment stays last. */
