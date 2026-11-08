@@ -100,6 +100,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Refunds** (review round 23, medium). After the provider declined an item refund the payment stayed `refund_pending`
+  for good and the next refund from the admin was refused; it now returns to paid (or partially refunded) when no
+  other refund is in flight. The numbered credit note of a failed refund is no longer cancelled (it may be in a VAT or
+  OSS return already filed): a reversal of it is issued in the credit note series, with its own PDF, and the OSS report
+  adds it back in its own period. Low: with three or more VAT rates a refund credit note no longer credits a cent more
+  at one rate than the invoice has left there; a refund booked without a gateway refund id (GoPay, ThePay, Comgate)
+  gets its credit note at once instead of waiting 30 minutes for an unrelated item refund of the same amount and failing.
 - **Invoice, admin and texts** (review round 22, low). A long item name on the PDF invoice wraps inside its column and
   is printed in full; it was cut at 32 characters and, after round 21 narrowed the column, capitals still ran into the
   quantity. Text width now follows Helvetica's character widths, and a word wider than its column is split. On a 390 px
