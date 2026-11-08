@@ -80,6 +80,7 @@ function handlePost(string $page, string $action): void {
         'admin_users:grant' => handleAdminUserGrant(),
         'my_account:password' => handleMyAccountPassword(), 'my_account:mfa' => handleMyAccountMfa(),
         'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
+        'mail:save' => handleMailDeliverySave(), 'mail:test' => handleMailDeliveryTest(),
         'stores:save' => handleStoreSettingsSave(),
         'stores:add' => handleStoreAdd(),
         'stores:remove' => handleStoreRemove(),

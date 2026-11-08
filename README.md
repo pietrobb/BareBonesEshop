@@ -118,7 +118,12 @@ the hosting panel where there is no shell); it keeps `config.php` and the privat
 unpack as 0755 and files as 0644. A package built from a branch instead of a release tag records no
 version: run `php cli/update.php baseline --version=<release it was built from>` once before the first update.
 
-E-mails are only logged until you configure SMTP in `config.php`. To build the package yourself:
+E-mails are only logged (to `logs/emails.log`, with a copy of each message as an `.eml` file in
+`logs/emails/`) until you enter an SMTP server: in the installer's *Sending e-mail* section or later in
+Admin → E-mail delivery, which also sends a test e-mail. The password is stored encrypted in the private
+data folder and never shown again. Environment variables (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+`SMTP_ENCRYPTION`, `MAIL_FROM`, `MAIL_ADAPTER`) win over the admin values, which win over the `smtp_*` keys
+of `config.php`. To build the package yourself:
 `php demo/bookshop/package.php --out=/tmp` (needs git and the `vendor/bbf` submodule). The same
 `install.php` also installs a plain checkout without a shell; it then starts with an empty catalog.
 

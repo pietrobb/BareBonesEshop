@@ -100,6 +100,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **E-mail delivery** (review round 23, UX). SMTP could be set only in environment variables, which most shared
+  hosting cannot set, so the shop only logged every e-mail. The SMTP server, its login and the sender are now entered in
+  Admin → E-mail delivery (with a test e-mail) or in the web installer's optional "Sending e-mail" fields. They are
+  stored in `mail.json` in the private data directory (mode 0600), the password encrypted with a key derived from
+  `admin_identity_key` and never shown again; a login without TLS/SSL is refused. The environment (`SMTP_*`,
+  `MAIL_FROM`, `MAIL_ADAPTER`) still wins and its fields are shown read-only; the saved values win over the `smtp_*`
+  keys of `config.php`, and `setup.php doctor` reports the provider really in use. The merchant's order e-mails print
+  the payment method and state in the e-mail's language ("Kartou online — Zaplatené", not "paid" or "— pending") and
+  link the order in the admin; the invoice e-mail of a paid order says it is paid instead of asking for an amount due
+  by a due date; the bank transfer e-mails show the BIC. The e-mail log names the sender, Reply-To and attachments and
+  keeps an `.eml` copy of the last 50 messages in `logs/emails/`.
 - **Refunds** (review round 23, medium). After the provider declined an item refund the payment stayed `refund_pending`
   for good and the next refund from the admin was refused; it now returns to paid (or partially refunded) when no
   other refund is in flight. The numbered credit note of a failed refund is no longer cancelled (it may be in a VAT or
