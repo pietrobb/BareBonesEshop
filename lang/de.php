@@ -767,6 +767,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipment.msg.tracking_saved' => 'Sendungsverfolgung gespeichert.',
     'admin.shipment.msg.cancelled' => 'Die Sendung wurde storniert.',
     'admin.shipment.msg.cancelled_label_active' => 'Die Sendung wurde storniert, aber der Versanddienst hat ihr Etikett nicht storniert. Stornieren Sie es direkt beim Versanddienst, sonst holt er das Paket ab.',
+    'admin.shipment.label_still_active' => 'Der Versanddienst führt das Etikett {label} noch als aktiv, obwohl die Ware nicht versendet wird (stornierte Sendung oder Bestellung). Stornieren Sie es direkt beim Versanddienst, sonst holt er das Paket ab und kassiert eine Nachnahme.',
     'admin.shipment.msg.not_found' => 'Die Sendung existiert nicht.',
     'admin.shipment.msg.invalid_tracking' => 'Versanddienstleister, Sendungsnummer oder Link sind ungültig (der Link muss mit http:// oder https:// beginnen).',
     'admin.shipment.msg.failed' => 'Die Sendung konnte nicht gespeichert werden.',

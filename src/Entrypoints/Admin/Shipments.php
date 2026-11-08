@@ -87,7 +87,7 @@ function renderOrderShipments(array $order): void {
     <?php };
     ?>
     <div class="card" id="shipments">
-        <h3><?= esc(I18n::t('admin.shipment.heading')) ?></h3>
+        <h3><?= esc(I18n::t('admin.shipment.heading')) ?></h3><?php renderStrandedLabels($orderId); ?>
         <?php if ($shipments): ?>
         <table>
             <tr><th>#</th><th><?= esc(I18n::t('admin.shipment.warehouse')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.shipment.tracking')) ?></th><th><?= esc(I18n::t('admin.shipment.shipped_at')) ?></th><?php if ($canShip): ?><th><?= esc(I18n::t('admin.th.actions')) ?></th><?php endif; ?></tr>
