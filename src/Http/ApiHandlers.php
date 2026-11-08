@@ -675,7 +675,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             Customers::update((int)$_SESSION['customer_id'], [
                 'vat_id'           => $vatId,
                 'vat_country'      => substr($vatId, 0, 2),
-                'vat_validated_at' => $vatIdValid ? date('Y-m-d H:i:s') : null,
+                // R23: stored in UTC like every timestamp (I18n::dateTime reads it as UTC; local time showed it hours off).
+                'vat_validated_at' => $vatIdValid ? gmdate('Y-m-d H:i:s') : null,
             ]);
         }
     }

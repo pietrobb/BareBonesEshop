@@ -338,7 +338,7 @@ function pageWarehouse(): void {
                     <td><a href="admin.php?p=feed&id=<?= $f['id'] ?>"><?= esc($f['code']) ?></a></td>
                     <td><?= esc($f['name']) ?></td>
                     <td><?= esc($f['format']) ?></td>
-                    <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">' . esc(I18n::t('admin.common.never')) . '</span>' ?></td>
+                    <td><?= $f['last_sync'] ? esc(I18n::dateTime((string)$f['last_sync'])) : '<span class="muted">' . esc(I18n::t('admin.common.never')) . '</span>' ?></td>
                     <td><?= esc(FeedMessages::status((string)($f['last_status'] ?? '—'))) ?></td>
                 </tr>
                 <?php endforeach; ?>
@@ -411,7 +411,7 @@ function pageFeeds(): void {
                 <td><?= esc($f['name']) ?></td>
                 <td><?= esc($f['warehouse_name']) ?></td>
                 <td><?= esc($f['format']) ?></td>
-                <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">' . esc(I18n::t('admin.common.never')) . '</span>' ?></td>
+                <td><?= $f['last_sync'] ? esc(I18n::dateTime((string)$f['last_sync'])) : '<span class="muted">' . esc(I18n::t('admin.common.never')) . '</span>' ?></td>
                 <td><?= (int)$f['last_count'] ?></td>
                 <td><?= $f['enabled'] ? esc(FeedMessages::status((string)($f['last_status'] ?? '—'))) : '<span class="muted">' . esc(I18n::t('admin.feed.disabled')) . '</span>' ?></td>
                 <td>
@@ -479,7 +479,7 @@ function pageFeed(): void {
     <?php if ($f): ?>
     <div class="card" style="margin-top:1rem">
         <h3><?= esc(I18n::t('admin.feed.last_sync')) ?></h3>
-        <p><?= esc(I18n::t('admin.feed.time')) ?>: <?= $f['last_sync'] ? esc($f['last_sync']) : esc(I18n::t('admin.common.never')) ?></p>
+        <p><?= esc(I18n::t('admin.feed.time')) ?>: <?= $f['last_sync'] ? esc(I18n::dateTime((string)$f['last_sync'])) : esc(I18n::t('admin.common.never')) ?></p>
         <p><?= esc(I18n::t('admin.th.status')) ?>: <?= esc(FeedMessages::status((string)($f['last_status'] ?? '—'))) ?></p>
         <p><?= esc(I18n::t('admin.nav.products')) ?>: <?= (int)$f['last_count'] ?></p>
         <?php if ($feedErrors = Warehouse::feedLastErrors($f)): ?>

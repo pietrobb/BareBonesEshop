@@ -106,8 +106,21 @@ class BackInStock {
         return $stmt->rowCount() === 1;
     }
 
-    private static function confirmCutoff(): string {
-        return gmdate('Y-m-d H:i:s', time() - self::CONFIRM_HOURS * 3600);
+    private static function confirmCutoff(?int $now = null): string {
+        return gmdate('Y-m-d H:i:s', ($now ?? time()) - self::CONFIRM_HOURS * 3600);
+    }
+
+    /**
+     * Delete lapsed requests (RETENTION_DAYS) and links nobody confirmed in time, of one store or (null) all of them.
+     * R23: this ran only when a SKU was restocked; a product that never came back kept its requests, e-mails included,
+     * so the daily cleanup job (RetentionCleanup) runs it too. Returns the deleted rows.
+     */
+    public static function cleanup(?int $now = null, ?string $storeId = null): int {
+        $now ??= time();
+        $params = [':lapsed' => gmdate('Y-m-d H:i:s', $now - self::RETENTION_DAYS * 86400), ':unconfirmed' => self::confirmCutoff($now)];
+        if ($storeId !== null) $params[':store'] = $storeId;
+        return Db::writeInBatches('back_in_stock_requests', 'DELETE FROM back_in_stock_requests',
+            ($storeId !== null ? 'store_id = :store AND ' : '') . '(created_at < :lapsed OR (confirmed_at IS NULL AND created_at < :unconfirmed))', $params);
     }
 
     /** Called by Inventory::movement when a SKU's stock row goes from empty to available; cheap, never throws. */
@@ -169,8 +182,7 @@ class BackInStock {
     public static function process(array $skus): int {
         $db = Db::get();
         $store = StoreContext::current()->id();
-        $db->prepare('DELETE FROM back_in_stock_requests WHERE store_id = ? AND (created_at < ? OR (confirmed_at IS NULL AND created_at < ?))')
-            ->execute([$store, gmdate('Y-m-d H:i:s', time() - self::RETENTION_DAYS * 86400), self::confirmCutoff()]);
+        self::cleanup(null, $store);
         $sent = 0;
         $failed = false;
         foreach (self::productIds($skus) as $productId) {

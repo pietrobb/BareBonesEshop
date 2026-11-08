@@ -69,6 +69,12 @@ final class RetentionCleanup
         $deleted['failed_jobs'] = Db::writeInBatches('queue_jobs', 'DELETE FROM queue_jobs', "state = 'failed' AND updated_at < :cutoff",
             [':cutoff' => $cutoff($failedDays)]);
 
+        // R23: lapsed payment/account links and old confirmation tokens (the table only grew).
+        $deleted['checkout_sessions'] = Db::tableExists('checkout_sessions', $db)
+            ? CheckoutSession::cleanup((int)($cfg['checkout_confirmation_days'] ?? 90), $now) : 0;
+        // R23: back-in-stock requests ran their cleanup only on a restock; a product that never returns kept them.
+        $deleted['back_in_stock'] = Db::tableExists('back_in_stock_requests', $db) ? BackInStock::cleanup($now) : 0;
+
         // CSP reports are purged on ingest too, but a quiet site would otherwise keep old ones forever.
         $deleted['csp_violations'] = Db::tableExists('csp_violations', $db) ? CspReports::purge($db, $now) : 0;
 

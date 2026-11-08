@@ -154,13 +154,18 @@ class Import {
      * columns present in $data, so an edited "Export CSV" file (a subset of the columns) never
      * wipes the description, images, tags, category or attributes it does not carry.
      */
-    public static function importProduct(array $data, ?PDO $db = null): void {
+    /**
+     * $createOnly (API POST /products): the SKU must be new. R23: on MySQL two concurrent creates both saw no product
+     * and the second upsert overwrote the first, still answering 201; a plain INSERT waits for the first and fails on
+     * the unique SKU instead (PDOException 23000), an existing product is a DomainException.
+     */
+    public static function importProduct(array $data, ?PDO $db = null, bool $createOnly = false): void {
         $db = $db ?? Db::get();
         // product.updated is recorded with the change: a lone call runs in its own transaction.
         $ownsTransaction = !$db->inTransaction();
         if ($ownsTransaction) $db->beginTransaction();
         try {
-            self::importRow($data, $db);
+            self::importRow($data, $db, $createOnly);
             if ($ownsTransaction) $db->commit();
         } catch (Throwable $e) {
             if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
@@ -168,7 +173,7 @@ class Import {
         }
     }
 
-    private static function importRow(array $data, PDO $db): void {
+    private static function importRow(array $data, PDO $db, bool $createOnly = false): void {
         // Required fields
         $sku  = trim($data['sku'] ?? '');
         $name = trim($data['name'] ?? '');
@@ -181,12 +186,13 @@ class Import {
         $stmt->execute([':sku' => $sku, ':catalog' => $catalog]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
+        if ($existing && $createOnly) throw new \DomainException("SKU '{$sku}' already exists");
         if ($existing) {
             $productId = (int)$existing['id'];
             $productType = self::updateProduct($existing, $data, $db);
         } else {
             $productType = trim($data['product_type'] ?? 'simple');
-            $productId = self::createProduct($data, $productType, $db);
+            $productId = self::createProduct($data, $productType, $db, $createOnly);
         }
 
         // Optional per-product stock alert thresholds; an empty cell resets to the config default.
@@ -237,7 +243,7 @@ class Import {
         return $catalog;
     }
 
-    private static function createProduct(array $data, string $productType, PDO $db): int {
+    private static function createProduct(array $data, string $productType, PDO $db, bool $createOnly = false): int {
         $sku = trim($data['sku']);
         $name = trim($data['name']);
         // A missing price is an error, not a free product; a free one says 0.
@@ -264,7 +270,7 @@ class Import {
             'filter_tags'   => self::buildFilterTagsFromAttrs($attrs),
             'weight_g'      => (int)($data['weight_g'] ?? 0),
             'translations'  => self::gatherTranslations($data),
-        ], $db);
+        ], $db, $createOnly);
 
         $stmt = $db->prepare("SELECT id FROM products WHERE sku = :sku AND store_id = :catalog");
         $stmt->execute([':sku' => $sku, ':catalog' => StoreContext::current()->catalogId()]);
@@ -349,7 +355,8 @@ class Import {
     /**
      * UPSERT product — works on both SQLite and MySQL
      */
-    public static function upsertProduct(array $data, ?PDO $db = null): void {
+    /** $insertOnly: a plain INSERT, failing on an existing SKU (see importProduct's $createOnly). */
+    public static function upsertProduct(array $data, ?PDO $db = null, bool $insertOnly = false): void {
         $db = $db ?? Db::get();
         // R21: an ERP row's price went into the column as sent ("abc" or -5 on SQLite, which keeps any value).
         $data['price'] = self::centsField($data['price'] ?? null, 'price');
@@ -388,7 +395,7 @@ class Import {
         // EUR, 12 990 Ft became 12 990,00 €); an existing product keeps its currency.
         $stmt = $db->prepare('INSERT INTO products (store_id, sku, currency, ' . implode(', ', array_keys($columns)) . ')
             VALUES (:catalog, :sku, :currency, ' . implode(', ', array_map(static fn(string $p): string => ":{$p}", $columns)) . ')
-            ' . ($sqlite ? 'ON CONFLICT(sku) DO UPDATE SET ' : 'ON DUPLICATE KEY UPDATE ') . implode(', ', $assignments));
+            ' . ($insertOnly ? '' : ($sqlite ? 'ON CONFLICT(sku) DO UPDATE SET ' : 'ON DUPLICATE KEY UPDATE ') . implode(', ', $assignments)));
 
         $stmt->execute([
             ':catalog'      => $catalog,

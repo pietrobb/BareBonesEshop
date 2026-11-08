@@ -64,7 +64,7 @@ paths:
                   meta: { $ref: '#/components/schemas/WriteMeta' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409':
-          description: The Idempotency-Key was already used for a different request (idempotency_conflict), or a product or variant already uses the SKU (sku_exists; nothing is stored, update it with PATCH /products/{id})
+          description: The Idempotency-Key was already used for a different request (idempotency_conflict), or a product or variant already uses the SKU (sku_exists, also when another request created it concurrently; nothing is stored, update it with PATCH /products/{id})
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -145,6 +145,11 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '412':
           description: If-Match does not match the current product (precondition_failed); nothing is stored, read the product again
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: The new price is below the variant price floor, so a variant price would be negative (price_below_variant_floor); nothing is stored
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
