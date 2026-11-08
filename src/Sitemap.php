@@ -71,9 +71,29 @@ class Sitemap {
                 'prefix' => (string)($store->config()['url_prefix'] ?? ''),
                 'catalog' => $store->catalogId(),
                 'id' => $store->id(),
+                'config' => $store->config(),
             ];
         }
         return $stores;
+    }
+
+    /**
+     * R23 (T19): store id => the base its URLs are on. A store on its own domain is there (Security::storeAppUrl);
+     * the others share app_url, or $base when $base is no store's own domain (or without app_url). Only the stores
+     * on $base get <loc> entries in this sitemap (a sitemap lists its own host); every alternate is on its store's base.
+     * @return array<string, string>
+     */
+    private static function bases(array $stores, string $base): array {
+        $appUrl = Security::configuredAppUrl();
+        $own = [];
+        foreach ($stores as $storeId => $store) {
+            $domainBase = Security::storeAppUrl($appUrl ?? $base, $store['config']);
+            if ($domainBase !== rtrim($appUrl ?? $base, '/')) $own[(string)$storeId] = $domainBase;
+        }
+        $shared = in_array($base, $own, true) && $appUrl !== null ? rtrim($appUrl, '/') : $base;
+        $bases = [];
+        foreach (array_keys($stores) as $storeId) $bases[(string)$storeId] = $own[(string)$storeId] ?? $shared;
+        return $bases;
     }
 
     /** Protocol limits per sitemap file (sitemaps.org): 50,000 <url> entries and 50 MB uncompressed. */
@@ -157,12 +177,13 @@ class Sitemap {
         $wrapper = strlen(self::URLSET_OPEN) + strlen(self::URLSET_CLOSE);
         [$number, $count, $bytes] = [1, 0, $wrapper];
         $versions = self::languageVersions($stores);
+        $bases = self::bases($stores, $base);
         foreach (self::entries($stores) as [$path, $storeIds, $localized]) {
             $pathIn = static fn(string $locale): string => $localized[$locale] ?? $path;
             $urls = [];
             $alternates = [];
             foreach ($storeIds as $storeId) {
-                $urls[$storeId] = $stores[$storeId]['prefix'] . $pathIn($stores[$storeId]['locale']);
+                $urls[$storeId] = $bases[$storeId] . $stores[$storeId]['prefix'] . $pathIn($stores[$storeId]['locale']);
                 $alternates[$stores[$storeId]['locale']] ??= $urls[$storeId];
             }
             // R22: a store's further languages are pages of their own (?lang=), announced by the page's hreflang
@@ -170,19 +191,22 @@ class Sitemap {
             $languageUrls = [];
             foreach ($storeIds as $storeId) {
                 foreach ($versions[$storeId] ?? [] as $code => $locale) {
-                    $languageUrls[] = $alternates[$code] ??= Bootstrap::withLang($stores[$storeId]['prefix'] . $pathIn($locale), $locale);
+                    $languageUrls[$storeId][] = $alternates[$code] ??= $bases[$storeId] . Bootstrap::withLang($stores[$storeId]['prefix'] . $pathIn($locale), $locale);
                 }
             }
             $links = '';
             foreach ($alternates as $altLocale => $altUrl) {
                 $links .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
-                    . '" href="' . $e($base . $altUrl) . "\"/>\n";
+                    . '" href="' . $e($altUrl) . "\"/>\n";
             }
             if (isset($urls[$defaultStore])) {
-                $links .= '    <xhtml:link rel="alternate" hreflang="x-default" href="' . $e($base . $urls[$defaultStore]) . "\"/>\n";
+                $links .= '    <xhtml:link rel="alternate" hreflang="x-default" href="' . $e($urls[$defaultStore]) . "\"/>\n";
             }
-            foreach (array_merge(array_values($urls), $languageUrls) as $url) {
-                $entry = "  <url>\n" . '    <loc>' . $e($base . $url) . "</loc>\n" . $links . "  </url>\n";
+            $locs = [];
+            foreach ($urls as $storeId => $url) if ($bases[$storeId] === $base) $locs[] = $url;
+            foreach ($languageUrls as $storeId => $list) if ($bases[$storeId] === $base) array_push($locs, ...$list);
+            foreach ($locs as $url) {
+                $entry = "  <url>\n" . '    <loc>' . $e($url) . "</loc>\n" . $links . "  </url>\n";
                 if ($count > 0 && ($count >= self::$maxUrls || $bytes + strlen($entry) > self::$maxBytes)) {
                     [$number, $count, $bytes] = [$number + 1, 0, $wrapper];
                 }
@@ -202,15 +226,16 @@ class Sitemap {
      * @return array<string, array<string, string>> store id => [hreflang code => locale]
      */
     private static function languageVersions(array $stores): array {
-        $byPrefix = [];
-        foreach ($stores as $storeId => $store) $byPrefix[$store['prefix']] ??= (string)$storeId;
+        // R23: by store id, not url_prefix: two stores on their own domains may both have the empty prefix.
         $hreflang = Bootstrap::hreflangAlternates('/');
         $versions = [];
         foreach ($hreflang['secondary'] as $locale => $prefix) {
-            if (isset($byPrefix[$prefix])) $versions[$byPrefix[$prefix]][(string)$locale] = (string)$locale;
+            $storeId = $hreflang['stores'][(string)$locale] ?? null;
+            if ($storeId !== null && isset($stores[$storeId])) $versions[$storeId][(string)$locale] = (string)$locale;
         }
         foreach ($hreflang['regional'] as $code => $target) {
-            if (isset($byPrefix[$target['prefix']])) $versions[$byPrefix[$target['prefix']]][(string)$code] = (string)$target['locale'];
+            $storeId = $hreflang['stores'][(string)$code] ?? null;
+            if ($storeId !== null && isset($stores[$storeId])) $versions[$storeId][(string)$code] = (string)$target['locale'];
         }
         return $versions;
     }

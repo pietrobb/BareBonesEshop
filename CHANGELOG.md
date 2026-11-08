@@ -100,6 +100,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Stores on their own domains** (review round 23, medium). The store switch and the hreflang links built every
+  store's URL from its prefix on the current host: with the Czech store on its own domain, "CZ · Kč" on the Slovak
+  site opened the Slovak store in euros, and `hreflang="cs"` pointed to the Slovak host. A store with `domains` is now
+  linked on its first domain (app_url's scheme and path), both from the switch and in hreflang, x-default and the
+  canonical URL; the stores without a domain are linked on app_url from it. The sitemap of each host lists the URLs of
+  the stores served there and links every alternate on its store's domain (it listed all stores on one domain).
+  Two stores on their own domains may now both use the empty `url_prefix`: the Czech version of the Slovak store
+  (`cs-SK`) was dropped from hreflang and the sitemap when they did.
 - **A killed update, rollback, migration or restore keeps the shop closed** (review round 23, medium). `apply`,
   `rollback`, `cli/migrate.php apply` and now `cli/restore.php` mark their maintenance window failed, with the command
   to run, right before their first change. A process killed half-way (SSH dropped, OOM killer, a migration timeout)

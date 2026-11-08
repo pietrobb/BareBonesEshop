@@ -12,11 +12,12 @@ class Seo {
             throw new RuntimeException('app_url must be an absolute HTTP(S) URL');
         }
         // Without app_url the links stay relative, but keep the deployment base path (subdirectory installs).
-        if ($base === '') $base = Template::baseUrl();
+        // R23: with app_url, a store on its own domain is announced there (Bootstrap::storeBase), this page included.
+        $baseOf = static fn(string $storeId): string => Bootstrap::storeBase($storeId) ?? $base;
         // A store's further language (?lang=xx, Bootstrap::initLocale) is its own indexable URL. R21: also another store's
         // own language (Czech in the SK store): its canonical was the store's default-language page (Slovak).
         $secondary = Bootstrap::secondaryLocale();
-        $canonical = $base . ($secondary !== null ? Bootstrap::withLang($path, $secondary) : $path);
+        $canonical = $baseOf(StoreContext::current()->id()) . ($secondary !== null ? Bootstrap::withLang($path, $secondary) : $path);
         $e = static fn(string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $lines = [
             '<meta name="description" content="' . $e(mb_substr(trim($description), 0, 320)) . '">',
@@ -29,21 +30,22 @@ class Seo {
         ];
         $alternates = Bootstrap::hreflangAlternates($path);
         $pathOf = static fn(string|int $locale): string => (string)($localePaths[(string)$locale] ?? $alternates['pathNoPrefix']);
+        $baseFor = static fn(string|int $code): string => $baseOf((string)($alternates['stores'][(string)$code] ?? ''));
         foreach ($alternates['alternates'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . $e((string)$locale) . '" href="'
-                . $e($base . (string)$prefix . $pathOf($locale)) . '">';
+                . $e($baseFor($locale) . (string)$prefix . $pathOf($locale)) . '">';
         }
         foreach ($alternates['secondary'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . $e((string)$locale) . '" href="'
-                . $e($base . Bootstrap::withLang((string)$prefix . $pathOf($locale), (string)$locale)) . '">';
+                . $e($baseFor($locale) . Bootstrap::withLang((string)$prefix . $pathOf($locale), (string)$locale)) . '">';
         }
         foreach ($alternates['regional'] as $code => $target) {
             $lines[] = '<link rel="alternate" hreflang="' . $e((string)$code) . '" href="'
-                . $e($base . Bootstrap::withLang($target['prefix'] . $pathOf($target['locale']), $target['locale'])) . '">';
+                . $e($baseFor($code) . Bootstrap::withLang($target['prefix'] . $pathOf($target['locale']), $target['locale'])) . '">';
         }
         $xDefaultLocale = array_search($alternates['xDefaultPrefix'], $alternates['alternates'], true);
         $lines[] = '<link rel="alternate" hreflang="x-default" href="'
-            . $e($base . $alternates['xDefaultPrefix'] . ($xDefaultLocale === false ? $alternates['pathNoPrefix'] : $pathOf($xDefaultLocale))) . '">';
+            . $e($baseOf($alternates['xDefaultStore']) . $alternates['xDefaultPrefix'] . ($xDefaultLocale === false ? $alternates['pathNoPrefix'] : $pathOf($xDefaultLocale))) . '">';
         return implode("\n", $lines);
     }
 
