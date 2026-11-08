@@ -100,6 +100,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Payment QR in the payer's standard** (review round 23, UX). The bank-transfer QR was PAY by square only, the
+  Slovak standard: a German customer's banking app could not read it, and a CZK order had no QR at all. Now a CZK
+  order gets the Czech SPAYD (QR Platba), a EUR order from a Slovak address keeps PAY by square, and a EUR order
+  from anywhere else gets the SEPA EPC code (GiroCode). An order without an address follows the store's country.
+  The order pages show it with a label and hint for its format, the order confirmation and payment reminder e-mails
+  attach it as a PNG (mail clients do not show inline SVG), and an invoice still to pay by transfer prints it
+  beside the IBAN. The JSON `bank_transfer` block adds `qr_format` and `qr_payload`, and `pay_by_square` is set
+  only for that format.
 - **Feeds** (review round 23, medium). A CSV supplier feed's price of only spaces is a missing price: an existing
   product keeps its price (it became 0) and a new one is not created ("Missing required field: price" in the sync
   status; it was created free and the sync said "ok"). A control character in a product name (`\x01`, `\x0B`, e.g. from

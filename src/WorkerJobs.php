@@ -105,6 +105,9 @@ final class WorkerJobs
         if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
         // The confirmation carries the terms valid at the time of the order on a durable medium (Directive 2011/83/EU art. 8(7)).
         $attachments = $template === 'order_confirmation' && $order ? [ConsumerNotice::termsAttachment($order, $locale ?: (string)($order['locale'] ?? 'en'))] : [];
+        // R23: the payment QR travels as a PNG (mail clients show no inline SVG) with the transfer instructions.
+        $qr = in_array($template, ['order_confirmation', 'bank_transfer_reminder'], true) && $order ? BankTransferInstructions::qrAttachment($order) : null;
+        if ($qr !== null) $attachments[] = $qr;
         $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, $attachments, $providerCode);
         if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
         // Rate-limited order mail is queued again after the limit window instead of being dropped.

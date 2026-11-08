@@ -20,7 +20,8 @@ $a136Unit = ['id' => 77, 'order_number' => 'ORD-A136-CZK', 'total' => 150000, 'c
     'payment_method_snapshot' => '', 'payment_status' => 'pending', 'status' => 'pending', 'created_at' => '2026-10-13 10:00:00'];
 $a136Czk = BankTransferInstructions::forOrder($a136Unit, ['name' => 'A136 CZ s.r.o.', 'iban' => 'CZ65 0800 0000 1920 0014 5399', 'bic' => 'GIBACZPX']);
 assert_true(($a136Czk['currency'] ?? '') === 'CZK' && ($a136Czk['iban'] ?? '') === 'CZ6508000000192000145399' && ($a136Czk['variable_symbol'] ?? '') === '77'
-    && ($a136Czk['pay_by_square'] ?? '-') === '' && ($a136Czk['qr_svg'] ?? '-') === '', 'A13.6: a CZK order gets text instructions but no PAY by square QR (EUR-only standard)');
+    && ($a136Czk['pay_by_square'] ?? '-') === '' && ($a136Czk['qr_format'] ?? '') === PaymentQr::SPAYD && str_starts_with((string)($a136Czk['qr_payload'] ?? ''), 'SPD*1.0*'),
+    'A13.6: a CZK order gets text instructions and no PAY by square (EUR-only standard); R23: it gets the Czech SPAYD QR instead');
 assert_true(BankTransferInstructions::forOrder($a136Unit, ['iban' => 'CZ66 0800 0000 1920 0014 5399']) === null
     && BankTransferInstructions::forOrder(['payment_method' => 'cod'] + $a136Unit, ['iban' => 'CZ65 0800 0000 1920 0014 5399']) === null,
     'A13.6: no instructions for an IBAN with a wrong checksum or a non-transfer payment');
