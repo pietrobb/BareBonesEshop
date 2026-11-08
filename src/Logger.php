@@ -105,7 +105,7 @@ class Logger
      * (the quote between key and colon used to hide it), also as part of a longer key (`stripe_secret_key`,
      * `access_token`). The value stops at a quote, `&`, `,`, `;` or `}`; a value already masked by SECRET_PATTERNS stays.
      */
-    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)(?!\[REDACTED)[^\s"\'&,;}]+/i';
+    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|pwd|private[_-]?key|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)(?!\[REDACTED)[^\s"\'&,;}]+/i';
 
     /**
      * Secrets recognisable without a key: HTTP Basic credentials (maskSecrets), the password in a URL (`scheme://user:pass@host`),
@@ -117,22 +117,22 @@ class Logger
         '/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}|\bwhsec_[A-Za-z0-9]{8,}/' => '[REDACTED]',
         // The password of a URL runs to the last "@" before the host: "user:p@ss@host" must not leave "ss" behind.
         '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s/?\#]+@#i' => '$1[REDACTED]@',
-        // Whatever credentials an Authorization header carries, however short.
-        '/(\bAuthorization["\']?\s*[:=]\s*["\']?(?:Basic|Bearer|Digest|Token|NTLM|Negotiate)\s+)(?!\[REDACTED)[^\s"\',;]+/i' => '$1[REDACTED]',
+        // Whatever credentials an Authorization header carries, however short, with or without a scheme (R23 T15).
+        '/(\bAuthorization["\']?\s*[:=]\s*["\']?(?!(?:(?:Basic|Bearer|Digest|Token|NTLM|Negotiate)\s+)?\[REDACTED)(?:(?:Basic|Bearer|Digest|Token|NTLM|Negotiate)\s+)?)[^\s"\',;]+/i' => '$1[REDACTED]',
         // JSON inside a JSON string: the quotes are escaped ({\"password\":\"x y\"}), the value runs to the next escaped quote
         // of the same level; a quote escaped once more inside the value (\\\") does not end it.
-        '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*\\\\+["\']\s*[=:]\s*)(\\\\+["\'])(?!\[REDACTED).*?(?<!\\\\)\2/is' => '$1$2[REDACTED]$2',
+        '/((?:secret|token|password|passwd|pwd|passphrase|private[_-]?key|api[_-]?key)[\w-]*\\\\+["\']\s*[=:]\s*)(\\\\+["\'])(?!\[REDACTED).*?(?<!\\\\)\2/is' => '$1$2[REDACTED]$2',
         // XML elements (<password>x</password>, <ns:ClientSecret>, CDATA included): the text up to the next tag.
-        '/(<([\w:-]*(?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*)(?:\s[^>]*)?>)(?!\[REDACTED)(?:<!\[CDATA\[.*?\]\]>|[^<])+/is' => '$1[REDACTED]',
+        '/(<([\w:-]*(?:secret|token|password|passwd|pwd|passphrase|private[_-]?key|api[_-]?key)[\w-]*)(?:\s[^>]*)?>)(?!\[REDACTED)(?:<!\[CDATA\[.*?\]\]>|[^<])+/is' => '$1[REDACTED]',
         // Card security codes, keyed (cvc=123, "cvv2": "1234", card_cvc, security_code), escaped quotes included.
         '/((?<![a-z0-9])(?:cvc|cvv2?|cvn|csc|security[_-]?code)(?:\\\\*["\'])?\s*[=:]\s*(?:\\\\*["\'])?)\d{3,4}(?!\d)/i' => '$1[REDACTED]',
         // Cookie headers and session ids: the whole cookie string up to the line end or the closing quote.
         '/(\b(?:Set-)?Cookie(?:\\\\*["\'])?\s*[=:]\s*(?:\\\\*["\'])?)(?!\[REDACTED)[^\r\n"\'\\\\]+/i' => '$1[REDACTED]',
         '/\b((?:PHPSESSID|bbe_install)=)(?!\[REDACTED)[^\s;"\'&,\\\\]+/i' => '$1[REDACTED]',
         // A quoted value is masked up to its closing quote, spaces included ("password": "correct horse battery").
-        '/((?:secret|token|password|passwd|passphrase|api[_-]?key)[\w-]*["\']?\s*[=:]\s*)(["\'])(?!\[REDACTED)(?:(?!\2)[^\\\\]|\\\\.)*\2/i' => '$1$2[REDACTED]$2',
+        '/((?:secret|token|password|passwd|pwd|passphrase|private[_-]?key|api[_-]?key)[\w-]*["\']?\s*[=:]\s*)(["\'])(?!\[REDACTED)(?:(?!\2)[^\\\\]|\\\\.)*\2/i' => '$1$2[REDACTED]$2',
         // An unquoted password may contain spaces: it runs on until the next "key=" / "key:" or a separator.
-        '/((?:password|passwd|passphrase)[\w-]*\s*[=:]\s*)(?![\["\'])[^\s"\'&,;}]+(?:[ \t]+(?![\w.-]+["\']?\s*[=:])(?!\[REDACTED)[^\s"\'&,;}]+)*/i' => '$1[REDACTED]',
+        '/((?:password|passwd|pwd|passphrase)[\w-]*\s*[=:]\s*)(?![\["\'])[^\s"\'&,;}]+(?:[ \t]+(?![\w.-]+["\']?\s*[=:])(?!\[REDACTED)[^\s"\'&,;}]+)*/i' => '$1[REDACTED]',
         self::SECRET_VALUE => '$1$2[REDACTED]',
     ];
 
@@ -214,7 +214,7 @@ class Logger
     public static function redact(array $value): array
     {
         foreach ($value as $key => &$item) {
-            if (preg_match('/(?:secret|token|password|authorization|api[_-]?key|credential|cookie|payload|post|message|errors|card_?number|cc_?number|security_?code|(?:^|_)(?:name|email|address|ip|session|card|pan|cvv|cvv2|cvc|cvn|csc)(?:$|_))/i', (string)$key)) {
+            if (preg_match('/(?:secret|token|password|pwd|private[_-]?key|authorization|api[_-]?key|credential|cookie|payload|post|message|errors|card_?number|cc_?number|security_?code|(?:^|_)(?:name|email|address|ip|session|card|pan|cvv|cvv2|cvc|cvn|csc)(?:$|_))/i', (string)$key)) {
                 $item = '[REDACTED]';
             } elseif (is_int($item) && self::isCardNumber((string)$item)) {
                 $item = '[REDACTED CARD]';

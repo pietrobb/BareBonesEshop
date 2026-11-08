@@ -419,8 +419,9 @@ final class Updater
             // R22: the snapshot whose rollback a failed window names stays; deleted, the shop could never reopen.
             $due = MaintenanceMode::failed($this->root)
                 && preg_match('/--snapshot=(\S+)/', (string)(MaintenanceMode::marker($this->root)['reason'] ?? ''), $named) ? $named[1] : '';
-            $deleted = [];
             $kept = [];
+            $prunable = [];
+            $chain = [];
             foreach ($this->listSnapshots() as $snapshot) { // newest first
                 $id = (string)($snapshot['id'] ?? '');
                 // Manual `update.php backup` snapshots are full copies too: the newest $keep of each kind stay.
@@ -430,10 +431,19 @@ final class Updater
                 // (or their rollbacks) deleted the only database snapshot. The newest $keep with a database stay too.
                 $kind = $reason . (is_array($snapshot['database'] ?? null) ? ':database' : ':files');
                 $kept[$kind] = ($kept[$kind] ?? 0) + 1;
-                if ($kept[$kind] <= max(1, $keep) || $id === $installed || $id === $due) continue;
-                $this->removeTree($this->snapshotDirectory($id));
-                $deleted[] = $id;
+                $prunable[$id] = $kept[$kind] > max(1, $keep) && $id !== $installed && $id !== $due;
+                if ($reason === 'pre-update' && in_array($snapshot['status'] ?? '', ['prepared', 'applied'], true)) $chain[] = $id;
             }
+            // R23: a rollback restores only its own update's files, newest first. Deleting a code-only snapshot between
+            // two kept ones left the older rollback reachable, and the deleted update's files stayed: a mix of releases.
+            // Every still-installed update newer than the oldest kept one stays.
+            $keepNewer = false;
+            foreach (array_reverse($chain) as $id) { // oldest first
+                $keepNewer = $keepNewer || !$prunable[$id];
+                if ($keepNewer) $prunable[$id] = false;
+            }
+            $deleted = array_keys(array_filter($prunable));
+            foreach ($deleted as $id) $this->removeTree($this->snapshotDirectory($id));
             return $deleted;
         } finally {
             $this->unlock();
@@ -1038,19 +1048,19 @@ final class Updater
     private function installAbsoluteFile(string $source, string $target): void
     {
         $existing = is_file($target) && !is_link($target) ? @stat($target) : false;
-        [$temporary, $inode] = $this->stageExclusive($source, $target, is_array($existing) ? (int)$existing['mode'] & 0777 : null);
-        try {
-            // Only root can hand the file to another owner (cli/update.php run as root); otherwise the mode carries the access.
-            if (is_array($existing) && function_exists('posix_geteuid') && posix_geteuid() === 0) {
-                $staged = self::assertStagedInode($temporary, $inode);
-                if ((int)$existing['uid'] !== (int)$staged['uid'] && !@lchown($temporary, (int)$existing['uid'])) {
-                    throw new RuntimeException("Cannot set the owner of the staged {$target}");
-                }
-                if ((int)$existing['gid'] !== (int)$staged['gid'] && !@lchgrp($temporary, (int)$existing['gid'])) {
-                    throw new RuntimeException("Cannot set the group of the staged {$target}");
-                }
-                self::assertStagedInode($temporary, $inode);
+        // Only root can hand the file to another owner (cli/update.php run as root); otherwise the mode carries the access.
+        // R23 G5: through the open descriptor, so a hard link swapped in under the staged name is never chowned.
+        $handOver = is_array($existing) && function_exists('posix_geteuid') && posix_geteuid() === 0
+            ? static function ($handle) use ($existing, $target): void {
+                $staged = fstat($handle);
+                FileOwnership::handOver($handle, "the staged {$target}",
+                    (int)$existing['uid'] !== (int)$staged['uid'] ? (int)$existing['uid'] : null,
+                    (int)$existing['gid'] !== (int)$staged['gid'] ? (int)$existing['gid'] : null);
             }
+            : null;
+        [$temporary, $inode] = $this->stageExclusive($source, $target, is_array($existing) ? (int)$existing['mode'] & 0777 : null, $handOver);
+        try {
+            if ($handOver !== null) self::assertStagedInode($temporary, $inode);
         } catch (Throwable $e) {
             @unlink($temporary);
             throw $e;
@@ -1070,10 +1080,11 @@ final class Updater
     /**
      * Copy $source to a new name next to $target, created exclusively ('x': never through a name or link someone put
      * there) with $mode from the umask; returns the path and its inode. fopen cannot create execute bits and chmod
-     * follows links, so those are added by path only in a directory nobody but this user can write to.
+     * follows links, so those are added by path only in a directory nobody but this user can write to. $whileOpen gets
+     * the still open staged file.
      * @return array{0: string, 1: int}
      */
-    private function stageExclusive(string $source, string $target, ?int $mode): array
+    private function stageExclusive(string $source, string $target, ?int $mode, ?Closure $whileOpen = null): array
     {
         if (!is_file($source) || is_link($source)) {
             throw new RuntimeException("Update source is not a regular file: {$source}");
@@ -1088,9 +1099,13 @@ final class Updater
             $out = $in ? @fopen($temporary, 'xb') : false;
             $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
             $stat = $copied ? fstat($out) : false;
-            if ($in) fclose($in);
-            if ($out) fclose($out);
+            if (is_array($stat) && $whileOpen !== null) $whileOpen($out);
+        } catch (Throwable $e) {
+            @unlink($temporary);
+            throw $e;
         } finally {
+            if (!empty($in)) fclose($in);
+            if (!empty($out)) fclose($out);
             umask($previous);
         }
         if (!is_array($stat)) {

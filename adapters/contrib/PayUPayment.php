@@ -11,6 +11,7 @@
  *   PAY_PAYU_SECOND_KEY      — POS second key for notification signatures
  *   PAY_PAYU_POS_ID          — POS identifier (same as client_id usually)
  *   PAY_PAYU_ENV             — 'production' | 'sandbox' (default: sandbox)
+ *   PAY_PAYU_SIGNATURE_ALGORITHM — 'sha256' accepts only SHA-256 notification signatures (default: MD5 or SHA-256)
  */
 class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, SignedWebhookPaymentAdapter, PaymentStatusEventAdapter {
     private string $clientId;
@@ -20,6 +21,13 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
     private string $baseUrl;
     private ?string $accessToken = null;
     private int $tokenExpiry = 0;
+    private bool $sha256Only;
+
+    /** Whether notifications must be signed with SHA-256 (payu_signature_algorithm / PAY_PAYU_SIGNATURE_ALGORITHM = sha256). */
+    public static function sha256Only(array $cfg): bool {
+        $algorithm = getenv('PAY_PAYU_SIGNATURE_ALGORITHM') ?: ($cfg['payu_signature_algorithm'] ?? '');
+        return in_array(strtolower(trim((string)$algorithm)), ['sha256', 'sha-256'], true);
+    }
 
     public function __construct(array $cfg) {
         $this->clientId     = getenv('PAY_PAYU_CLIENT_ID')     ?: ($cfg['payu_client_id']     ?? '');
@@ -27,6 +35,7 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
         $this->secondKey    = getenv('PAY_PAYU_SECOND_KEY')    ?: ($cfg['payu_second_key']    ?? '');
         $this->posId        = getenv('PAY_PAYU_POS_ID')        ?: ($cfg['payu_pos_id']        ?? '');
         $env                = getenv('PAY_PAYU_ENV')            ?: ($cfg['payu_env']            ?? 'sandbox');
+        $this->sha256Only   = self::sha256Only($cfg);
         $this->baseUrl      = $env === 'production'
             ? 'https://secure.payu.com'
             : 'https://secure.snd.payu.com';
@@ -232,6 +241,8 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
         // R14 T20: a POS may be set to sign with SHA-256 instead of MD5 (PayU sends "SHA-256" or "SHA256").
         $hash = match (strtoupper($parts['algorithm'] ?? '')) { 'MD5' => 'md5', 'SHA-256', 'SHA256' => 'sha256', default => '' };
         $receivedSig = $parts['signature'] ?? '';
+        // R23 T20: payu_signature_algorithm = 'sha256' refuses MD5 (a weak hash) once the POS signs with SHA-256.
+        if ($hash === 'md5' && $this->sha256Only) return false;
         if ($hash === '' || !preg_match('/^[a-fA-F0-9]{' . ($hash === 'md5' ? 32 : 64) . '}$/D', $receivedSig)) return false;
         if (isset($parts['content']) && $parts['content'] !== 'DOCUMENT') return false;
 

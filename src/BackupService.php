@@ -716,16 +716,16 @@ class BackupService
         // The restored file replaces live: keep live's mode, owner and group, or a restore run from the CLI leaves
         // www-data with a read-only database (only root can hand the file to another owner). The database directory
         // belongs to the web user, so the copy is created exclusively with live's mode and owned via lchown on that
-        // inode (T7): chmod/chown by path followed a symlink swapped in by the web user.
-        $restoreInode = self::stageExclusive($absSrc, $restoreTemp, fileperms($livePath) & 0666);
+        // inode (T7): chmod/chown by path followed a symlink swapped in by the web user (R23 G5: and a hard link).
+        $liveOwner = @fileowner($livePath);
+        $liveGroup = @filegroup($livePath);
+        $restoreInode = self::stageExclusive($absSrc, $restoreTemp, fileperms($livePath) & 0666,
+            $liveOwner === false ? null : $liveOwner, $liveGroup === false ? null : $liveGroup);
         if ($restoreInode === null
             || filesize($restoreTemp) !== $expectedSize
             || !hash_equals($expectedSha, (string)hash_file('sha256', $restoreTemp))) {
             throw new RuntimeException('Restore: failed to stage a complete verified replacement database');
         }
-        $liveOwner = @fileowner($livePath);
-        $liveGroup = @filegroup($livePath);
-        self::applyOwnership($restoreTemp, $liveOwner === false ? null : $liveOwner, $liveGroup === false ? null : $liveGroup, $restoreInode);
 
         $lockHandle = self::acquireLock();
         try {
@@ -1415,19 +1415,33 @@ class BackupService
 
     /**
      * Copy $source to $temporary created exclusively ('x': never through an existing name or link) with its final
-     * $mode; returns the new file's inode, null on failure.
+     * $mode; returns the new file's inode, null on failure. Run as root, the copy gets $uid/$gid while it is still
+     * open (R23 G5: FileOwnership, never by a name the web user can re-link), and is checked to be the same inode.
      */
-    private static function stageExclusive(string $source, string $temporary, int $mode): ?int
+    private static function stageExclusive(string $source, string $temporary, int $mode, ?int $uid = null, ?int $gid = null): ?int
     {
-        return self::withMode($mode, static function () use ($source, $temporary): ?int {
+        $inode = self::withMode($mode, static function () use ($source, $temporary, $uid, $gid): ?int {
             $in = @fopen($source, 'rb');
             $out = $in ? @fopen($temporary, 'xb') : false;
-            $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
-            $stat = $copied ? fstat($out) : false;
-            if ($in) fclose($in);
-            if ($out) fclose($out);
-            return is_array($stat) ? (int)$stat['ino'] : null;
+            try {
+                $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
+                $stat = $copied ? fstat($out) : false;
+                if (is_array($stat) && ($uid !== null || $gid !== null) && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+                    FileOwnership::handOver($out, "Restore: {$temporary}", $uid, $gid);
+                }
+                return is_array($stat) ? (int)$stat['ino'] : null;
+            } catch (\Throwable $e) {
+                @unlink($temporary);
+                throw $e;
+            } finally {
+                if ($in) fclose($in);
+                if ($out) fclose($out);
+            }
         });
+        if ($inode !== null && ($uid !== null || $gid !== null) && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            self::assertSameInode($temporary, $inode);
+        }
+        return $inode;
     }
 
     /** Run $create with the umask that gives exactly $mode, so no chmod by path (which follows links) is needed. */
@@ -1467,16 +1481,10 @@ class BackupService
             throw new RuntimeException("Restore: {$target} resolves outside its configured directory; refusing");
         }
         $temporary = $parent . DIRECTORY_SEPARATOR . '.' . basename($target) . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
-        $inode = self::stageExclusive($source, $temporary, $ownership['mode'] & 0666);
+        $inode = self::stageExclusive($source, $temporary, $ownership['mode'] & 0666, $ownership['uid'], $ownership['gid']);
         if ($inode === null) {
             @unlink($temporary);
             throw new RuntimeException("Restore: cannot stage {$target}");
-        }
-        try {
-            self::applyOwnership($temporary, $ownership['uid'], $ownership['gid'], $inode);
-        } catch (\Throwable $e) {
-            @unlink($temporary);
-            throw $e;
         }
         if (!@rename($temporary, $target)) {
             @unlink($temporary);

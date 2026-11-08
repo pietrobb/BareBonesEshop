@@ -108,6 +108,43 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   attach it as a PNG (mail clients do not show inline SVG), and an invoice still to pay by transfer prints it
   beside the IBAN. The JSON `bank_transfer` block adds `qr_format` and `qr_payload`, and `pay_by_square` is set
   only for that format.
+- **Sample stores in other currencies sell the seeded products** (review round 23, UX). `cli/seed.php` creates a
+  price list in each sample store's currency (cz CZK in whole korunas, pl PLN, hu HUF, us USD; fixed sample rates)
+  and prices every seeded product in it; these stores used to sell none of the seeded EUR products. A second seed
+  run reuses the lists. Saving a public store whose products have no price in its currency shows a warning with the
+  count, examples and where to price them (Admin → Price lists); it saved silently. Docs: the README said such
+  products "stay in the catalog currency" (they are not for sale in that store), the promotion hint asked for
+  amounts in cents in every language (they are typed in the currency, e.g. 4.90), and the doctor pointed to a
+  non-existent Admin → Pricing section.
+- **Security** (review round 23, low). The CSP report endpoint counts an IPv6 reporter per /64 network: one client
+  that took a new address of its /64 for every forged form-action report counted as several reporters and raised
+  the critical alarm alone (IPv4 still counts per address, an IPv4-mapped address as that IPv4 address). The log
+  masks `pwd=…`, `private_key` / `private-key` values and an `Authorization` header without a scheme
+  (`Authorization: <token>`), which reached the log in clear (T15). PayU: the new `payu_signature_algorithm =
+  'sha256'` (`PAY_PAYU_SIGNATURE_ALGORITHM`) refuses MD5-signed notifications once the POS signs with SHA-256; until
+  it is set `cli/doctor.php` warns that MD5 is still accepted (T20, README).
+- **API, time and retention fixes** (review round 23, low).
+  - `POST /products`: two concurrent creates of one SKU both passed the SKU check on MySQL, and the second overwrote
+    the first product while still answering 201. An API create now only inserts; the slower request gets
+    `409 sku_exists`. The OpenAPI spec now lists `PATCH /products/{id}` → `422 price_below_variant_floor`.
+  - A customer's VAT ID validation time (`vat_validated_at`) is stored in UTC; it was local time read as UTC.
+  - `checkout_sessions` were never deleted, and every order lookup that shows a payment link added a row. The daily
+    cleanup job now deletes lapsed payment and account links, pay-again claims and confirmation tokens older than
+    `checkout_confirmation_days` (90); gateway sessions stay. An order keeps its newest five page payment links.
+  - Back-in-stock requests past their retention (or never confirmed) were deleted only when a SKU was restocked;
+    the daily cleanup job deletes them too.
+  - Feed sync times in the admin are shown in the shop's time zone (they were UTC).
+  - A return-window test failed between 00:00 and 00:59 in the two weeks before the autumn clock change.
+- **Snapshot pruning leaves no hole in the rollback chain** (review round 23, low). Code-only and database snapshots
+  are counted apart, so pruning could delete a code-only snapshot between two kept ones; rolling back from the newest
+  then reached the older snapshot and left the deleted update's files in place, a mix of releases. Every update still
+  installed above the oldest kept snapshot now stays; rolled-back snapshots and the chain below the oldest kept one
+  are pruned as before.
+- **Root updater and restore can no longer be tricked into giving away a hard-linked file** (review round 23, low,
+  G5). Run as root, they gave a staged copy the owner of the file it replaces with `lchown` on its name, in a directory
+  the web user can write to. With `fs.protected_hardlinks=0` the web user could hard-link e.g. `/etc/shadow` under that
+  name between the inode check and the call. The owner is now set through the still open file (`/proc/self/fd`);
+  without `/proc`, only when the kernel protects hard links, otherwise the update or restore refuses.
 - **Stores on their own domains** (review round 23, medium). The store switch and the hreflang links built every
   store's URL from its prefix on the current host: with the Czech store on its own domain, "CZ · Kč" on the Slovak
   site opened the Slovak store in euros, and `hreflang="cs"` pointed to the Slovak host. A store with `domains` is now
