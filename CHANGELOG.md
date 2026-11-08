@@ -111,6 +111,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   link the order in the admin; the invoice e-mail of a paid order says it is paid instead of asking for an amount due
   by a due date; the bank transfer e-mails show the BIC. The e-mail log names the sender, Reply-To and attachments and
   keeps an `.eml` copy of the last 50 messages in `logs/emails/`.
+- **Carrier labels of a cancelled order** (review round 23, medium). Cancelling a whole order cancelled its planned
+  parcels in the shop only: their labels stayed active at the carrier, cash on delivery included, so the carrier still
+  picked the goods up and collected. The cancellation now queues the job `shipping_labels_cancel`, and the worker
+  cancels the labels of the cancelled parcels (and a label of the order itself when nothing shipped) at the carrier.
+  A label the carrier does not cancel is a critical incident, e-mailed to the merchant when incident alerts are on, and
+  stays listed in red on the admin order until it is handled. Low: cancelling a parcel now takes the order lock, so on
+  MySQL a label created at the same moment can no longer stay active on the cancelled parcel; a label the carrier
+  returns after the whole order was cancelled is cancelled at the carrier instead of being recorded as active.
 - **Refunds** (review round 23, medium). After the provider declined an item refund the payment stayed `refund_pending`
   for good and the next refund from the admin was refused; it now returns to paid (or partially refunded) when no
   other refund is in flight. The numbered credit note of a failed refund is no longer cancelled (it may be in a VAT or
@@ -137,7 +145,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   holds the window open (an update or migration that is running) instead of working under it and lifting it at the
   end; `cli/migrate.php` lifts only its own marker. `cli/restore.php` closes the shop while it replaces the database
   and files, refuses while an update or migration holds the window, and keeps a failed window it found. A failed
-  window is written before the lock on the old marker is let go.
+  window is written before the lock on the old marker is let go. Whether a window is still running is told by its
+  lock, not its failed flag: a step that is changing files or the database marks its own window failed, and that
+  window had been taken for one left by a dead run, so a restore, migration or update went ahead in the middle of
+  it. Only a failed window that no process holds is taken over now, and an update, rollback or restore lifts the
+  window at the end only while the marker is still its own.
 - **Invoice, admin and texts** (review round 22, low). A long item name on the PDF invoice wraps inside its column and
   is printed in full; it was cut at 32 characters and, after round 21 narrowed the column, capitals still ran into the
   quantity. Text width now follows Helvetica's character widths, and a word wider than its column is split. On a 390 px

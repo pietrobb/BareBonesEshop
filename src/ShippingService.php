@@ -284,21 +284,23 @@ class ShippingService
                 $db->commit();
                 return $concurrent;
             }
-            // The parcel was cancelled while the carrier answered: the label is voided at the carrier (after the commit,
-            // the carrier is not called under the lock) instead of being recorded as active on a cancelled parcel.
+            // The parcel, or the whole order (R23), was cancelled while the carrier answered: the label is voided at the
+            // carrier (after the commit, the carrier is not called under the lock) instead of being recorded as active.
+            $parcelCancelled = false;
             if ($shipmentId !== null) {
                 $status = $db->prepare("SELECT status FROM shipments WHERE id = :id AND order_id = :order AND store_id = :store");
                 $status->execute([':id' => $shipmentId, ':order' => $orderId, ':store' => $store]);
-                if ($status->fetchColumn() === 'cancelled') {
-                    $db->commit();
-                    $voided = self::voidAtCarrier($carrierId, (string)$result['awb'], $orderId);
-                    $db->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data, shipment_id, cod_amount)
-                        VALUES (:order_id, :store, :carrier, :awb, :status, '', :shipment_id, 0)")->execute([
-                        ':order_id' => $orderId, ':store' => $store, ':carrier' => $carrierId, ':awb' => $result['awb'],
-                        ':status' => $voided ? 'cancelled' : 'created', ':shipment_id' => $shipmentId,
-                    ]);
-                    throw new \RuntimeException("Shipment {$shipmentId} was cancelled while its label was created");
-                }
+                $parcelCancelled = $status->fetchColumn() === 'cancelled';
+            }
+            if ($parcelCancelled || (string)(Orders::byId($orderId)['status'] ?? '') === 'cancelled') {
+                $db->commit();
+                $voided = self::voidAtCarrier($carrierId, (string)$result['awb'], $orderId, $parcelCancelled ? 'error' : 'critical');
+                $db->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data" . ($perShipment ? ', shipment_id, cod_amount' : '') . ")
+                    VALUES (:order_id, :store, :carrier, :awb, :status, ''" . ($perShipment ? ', :shipment_id, 0' : '') . ")")->execute([
+                    ':order_id' => $orderId, ':store' => $store, ':carrier' => $carrierId, ':awb' => $result['awb'],
+                    ':status' => $voided ? 'cancelled' : 'created',
+                ] + ($perShipment ? [':shipment_id' => $shipmentId] : []));
+                throw new \RuntimeException($parcelCancelled ? "Shipment {$shipmentId} was cancelled while its label was created" : "Order {$orderId} was cancelled while its label was created");
             }
             // A label of another parcel took the cash on delivery while the carrier answered: the carrier collects what
             // this label carries, so it is recorded as sent and the double collection is reported for the merchant.
@@ -574,20 +576,67 @@ class ShippingService
         $labels = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         // Only a carrier call needs to be outside a transaction; a parcel without labels has nothing to call.
         if ($labels !== [] && $db->inTransaction()) throw new \LogicException('ShippingService::cancelParcelLabels calls the carrier and must run outside a transaction');
+        return self::voidLabels($labels, $orderId, 'error');
+    }
+
+    /**
+     * R23: cancelling the whole order cancels its labels at the carrier too, cash on delivery included (only the
+     * planned parcels were cancelled, in the database: the carrier still picked the goods up and collected). Runs in the
+     * worker after the cancellation committed (job shipping_labels_cancel: it calls the carrier). Returns the AWBs the
+     * carrier left active; each is a critical incident (e-mailed to the merchant) and stays listed on the admin order.
+     *
+     * @return list<string>
+     */
+    public static function cancelOrderLabels(int $orderId): array
+    {
+        if (!StoreContext::current()->allows('shipping')) return [];
+        $labels = self::strandedLabels($orderId);
+        if ($labels !== [] && Db::get()->inTransaction()) throw new \LogicException('ShippingService::cancelOrderLabels calls the carrier and must run outside a transaction');
+        return self::voidLabels($labels, $orderId, 'critical');
+    }
+
+    /**
+     * Labels still active at the carrier for goods that will not ship: the label of a cancelled parcel, and a label
+     * of the order itself (no parcel) once the order is cancelled with nothing shipped. Oldest first.
+     *
+     * @return list<array>
+     */
+    public static function strandedLabels(int $orderId): array
+    {
+        $order = Orders::byId($orderId);
+        if ($order === null) return [];
+        $parcels = array_column(Fulfillment::shipments($orderId), 'status', 'id');
+        $orderVoid = ($order['status'] ?? '') === 'cancelled' && array_intersect($parcels, ['shipping', 'shipped']) === [];
+        return array_values(array_filter(array_reverse(self::labels($orderId)), static function (array $label) use ($parcels, $orderVoid): bool {
+            if (($label['status'] ?? '') === 'cancelled') return false;
+            $parcel = $label['shipment_id'] ?? null;
+            return $parcel === null ? $orderVoid : ($parcels[(int)$parcel] ?? '') === 'cancelled';
+        }));
+    }
+
+    /**
+     * Cancel labels at their carriers (call outside a transaction) and mark them cancelled. Returns the AWBs the carrier
+     * did not cancel (no cancellation support or an error), reported with $severity.
+     *
+     * @param list<array> $labels shipping_labels rows
+     * @return list<string>
+     */
+    private static function voidLabels(array $labels, int $orderId, string $severity): array
+    {
         $left = [];
         foreach ($labels as $label) {
-            if (!self::voidAtCarrier((string)$label['carrier'], (string)$label['awb'], $orderId)) {
+            if (!self::voidAtCarrier((string)$label['carrier'], (string)$label['awb'], $orderId, $severity)) {
                 $left[] = (string)$label['awb'];
                 continue;
             }
-            $db->prepare("UPDATE shipping_labels SET status = 'cancelled', updated_at = " . Db::now() . " WHERE id = :id AND status != 'cancelled'")
+            Db::get()->prepare("UPDATE shipping_labels SET status = 'cancelled', updated_at = " . Db::now() . " WHERE id = :id AND status != 'cancelled'")
                 ->execute([':id' => $label['id']]);
         }
         return $left;
     }
 
     /** Cancel one label at its carrier; false (reported) when the carrier cannot or did not. */
-    private static function voidAtCarrier(string $carrierId, string $awb, int $orderId): bool
+    private static function voidAtCarrier(string $carrierId, string $awb, int $orderId, string $severity = 'error'): bool
     {
         try {
             $adapter = self::findAdapter($carrierId);
@@ -595,7 +644,7 @@ class ShippingService
             $adapter->cancelLabel($awb);
             return true;
         } catch (\Throwable $e) {
-            IncidentMonitor::report('shipping.label_still_active', 'shipping', 'error', ['order_id' => $orderId, 'awb' => $awb, 'error' => $e->getMessage()]);
+            IncidentMonitor::report('shipping.label_still_active', 'shipping', $severity, ['order_id' => $orderId, 'awb' => $awb, 'error' => $e->getMessage()]);
             return false;
         }
     }

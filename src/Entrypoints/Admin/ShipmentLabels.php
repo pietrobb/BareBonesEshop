@@ -27,6 +27,13 @@ function adminOrderLabelCarriers(array $order, array $carriers): array {
     return [$own => array_key_exists($own, $carriers) ? $carriers[$own] : 'no label API'];
 }
 
+/** R23: labels the carrier did not cancel with their parcel or the order (ShippingService::strandedLabels) stay visible until handled. */
+function renderStrandedLabels(int $orderId): void {
+    foreach (ShippingService::strandedLabels($orderId) as $label): ?>
+    <p class="flash flash-err" role="alert" data-stranded-label="<?= esc((string)$label['awb']) ?>"><?= esc(I18n::format('admin.shipment.label_still_active', ['label' => MethodLabels::carrier((string)$label['carrier']) . ' ' . (string)$label['awb']])) ?></p>
+    <?php endforeach;
+}
+
 /**
  * Cash on delivery of one parcel, shown whether or not a carrier API is connected: the amount to enter in the carrier's
  * portal for what that parcel collects (its goods, the rest on the last one), else "prepaid" (ShippingService::parcelCodAmount).

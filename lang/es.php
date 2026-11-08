@@ -966,6 +966,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipment.msg.tracking_saved' => 'Seguimiento del envío guardado.',
     'admin.shipment.msg.cancelled' => 'El envío se ha cancelado.',
     'admin.shipment.msg.cancelled_label_active' => 'El envío se ha cancelado, pero el transportista no anuló su etiqueta. Anúlela directamente con el transportista o recogerá el paquete.',
+    'admin.shipment.label_still_active' => 'El transportista aún tiene activa la etiqueta {label} para mercancía que no se enviará (envío o pedido cancelado). Anúlela directamente con el transportista o recogerá el paquete y cobrará el contra reembolso.',
     'admin.shipment.msg.not_found' => 'El envío no existe.',
     'admin.shipment.msg.invalid_tracking' => 'El transportista, el número de seguimiento o el enlace no son válidos (el enlace debe empezar por http:// o https://).',
     'admin.shipment.msg.failed' => 'No se pudo guardar el envío.',

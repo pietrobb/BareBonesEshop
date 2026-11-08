@@ -266,7 +266,8 @@ $architectureBudgets = [
     // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected) and the
     // cash on delivery of every parcel, shown also when no carrier API is connected.
     // +14 lines, +1 function R15: only the carrier the customer chose is offered (adminOrderLabelCarriers).
-    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 28, 'coupling' => 5],
+    // +7 lines, +1 function R23 medium: labels the carrier kept after a parcel or order cancel are shown (renderStrandedLabels).
+    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 97, 'functions' => 6, 'max_function_lines' => 28, 'coupling' => 5],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],
