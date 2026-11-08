@@ -119,7 +119,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   holds the window open (an update or migration that is running) instead of working under it and lifting it at the
   end; `cli/migrate.php` lifts only its own marker. `cli/restore.php` closes the shop while it replaces the database
   and files, refuses while an update or migration holds the window, and keeps a failed window it found. A failed
-  window is written before the lock on the old marker is let go.
+  window is written before the lock on the old marker is let go. Whether a window is still running is told by its
+  lock, not its failed flag: a step that is changing files or the database marks its own window failed, and that
+  window had been taken for one left by a dead run, so a restore, migration or update went ahead in the middle of
+  it. Only a failed window that no process holds is taken over now, and an update, rollback or restore lifts the
+  window at the end only while the marker is still its own.
 - **Invoice, admin and texts** (review round 22, low). A long item name on the PDF invoice wraps inside its column and
   is printed in full; it was cut at 32 characters and, after round 21 narrowed the column, capitals still ran into the
   quantity. Text width now follows Helvetica's character widths, and a word wider than its column is split. On a 390 px
