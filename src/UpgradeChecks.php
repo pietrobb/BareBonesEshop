@@ -56,7 +56,7 @@ final class UpgradeChecks
     public static function mailSender(?array $config = null): array
     {
         $from = MailService::sender($config);
-        if (trim((string)(getenv('MAIL_FROM') ?: '')) === '') {
+        if (trim((string)(getenv('MAIL_FROM') ?: '')) === '' && MailSettings::from($config) === '') {
             return ['warn', $from === MailService::DEFAULT_FROM
                 ? 'MAIL_FROM is not set: e-mails go out from ' . MailService::DEFAULT_FROM . ', which receiving servers reject or file as spam.'
                 : "MAIL_FROM is not set: e-mails go out from {$from} (from app_url); set MAIL_FROM to an address whose domain has SPF/DKIM for this server."];

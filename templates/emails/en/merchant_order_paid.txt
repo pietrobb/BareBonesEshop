@@ -1,7 +1,9 @@
 New paid order {{order_number}}
 Customer: {{customer_name}} ({{customer_email}})
 Total: {{order_total}}
-Payment: {{payment_status}} / {{payment_id}}
+Payment: {{#if payment_method}}{{payment_method}} — {{/if}}{{payment_status}}{{#if payment_id}} ({{payment_id}}){{/if}}
 
 {{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
-{{/each}}
+{{/each}}{{#if admin_url}}
+Detail: {{admin_url}}
+{{/if}}

@@ -108,6 +108,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   attach it as a PNG (mail clients do not show inline SVG), and an invoice still to pay by transfer prints it
   beside the IBAN. The JSON `bank_transfer` block adds `qr_format` and `qr_payload`, and `pay_by_square` is set
   only for that format.
+- **E-mail delivery** (review round 23, UX). SMTP could be set only in environment variables, which most shared
+  hosting cannot set, so the shop only logged every e-mail. The SMTP server, its login and the sender are now entered in
+  Admin → E-mail delivery (with a test e-mail) or in the web installer's optional "Sending e-mail" fields. They are
+  stored in `mail.json` in the private data directory (mode 0600), the password encrypted with a key derived from
+  `admin_identity_key` and never shown again; a login without TLS/SSL is refused. The environment (`SMTP_*`,
+  `MAIL_FROM`, `MAIL_ADAPTER`) still wins and its fields are shown read-only; the saved values win over the `smtp_*`
+  keys of `config.php`, and `setup.php doctor` reports the provider really in use. The merchant's order e-mails print
+  the payment method and state in the e-mail's language ("Kartou online — Zaplatené", not "paid" or "— pending") and
+  link the order in the admin; the invoice e-mail of a paid order says it is paid instead of asking for an amount due
+  by a due date; the bank transfer e-mails show the BIC. The e-mail log names the sender, Reply-To and attachments and
+  keeps an `.eml` copy of the last 50 messages in `logs/emails/`.
 - **Sample stores in other currencies sell the seeded products** (review round 23, UX). `cli/seed.php` creates a
   price list in each sample store's currency (cz CZK in whole korunas, pl PLN, hu HUF, us USD; fixed sample rates)
   and prices every seeded product in it; these stores used to sell none of the seeded EUR products. A second seed

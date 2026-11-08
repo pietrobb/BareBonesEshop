@@ -28,6 +28,8 @@ class SmtpMail implements MailAdapter {
     private bool $allowPlaintextAuth;
 
     public function __construct(array $cfg = []) {
+        // R23: environment first, then what the owner saved in Admin → E-mail delivery, then config.php's smtp_* keys.
+        $cfg = MailSettings::smtpConfig() + $cfg;
         $env = fn(string $k, $def = '') => getenv($k) !== false ? getenv($k) : ($cfg[strtolower($k)] ?? $def);
         $this->host       = (string)$env('SMTP_HOST', 'localhost');
         $this->port       = (int)$env('SMTP_PORT', 587);
