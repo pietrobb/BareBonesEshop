@@ -540,9 +540,11 @@ final class WebInstaller
         $store['legal'] = [
             'name' => $v['company'], 'street' => $v['street'], 'city' => $v['city'], 'zip' => $v['zip'], 'country' => $v['country'],
             'vat_registered' => $v['vat_id'] !== '', 'ic_dph' => $v['vat_id'], 'iban' => $v['iban'], 'email' => $v['email'],
-            'ico' => (string)($v['ico'] ?? ''), 'dic' => (string)($v['dic'] ?? ''), 'bic' => (string)($v['bic'] ?? ''),
             'invoice_prefix' => (string)($legal['invoice_prefix'] ?? ''), 'payment_terms_days' => (int)($legal['payment_terms_days'] ?? 14),
         ];
+        foreach (['ico', 'dic', 'bic'] as $key) {
+            if ((string)($v[$key] ?? '') !== '') $store['legal'][$key] = (string)$v[$key];
+        }
         $stores['stores'][$id] = $store;
         // The installer sets up one seller. Other stores still naming the example seller go offline until the merchant
         // enters theirs in Admin → Stores and seller (as setup apply does with the hidden sample stores).
