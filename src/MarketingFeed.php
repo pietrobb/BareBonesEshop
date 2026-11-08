@@ -22,7 +22,9 @@ class MarketingFeed {
     public static function writeGoogle($out, string $baseUrl, ?string $locale = null): void {
         $baseUrl = self::baseUrl($baseUrl);
         $locale = self::locale($locale);
-        $e = static fn(string $value): string => htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        // R23: characters XML 1.0 does not allow (C0 controls such as \x01 or \x0B from a CSV import) made the whole
+        // feed invalid and Google refused every item; invalid UTF-8 no longer empties the value.
+        $e = static fn(string $value): string => htmlspecialchars(self::xmlText($value), ENT_XML1 | ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $store = StoreContext::current();
         fwrite($out, implode("\n", [
             '<?xml version="1.0" encoding="UTF-8"?>',
@@ -121,7 +123,11 @@ class MarketingFeed {
      */
     private static function items(array $product, string $baseUrl): array {
         $base = self::googleFields($product, $baseUrl);
-        if (($product['_variants'] ?? []) === []) return [$base];
+        // R23: an item the store does not sell (no price in its currency: the cart refuses it) is not offered; a HU store
+        // of a shared EUR catalog listed it "in stock, 10.00 EUR".
+        if (($product['_variants'] ?? []) === []) {
+            return Pricing::soldInStore(trim((string)($product['currency'] ?? '')) ?: StoreContext::current()->currency()) ? [$base] : [];
+        }
         $items = [];
         foreach ($product['_variants'] as $row) {
             $variant = StorefrontViewModel::variant($product, $row);
@@ -221,6 +227,12 @@ class MarketingFeed {
         if (!VariantAvailability::productPurchasable($product)) return 'out of stock';
         if (VariantAvailability::isDigitalType((string)($product['product_type'] ?? '')) || (int)($product['stock'] ?? 0) > 0) return 'in stock';
         return ($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'preorder' : 'backorder';
+    }
+
+    /** Text without the characters XML 1.0 forbids (C0 controls but tab and line breaks, U+FFFE/U+FFFF, broken UTF-8). */
+    public static function xmlText(string $value): string {
+        $valid = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+        return preg_replace('/[^\x{9}\x{A}\x{D}\x{20}-\x{D7FF}\x{E000}-\x{FFFD}\x{10000}-\x{10FFFF}]+/u', '', $valid) ?? '';
     }
 
     private static function isoDate(string $date): string {
