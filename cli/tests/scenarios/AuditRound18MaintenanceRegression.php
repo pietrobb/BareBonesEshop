@@ -122,5 +122,5 @@ assert_equals([true, true, false], [$r18mLocked, $r18mHour, $r18mDay],
 //    so it restores the window it found instead of a permanent 503 (end-to-end run in the PR proof).
 $r18mScript = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/migrate.php');
 assert_true(preg_match('/if \(\$ownMaintenance && !\$schemaTouched\) \{\s*if \(\$priorFailure !== null\) \{\s*MaintenanceMode::fail\(\$root, \$priorFailure\);.*?\} else \{\s*MaintenanceMode::leave\(\$root\);/s', $r18mScript) === 1
-    && preg_match('/\$preApplyHook\(\$names, \$log\);\s*\$backupTaken = true;\s*\}\s*\$schemaTouched = true;/', $r18mScript) === 1,
+    && preg_match('/\$preApplyHook\(\$names, \$log\);\s*\$backupTaken = true;\s*\}\s*(?:\/\/[^\n]*\n\s*)?if \(\$ownMaintenance\) \{\s*MaintenanceMode::arm\(\$root, [^\n]*\);\s*\}\s*\$schemaTouched = true;/', $r18mScript) === 1,
     'R18 migrate.php: a failed pre-migration backup reopens the unchanged shop (or keeps an earlier failed window)');

@@ -523,12 +523,15 @@ unless the operator supplies `--allow-unsigned` explicitly. While `apply` or
 application root): web requests get 503 and the worker and feed sync skip their run.
 The updater holds a lock on that file for as long as it runs, so the window also
 holds when the shop checks it from another container on the same volume (a lock
-counts for 24 hours at most). The updater removes the file when it ends; one killed
-half-way leaves it, and it keeps blocking for an hour (longer, up to 24 hours, while
-the process it names still runs on that host). `php cli/migrate.php apply` uses the
-same window; a migration that fails, an update whose automatic rollback fails, or a
-rollback that stops after it began restoring marks the window failed: it never
-expires and the file says what to run. A failed migration is lifted only by a
+counts for 24 hours at most). The updater removes the file when it ends. One killed
+before its first change leaves a marker that keeps blocking for an hour (longer, up to
+24 hours, while the process it names still runs on that host); from the first changed
+file on the window is marked failed, so one killed half-way keeps the shop closed and
+names the rollback to run. `php cli/migrate.php apply` and `php cli/restore.php` use
+the same window (and refuse while an update or migration holds it); a migration that
+fails or is killed, an update whose automatic rollback fails, or a rollback that stops
+after it began restoring marks the window failed: it never expires and the file says
+what to run. A worker run checks the window before every job and stops when it opens. A failed migration is lifted only by a
 successful `migrate.php apply`, an update that runs the migrations or a rollback that
 restores the database; an update or rollback of code only leaves that schema as it
 was and keeps the shop closed (it warns). A failed update or rollback is lifted only

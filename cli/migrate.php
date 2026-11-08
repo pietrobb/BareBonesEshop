@@ -99,6 +99,12 @@ try {
             $schemaTouched = false;
             $priorFailure = MaintenanceMode::failed($root, 'cli/migrate.php') ? (string)(MaintenanceMode::marker($root)['reason'] ?? '') : null;
             $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, &$schemaTouched, $preApplyHook, $root): void {
+                // R23: an update, rollback or other migration that is running holds its window; migrating under it and
+                // lifting it at the end opened the shop in the middle of that step.
+                if (!$ownMaintenance && MaintenanceMode::heldElsewhere($root) && !MaintenanceMode::failed($root)) {
+                    throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
+                        . '); no migration ran. Wait until that step ends, then run php cli/migrate.php apply again');
+                }
                 if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {
                     MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
                     $ownMaintenance = true;
@@ -108,6 +114,10 @@ try {
                     $preApplyHook($names, $log);
                     $backupTaken = true;
                 }
+                // R23: a run killed during a migration (no catch runs) keeps the shop closed instead of an expiring marker.
+                if ($ownMaintenance) {
+                    MaintenanceMode::arm($root, 'cli/migrate.php was interrupted during a migration — the shop stays in maintenance; fix the cause and run php cli/migrate.php apply again');
+                }
                 $schemaTouched = true; // Migrator::apply() runs the pending migrations right after this hook
             };
             try {
@@ -116,7 +126,9 @@ try {
                     $applied = array_merge($applied, $extensionMigrator->apply($logger, $beforeFirst));
                 }
             } catch (Throwable $migrationError) {
-                if ($ownMaintenance && !$schemaTouched) {
+                if ($ownMaintenance && !MaintenanceMode::owned($root)) {
+                    // R23: another step took the window over meanwhile; it is that step's to lift.
+                } elseif ($ownMaintenance && !$schemaTouched) {
                     if ($priorFailure !== null) {
                         MaintenanceMode::fail($root, $priorFailure);
                         fwrite(STDERR, "No migration ran; the shop stays in maintenance (503) from the earlier failed run until php cli/migrate.php apply succeeds.\n");
@@ -132,7 +144,8 @@ try {
                 throw $migrationError;
             }
             // Every migration is applied: a window this run opened, or one a failed run left, ends here.
-            if ($ownMaintenance || MaintenanceMode::failed($root, 'cli/migrate.php')) MaintenanceMode::leave($root);
+            // R23: only while the marker is still this run's own — never the window of an update that took over meanwhile.
+            if ($ownMaintenance ? MaintenanceMode::owned($root) : MaintenanceMode::failed($root, 'cli/migrate.php')) MaintenanceMode::leave($root);
             $n = count($applied);
             echo $n === 0 ? "Nothing to apply.\n" : "Applied {$n} migration(s).\n";
             break;
