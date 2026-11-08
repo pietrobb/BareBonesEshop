@@ -248,7 +248,7 @@ final class InvoiceService
     /**
      * Variables of the invoice_issued e-mail: what the templates of every language print (amount, dates, the online
      * link and the seller), whichever path sends it — the worker after payment or the admin's issue / resend.
-     * @return array<string, string>
+     * @return array<string, string|bool>
      */
     public static function mailVars(array $invoice, array $order): array
     {
@@ -262,7 +262,11 @@ final class InvoiceService
         // The customer's language, not the one of the admin resending it (storeUrl() adds the active ?lang=).
         $link = $documentLocale === '' ? Bootstrap::withoutLang($link) : Template::withOrderLang($link, ['locale' => $documentLocale]);
         $mailLocale = $documentLocale ?: I18n::locale();
+        // R23 UX: an invoice of a paid order is a receipt, as on its PDF ("Uhradené"): no amount due and no due date.
+        $paid = self::orderSettled((int)($invoice['order_id'] ?? ($order['id'] ?? 0)));
         return [
+            'invoice_paid' => $paid,
+            'invoice_due' => !$paid,
             'order_number' => (string)($order['order_number'] ?? ''),
             'invoice_number' => (string)$invoice['number'],
             'customer_name' => (string)($order['customer_name'] ?? ''),

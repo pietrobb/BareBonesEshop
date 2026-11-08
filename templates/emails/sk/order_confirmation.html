@@ -18,6 +18,7 @@
 <table style="border-collapse:collapse">
 <tr><td style="padding:2px 12px 2px 0;color:#555">Príjemca</td><td>{{bank_beneficiary}}</td></tr>
 <tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+{{/if}}{{#if bank_bic}}<tr><td style="padding:2px 12px 2px 0;color:#555">BIC</td><td>{{bank_bic}}</td></tr>{{/if}}{{#if bank_transfer}}
 <tr><td style="padding:2px 12px 2px 0;color:#555">Suma</td><td><strong>{{bank_amount}}</strong></td></tr>
 <tr><td style="padding:2px 12px 2px 0;color:#555">Variabilný symbol</td><td><strong>{{bank_vs}}</strong></td></tr>
 <tr><td style="padding:2px 12px 2px 0;color:#555">Správa pre príjemcu</td><td>{{bank_message}}</td></tr>

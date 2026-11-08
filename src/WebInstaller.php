@@ -246,7 +246,8 @@ final class WebInstaller
     {
         $text = static fn(string $key): string => trim((string)($input[$key] ?? ''));
         $v = [];
-        foreach (['shop_name', 'app_url', 'private_parent', 'email', 'company', 'street', 'city', 'zip', 'country', 'vat_id', 'iban', 'timezone', 'admin_user', 'stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret'] as $key) {
+        foreach (['shop_name', 'app_url', 'private_parent', 'email', 'company', 'street', 'city', 'zip', 'country', 'vat_id', 'iban', 'timezone', 'admin_user', 'stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret',
+            'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_user', 'mail_from'] as $key) {
             $v[$key] = $text($key);
         }
         $v['country'] = strtoupper($v['country']);
@@ -273,7 +274,38 @@ final class WebInstaller
         elseif (!hash_equals($v['admin_password'], (string)($input['admin_password_repeat'] ?? ''))) $errors['admin_password'] = 'The two passwords differ.';
         $privateError = self::privateParentError($v['private_parent'], $root);
         if ($privateError !== null) $errors['private_parent'] = $privateError;
+        [$v['mail'], $mailErrors] = self::mailSettings($input);
+        $errors += $mailErrors;
         return [$v, $errors];
+    }
+
+    /** English messages of MailSettings::validate() codes (the installer runs before any language is set up). */
+    private const MAIL_ERRORS = [
+        'host' => 'Enter the SMTP server name, e.g. smtp.example.com.', 'port' => 'Enter a port between 1 and 65535.',
+        'encryption' => 'Use tls, ssl or none.', 'plaintext_auth' => 'A login needs encryption: use tls or ssl.',
+        'username' => 'The SMTP user name is too long or contains control characters.',
+        'password' => 'The SMTP password must be one line of at most 1024 characters.', 'from' => 'Enter a sender address on a real domain.',
+    ];
+
+    /**
+     * R23 UX: the optional "Sending e-mail" fieldset — saved like Admin → E-mail delivery once config.php exists.
+     * Null when the SMTP server and the sender are both left empty (e-mails are then only logged).
+     * @return array{0: array<string, mixed>|null, 1: array<string, string>}
+     */
+    private static function mailSettings(array $input): array
+    {
+        $text = static fn(string $key): string => trim((string)(is_scalar($input[$key] ?? null) ? $input[$key] : ''));
+        if ($text('smtp_host') === '' && $text('mail_from') === '') return [null, []];
+        [$mail, $errors] = MailSettings::validate([
+            'mode' => $text('smtp_host') === '' ? 'log' : 'smtp', 'host' => $text('smtp_host'), 'port' => $text('smtp_port'),
+            'encryption' => $text('smtp_encryption'), 'username' => $text('smtp_user'),
+            'password' => (string)(is_scalar($input['smtp_pass'] ?? null) ? $input['smtp_pass'] : ''), 'from' => $text('mail_from'),
+        ]);
+        $fields = ['host' => 'smtp_host', 'port' => 'smtp_port', 'encryption' => 'smtp_encryption', 'plaintext_auth' => 'smtp_encryption',
+            'username' => 'smtp_user', 'password' => 'smtp_pass', 'from' => 'mail_from'];
+        $out = [];
+        foreach ($errors as $field => $code) $out[$fields[$code] ?? $fields[$field] ?? 'smtp_host'] = self::MAIL_ERRORS[$code] ?? 'Check the e-mail settings.';
+        return [$mail, $out];
     }
 
     /** @return array<string, string> */
@@ -339,6 +371,11 @@ final class WebInstaller
             }
             (new Migrator())->apply();
             foreach (Extensions::migrators() as $migrator) $migrator->apply();
+            if (!empty($v['mail'])) {
+                $mailPath = MailSettings::path($config);
+                $mailError = MailSettings::save($v['mail'], $config, 'install.php');
+                if ($mailError !== null) throw new RuntimeException("Cannot save the e-mail settings ({$mailError})");
+            }
             $stores = self::configureStore($root, $config, $v);
             self::configurePayments(Db::get(), $stores, $v);
             $default = (string)($stores['default_store'] ?? 'default');
@@ -349,6 +386,8 @@ final class WebInstaller
                 'starter' => $starter['name'] ?? null, 'leftover' => $leftover];
         } catch (Throwable $e) {
             @unlink($root . '/config.php');
+            // The SMTP password in it is encrypted with the key of the config.php just removed: nobody could open it.
+            if (isset($mailPath)) @unlink($mailPath);
             if ($seeded || (is_file($database) && $starter === null)) {
                 foreach (['', '-wal', '-shm', '-journal'] as $suffix) @unlink($database . $suffix);
             }

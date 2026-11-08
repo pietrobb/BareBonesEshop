@@ -7,9 +7,11 @@
 de su pedido <strong>{{order_number}}</strong>.</p>
 <table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
   <tr><td>Fecha de emisión</td><td>{{issued_at}}</td></tr>
-  <tr><td>Fecha de vencimiento</td><td>{{due_date}}</td></tr>
-  <tr><td>Importe a pagar</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+{{#if invoice_due}}  <tr><td>Fecha de vencimiento</td><td>{{due_date}}</td></tr>
+  <tr><td>Importe a pagar</td><td><strong>{{total_gross_formatted}}</strong></td></tr>{{/if}}
+{{#if invoice_paid}}  <tr><td>Total (pagado)</td><td><strong>{{total_gross_formatted}}</strong></td></tr>{{/if}}
 </table>
+{{#if invoice_paid}}<p><strong>Pagado – no hay nada que pagar.</strong></p>{{/if}}
 <p>El PDF va adjunto. Acceso en línea:
 <a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
 <p>Gracias por su compra,<br/>{{seller_name}}</p>

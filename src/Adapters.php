@@ -235,6 +235,9 @@ class Adapters {
                 }
                 return $environmentCode;
             }
+            // R23: what the owner chose in Admin → E-mail delivery (or the web installer) wins over config.php.
+            $saved = MailSettings::mode();
+            if ($saved !== null) return $saved;
         }
         $configured = (string)($cfg['provider_defaults'][$type] ?? '');
         if ($configured !== '') {

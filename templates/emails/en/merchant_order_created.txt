@@ -1,7 +1,7 @@
 New order {{order_number}}
 Customer: {{customer_name}} ({{customer_email}})
 Total: {{order_total}}
-Payment: {{payment_method}} — {{payment_status}}
+Payment: {{#if payment_method}}{{payment_method}} — {{/if}}{{payment_status}}
 {{#if awaiting_payment}}The order is not paid yet.
 {{/if}}
 {{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}

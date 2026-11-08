@@ -1,7 +1,9 @@
 Új kifizetett rendelés {{order_number}}
 Vásárló: {{customer_name}} ({{customer_email}})
 Összesen: {{order_total}}
-Fizetés: {{payment_status}} / {{payment_id}}
+Fizetés: {{#if payment_method}}{{payment_method}} — {{/if}}{{payment_status}}{{#if payment_id}} ({{payment_id}}){{/if}}
 
 {{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
-{{/each}}
+{{/each}}{{#if admin_url}}
+Részletek: {{admin_url}}
+{{/if}}

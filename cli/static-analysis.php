@@ -201,6 +201,8 @@ $architectureBudgets = [
     // +10 lines R15: the GDPR page shows a guest's erasure (date, retained orders) and the erasure flash says what went and what stays.
     'src/Entrypoints/Admin/Customers.php' => ['lines' => 340, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
     'src/Entrypoints/Admin/EmailTemplates.php' => ['lines' => 135, 'functions' => 7, 'max_function_lines' => 46, 'coupling' => 3],
+    // R23 UX: SMTP settings form (MailSettings) and test e-mail.
+    'src/Entrypoints/Admin/MailDelivery.php' => ['lines' => 138, 'functions' => 3, 'max_function_lines' => 69, 'coupling' => 6],
     // Data files: route => page modules, side menu and page permissions.
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Navigation.php' => ['lines' => 40, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
