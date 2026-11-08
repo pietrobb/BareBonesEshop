@@ -19,6 +19,33 @@ class CheckoutSession {
         ]);
     }
 
+    /**
+     * R23: rows were never deleted. Tokens that lapse (payment and account links, pay-again claims) go once expired,
+     * confirmation tokens after $confirmationDays; gateway sessions stay (late webhooks resolve the order by them).
+     * Returns the deleted rows (RetentionCleanup, daily).
+     */
+    public static function cleanup(int $confirmationDays, ?int $now = null): int {
+        $now ??= time();
+        $lifetimes = ['pay_link' => PaymentLink::LINK_TTL, 'pay_link_page' => PaymentLink::LINK_TTL,
+            'account_offer' => GuestCheckoutAccount::LINK_TTL, 'pay_restart' => 86400,
+            'confirmation' => max(1, $confirmationDays) * 86400, 'pay_confirmation' => max(1, $confirmationDays) * 86400];
+        $deleted = 0;
+        foreach ($lifetimes as $provider => $seconds) {
+            $deleted += Db::writeInBatches('checkout_sessions', 'DELETE FROM checkout_sessions', 'provider = :provider AND created_at < :cutoff',
+                [':provider' => $provider, ':cutoff' => gmdate('Y-m-d H:i:s', $now - $seconds)]);
+        }
+        return $deleted;
+    }
+
+    /** R23: keep only the newest $keep rows of $provider for the order (a link shown on every page view added one each time). */
+    public static function keepNewest(int $orderId, string $provider, int $keep): void {
+        $stmt = Db::get()->prepare('SELECT id FROM checkout_sessions WHERE order_id = :order AND provider = :provider ORDER BY id DESC');
+        $stmt->execute([':order' => $orderId, ':provider' => $provider]);
+        $old = array_slice(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), $keep);
+        if ($old === []) return;
+        Db::get()->prepare('DELETE FROM checkout_sessions WHERE id IN (' . implode(',', $old) . ')')->execute();
+    }
+
     public static function browserSessionId(): string {
         $id = session_id();
         if ($id !== '') return $id;

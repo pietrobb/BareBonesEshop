@@ -100,6 +100,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **API, time and retention fixes** (review round 23, low).
+  - `POST /products`: two concurrent creates of one SKU both passed the SKU check on MySQL, and the second overwrote
+    the first product while still answering 201. An API create now only inserts; the slower request gets
+    `409 sku_exists`. The OpenAPI spec now lists `PATCH /products/{id}` → `422 price_below_variant_floor`.
+  - A customer's VAT ID validation time (`vat_validated_at`) is stored in UTC; it was local time read as UTC.
+  - `checkout_sessions` were never deleted, and every order lookup that shows a payment link added a row. The daily
+    cleanup job now deletes lapsed payment and account links, pay-again claims and confirmation tokens older than
+    `checkout_confirmation_days` (90); gateway sessions stay. An order keeps its newest five page payment links.
+  - Back-in-stock requests past their retention (or never confirmed) were deleted only when a SKU was restocked;
+    the daily cleanup job deletes them too.
+  - Feed sync times in the admin are shown in the shop's time zone (they were UTC).
+  - A return-window test failed between 00:00 and 00:59 in the two weeks before the autumn clock change.
 - **A killed update, rollback, migration or restore keeps the shop closed** (review round 23, medium). `apply`,
   `rollback`, `cli/migrate.php apply` and now `cli/restore.php` mark their maintenance window failed, with the command
   to run, right before their first change. A process killed half-way (SSH dropped, OOM killer, a migration timeout)
