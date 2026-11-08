@@ -100,6 +100,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Security** (review round 23, low). The CSP report endpoint counts an IPv6 reporter per /64 network: one client
+  that took a new address of its /64 for every forged form-action report counted as several reporters and raised
+  the critical alarm alone (IPv4 still counts per address, an IPv4-mapped address as that IPv4 address). The log
+  masks `pwd=…`, `private_key` / `private-key` values and an `Authorization` header without a scheme
+  (`Authorization: <token>`), which reached the log in clear (T15). PayU: the new `payu_signature_algorithm =
+  'sha256'` (`PAY_PAYU_SIGNATURE_ALGORITHM`) refuses MD5-signed notifications once the POS signs with SHA-256; until
+  it is set `cli/doctor.php` warns that MD5 is still accepted (T20, README).
 - **API, time and retention fixes** (review round 23, low).
   - `POST /products`: two concurrent creates of one SKU both passed the SKU check on MySQL, and the second overwrote
     the first product while still answering 201. An API create now only inserts; the slower request gets

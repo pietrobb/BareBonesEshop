@@ -66,7 +66,7 @@ final class CspReports
         if ($reports === []) return 0;
         $optional = [];
         if (Db::hasColumn('csp_violations', 'reporter_hash', $db)) {
-            $optional['reporter_hash'] = self::reporterHash($reporter ?? Security::clientIp());
+            $optional['reporter_hash'] = self::reporterHash(self::reporterNetwork($reporter ?? Security::clientIp()));
         }
         if (Db::hasColumn('csp_violations', 'request_id', $db)) $optional['request_id'] = bin2hex(random_bytes(8));
         $optionalColumns = $optional === [] ? '' : ', ' . implode(', ', array_keys($optional));
@@ -130,6 +130,18 @@ final class CspReports
         $prefixed = [];
         foreach ($values as $key => $value) $prefixed[':' . $key] = $value;
         return $prefixed;
+    }
+
+    /**
+     * The reporter as a network: one IPv6 client usually owns a whole /64 and can pick a new address from it for
+     * every request, so IPv6 reporters count per /64 (IPv4, including IPv4-mapped IPv6, per address).
+     */
+    private static function reporterNetwork(string $reporter): string
+    {
+        $packed = filter_var($reporter, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? @inet_pton($reporter) : false;
+        if (!is_string($packed) || strlen($packed) !== 16) return $reporter;
+        if (str_starts_with($packed, str_repeat("\0", 10) . "\xff\xff")) return (string)inet_ntop(substr($packed, 12));
+        return inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
     }
 
     /**

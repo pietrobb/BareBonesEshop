@@ -76,6 +76,7 @@
     "payu_second_key": {"type": "string", "x-secret": true},
     "payu_pos_id": {"type": "string"},
     "payu_env": {"type": "string", "enum": ["sandbox", "production"]},
+    "payu_signature_algorithm": {"type": "string", "enum": ["", "sha256"]},
     "digital_assets_base_dir": {"type": "string", "x-private-path": true},
     "digital_download_resume_minutes": {"type": "integer", "minimum": 0},
     "rma_return_window_days": {"type": "integer", "minimum": 0, "description": "Days after delivery a customer can request a return (0 = no limit)."},
