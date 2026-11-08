@@ -275,6 +275,14 @@ class Fulfillment {
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
+            // R23 G7: under the order lock, like ShippingService::generateLabel records a label. Without it on MySQL a
+            // label committed just after this cancel (its check had still seen the parcel planned) stayed active on a
+            // cancelled parcel: cancelParcelLabels had not seen it yet. This read only finds the order; the parcel is
+            // changed by the locking UPDATE below.
+            $owner = $db->prepare("SELECT order_id FROM shipments WHERE id = :id AND store_id = :store");
+            $owner->execute([':id' => $shipmentId, ':store' => StoreContext::current()->id()]);
+            $orderId = $owner->fetchColumn();
+            if ($orderId !== false) Orders::lockWithin((int)$orderId);
             $stmt = $db->prepare("UPDATE shipments SET status = 'cancelled', updated_at = " . Db::now() . "
                 WHERE id = :id AND store_id = :store AND status = 'planned'");
             $stmt->execute([':id' => $shipmentId, ':store' => StoreContext::current()->id()]);

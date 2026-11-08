@@ -665,15 +665,28 @@ final class InvoiceService
                 $amount = $uncredited;
                 if ($amount <= 0) return [];
             }
-            // Shares of the uncredited VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
+            // Shares of the uncredited VAT rates: gross in proportion, net likewise. R23: the cents the rounding down leaves go
+            // to the largest remainders, never past a rate's uncredited gross; the last rate took them all and, with three
+            // or more rates, could credit a cent more than that rate had left.
             $sourceGross = array_sum(array_column($rates, 'gross'));
+            $shares = [];
+            $remainders = [];
+            foreach ($rates as $key => $rate) {
+                $shares[(string)$key] = intdiv($amount * $rate['gross'], $sourceGross);
+                $remainders[(string)$key] = ($amount * $rate['gross']) % $sourceGross;
+            }
+            arsort($remainders);
+            for ($left = $amount - array_sum($shares); $left > 0;) {
+                foreach (array_keys($remainders) as $key) {
+                    if ($left <= 0) break;
+                    if ($shares[$key] >= $rates[$key]['gross']) continue;
+                    $shares[$key]++;
+                    $left--;
+                }
+            }
             $parts = [];
-            $left = $amount;
-            $keys = array_keys($rates);
-            foreach ($keys as $i => $key) {
-                $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
-                $left -= $gross;
-                $parts[(string)$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
+            foreach ($shares as $key => $gross) {
+                $parts[$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
             }
             return $parts;
         });
@@ -846,6 +859,12 @@ final class InvoiceService
         if ($item->fetchColumn()) return null;
         // R14 #2: an item refund of the same amount whose provider refund id is not noted yet may be this very refund (its
         // webhook came before the refund job): wait for the job instead of issuing a second credit note.
+        // R23: only a refund booked under a provider refund id can be that. A gateway that names none (GoPay, ThePay,
+        // Comgate: the ledger holds the payment id) books an item refund under its own key, matched above; an unrelated
+        // refund of the same amount waited 30 minutes and then failed.
+        $paymentId = (string)(Orders::byId($orderId)['payment_id'] ?? '');
+        $providerRefundId = (string)$row['provider_ref'];
+        if ($providerRefundId === '' || $providerRefundId === $paymentId) return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey);
         $inFlight = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending'
             AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
         $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
@@ -872,7 +891,9 @@ final class InvoiceService
         $vatRates   = json_decode((string)$invoice['vat_breakdown'], true) ?: [];
         $vatBreakdown = ['rates' => $vatRates, 'vat_total' => (int)$invoice['total_vat'], 'services_only' => self::servicesOnly($order ?: [])];
 
-        if (($invoice['type'] ?? 'invoice') === 'credit_note') {
+        if (($invoice['type'] ?? 'invoice') === 'credit_note' && str_contains((string)($invoice['credit_snapshot'] ?? ''), '"kind":"reversal"')) {
+            $rows = self::reversalRows($invoice);
+        } elseif (($invoice['type'] ?? 'invoice') === 'credit_note') {
             $stmt = Db::get()->prepare('SELECT name, quantity, net, gross, rate_basis_points FROM credit_note_items WHERE credit_note_id = :id ORDER BY id');
             $stmt->execute([':id' => $invoiceId]);
             $rows = self::creditRows($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -902,6 +923,92 @@ final class InvoiceService
             ':store'  => StoreContext::current()->id(),
         ]);
         AuditLog::log('invoice_cancelled', $invoiceId, self::STATUS_ISSUED, self::STATUS_CANCELLED, $note);
+    }
+
+    /**
+     * R23: a credit note whose refund failed is reversed by a new document of its series, not cancelled. A numbered credit
+     * note may already be in a filed VAT or OSS return; cancelling it took it out of that period afterwards. The reversal
+     * carries the credit note's amounts with the opposite sign, so the invoice counts as uncredited again from its date.
+     * Null when $creditNoteId is not an issued credit note; a repeated call returns the same reversal.
+     */
+    public static function reverseCredit(int $creditNoteId, string $reason): ?array
+    {
+        $db = Db::get();
+        $credit = self::byId($creditNoteId);
+        if (!$credit || (string)($credit['type'] ?? '') !== 'credit_note' || (string)($credit['status'] ?? '') !== self::STATUS_ISSUED) return null;
+        $orderId = (int)$credit['order_id'];
+        $key = 'reversal:' . $creditNoteId;
+        if ($row = self::refundCreditByKey($db, $orderId, $key)) return $row;
+        $source = self::byId((int)$credit['refers_to_invoice_id']);
+        $order = Orders::byId($orderId);
+        if (!$source || !$order) return null;
+        [$sellerCode, $store] = self::creditSeller($source, $order);
+        $issuedAt = ShopTime::dateIn('Y-m-d', StoreContext::timezoneFor($store));
+        $year = (int)substr($issuedAt, 0, 4);
+        $breakdown = [];
+        foreach (json_decode((string)$credit['vat_breakdown'], true) ?: [] as $rateKey => $info) {
+            if (!is_array($info)) continue;
+            $breakdown[(string)$rateKey] = ['net' => abs((int)($info['net'] ?? 0)), 'vat' => abs((int)($info['vat'] ?? 0))] + self::supplyOf($info);
+        }
+        $totals = ['gross' => abs((int)$credit['total_gross']), 'net' => abs((int)$credit['total_net']), 'vat' => abs((int)$credit['total_vat'])];
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+        try {
+            Orders::lockWithin($orderId);
+            if ($row = self::refundCreditByKey($db, $orderId, $key)) {
+                if ($ownTransaction) $db->commit();
+                return $row;
+            }
+            $creditData = ['version' => 1, 'kind' => 'reversal', 'source_invoice_id' => (int)$source['id'], 'refund_key' => $key,
+                'reverses_credit_note_id' => $creditNoteId, 'reverses_number' => (string)$credit['number'],
+                'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$credit['currency'], 'totals' => $totals];
+            $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, self::numberPrefix($store['legal'] ?? [], 'credit_note'));
+            $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
+            $db->prepare("INSERT INTO invoices
+                (order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,
+                 total_net, total_vat, total_gross, currency, vat_breakdown,
+                 customer_snapshot, seller_snapshot, payment_method, locale, status, download_token,
+                 type, refers_to_invoice_id, vat_scenario, reverse_charge_note_key, financial_snapshot, credit_snapshot)
+                VALUES (:order, :store, :number, :issued, :delivery, :due, :path,
+                 :net, :vat, :gross, :currency, :breakdown, :customer, :seller, :payment, :locale, 'issued', :token,
+                 'credit_note', :source, :scenario, :note, :financial, :credit)")->execute([
+                ':order' => $orderId, ':store' => StoreContext::current()->id(), ':number' => $number,
+                ':issued' => $issuedAt, ':delivery' => $issuedAt, ':due' => $issuedAt, ':path' => $relPath,
+                ':net' => $totals['net'], ':vat' => $totals['vat'], ':gross' => $totals['gross'],
+                ':currency' => (string)$credit['currency'], ':breakdown' => json_encode($breakdown, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                ':customer' => (string)$credit['customer_snapshot'], ':seller' => (string)$credit['seller_snapshot'],
+                ':payment' => (string)$credit['payment_method'], ':locale' => (string)$credit['locale'],
+                ':token' => self::tokenHash(bin2hex(random_bytes(32))), ':source' => (int)$source['id'], ':scenario' => $credit['vat_scenario'] ?? null,
+                ':note' => $credit['reverse_charge_note_key'] ?? null, ':financial' => (string)$credit['financial_snapshot'],
+                ':credit' => json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ]);
+            $invoiceId = (int)$db->lastInsertId();
+            self::recordSeller($db, $invoiceId, $sellerCode);
+            AuditLog::log('credit_note', $invoiceId, null, ['reverses_credit_note_id' => $creditNoteId, 'gross' => $totals['gross']], 'Credit note reversed: ' . mb_substr($reason, 0, 200));
+            if ($ownTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        $invoice = self::byId($invoiceId);
+        $pdf = self::renderPdf($invoice, self::reversalRows($invoice), json_decode((string)$credit['seller_snapshot'], true) ?: [],
+            json_decode((string)$credit['customer_snapshot'], true) ?: [], ['rates' => $breakdown, 'vat_total' => $totals['vat'], 'services_only' => self::servicesOnly($order)]);
+        self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
+        return $invoice;
+    }
+
+    /** One row per VAT rate of a reversal (reverseCredit()), naming the credit note it reverses. */
+    private static function reversalRows(array $reversal): array
+    {
+        $data = json_decode((string)($reversal['credit_snapshot'] ?? ''), true) ?: [];
+        $label = (self::loadInvoiceLabels((string)$reversal['locale'])['credit_reversal'] ?? 'Reversal of credit note No.') . ' ' . (string)($data['reverses_number'] ?? '');
+        $rows = [];
+        foreach (json_decode((string)$reversal['vat_breakdown'], true) ?: [] as $rateKey => $info) {
+            if (!is_array($info)) continue;
+            $net = (int)($info['net'] ?? 0);
+            $rows[] = ['name' => $label, 'qty' => 1, 'rate' => (float)$rateKey, 'net' => $net, 'gross' => $net + (int)($info['vat'] ?? 0)] + self::supplyOf($info);
+        }
+        return $rows;
     }
 
     public static function byId(int $id): ?array
@@ -2157,7 +2264,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný doklad k faktúre č.', 'refers_to_issued_at' => 'Dátum vystavenia faktúry', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby', 'cancellation' => 'Storno faktúry',
+                'refers_to' => 'Opravný doklad k faktúre č.', 'refers_to_issued_at' => 'Dátum vystavenia faktúry', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby', 'cancellation' => 'Storno faktúry', 'credit_reversal' => 'Storno dobropisu č.',
                 'discount' => 'Zľava',
                 'payment_fee' => 'Poplatok za platbu',
                 'rounding' => 'Zaokrúhlenie',
@@ -2179,7 +2286,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'refers_to_issued_at' => 'Datum vystavení faktury', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby', 'cancellation' => 'Storno faktury',
+                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'refers_to_issued_at' => 'Datum vystavení faktury', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby', 'cancellation' => 'Storno faktury', 'credit_reversal' => 'Storno dobropisu č.',
                 'discount' => 'Sleva',
                 'payment_fee' => 'Poplatek za platbu',
                 'rounding' => 'Zaokrouhlení',
@@ -2201,7 +2308,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
-                'refers_to' => 'Korekta faktury nr', 'refers_to_issued_at' => 'Data wystawienia faktury', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności', 'cancellation' => 'Anulowanie faktury',
+                'refers_to' => 'Korekta faktury nr', 'refers_to_issued_at' => 'Data wystawienia faktury', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności', 'cancellation' => 'Anulowanie faktury', 'credit_reversal' => 'Anulowanie korekty nr',
                 'discount' => 'Rabat',
                 'payment_fee' => 'Opłata za płatność',
                 'rounding' => 'Zaokrąglenie',
@@ -2223,7 +2330,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
-                'refers_to' => 'Az alábbi számla helyesbítése:', 'refers_to_issued_at' => 'A számla kiállítása', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés', 'cancellation' => 'Számla sztornó',
+                'refers_to' => 'Az alábbi számla helyesbítése:', 'refers_to_issued_at' => 'A számla kiállítása', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés', 'cancellation' => 'Számla sztornó', 'credit_reversal' => 'Helyesbítő számla sztornója, sz.',
                 'discount' => 'Kedvezmény',
                 'payment_fee' => 'Fizetési díj',
                 'rounding' => 'Kerekítés',
@@ -2245,7 +2352,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Rechnungskorrektur Nr.',
-                'refers_to' => 'Korrektur zur Rechnung Nr.', 'refers_to_issued_at' => 'Datum der Rechnung', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung', 'cancellation' => 'Rechnungsstorno',
+                'refers_to' => 'Korrektur zur Rechnung Nr.', 'refers_to_issued_at' => 'Datum der Rechnung', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung', 'cancellation' => 'Rechnungsstorno', 'credit_reversal' => 'Storno der Rechnungskorrektur Nr.',
                 'discount' => 'Rabatt',
                 'payment_fee' => 'Zahlungsgebühr',
                 'rounding' => 'Rundung',
@@ -2266,7 +2373,7 @@ final class InvoiceService
                 'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
                 'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
-                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'refers_to_issued_at' => 'Fecha de la factura', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'cancellation' => 'Anulación de factura', 'discount' => 'Descuento',
+                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'refers_to_issued_at' => 'Fecha de la factura', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'cancellation' => 'Anulación de factura', 'credit_reversal' => 'Anulación de la factura rectificativa n.º', 'discount' => 'Descuento',
                 'payment_fee' => 'Comisión de pago', 'rounding' => 'Redondeo', 'col_unit_net' => 'Precio unit. sin IVA', 'col_net_total' => 'Sin IVA',
             ],
             'en' => [
@@ -2283,7 +2390,7 @@ final class InvoiceService
                 'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
                 'reverse_charge_services_note' => 'Reverse charge — VAT to be accounted for by the recipient (Article 196 of Directive 2006/112/EC)',
                 'credit_title' => 'Credit note No.',
-                'refers_to' => 'Corrects invoice No.', 'refers_to_issued_at' => 'Invoice date', 'credit_total' => 'Total credited', 'refund' => 'Refund', 'cancellation' => 'Invoice cancellation',
+                'refers_to' => 'Corrects invoice No.', 'refers_to_issued_at' => 'Invoice date', 'credit_total' => 'Total credited', 'refund' => 'Refund', 'cancellation' => 'Invoice cancellation', 'credit_reversal' => 'Reversal of credit note No.',
                 'discount' => 'Discount',
                 'payment_fee' => 'Payment fee',
                 'rounding' => 'Rounding',
