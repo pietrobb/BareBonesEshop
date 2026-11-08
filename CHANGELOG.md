@@ -107,6 +107,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   adds it back in its own period. Low: with three or more VAT rates a refund credit note no longer credits a cent more
   at one rate than the invoice has left there; a refund booked without a gateway refund id (GoPay, ThePay, Comgate)
   gets its credit note at once instead of waiting 30 minutes for an unrelated item refund of the same amount and failing.
+- **Feeds** (review round 23, medium). A CSV supplier feed's price of only spaces is a missing price: an existing
+  product keeps its price (it became 0) and a new one is not created ("Missing required field: price" in the sync
+  status; it was created free and the sync said "ok"). A control character in a product name (`\x01`, `\x0B`, e.g. from
+  a CSV import) is left out of the Google feed; it made the whole feed invalid XML and Google refused every item. A
+  simple product with no price in the store's currency (a HU store of the shared EUR catalog) is no longer offered in
+  that store's feed; it was "in stock, 10.00 EUR" and the cart refused it. Low: a feed's link to a variant that cannot
+  be bought now opens the page on that variant at its price (it showed another variant's), and the XML sitemap escapes
+  quotes (a CSV slug with `"` broke it).
 - **A killed update, rollback, migration or restore keeps the shop closed** (review round 23, medium). `apply`,
   `rollback`, `cli/migrate.php apply` and now `cli/restore.php` mark their maintenance window failed, with the command
   to run, right before their first change. A process killed half-way (SSH dropped, OOM killer, a migration timeout)
