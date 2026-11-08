@@ -167,8 +167,8 @@ try {
             ], $r15rFeed['items'] ?? null, "R15 feed {$r15rDriver}: the reduced book has price + sale_price; the T-shirt is one item per variant (own SKU, price, stock, size/colour) grouped by the product SKU");
             assert_equals(['R15F-BOOK' => ['10.00 EUR', '8.00 EUR', ''], 'R15F-TEE-S' => ['12.00 EUR', '', 'R15F-TEE'], 'R15F-TEE-L' => ['15.00 EUR', '', 'R15F-TEE'], 'R15F-TEE-XL' => ['13.00 EUR', '', 'R15F-TEE']],
                 $r15rFeed['meta'] ?? null, "R15 feed {$r15rDriver}: the Meta catalog CSV carries the same items with sale_price and item_group_id");
-            assert_equals([['12,00 €', ['R15F-TEE-S']], ['15,00 €', ['R15F-TEE-L']], ['12,00 €', ['R15F-TEE-S']], ['12,00 €', ['R15F-TEE-S']]], $r15rFeed['page'] ?? null,
-                "R15 feed {$r15rDriver}: the variant link opens the product page on that variant at its price; a sold-out or unknown variant falls back to the default");
+            assert_equals([['12,00 €', ['R15F-TEE-S']], ['15,00 €', ['R15F-TEE-L']], ['13,00 €', ['R15F-TEE-XL']], ['12,00 €', ['R15F-TEE-S']]], $r15rFeed['page'] ?? null,
+                "R15 feed {$r15rDriver}: the variant link opens the product page on that variant at its price; (R23) a sold-out one too, at its own price; an unknown variant falls back to the default");
             $r15rEsLinks = $r15rFeed['es_links'] ?? [];
             assert_true(count($r15rEsLinks) === 3 && array_filter($r15rEsLinks, static fn(string $l, string $sku): bool
                     => preg_match('#^https://r15f\.example\.test/[^?]*/product/r15f-tee\?lang=es&variant=' . ['S' => 61, 'L' => 62, 'XL' => 63][substr($sku, 9)] . '$#', $l) !== 1, ARRAY_FILTER_USE_BOTH) === [],
