@@ -17,6 +17,8 @@ declare(strict_types=1);
  *   A failed migration is lifted by a successful `php cli/migrate.php apply`, an update that runs the migrations or a
  *   rollback that restores the database; a half-done update or rollback only by the rollback its reason names
  *   (Updater::windowKept()). Any other step puts the failed window back.
+ * - R23: an update, rollback, migration or restore marks its window failed (arm()) right before its first change, so
+ *   one killed half-way leaves the shop closed with what to run instead of an expiring marker.
  */
 final class MaintenanceMode
 {
@@ -64,26 +66,31 @@ final class MaintenanceMode
     public static function enter(string $root, string $reason): void
     {
         $path = self::path($root);
-        self::release($path);
-        self::write($path, ['since' => gmdate('c'), 'reason' => $reason, 'pid' => getmypid(), 'host' => (string)gethostname(),
-            'start' => self::startTime(getmypid())]);
-        $handle = @fopen($path, 'r');
-        if (is_resource($handle) && flock($handle, LOCK_EX | LOCK_NB)) {
-            self::$held[$path] = $handle;
-        } elseif (is_resource($handle)) {
-            fclose($handle);
-        }
+        self::replace($path, self::own(['since' => gmdate('c'), 'reason' => $reason]));
+        self::hold($path);
+    }
+
+    /**
+     * R23: call right before the first change of files or schema. From then on the window must not expire: a process
+     * killed half-way (SSH dropped, OOM killer, a timeout) runs no finally, and its plain marker opened the shop after
+     * STALE_AFTER on a mix of old and new files over a half-migrated database. The marker now says failed with what to
+     * run ($reason) while this process still holds its lock; on its way out the step lifts or replaces it as before.
+     */
+    public static function arm(string $root, string $reason): void
+    {
+        $path = self::path($root);
+        self::replace($path, self::own(['since' => gmdate('c'), 'reason' => $reason, 'failed' => true]));
+        self::hold($path);
     }
 
     /**
      * Keep the shop closed after a step that failed half-way (a migration that stopped part-way, a rollback that
-     * failed): the marker no longer expires, and the reason says what to run.
+     * failed): the marker no longer expires, and the reason says what to run. R23: written before the lock is let go,
+     * so no reader sees an unlocked marker that is older than STALE_AFTER in between.
      */
     public static function fail(string $root, string $reason): void
     {
-        $path = self::path($root);
-        self::release($path);
-        self::write($path, ['since' => gmdate('c'), 'reason' => $reason, 'failed' => true, 'host' => (string)gethostname()]);
+        self::replace(self::path($root), ['since' => gmdate('c'), 'reason' => $reason, 'failed' => true, 'host' => (string)gethostname()]);
     }
 
     /**
@@ -93,10 +100,23 @@ final class MaintenanceMode
     public static function restore(string $root, array $marker, int $modifiedAt): void
     {
         $path = self::path($root);
-        self::release($path);
-        self::write($path, $marker);
+        self::replace($path, $marker);
         @touch($path, $modifiedAt);
         clearstatcache(true, $path);
+    }
+
+    /** R23: whether the marker is the one this process wrote (another may have taken the window over since). */
+    public static function owned(string $root): bool
+    {
+        $marker = self::marker($root);
+        return ($marker['pid'] ?? null) === getmypid() && ($marker['host'] ?? null) === (string)gethostname();
+    }
+
+    /** R23: whether another process holds the window open right now (an update or migration that is running). */
+    public static function heldElsewhere(string $root): bool
+    {
+        $path = self::path($root);
+        return !isset(self::$held[$path]) && is_file($path) && self::lockHeld($path);
     }
 
     public static function leave(string $root): void
@@ -122,6 +142,43 @@ final class MaintenanceMode
         $json = json_encode($marker, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
         if (!DataOverrides::atomicWrite($path, $json)) {
             throw new RuntimeException('Cannot write the maintenance marker ' . $path . '; the shop would keep serving during the update');
+        }
+    }
+
+    /** @param array<string,mixed> $marker */
+    private static function own(array $marker): array
+    {
+        return $marker + ['pid' => getmypid(), 'host' => (string)gethostname(), 'start' => self::startTime(getmypid())];
+    }
+
+    /**
+     * Write the new marker, then let go of the lock on the old one: readers see one of the two, always with a lock
+     * holder or a failed flag where there was one. Windows cannot rename over a file that is open, so there the lock
+     * goes first.
+     */
+    private static function replace(string $path, array $marker): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') self::release($path);
+        $old = self::$held[$path] ?? null;
+        unset(self::$held[$path]);
+        try {
+            self::write($path, $marker);
+        } finally {
+            if (is_resource($old)) {
+                flock($old, LOCK_UN);
+                fclose($old);
+            }
+        }
+    }
+
+    /** Lock the marker that is now on disk for as long as this process runs the step. */
+    private static function hold(string $path): void
+    {
+        $handle = @fopen($path, 'r');
+        if (is_resource($handle) && flock($handle, LOCK_EX | LOCK_NB)) {
+            self::$held[$path] = $handle;
+        } elseif (is_resource($handle)) {
+            fclose($handle);
         }
     }
 

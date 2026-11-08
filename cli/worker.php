@@ -165,7 +165,20 @@ $maxRuntime = 55; // seconds (cron runs every minute)
 $startTime = time();
 $processed = 0;
 
+// R23: an update, rollback, migration or restore may start while this run is in its loop (up to $maxRuntime): checked
+// before every pull and every job, the run stops and closes its database connection (an open SQLite connection made
+// the updater refuse its automatic rollback). Jobs not yet claimed wait for the next run.
+$maintenanceRoot = dirname(__DIR__);
+$maintenanceStarted = false;
+$stopForMaintenance = static function () use ($maintenanceRoot, &$maintenanceStarted, $verbose): bool {
+    if (!MaintenanceMode::active($maintenanceRoot)) return false;
+    if ($verbose && !$maintenanceStarted) echo "Maintenance started; worker stops.\n";
+    $maintenanceStarted = true;
+    return true;
+};
+
 do {
+    if ($stopForMaintenance()) break;
     $jobs = JobQueue::pull(5);
 
     if (empty($jobs)) {
@@ -176,6 +189,7 @@ do {
 
     $claimedAny = false;
     foreach ($jobs as $job) {
+        if ($stopForMaintenance()) break 2;
         // Skip jobs waiting for exponential backoff
         if (!JobQueue::isReady($job)) continue;
 
@@ -253,5 +267,6 @@ if (is_resource($lock)) {
     flock($lock, LOCK_UN);
     fclose($lock);
 }
+if ($maintenanceStarted) Db::reset();
 
 if ($verbose) echo "Worker done. Processed: {$processed} jobs.\n";
