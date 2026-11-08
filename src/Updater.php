@@ -275,6 +275,8 @@ final class Updater
                 }
             }
 
+            // R23: an updater killed from here on (no finally runs) leaves the shop closed with the rollback to run.
+            MaintenanceMode::arm($this->root, "update {$package->version()} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss");
             $mutated = true;
             foreach ($ready as $entry) {
                 if ($entry['action'] === 'write') {
@@ -364,6 +366,13 @@ final class Updater
     private function priorMaintenance(): ?array
     {
         if (!MaintenanceMode::active($this->root)) return null;
+        // R23: a window another process holds open (cli/migrate.php running) is not taken over: lifted at the end of
+        // this step, it opened the shop while that migration still ran.
+        if (MaintenanceMode::heldElsewhere($this->root) && !MaintenanceMode::failed($this->root)) {
+            $this->unlock();
+            throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? '')
+                . '); wait until that step ends, then retry');
+        }
         $modifiedAt = @filemtime(MaintenanceMode::path($this->root));
         return ['marker' => MaintenanceMode::marker($this->root), 'modified_at' => $modifiedAt === false ? time() : $modifiedAt];
     }
@@ -452,6 +461,8 @@ final class Updater
             MaintenanceMode::enter($this->root, 'rollback ' . $snapshotId);
             $entered = true;
             $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
+            MaintenanceMode::arm($this->root, "rollback {$snapshotId} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshotId} --force"
+                . ($databaseAt !== null ? ' --accept-data-loss' : ''));
             try {
                 $result = $this->restoreSnapshot($snapshotId, $force, $databaseAt !== null ? $this->numberingHighWater() : [], $touched);
             } catch (Throwable $e) {

@@ -77,6 +77,6 @@ try {
 $r21uReadme = preg_replace('/\s+/', ' ', (string)file_get_contents(dirname(TEST_CLI_DIR) . '/README.md'));
 $r21uMaint = preg_replace('/\s+/', ' ', (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/MaintenanceMode.php'));
 assert_true(str_contains($r21uReadme, 'A failed update or rollback is lifted only by the rollback the file names')
-    && str_contains($r21uReadme, 'it keeps blocking for an hour') && !str_contains($r21uMaint, 'the next successful `php cli/migrate.php apply`, update or rollback lifts it')
+    && str_contains($r21uReadme, 'a marker that keeps blocking for an hour') && !str_contains($r21uMaint, 'the next successful `php cli/migrate.php apply`, update or rollback lifts it')
     && str_contains($r21uMaint, 'only by the rollback its reason names'),
     'R21 docs: README and MaintenanceMode say which step lifts which failed window and how long a killed updater\'s marker blocks');

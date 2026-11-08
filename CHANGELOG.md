@@ -108,6 +108,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   stays listed in red on the admin order until it is handled. Low: cancelling a parcel now takes the order lock, so on
   MySQL a label created at the same moment can no longer stay active on the cancelled parcel; a label the carrier
   returns after the whole order was cancelled is cancelled at the carrier instead of being recorded as active.
+- **A killed update, rollback, migration or restore keeps the shop closed** (review round 23, medium). `apply`,
+  `rollback`, `cli/migrate.php apply` and now `cli/restore.php` mark their maintenance window failed, with the command
+  to run, right before their first change. A process killed half-way (SSH dropped, OOM killer, a migration timeout)
+  runs no clean-up: its plain marker used to expire after an hour, and the shop and worker then ran a mix of old and
+  new files over a half-migrated database. Such a window now stays until the named rollback, migration or restore
+  succeeds. The job worker checks maintenance before every pull and every job, so a run that started just before an
+  update stops within seconds (it went on for up to 55 s) and closes its SQLite connection, which had made the
+  automatic rollback after a failed migration refuse. `cli/migrate.php` and the updater refuse while another process
+  holds the window open (an update or migration that is running) instead of working under it and lifting it at the
+  end; `cli/migrate.php` lifts only its own marker. `cli/restore.php` closes the shop while it replaces the database
+  and files, refuses while an update or migration holds the window, and keeps a failed window it found. A failed
+  window is written before the lock on the old marker is let go.
 - **Invoice, admin and texts** (review round 22, low). A long item name on the PDF invoice wraps inside its column and
   is printed in full; it was cut at 32 characters and, after round 21 narrowed the column, capitals still ran into the
   quantity. Text width now follows Helvetica's character widths, and a word wider than its column is split. On a 390 px
