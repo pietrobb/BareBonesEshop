@@ -234,8 +234,12 @@ variable symbol (the order ID, also shown in admin *Awaiting payment*), message 
 due date. The account comes from `legal.name`, `legal.iban`, `legal.bic` and the
 optional `legal.bank` of the store in `stores.json` (Admin → Stores and seller). A store
 without a valid IBAN (missing, or wrong check digits as in the shipped sample stores) does
-not offer bank transfer at checkout at all. EUR orders also get a PAY by square QR code, generated
-locally as an inline SVG.
+not offer bank transfer at checkout at all. The instructions carry a payment QR code in the
+payer's standard, generated locally: the Czech SPAYD (QR Platba) for CZK, PAY by square for EUR
+from a Slovak address, and the SEPA EPC code (GiroCode) for EUR from any other country (an order
+without an address follows the store's `legal.country`). Other currencies get the text only. The
+pages show it as an inline SVG, the order confirmation and the payment reminder attach it as a PNG,
+and an invoice still to pay by transfer prints it beside the IBAN.
 
 ---
 

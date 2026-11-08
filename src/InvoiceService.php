@@ -2193,7 +2193,8 @@ final class InvoiceService
         }
 
         // Payment info
-        $ensureSpace(15);
+        $ensureSpace($settled || $creditNote ? 15 : 40); // an invoice to pay may carry the 30 mm payment QR
+        $qrBottom = null;
         $pdf->text(20, $y, $L['payment_method'] . ': ' . self::paymentText($invoice, $locale), ['size' => 9]);
         $y += 5;
         // A credit note is paid out by the seller: no seller IBAN to pay to. An invoice carries the variable
@@ -2205,9 +2206,10 @@ final class InvoiceService
             // R14 T18: cash on delivery is paid to the carrier; the IBAN read as a second request to pay.
             $pdf->text(20, $y, $L['iban'] . ': ' . $sellerSnap['iban'], ['size' => 9]);
             $y += 5;
+            $qrBottom = self::drawPaymentQr($pdf, $invoice, $sellerSnap, $customerSnap, $y - 9);
         }
         $pdf->text(20, $y, $L['variable_symbol'] . ': ' . self::variableSymbol($invoice), ['size' => 9]);
-        $y += 8;
+        $y = max($y + 8, $qrBottom ?? 0.0);
 
         // Footer (register note)
         if (!empty($sellerSnap['register_note'])) {
@@ -2223,6 +2225,35 @@ final class InvoiceService
      * of "CN-20260007" are those of invoice 20260007 (R17), so it is "9" + the last nine digits of its number. Invoice
      * numbers start with their year and invoice symbols are order IDs, so neither starts with 9 in practice.
      */
+    /**
+     * R23: the payment QR of an invoice still to pay by transfer (PaymentQr: SPAYD for CZK, PAY by square for EUR from
+     * Slovakia, the SEPA EPC code for EUR from elsewhere), 30 mm at the right of the payment lines. Returns the y below
+     * it, null when the invoice's currency has no QR standard.
+     */
+    private static function drawPaymentQr(MinimalPdf $pdf, array $invoice, array $sellerSnap, array $customerSnap, float $top): ?float
+    {
+        $due = preg_replace('/\D/', '', substr((string)($invoice['due_date'] ?? ''), 0, 10)) ?? '';
+        $qr = PaymentQr::for(['iban' => (string)$sellerSnap['iban'], 'bic' => (string)($sellerSnap['bic'] ?? ''),
+            'amount' => (int)$invoice['total_gross'], 'currency' => (string)$invoice['currency'],
+            'variable_symbol' => self::variableSymbol($invoice), 'due_date' => $due, 'note' => (string)$invoice['number'],
+            'beneficiary' => (string)($sellerSnap['name'] ?? '')], (string)($customerSnap['country'] ?? '') ?: (string)($sellerSnap['country'] ?? ''));
+        if ($qr['payload'] === '') return null;
+        $matrix = QrCode::matrix($qr['payload']);
+        $module = 30.0 / count($matrix);
+        foreach ($matrix as $row => $cells) {
+            // One rectangle per run of dark modules: fewer operators, no hairline gaps between neighbours.
+            $run = null;
+            foreach ($cells + [count($cells) => false] as $col => $dark) {
+                if ($dark && $run === null) $run = $col;
+                if (!$dark && $run !== null) {
+                    $pdf->rect(160 + $run * $module, $top + $row * $module, ($col - $run) * $module, $module, true);
+                    $run = null;
+                }
+            }
+        }
+        return $top + 30.0 + 4.0;
+    }
+
     public static function variableSymbol(array $invoice): string
     {
         if (($invoice['type'] ?? 'invoice') === 'credit_note') {
