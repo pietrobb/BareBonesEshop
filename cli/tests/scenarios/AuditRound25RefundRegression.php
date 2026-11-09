@@ -176,6 +176,53 @@ try {
         [...$o7Steps, PaymentService::refundedAmount($o7), $o7Late, $r25rItem($e['id']), array_sum($r25rCredits($o7))],
         'R25 refunds: a dashboard refund larger than an item refund still at Stripe is booked once — its own id reclaims the money the summary event matched to the item, which is completed only by its own result (was: 50.00 on the ledger for 46.00 refunded)');
 
+    // 7b. Review run 380: the same, but the item's job result (re_X succeeded) confirms the provisional booking before the
+    // dashboard refund's own event arrives.
+    $o7b = $r25rOrder('R25R-7B', 3);
+    $h = $r25rItemRefund($o7b, 0, 'r25r-7b');
+    $hRefund = R25rFakeStripe::refundIdOf('r25r-7b');
+    $dash7b = $h['amount'] + 400;
+    R25rFakeStripe::$during = static function () use ($o7b, $dash7b, $r25rCreditJobs): void {
+        PaymentService::bookCumulativeRefund($o7b, 'stripe', $dash7b, 'charge.refunded', 'stripe_refund_ch_r25r7b_' . $dash7b);
+        $r25rCreditJobs($o7b);
+    };
+    $r25rJob($o7b, $h);
+    $r25rCreditJobs($o7b);
+    $o7bSteps = [PaymentService::refundedAmount($o7b)];
+    PaymentService::bookProviderRefund($o7b, 'stripe', 're_r25r7b_dashboard', $dash7b, 'refund.updated', 'stripe_refund_re_r25r7b_dashboard');
+    $r25rCreditJobs($o7b);
+    $o7bSteps[] = PaymentService::refundedAmount($o7b);
+    $o7bSteps[] = PaymentService::bookCumulativeRefund($o7b, 'stripe', $dash7b + $h['amount'], 'charge.refunded', 'stripe_refund_ch_r25r7b_' . ($dash7b + $h['amount']));
+    $o7bSteps[] = PaymentService::bookProviderRefund($o7b, 'stripe', $hRefund, $h['amount'], 'refund.updated', 'stripe_refund_' . $hRefund . '_late',
+        stripeRefundKey(['metadata' => [StripePayment::REFUND_KEY_METADATA => 'r25r-7b']]));
+    $o7bSteps[] = PaymentService::bookProviderRefund($o7b, 'stripe', 're_r25r7b_dashboard', $dash7b, 'refund.updated', 'stripe_refund_re_r25r7b_dashboard_again');
+    $r25rCreditJobs($o7b);
+    assert_equals([$dash7b, $dash7b + $h['amount'], false, false, false, $dash7b + $h['amount'], ['succeeded', $hRefund], -($dash7b + $h['amount'])],
+        [...$o7bSteps, PaymentService::refundedAmount($o7b), $r25rItem($h['id']), array_sum($r25rCredits($o7b))],
+        'R25 refunds: a dashboard refund\'s own id after the item\'s job result confirmed the summary booking reclaims it and books the item\'s money under its own refund once (was: 50.00 on the ledger for 46.00 refunded)');
+
+    // 7c. The same, but an event naming the item's refund with its key confirms the provisional booking first.
+    $o7c = $r25rOrder('R25R-7C', 3);
+    $k = $r25rItemRefund($o7c, 0, 'r25r-7c');
+    $kRefund = R25rFakeStripe::refundIdOf('r25r-7c');
+    $dash7c = $k['amount'] + 400;
+    $o7cSteps = [];
+    R25rFakeStripe::$during = static function () use ($o7c, $k, $kRefund, $dash7c, $r25rCreditJobs, &$o7cSteps): void {
+        PaymentService::bookCumulativeRefund($o7c, 'stripe', $dash7c, 'charge.refunded', 'stripe_refund_ch_r25r7c_' . $dash7c);
+        $r25rCreditJobs($o7c);
+        $o7cSteps[] = PaymentService::bookProviderRefund($o7c, 'stripe', $kRefund, $k['amount'], 'refund.updated', 'stripe_refund_' . $kRefund,
+            stripeRefundKey(['metadata' => [StripePayment::REFUND_KEY_METADATA => 'r25r-7c']]));
+        $r25rCreditJobs($o7c);
+        PaymentService::bookProviderRefund($o7c, 'stripe', 're_r25r7c_dashboard', $dash7c, 'refund.updated', 'stripe_refund_re_r25r7c_dashboard');
+        $r25rCreditJobs($o7c);
+        $o7cSteps[] = PaymentService::refundedAmount($o7c);
+    };
+    $r25rJob($o7c, $k);
+    $r25rCreditJobs($o7c);
+    assert_equals([false, $dash7c + $k['amount'], $dash7c + $k['amount'], ['succeeded', $kRefund], -($dash7c + $k['amount'])],
+        [...$o7cSteps, PaymentService::refundedAmount($o7c), $r25rItem($k['id']), array_sum($r25rCredits($o7c))],
+        'R25 refunds: a dashboard refund\'s own id after an event naming the item\'s refund confirmed the summary booking is booked once, the item\'s money once under its own refund');
+
     // 8. The same, but Stripe declines the item refund: the summary's money was the dashboard refund alone.
     $o8 = $r25rOrder('R25R-8', 3);
     $g = $r25rItemRefund($o8, 0, 'r25r-8a');

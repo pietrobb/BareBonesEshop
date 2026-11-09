@@ -113,7 +113,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   another id (a dashboard refund) and does not fit the unexplained money reclaims that booking. Was: a 25.00 dashboard
   refund matched with a 21.00 item refund Stripe had not carried out yet left 4.00 unexplained, its own event booked
   25.00 again (50.00 on the ledger for 46.00 refunded), and the item's credit note was completed even if Stripe then
-  declined it.
+  declined it. This holds in whatever order the events arrive: when the item's result or its own event confirmed the
+  booking before the dashboard refund's event, that event still reclaims it, and the item's money is booked once under
+  its own refund (was: 25.00 booked again).
 - **A failed restore, update or rollback no longer reopens a shop left half-done** (review round 25). A
   `cli/restore.php` that failed before it replaced anything (a corrupt backup, a refused files archive) lifted the
   window an earlier interrupted restore had left, and the shop reopened on a half-restored database or files; it now

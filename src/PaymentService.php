@@ -1291,15 +1291,20 @@ class PaymentService {
         // refund ids booked provisionally as a shop refund the provider has not named yet: that booking is reclaimed (its
         // refund books its own money once its result names it), oldest first. Was: a 25.00 dashboard refund matched
         // with a 21.00 item refund still at Stripe left 4.00 unidentified, and its own event booked 25.00 again.
+        // R25 (review run 380): also one its own refund id confirmed already (the job's result or an event with its key came
+        // first): that refund happened, so its money is booked once under its own id now. Was: only an 'open' one, and the
+        // dashboard refund's event after the item's result booked 25.00 again.
         $reclaims = [];
+        $rebooks = [];
         if ($fresh && $key === '' && ($unidentified = self::unidentifiedRefunded($orderId)) < $amount) {
             foreach (self::provisionalRefundsWithin($orderId) as $part) {
-                if ($part['state'] !== 'open') continue;
+                if (!in_array($part['state'], ['open', 'confirmed'], true)) continue;
                 $reclaims[] = $part['ledger'];
+                if ($part['state'] === 'confirmed') $rebooks[] = $part;
                 $unidentified += $part['amount'];
                 if ($unidentified >= $amount) break;
             }
-            if ($unidentified < $amount) $reclaims = [];
+            if ($unidentified < $amount) $reclaims = $rebooks = [];
         }
         if ($fresh && ($key !== '' ? self::refundSettledByEvent($orderId, $key) : ($reclaims !== [] || $amount <= self::unidentifiedRefunded($orderId)))) {
             self::logTransaction(
@@ -1322,7 +1327,15 @@ class PaymentService {
             }
             // The reclaimed money was this refund, not an item refund: it corrects the invoice by a credit note of its own.
             foreach ($reclaims as $ledger) JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledger], 5);
-            return false;
+            // A reclaimed refund its own id confirmed is booked as that refund: no refund id on the row (its id is recorded
+            // as confirmed, refundAlreadyRecorded()), it settles its request, so its item refund's credit note stays the only one.
+            $rebooked = false;
+            foreach ($rebooks as $part) {
+                $rebooked = self::bookRefundWithin(Orders::byId($orderId) ?: $order, $provider, '', $part['amount'], $eventType, $part['ledger'] . '#own',
+                    ['refund_id' => $part['refund_id'], 'settles_refund_request' => $part['settles'] !== '' ? $part['settles'] : $part['execute'],
+                        'rebooks_reclaimed_refund' => $part['ledger']]) || $rebooked;
+            }
+            return $rebooked;
         }
         if ($key === '') return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload);
         // The shop's own refund, before its job's result: booked as the refund it executes, so the item refund's credit
@@ -1515,12 +1528,13 @@ class PaymentService {
      * R25 (review run 379): the refunds an event without refund ids booked before the provider named them
      * (bookCumulativeRefund()), oldest first. Each is 'open' until its own refund id confirms it ('confirmed': the refund
      * job's result, or an event carrying its refund key), 'failed' when its refund call failed (the money was another
-     * refund), 'reclaimed' when an event naming another refund id claimed the money (bookProviderRefundWithin()).
+     * refund), 'reclaimed' when an event naming another refund id claimed the money (bookProviderRefundWithin()). A
+     * confirmed one carries the refund id that confirmed it.
      *
-     * @return list<array{ledger:string, execute:string, amount:int, state:string}>
+     * @return list<array{ledger:string, execute:string, settles:string, amount:int, state:string, refund_id:string}>
      */
     private static function provisionalRefundsWithin(int $orderId): array {
-        $stmt = Db::get()->prepare("SELECT idempotency_key, status, amount, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
+        $stmt = Db::get()->prepare("SELECT idempotency_key, status, amount, provider_ref, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
             AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed', 'refund_failed', 'refund_canceled', 'refund_cancelled') ORDER BY id");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
         $parts = [];
@@ -1532,17 +1546,20 @@ class PaymentService {
             $raw = is_array($raw) ? $raw : [];
             $key = (string)$row['idempotency_key'];
             if ($row['status'] === 'refund_confirmed') {
-                $confirmed[$key] = true;
-                if (!empty($raw['identifies_booked_refund']) && (string)($raw['refund_key'] ?? '') !== '') $confirmed[(string)$raw['refund_key']] = true;
+                $confirmedBy = (string)($row['provider_ref'] ?? '');
+                $confirmed[$key] = $confirmedBy;
+                if (!empty($raw['identifies_booked_refund']) && (string)($raw['refund_key'] ?? '') !== '') $confirmed[(string)$raw['refund_key']] = $confirmedBy;
                 foreach ((array)($raw['reclaims'] ?? []) as $ledger) $reclaimed[(string)$ledger] = true;
             } elseif (in_array($row['status'], ['refund_failed', 'refund_canceled', 'refund_cancelled'], true)) {
                 $failed[$key] = true;
             } elseif ((string)($raw['provisional_refund'] ?? '') !== '') {
-                $parts[] = ['ledger' => $key, 'execute' => (string)$raw['provisional_refund'], 'amount' => (int)$row['amount']];
+                $parts[] = ['ledger' => $key, 'execute' => (string)$raw['provisional_refund'], 'settles' => (string)($raw['settles_refund_request'] ?? ''),
+                    'amount' => (int)$row['amount']];
             }
         }
         return array_map(static fn(array $p): array => $p + ['state' => isset($reclaimed[$p['ledger']]) ? 'reclaimed'
-            : (isset($confirmed[$p['execute']]) ? 'confirmed' : (isset($failed[$p['execute']]) ? 'failed' : 'open'))], $parts);
+            : (isset($confirmed[$p['execute']]) ? 'confirmed' : (isset($failed[$p['execute']]) ? 'failed' : 'open')),
+            'refund_id' => $confirmed[$p['execute']] ?? ''], $parts);
     }
 
     /** R25: whether the provisional refund booked under $ledgerKey turned out to be other money (reclaimed or failed). */
