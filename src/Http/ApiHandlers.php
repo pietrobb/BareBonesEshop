@@ -1185,7 +1185,8 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
             $refundId = (string)($refund['id'] ?? '');
             // Only money Stripe has returned: a pending refund (SEPA, bank transfers) may still fail; refund.updated books it.
             if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || (string)($refund['status'] ?? '') !== 'succeeded') continue;
-            PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId, $eventPayload);
+            PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId,
+                $eventPayload + stripeRefundKey($refund));
         }
     } else {
         PaymentService::bookCumulativeRefund($orderId, 'stripe', $refundedAmount, 'charge.refunded', 'stripe_refund_' . $chargeId . '_' . $refundedAmount, $eventPayload);
@@ -1221,6 +1222,12 @@ function stripeChargeRefunds(array $charge): ?array {
     return $gateway instanceof StripePayment ? $gateway->chargeRefunds((string)($charge['id'] ?? '')) : null;
 }
 
+/** R25: the shop's refund key a Stripe refund carries in its metadata (StripePayment::performRefund()), as the booking payload expects it. */
+function stripeRefundKey(array $refund): array {
+    $key = $refund['metadata'][StripePayment::REFUND_KEY_METADATA] ?? null;
+    return is_string($key) && $key !== '' ? ['refund_key' => $key] : [];
+}
+
 /** A Stripe refund changed state (refund.updated / charge.refund.updated): book it once it succeeded, release it when it failed. */
 function onRefundUpdated(array $refund, string $eventId): ?string {
     $paymentIntent = (string)($refund['payment_intent'] ?? '');
@@ -1238,7 +1245,7 @@ function applyStripeRefundUpdated(array $refund, string $eventId, int $orderId):
     $payload = ['charge_id' => (string)($refund['charge'] ?? ''), 'refund_status' => (string)$refund['status']];
     if ($refund['status'] === 'succeeded') {
         // Same key as charge.refunded books it under: whichever event comes first moves the money.
-        PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId, $payload);
+        PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId, $payload + stripeRefundKey($refund));
         $order = Orders::byId($orderId);
         if ($order && (string)$order['payment_status'] === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', "Stripe refund {$refundId} succeeded");
