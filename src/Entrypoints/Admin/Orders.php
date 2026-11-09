@@ -43,8 +43,7 @@ function pageSalesOverview(): void {
             (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
             (SELECT COUNT(*) FROM digital_entitlements de WHERE de.order_id = o.id) AS entitlement_count,
             (SELECT COALESCE(SUM(de.download_count), 0) FROM digital_entitlements de WHERE de.order_id = o.id) AS order_download_count,
-            (SELECT CASE WHEN el.status = 'sent' AND el.adapter = 'log' THEN 'logged' ELSE el.status END
-                FROM email_log el WHERE el.order_id = o.id ORDER BY el.id DESC LIMIT 1) AS email_status
+            (SELECT CASE WHEN el.status = 'sent' AND el.adapter = 'log' THEN 'logged' ELSE el.status END FROM email_log el WHERE el.order_id = o.id ORDER BY el.id DESC LIMIT 1) AS email_status
         FROM orders o
         WHERE {$whereSql}
         ORDER BY o.created_at DESC
@@ -449,8 +448,8 @@ function pageOrder(): void {
     <?php endif; ?>
 
     <?php
-    $emailStmt = Db::get()->prepare("SELECT id, template, locale, subject, adapter, status, error, sent_at, created_at
-                                     FROM email_log WHERE order_id = :oid ORDER BY id DESC LIMIT 20");
+    // R24: the log adapter only writes the mail down; it reached nobody, so it does not read "Sent".
+    $emailStmt = Db::get()->prepare("SELECT id, template, locale, subject, adapter, CASE WHEN status = 'sent' AND adapter = 'log' THEN 'logged' ELSE status END AS status, error, sent_at, created_at FROM email_log WHERE order_id = :oid ORDER BY id DESC LIMIT 20");
     $emailStmt->execute([':oid' => $id]);
     $emails = $emailStmt->fetchAll();
     ?>
@@ -460,8 +459,6 @@ function pageOrder(): void {
         <table>
             <tr><th><?= esc(I18n::t('admin.common.template')) ?></th><th><?= esc(I18n::t('admin.order.locale')) ?></th><th><?= esc(I18n::t('admin.order.subject')) ?></th><th><?= esc(I18n::t('admin.order.adapter')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.sent')) ?></th><th></th></tr>
             <?php foreach ($emails as $em): ?>
-            <?php // R24: the log adapter only writes the mail down; it reached nobody, so it does not read "Sent".
-            if ($em['status'] === 'sent' && $em['adapter'] === 'log') $em['status'] = 'logged'; ?>
             <tr>
                 <td><?= esc(adminCodeLabel('admin.email.tpl.', (string)$em['template'])) ?></td>
                 <td><?= esc($em['locale']) ?></td>
