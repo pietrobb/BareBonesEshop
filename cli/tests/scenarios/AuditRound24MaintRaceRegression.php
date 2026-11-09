@@ -109,7 +109,8 @@ try {
         . trim(substr($r24xMigrate['output'], -200)));
     assert_equals([true, [false, '']], $r24xEnterState,
         'R24 race: entering a window while another step runs is refused, and the marker is not written over (was: the later step overwrote it) — ' . $r24xEnter);
-    assert_true(str_contains($r24xRollback, 'Another maintenance window is open (a migration or restore is starting)'),
+    // R25: the refusal names the holder of the step lock (MaintenanceMode::busy()).
+    assert_true(str_contains($r24xRollback, 'Another maintenance window is open (step lock held by pid '),
         'R24 race: a rollback is refused while another step runs, before it looks at the window — ' . $r24xRollback);
     assert_equals([1, true, [false, '']], $r24xRestoreState,
         'R24 race: cli/restore.php is refused while another step runs — ' . trim(substr($r24xRestore['output'], -160)));

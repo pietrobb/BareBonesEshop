@@ -541,7 +541,10 @@ file on the window is marked failed, so one killed half-way keeps the shop close
 names the rollback to run. `php cli/migrate.php apply` and `php cli/restore.php` use
 the same window (and refuse while an update or migration holds it). These four steps
 take one lock, `.maintenance.lock`, before they look at the window, so only one of
-them runs at a time and none enters or lifts the window of another; a migration that
+them runs at a time and none enters or lifts the window of another (the file is
+created 0660; run as root, a step hands it to the owner and group of the application
+root, so the web user can take it after root; on a file system without file locks the
+steps run with a warning and must not be started together); a migration that
 fails or is killed, an update whose automatic rollback fails, or a rollback that stops
 after it began restoring marks the window failed: it never expires and the file says
 what to run. A worker run checks the window before every job and stops when it opens. A failed migration is lifted only by a
@@ -550,7 +553,12 @@ restores the database; an update or rollback of code only leaves that schema as 
 was and keeps the shop closed (it warns). A failed update or rollback is lifted only
 by the rollback the file names (`--snapshot=...`); any other update or rollback keeps
 the shop closed and warns, and `update_snapshots_keep` never deletes the snapshot the
-file names. Updates are rolled back newest first: a rollback is refused while an
+file names. A restore killed or failed half-way is lifted only by a restore that
+replaces at least as much (database, files or both); a restore that fails before
+it replaces anything leaves the window as it found it, and one that leaves pending
+migrations keeps the shop closed until `migrate.php apply`. A step that starts over a
+failed window carries that failure on in the file, so completing the step does not
+lift the earlier one. Updates are rolled back newest first: a rollback is refused while an
 update applied after its snapshot (or one half-applied, whose automatic rollback
 failed) is still installed, and it names the rollback to run first. A rollback puts
 the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so one

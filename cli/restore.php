@@ -135,50 +135,69 @@ if (!$yes && !$quiet) {
 $root = dirname(__DIR__);
 // R24: the step lock first (MaintenanceMode::claim()): checked and entered apart, an update or migration could start in between.
 if (!MaintenanceMode::claim($root) || MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
-    fwrite(STDERR, 'REFUSED: another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
+    fwrite(STDERR, 'REFUSED: another maintenance window is open (' . MaintenanceMode::busy($root)
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);
 }
+$markerPath = MaintenanceMode::path($root);
 $priorMarker = MaintenanceMode::failed($root) ? MaintenanceMode::marker($root) : null;
-$priorFailure = $priorMarker !== null ? (string)($priorMarker['reason'] ?? '') : null;
-$restoreCommand = 'php cli/restore.php ' . escapeshellarg($remotePath) . ($filesOnly ? ' --files-only' : ($withFiles ? ' --files' : ''));
+$priorAt = $priorMarker !== null ? (int)@filemtime($markerPath) : 0;
+// R25: the command a failed window names is run again as it was: without --force a killed files restore refused the
+// files it had half-written, without --i-stopped-writers a MySQL restore was refused.
+$restoreCommand = 'php cli/restore.php ' . escapeshellarg($remotePath) . ($filesOnly ? ' --files-only' : ($withFiles ? ' --files' : ''))
+    . ($withFiles && $force ? ' --force' : '') . (!$filesOnly && $writersStopped ? ' --i-stopped-writers' : '');
 // R24: a failed window that an interrupted or half-done restore left records what it was replacing (restore_scope: db,
 // files or both). A restore of any backup that replaces at least that completes it: it puts back the whole database
-// (and files), also from another backup or the pre-restore-snapshot. Matched on the backup it named, a restore of
-// another one kept the shop in maintenance for good. Less (the database after files) or any other failed window (a
-// migration, an update) stays.
+// (and files), also from another backup or the pre-restore-snapshot. Less (the database after files) or another step's
+// failure (a migration, an update; capability review run 375) stays, carried on under this run's window (pending_other).
+// R25: matched on those fields of every failure the window carries (MaintenanceMode::failures()), not its reason text.
 $scope = $filesOnly ? 'files' : ($withFiles ? 'both' : 'db');
-$priorScope = is_string($priorMarker['restore_scope'] ?? null) ? $priorMarker['restore_scope'] : null;
-// Capability review run 375: the failure of another step (an update, a migration) that a restore window covers. A restore
-// killed on top of it replaced the marker and dropped it, so the next covering restore reopened the shop on half-replaced
-// code or a half-migrated schema. Every restore window carries it on (pending_other) and puts it back when it ends.
-$pendingOther = $priorScope === null ? $priorFailure
-    : (is_string($priorMarker['pending_other'] ?? null) ? $priorMarker['pending_other'] : null);
-if ($priorScope !== null && ($scope === 'both' || $scope === $priorScope)) {
-    $priorFailure = $pendingOther;
-    $priorScope = null;
+$covers = static fn(string $done, array $failure): bool => isset($failure['restore_scope'])
+    && ($done === 'both' || $done === $failure['restore_scope']);
+$prior = $priorMarker !== null ? MaintenanceMode::failures($priorMarker) : [];
+$others = array_values(array_filter($prior, static fn(array $f): bool => !isset($f['restore_scope'])));
+// A failure of this run must not hide what an earlier restore still left half-done: its window covers that too.
+$failScope = $scope;
+foreach ($prior as $failure) {
+    if (isset($failure['restore_scope']) && !$covers($scope, $failure)) $failScope = 'both';
 }
-// A failure of this run must not hide what an earlier restore still left half-done, nor another step's failure.
-$failScope = $priorScope === null || $priorScope === $scope ? $scope : 'both';
-$earlier = $priorFailure !== null ? "; earlier: {$priorFailure}" : '';
-$failAbout = ['restore_scope' => $failScope] + ($pendingOther !== null ? ['pending_other' => $pendingOther] : []);
+$earlier = $prior !== [] ? '; earlier: ' . implode('; ', array_column($prior, 'reason')) : '';
+$failAbout = MaintenanceMode::about(['restore_scope' => $failScope], $others);
 MaintenanceMode::enter($root, 'cli/restore.php ' . $remotePath);
 // Killed from here on, the shop stays closed with what to run (no finally runs).
 MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again"
     . $earlier, $failAbout);
-$endWindow = static function (?string $halfDone) use ($root, $priorFailure, $priorScope, $pendingOther, $earlier, $failAbout): void {
+/**
+ * End the window. $done: what this run replaced completely (db, files, both; null: nothing). $halfDone: it left something
+ * half-replaced. R25: a run that replaced nothing (a corrupt backup, refused files) puts back the window it found, as it
+ * was: lifting the earlier restore failure there (same scope) opened the shop on a half-restored database or files.
+ */
+$endWindow = static function (?string $done, ?string $halfDone, int $pendingMigrations = 0) use ($root, $remotePath, $prior, $priorMarker, $priorAt, $covers, $earlier, $failAbout): void {
     if ($halfDone !== null) {
         MaintenanceMode::fail($root, $halfDone . $earlier, $failAbout);
         fwrite(STDERR, "The shop stays in maintenance (503) until that is resolved.\n");
-    } elseif (!MaintenanceMode::owned($root)) {
-        // Another step took the window over meanwhile; it is that step's to lift.
-    } elseif ($priorFailure !== null) {
-        MaintenanceMode::fail($root, $priorFailure, $priorScope === null ? []
-            : ['restore_scope' => $priorScope] + ($pendingOther !== null ? ['pending_other' => $pendingOther] : []));
-        fwrite(STDERR, "The shop stays in maintenance (503) for the earlier failed step: {$priorFailure}\n");
-    } else {
-        MaintenanceMode::leave($root);
+        return;
     }
+    if (!MaintenanceMode::owned($root)) {
+        MaintenanceMode::unclaim($root); // another step took the window over meanwhile; it is that step's to lift
+        return;
+    }
+    if ($done === null) {
+        if ($priorMarker !== null) {
+            MaintenanceMode::restore($root, $priorMarker, $priorAt);
+            fwrite(STDERR, "Nothing was replaced; the shop stays in maintenance (503) for: " . (string)($priorMarker['reason'] ?? '') . "\n");
+        } else {
+            MaintenanceMode::leave($root);
+        }
+        return;
+    }
+    $open = array_values(array_filter($prior, static fn(array $f): bool => !$covers($done, $f)));
+    // R25: a database older than the code (pending migrations) does not reopen the shop: the code would run on that schema.
+    if ($pendingMigrations > 0) {
+        $open[] = ['reason' => "cli/migrate.php: the database restored from {$remotePath} has {$pendingMigrations} pending migration(s) — run php cli/migrate.php apply"];
+    }
+    MaintenanceMode::settle($root, $open);
+    if ($open !== []) fwrite(STDERR, 'The shop stays in maintenance (503) for: ' . implode('; ', array_column($open, 'reason')) . "\n");
 };
 /** Whether a failed restore left something half-replaced (its own automatic rollback failed, or some files are written). */
 $leftHalfDone = static fn(Throwable $e): bool => $e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP
@@ -193,7 +212,7 @@ if (!$filesOnly) {
         ]);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'RESTORE FAILED: ' . $e->getMessage() . "\n");
-        $endWindow($leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null);
+        $endWindow(null, $leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null);
         exit(4);
     }
 
@@ -212,7 +231,9 @@ if ($withFiles) {
         $files = BackupService::restoreFiles($remotePath, ['force' => $force]);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'FILES RESTORE FAILED: ' . $e->getMessage() . "\n");
-        $endWindow($leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null);
+        // The database of a database + files run is replaced already: what it completes is lifted, the files are not.
+        $endWindow($filesOnly ? null : 'db', $leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null,
+            $filesOnly ? 0 : (int)$res['pending_count']);
         exit(5);
     }
     $emit('FILES OK ' . $files['archive']);
@@ -223,5 +244,5 @@ if ($withFiles) {
         fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");
     }
 }
-$endWindow(null);
+$endWindow($scope, null, $filesOnly ? 0 : (int)$res['pending_count']);
 exit(0);
