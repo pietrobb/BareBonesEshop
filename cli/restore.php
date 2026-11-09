@@ -133,7 +133,8 @@ if (!$yes && !$quiet) {
 // Whether that step still runs is told by its lock, not the failed flag: a running step marks its window failed (arm())
 // before its first change, so only a failed window that no process holds was left by a dead one.
 $root = dirname(__DIR__);
-if (MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
+// R24: the step lock first (MaintenanceMode::claim()): checked and entered apart, an update or migration could start in between.
+if (!MaintenanceMode::claim($root) || MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
     fwrite(STDERR, 'REFUSED: another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);

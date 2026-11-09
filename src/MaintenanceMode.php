@@ -19,15 +19,22 @@ declare(strict_types=1);
  *   (Updater::windowKept()). Any other step puts the failed window back.
  * - R23: an update, rollback, migration or restore marks its window failed (arm()) right before its first change, so
  *   one killed half-way leaves the shop closed with what to run instead of an expiring marker.
+ * - R24: those steps exclude each other through one step lock (claim(), <app root>/.maintenance.lock), taken before a
+ *   step looks at the window and held until it has left or failed it. Checking the marker's lock and then entering
+ *   left a gap: a migration and an update could both enter, and the migration ending first lifted the window of the
+ *   update still running.
  */
 final class MaintenanceMode
 {
     public const FILE = '.maintenance';
+    public const LOCK_FILE = '.maintenance.lock';
     public const STALE_AFTER = 3600;
     public const MAX_AGE = 86400;
 
     /** @var array<string,resource> marker path => the open handle this process holds the lock on */
     private static array $held = [];
+    /** @var array<string,resource> step lock path => the open handle of the step this process runs (claim()) */
+    private static array $claimed = [];
 
     public static function path(string $root): string
     {
@@ -63,8 +70,40 @@ final class MaintenanceMode
         return ($marker['failed'] ?? false) === true && str_starts_with((string)($marker['reason'] ?? ''), $by);
     }
 
+    /**
+     * R24: take the step lock for this process (kept until leave(), fail(), restore() or unclaim(); the kernel drops it
+     * when the process ends). False while another process runs a step: an update, rollback, migration or restore.
+     */
+    public static function claim(string $root): bool
+    {
+        $path = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . self::LOCK_FILE;
+        if (isset(self::$claimed[$path])) return true;
+        $handle = @fopen($path, 'c');
+        if (!is_resource($handle)) throw new RuntimeException('Cannot open the maintenance step lock ' . $path);
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+            return false;
+        }
+        self::$claimed[$path] = $handle;
+        return true;
+    }
+
+    /** R24: let go of the step lock (the step ended without leaving or failing its window: another step's, or none). */
+    public static function unclaim(string $root): void
+    {
+        $path = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . self::LOCK_FILE;
+        if (!isset(self::$claimed[$path])) return;
+        flock(self::$claimed[$path], LOCK_UN);
+        fclose(self::$claimed[$path]);
+        unset(self::$claimed[$path]);
+    }
+
     public static function enter(string $root, string $reason): void
     {
+        if (!self::claim($root)) {
+            throw new RuntimeException('Another maintenance step is running (' . (string)(self::marker($root)['reason'] ?? 'it has not opened its window yet')
+                . '); wait until that step ends, then retry');
+        }
         $path = self::path($root);
         self::replace($path, self::own(['since' => gmdate('c'), 'reason' => $reason]));
         self::hold($path);
@@ -91,6 +130,7 @@ final class MaintenanceMode
     public static function fail(string $root, string $reason, array $about = []): void
     {
         self::replace(self::path($root), ['since' => gmdate('c'), 'reason' => $reason, 'failed' => true, 'host' => (string)gethostname()] + $about);
+        self::unclaim($root);
     }
 
     /**
@@ -103,6 +143,7 @@ final class MaintenanceMode
         self::replace($path, $marker);
         @touch($path, $modifiedAt);
         clearstatcache(true, $path);
+        self::unclaim($root);
     }
 
     /** R23: whether the marker is the one this process wrote (another may have taken the window over since). */
@@ -124,6 +165,7 @@ final class MaintenanceMode
         $path = self::path($root);
         self::release($path);
         @unlink($path);
+        self::unclaim($root);
     }
 
     /** The answer to a web request during maintenance. */
