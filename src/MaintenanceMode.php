@@ -76,10 +76,10 @@ final class MaintenanceMode
      * STALE_AFTER on a mix of old and new files over a half-migrated database. The marker now says failed with what to
      * run ($reason) while this process still holds its lock; on its way out the step lifts or replaces it as before.
      */
-    public static function arm(string $root, string $reason): void
+    public static function arm(string $root, string $reason, array $about = []): void
     {
         $path = self::path($root);
-        self::replace($path, self::own(['since' => gmdate('c'), 'reason' => $reason, 'failed' => true]));
+        self::replace($path, self::own(['since' => gmdate('c'), 'reason' => $reason, 'failed' => true] + $about));
         self::hold($path);
     }
 
@@ -88,9 +88,9 @@ final class MaintenanceMode
      * failed): the marker no longer expires, and the reason says what to run. R23: written before the lock is let go,
      * so no reader sees an unlocked marker that is older than STALE_AFTER in between.
      */
-    public static function fail(string $root, string $reason): void
+    public static function fail(string $root, string $reason, array $about = []): void
     {
-        self::replace(self::path($root), ['since' => gmdate('c'), 'reason' => $reason, 'failed' => true, 'host' => (string)gethostname()]);
+        self::replace(self::path($root), ['since' => gmdate('c'), 'reason' => $reason, 'failed' => true, 'host' => (string)gethostname()] + $about);
     }
 
     /**
