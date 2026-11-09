@@ -109,6 +109,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (`bbe_refund_key`): a `refund.updated` or later `charge.refunded` naming the shop's refund before the job's result
   only identifies it (was: the money and a credit note twice), and the item refund keeps Stripe's `re_…` id as its
   payment reference instead of the webhook's ledger key.
+- **A failed restore, update or rollback no longer reopens a shop left half-done** (review round 25). A
+  `cli/restore.php` that failed before it replaced anything (a corrupt backup, a refused files archive) lifted the
+  window an earlier interrupted restore had left, and the shop reopened on a half-restored database or files; it now
+  puts that window back as it was, and only a restore that completes lifts it. The command the window names is the one
+  that ran, with `--force` and `--i-stopped-writers` (run again without them it was refused). A restore that leaves
+  pending migrations (an older backup) keeps the shop closed until `php cli/migrate.php apply` has run. An update or
+  rollback started over a failed window (a migration stopped half-way) carries that failure on: killed, its rollback no
+  longer reopens the shop on the half-migrated schema — also when that rollback restores the database, since the
+  update's snapshot was taken after the migration failed (`before_snapshots`). Which step lifts which failure is read from fields of the
+  `.maintenance` marker (`restore_scope`, `rollback_snapshot`, `pending_other`), no longer from its text, so a
+  restore's "earlier: … --snapshot=X" no longer lets a rollback of code only of X reopen it.
 - **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail
   provider with the order. An order placed while the shop only logged mail (the default before SMTP or SES is set up)
   kept sending every later e-mail (paid, shipped, invoice, refund) to the log, and the admin showed it as sent. Now
@@ -145,6 +156,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   application root, next to `.maintenance`), taken before they look at the window: while one runs, the others are
   refused with "Another maintenance window is open" and change nothing. The user that runs these commands creates the
   file and needs write access to it, as to `.maintenance`; the updater never replaces it.
+- **The maintenance step lock works for root and the web user alike** (review round 25). `.maintenance.lock` was
+  created 0644 by whoever ran a step first. Made by root, it shut the web user out (cron or a container running as
+  www-data: "Cannot open the maintenance step lock", every migrate, restore, update and rollback failed for good), and
+  any local account could open it to read and lock it, holding off every step with an empty reason. It is now created
+  0660, and a step run as root hands it (also an existing one) to the owner and group of the application root. A step
+  refused while another runs names the process that holds the lock. On a file system without file locks (NFS without
+  lock support, CIFS `nobrl`) the steps were refused for good; they now run with a warning that they must not be
+  started together. If www-data still cannot open the file, the error says its owner and mode and how to fix them.
 - **Payment QR in the payer's standard** (review round 23, UX). The bank-transfer QR was PAY by square only, the
   Slovak standard: a German customer's banking app could not read it, and a CZK order had no QR at all. Now a CZK
   order gets the Czech SPAYD (QR Platba), a EUR order from a Slovak address keeps PAY by square, and a EUR order

@@ -277,7 +277,10 @@ final class Updater
             }
 
             // R23: an updater killed from here on (no finally runs) leaves the shop closed with the rollback to run.
-            MaintenanceMode::arm($this->root, "update {$package->version()} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss");
+            // R25: on top of a failed window (a migration stopped half-way) that failure is carried on under this one: the
+            // rollback this marker names restores code only for an update without migrations and must not reopen the shop.
+            MaintenanceMode::arm($this->root, "update {$package->version()} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss",
+                self::carry($prior, $snapshot['id'], true));
             $mutated = true;
             foreach ($ready as $entry) {
                 if ($entry['action'] === 'write') {
@@ -310,7 +313,7 @@ final class Updater
             // R19: a failed window found before (a migration stopped half-way) is lifted only by an update that ran the
             // migrations; one of code only left the schema as it was and keeps the shop closed for what the marker says.
             $keepClosed = self::windowKept($prior, null, $package->runsMigrations());
-            if ($keepClosed !== null) $result['still_closed'] = $keepClosed;
+            if ($keepClosed !== []) $result['still_closed'] = $keepClosed[0]['reason'];
             $installed = true;
             return $result;
         } catch (Throwable $e) {
@@ -349,11 +352,11 @@ final class Updater
             // alone; one that changed nothing (or was rolled back) restores the window there was before (a failed one,
             // or the fresh marker of an updater killed half-way) or none.
             if ($halfDone !== null) {
-                MaintenanceMode::fail($this->root, $halfDone);
+                MaintenanceMode::fail($this->root, $halfDone, self::carry($prior, (string)$snapshot['id'], true));
             } elseif ($entered && !MaintenanceMode::owned($this->root)) {
                 // R23: another step took the window over meanwhile; it is that step's to lift.
-            } elseif ($installed && $keepClosed === null) {
-                MaintenanceMode::leave($this->root);
+            } elseif ($installed) {
+                MaintenanceMode::settle($this->root, $keepClosed ?? []);
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }
@@ -376,7 +379,7 @@ final class Updater
         }
         if (!$claimed) {
             $this->unlock();
-            throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? 'a migration or restore is starting')
+            throw new RuntimeException('Another maintenance window is open (' . MaintenanceMode::busy($this->root)
                 . '); wait until that step ends, then retry');
         }
     }
@@ -403,18 +406,43 @@ final class Updater
     }
 
     /**
-     * The reason of a failed window found before a successful update or rollback ($snapshotId) that this step leaves in
-     * place, null when it lifts it. A migration stopped half-way is lifted by a step that ran the migrations or restored
-     * the database ($resetsSchema); one of code only left that schema as it was. R21: a half-done update or rollback is
-     * lifted only by the rollback of the snapshot the marker names: a rollback of code only of another snapshot opened a
-     * shop whose files and database were still half-restored.
+     * The failures of a failed window found before a successful update or rollback ($snapshotId) that this step leaves
+     * open ([] when it lifts the window). A migration stopped half-way is lifted by a step that ran the migrations or
+     * restored the database ($resetsSchema); one of code only left that schema as it was. R21: a half-done update or
+     * rollback is lifted only by the rollback of the snapshot the marker names: a rollback of code only of another
+     * snapshot opened a shop whose files and database were still half-restored.
+     * R25: every failure the window carries counts (MaintenanceMode::failures()), matched on its fields: a restore's reason
+     * that quoted "; earlier: … --snapshot=X" let a rollback of code only of X lift a half-restored database. A restore
+     * left half-done is completed by a restore only.
+     * @return list<array{reason: string}>
      */
-    private static function windowKept(?array $prior, ?string $snapshotId, bool $resetsSchema): ?string
+    private static function windowKept(?array $prior, ?string $snapshotId, bool $resetsSchema): array
     {
-        if ($prior === null || ($prior['marker']['failed'] ?? false) !== true) return null;
-        $reason = (string)($prior['marker']['reason'] ?? '');
-        if (preg_match('/--snapshot=(\S+)/', $reason, $named)) return $named[1] === $snapshotId ? null : $reason;
-        return $resetsSchema ? null : $reason;
+        $failures = $prior !== null ? MaintenanceMode::failures($prior['marker']) : [];
+        return array_values(array_filter($failures, static fn(array $f): bool => isset($f['restore_scope'])
+            || (isset($f['rollback_snapshot']) ? $f['rollback_snapshot'] !== $snapshotId
+                : !$resetsSchema || in_array($snapshotId, $f['before_snapshots'] ?? [], true))));
+    }
+
+    /**
+     * R25: the marker fields of this step's failed window (rollback $snapshotId), carrying the failures of the window found
+     * before it (but the one this rollback runs again): arm() replaced that marker and dropped them, so the rollback the
+     * new one names reopened the shop over a schema a migration had stopped half-way on.
+     */
+    private static function carry(?array $prior, string $snapshotId, bool $takenAfter = false): array
+    {
+        $failures = $prior !== null ? MaintenanceMode::failures($prior['marker']) : [];
+        $carried = [];
+        foreach ($failures as $f) {
+            if (($f['rollback_snapshot'] ?? null) === $snapshotId) continue;
+            // An update's snapshot ($takenAfter) was taken over this failed migration: its database holds that schema, so
+            // its rollback does not complete the migration (windowKept()).
+            if ($takenAfter && !isset($f['restore_scope']) && !isset($f['rollback_snapshot'])) {
+                $f['before_snapshots'] = array_values(array_unique(array_merge($f['before_snapshots'] ?? [], [$snapshotId])));
+            }
+            $carried[] = $f;
+        }
+        return MaintenanceMode::about(['rollback_snapshot' => $snapshotId], $carried);
     }
 
     /** Back to the window there was before a step that changed nothing: any window that kept the shop closed stays. */
@@ -439,8 +467,8 @@ final class Updater
         try {
             $installed = (string)($this->readJson($this->statePath())['snapshot'] ?? '');
             // R22: the snapshot whose rollback a failed window names stays; deleted, the shop could never reopen.
-            $due = MaintenanceMode::failed($this->root)
-                && preg_match('/--snapshot=(\S+)/', (string)(MaintenanceMode::marker($this->root)['reason'] ?? ''), $named) ? $named[1] : '';
+            // R25: also those the failed window carries under its own.
+            $due = array_column(MaintenanceMode::failures(MaintenanceMode::marker($this->root)), 'rollback_snapshot');
             $kept = [];
             $prunable = [];
             $chain = [];
@@ -453,7 +481,7 @@ final class Updater
                 // (or their rollbacks) deleted the only database snapshot. The newest $keep with a database stay too.
                 $kind = $reason . (is_array($snapshot['database'] ?? null) ? ':database' : ':files');
                 $kept[$kind] = ($kept[$kind] ?? 0) + 1;
-                $prunable[$id] = $kept[$kind] > max(1, $keep) && $id !== $installed && $id !== $due;
+                $prunable[$id] = $kept[$kind] > max(1, $keep) && $id !== $installed && !in_array($id, $due, true);
                 if ($reason === 'pre-update' && in_array($snapshot['status'] ?? '', ['prepared', 'applied'], true)) $chain[] = $id;
             }
             // R23: a rollback restores only its own update's files, newest first. Deleting a code-only snapshot between
@@ -498,7 +526,7 @@ final class Updater
             $entered = true;
             $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
             MaintenanceMode::arm($this->root, "rollback {$snapshotId} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshotId} --force"
-                . ($databaseAt !== null ? ' --accept-data-loss' : ''));
+                . ($databaseAt !== null ? ' --accept-data-loss' : ''), self::carry($prior, $snapshotId));
             try {
                 $result = $this->restoreSnapshot($snapshotId, $force, $databaseAt !== null ? $this->numberingHighWater() : [], $touched);
             } catch (Throwable $e) {
@@ -513,20 +541,19 @@ final class Updater
             // half-way on as it was, so the shop stays closed for what the marker says (it was opened).
             $stillClosed = self::windowKept($prior, $snapshotId, $databaseAt !== null);
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice,
-                'still_closed' => $stillClosed];
+                'still_closed' => $stillClosed[0]['reason'] ?? null];
         } finally {
             // R18: only a completed restore lifts the window. A refused rollback (no --accept-data-loss, unknown
             // snapshot, changed files) puts back the window it found — failed, or the fresh one of an updater killed
             // half-way — or none; one that stopped after changing files or the database keeps the shop closed (no mix
             // of old and new files) and says what to run.
             if (!$restored && $entered && $touched && $halfDone !== null) {
-                MaintenanceMode::fail($this->root, $halfDone);
+                MaintenanceMode::fail($this->root, $halfDone, self::carry($prior, $snapshotId));
             } elseif ($entered && !MaintenanceMode::owned($this->root)) {
                 // R23: another step took the window over meanwhile; it is that step's to lift.
-            } elseif ($restored && $stillClosed !== null) {
-                $this->restoreMaintenance($prior);
             } elseif ($restored) {
-                MaintenanceMode::leave($this->root);
+                // R25: what it did not complete stays, the first shown and the rest carried under it.
+                MaintenanceMode::settle($this->root, $stillClosed ?? []);
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }

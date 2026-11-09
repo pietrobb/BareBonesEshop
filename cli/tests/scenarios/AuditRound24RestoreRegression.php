@@ -147,7 +147,7 @@ try {
     // The reason the test kills with is the one cli/restore.php arms with.
     $r24rCli = (string)file_get_contents($r24rRepo . '/cli/restore.php');
     assert_true(str_contains($r24rCli, 'MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again"')
-        && str_contains($r24rCli, "\$failAbout = ['restore_scope' => \$failScope]"),
+        && str_contains($r24rCli, "\$failAbout = MaintenanceMode::about(['restore_scope' => \$failScope]"), // R25: + the carried failures
         'R24 restore: cli/restore.php arms its window with the reason and restore_scope this test simulates');
 } catch (Throwable $e) {
     assert_true(false, 'R24 restore (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');

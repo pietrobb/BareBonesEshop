@@ -9,8 +9,12 @@
  */
 final class FileOwnership
 {
-    /** @param resource $handle the staged file, still open */
-    public static function handOver($handle, string $path, ?int $uid, ?int $gid): void
+    /**
+     * @param resource $handle the staged file, still open
+     * @param int|null $mode R25: also set these permission bits — through the descriptor only (chmod follows a symlink and
+     *                       PHP has no fchmod); without /proc they stay as the file was created
+     */
+    public static function handOver($handle, string $path, ?int $uid, ?int $gid, ?int $mode = null): void
     {
         $descriptor = self::descriptorPath($handle);
         if ($descriptor === null && !self::hardlinksProtected()) {
@@ -24,6 +28,9 @@ final class FileOwnership
         }
         if ($gid !== null && !@$group($target, $gid)) {
             throw new RuntimeException("Cannot set the group of {$path}");
+        }
+        if ($mode !== null && $descriptor !== null && !@chmod($descriptor, $mode)) {
+            throw new RuntimeException("Cannot set the permissions of {$path}");
         }
     }
 
