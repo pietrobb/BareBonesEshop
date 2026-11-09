@@ -758,6 +758,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_error' => 'Hiba a visszatérítési kérelem létrehozásakor.',
     'admin.order.msg.email_resend_refused' => 'Az e-mail nem küldhető el újra.',
     'admin.order.msg.email_resent' => 'Az e-mail újra elküldve ({adapter}).',
+    'admin.order.msg.email_logged' => 'Az e-mail csak a naplóba került ({adapter}); senki sem kapta meg. A küldést az E-mail küldés menüben állítsa be.',
     'admin.order.msg.email_failed' => 'Az e-mailt nem sikerült elküldeni: {error}',
     'admin.order.msg.unknown_error' => 'ismeretlen hiba',
     'admin.order.msg.email_resend_error' => 'Hiba az e-mail újraküldésekor.',

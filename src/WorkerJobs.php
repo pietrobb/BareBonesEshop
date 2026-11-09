@@ -15,12 +15,21 @@ final class WorkerJobs
      * R24: the provider an order's e-mail goes out through. Checkout freezes the mail provider with the others, but an
      * order placed before the shop's SMTP was set up froze 'log' (the default, which only writes the mail to the log):
      * its payment, shipping and invoice mails went to the log for good, reported as sent. The mail transport is no term
-     * of the order, so 'log' (or a provider no longer installed) gives way to the one configured now. $frozen: a job's own.
+     * of the order, so 'log' (or a provider no longer installed) gives way to the one configured now.
+     * R25: so does a real one. An order frozen on SMTP still mailed real customers after the shop was switched to 'log'
+     * (a staging copy of the database), and one frozen on SES failed every attempt once the shop moved to SMTP. Every
+     * order mail goes through the provider configured now; the order's frozen code (and a job's _provider_code) is not consulted.
+     * A MAIL_ADAPTER naming no installed provider writes the mail to the log (it reaches nobody) and raises an incident,
+     * instead of failing every order mail (R24) or sending through a provider nobody chose.
      */
-    public static function orderMailProvider(?array $order, string $frozen = ''): string {
-        $code = strtolower($frozen !== '' ? $frozen : ($order ? self::orderProviderCode($order, 'mail') : ''));
-        if ($code === '' || $code === 'log' || !isset(Adapters::registry('mail')[$code])) return Adapters::defaultProviderCode('mail');
-        return $code;
+    public static function orderMailProvider(?array $order): string {
+        try {
+            return Adapters::defaultProviderCode('mail');
+        } catch (\RuntimeException $e) {
+            Logger::error('mail provider misconfigured; order mail written to the log', ['error' => $e->getMessage()]);
+            IncidentMonitor::report('mail.provider_invalid', 'mail', 'critical', $order ? ['order_id' => (int)$order['id']] : []);
+            return 'log';
+        }
     }
 
     /**
@@ -112,8 +121,8 @@ final class WorkerJobs
             }
         }
 
-        // Retry with the provider frozen on the order; legacy jobs use the current default.
-        $providerCode = self::orderMailProvider($order, (string)($payload['_provider_code'] ?? ''));
+        // R25: the provider configured now (orderMailProvider()), not one frozen on the order or the job.
+        $providerCode = self::orderMailProvider($order);
         // The confirmation carries the terms valid at the time of the order on a durable medium (Directive 2011/83/EU art. 8(7)).
         $attachments = $template === 'order_confirmation' && $order ? [ConsumerNotice::termsAttachment($order, $locale ?: (string)($order['locale'] ?? 'en'))] : [];
         // R23: the payment QR travels as a PNG (mail clients show no inline SVG) with the transfer instructions.

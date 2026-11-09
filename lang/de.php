@@ -758,6 +758,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_error' => 'Fehler beim Erstellen der Erstattungsanfrage.',
     'admin.order.msg.email_resend_refused' => 'Die E-Mail kann nicht erneut gesendet werden.',
     'admin.order.msg.email_resent' => 'E-Mail erneut gesendet ({adapter}).',
+    'admin.order.msg.email_logged' => 'Die E-Mail wurde nur ins Protokoll geschrieben ({adapter}); niemand hat sie erhalten. Richten Sie den Versand unter E-Mail-Versand ein.',
     'admin.order.msg.email_failed' => 'Die E-Mail konnte nicht gesendet werden: {error}',
     'admin.order.msg.unknown_error' => 'unbekannter Fehler',
     'admin.order.msg.email_resend_error' => 'Fehler beim erneuten Senden der E-Mail.',

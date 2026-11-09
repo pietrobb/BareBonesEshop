@@ -138,6 +138,7 @@ class Complaints {
             'seller_name' => (string)($seller['name'] ?? ''),
             'seller_email' => (string)($seller['email'] ?? ''),
         ], (int)$complaint['order_id']);
-        return (string)($result['status'] ?? 'failed');
+        // R25: 'logged' when the log provider only wrote it down: the page and the admin do not say it was sent.
+        return MailService::shownStatus($result);
     }
 }

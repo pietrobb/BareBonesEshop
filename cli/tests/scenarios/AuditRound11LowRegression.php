@@ -190,7 +190,7 @@ try {
     $pdo->prepare("INSERT INTO shipments (store_id, order_id, status, carrier, tracking_number, tracking_url, idempotency_key, shipped_at) VALUES ('default', ?, 'shipped', 'packeta', 'Z1100', NULL, ?, ?)")
         ->execute([$r11lOrderId, 'r11l-ship-' . $r11lOrderId, gmdate('Y-m-d H:i:s')]);
     LogMail::clearCaptured();
-    MailService::useAdapter(new LogMail(['log_file' => TEST_CLI_DIR . '/../db/emails.test.log']));
+    MailService::useAdapter(new LogMail(['log_file' => test_fixture_path('test-mail') . '/emails.log']));
     WorkerJobs::handleEmailSend(['template' => 'order_shipped', 'to' => 'r11l-buyer@example.test', 'order_id' => $r11lOrderId], []);
     $r11lMail = (string)(LogMail::lastCaptured()['html'] ?? '');
     assert_true(str_contains($r11lMail, 'prepravcovi Packeta (Zásielkovňa)') && !str_contains($r11lMail, 'prepravcovi packeta'),

@@ -919,6 +919,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_error' => 'Error al crear la solicitud de reembolso.',
     'admin.order.msg.email_resend_refused' => 'El correo no se puede volver a enviar.',
     'admin.order.msg.email_resent' => 'Correo enviado de nuevo ({adapter}).',
+    'admin.order.msg.email_logged' => 'El correo solo se escribió en el registro ({adapter}); nadie lo recibió. Configure el envío en Envío de correo.',
     'admin.order.msg.email_failed' => 'No se pudo enviar el correo: {error}',
     'admin.order.msg.unknown_error' => 'error desconocido',
     'admin.order.msg.email_resend_error' => 'Error al volver a enviar el correo.',

@@ -100,6 +100,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
+  shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
+  database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out
+  through the provider set in Admin → E-mail delivery (or `MAIL_ADAPTER`) when it is sent. A `MAIL_ADAPTER` naming no
+  installed provider writes the mail to the log and raises a critical `mail.provider_invalid` incident instead of
+  failing every order e-mail. Mail the log provider only wrote down no longer reads as sent anywhere: the withdrawal
+  and complaint confirmation pages and admin screens, merchant notifications, the admin "resend" message and the GDPR
+  export say "logged".
 - **A Stripe refund is booked once, also when Stripe reports several refunds together** (review round 25). A
   `charge.refunded` without its refund list is matched against the set of the shop's refunds in flight whose sum it
   holds (was: only one of exactly that amount — two item refunds of 21.00 reported as 42.00 ended with 84.00 on the

@@ -387,9 +387,11 @@ class GdprService {
             ];
         }
 
-        // Unverified accounts may see only mail linked to their own orders.
+        // Unverified accounts may see only mail linked to their own orders. R25: mail the log provider only wrote down
+        // reached nobody; the export does not tell the customer it was sent.
         $stmt = $db->prepare("
-            SELECT id, order_id, recipient, template, locale, subject, adapter, status, sent_at, created_at
+            SELECT id, order_id, recipient, template, locale, subject, adapter,
+                CASE WHEN status = 'sent' AND adapter = 'log' THEN 'logged' ELSE status END AS status, sent_at, created_at
             FROM email_log WHERE store_id = :log_store AND LOWER(recipient) = LOWER(:recipient_email)
               AND (order_id IN (" . self::CUSTOMER_ORDERS . ") OR (order_id IS NULL AND :unlinked_verified = '1')) ORDER BY id ASC
         ");

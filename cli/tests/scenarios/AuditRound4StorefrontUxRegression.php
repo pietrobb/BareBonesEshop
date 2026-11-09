@@ -125,7 +125,7 @@ try {
     assert_equals(['carrier' => 'DPD', 'tracking_number' => 'R4TRACK1', 'tracking_url' => 'https://track.example/R4TRACK1'], Fulfillment::latestTracking($r4OrderId),
         'R4 tracking: the latest shipped shipment with tracking details is used');
     LogMail::clearCaptured();
-    MailService::useAdapter(new LogMail(['log_file' => TEST_CLI_DIR . '/../db/emails.test.log']));
+    MailService::useAdapter(new LogMail(['log_file' => test_fixture_path('test-mail') . '/emails.log']));
     WorkerJobs::handleEmailSend(['template' => 'order_shipped', 'to' => 'r4-buyer@example.test', 'order_id' => $r4OrderId], []);
     $r4Mail = (string)(LogMail::lastCaptured()['html'] ?? '');
     assert_true(str_contains($r4Mail, 'DPD') && str_contains($r4Mail, 'R4TRACK1') && str_contains($r4Mail, 'href="https://track.example/R4TRACK1"'),

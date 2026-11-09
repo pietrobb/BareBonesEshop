@@ -765,6 +765,7 @@ return [
     'admin.order.msg.refund_error' => 'Chyba pri vytváraní refund požiadavky.',
     'admin.order.msg.email_resend_refused' => 'Email nemožno opätovne odoslať.',
     'admin.order.msg.email_resent' => 'Email opätovne odoslaný ({adapter}).',
+    'admin.order.msg.email_logged' => 'E-mail sa iba zapísal do logu ({adapter}); nikto ho nedostal. Odosielanie nastavte v časti Odosielanie e-mailov.',
     'admin.order.msg.email_failed' => 'Email sa nepodarilo odoslať: {error}',
     'admin.order.msg.unknown_error' => 'neznáma chyba',
     'admin.order.msg.email_resend_error' => 'Chyba pri opätovnom odosielaní emailu.',

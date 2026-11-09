@@ -54,7 +54,8 @@ class MerchantNotifier {
                 if (($result['status'] ?? '') !== 'sent') {
                     throw new RuntimeException((string)($result['error'] ?? 'Mail send failed'));
                 }
-                self::finish($orderId, $event, $recipient, 'sent', '');
+                // R25: the log provider only wrote it down; the merchant was not told, so it is not recorded as sent.
+                self::finish($orderId, $event, $recipient, MailService::shownStatus($result), '');
                 $sent++;
             } catch (Throwable $e) {
                 self::finish($orderId, $event, $recipient, 'failed', $e->getMessage());

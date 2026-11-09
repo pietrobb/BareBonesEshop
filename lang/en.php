@@ -760,6 +760,7 @@ return [
     'admin.order.msg.refund_error' => 'Error while creating the refund request.',
     'admin.order.msg.email_resend_refused' => 'The email cannot be sent again.',
     'admin.order.msg.email_resent' => 'Email sent again ({adapter}).',
+    'admin.order.msg.email_logged' => 'The e-mail was only written to the log ({adapter}); nobody received it. Set up sending in E-mail delivery.',
     'admin.order.msg.email_failed' => 'The email could not be sent: {error}',
     'admin.order.msg.unknown_error' => 'unknown error',
     'admin.order.msg.email_resend_error' => 'Error while sending the email again.',

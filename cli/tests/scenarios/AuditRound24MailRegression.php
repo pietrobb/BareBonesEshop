@@ -44,10 +44,11 @@ try {
     putenv('SMTP_PORT=9');
     putenv('SMTP_ENCRYPTION=none');
     putenv('MAIL_FROM=shop@r24m.example.eu');
-    assert_equals(['smtp', 'smtp', 'ses', 'smtp', 'smtp'],
-        [WorkerJobs::orderMailProvider($r24mOld), WorkerJobs::orderMailProvider($r24mOld, 'log'), WorkerJobs::orderMailProvider($r24mOrder('ses')),
+    // R25: a frozen real provider (SES) gives way too (AuditRound25MailRegression).
+    assert_equals(['smtp', 'smtp', 'smtp', 'smtp'],
+        [WorkerJobs::orderMailProvider($r24mOld), WorkerJobs::orderMailProvider($r24mOrder('ses')),
          WorkerJobs::orderMailProvider($r24mOrder('r24-uninstalled')), WorkerJobs::orderMailProvider(null)],
-        'R24 mail: a frozen \'log\' (also a job\'s own) or a provider no longer installed gives way to the configured one; a frozen SES stays');
+        'R24 mail: a frozen \'log\' or a provider no longer installed gives way to the configured one');
     $r24mError = '';
     try {
         WorkerJobs::handleEmailSend(['template' => 'order_shipped', 'to' => $r24mOld['customer_email'], 'order_id' => (int)$r24mOld['id'], '_provider_code' => 'log'], []);

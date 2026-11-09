@@ -1139,7 +1139,7 @@ assert_equals('YES', $ifTpl, 'Email: {{#if}} includes truthy, excludes falsy');
 
 echo "\n--- Test: Email — LogMail adapter captures message ---\n";
 LogMail::clearCaptured();
-MailService::useAdapter(new LogMail(['log_file' => TEST_CLI_DIR . '/../db/emails.test.log']));
+MailService::useAdapter(new LogMail(['log_file' => test_fixture_path('test-mail') . '/emails.log']));
 $originalMailFrom = getenv('MAIL_FROM');
 $originalServerName = $_SERVER['SERVER_NAME'] ?? null;
 putenv('MAIL_FROM=');
@@ -1237,7 +1237,7 @@ assert_equals('skipped', $resendWrongOrder['status'], 'G4: resend cannot use an 
 
 echo "\n--- Test: Email — worker handleEmailSend end-to-end via OrderWorkflow ---\n";
 LogMail::clearCaptured();
-MailService::useAdapter(new LogMail(['log_file' => TEST_CLI_DIR . '/../db/emails.test.log']));
+MailService::useAdapter(new LogMail(['log_file' => test_fixture_path('test-mail') . '/emails.log']));
 
 // Create an order ready to be paid → triggers order_paid email
 $emProduct = Products::bySku('TSHIRT-BLK-M');

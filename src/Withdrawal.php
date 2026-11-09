@@ -216,7 +216,8 @@ class Withdrawal {
             'seller_name' => (string)($seller['name'] ?? ''),
             'seller_email' => (string)($seller['email'] ?? ''),
         ], (int)$order['id']);
-        $status = (string)($result['status'] ?? 'failed');
+        // R25: 'logged' when the log provider only wrote it down: the page and the admin do not say it was sent.
+        $status = MailService::shownStatus($result);
         Db::get()->prepare('UPDATE withdrawal_requests SET confirmation_status = ? WHERE id = ?')->execute([$status, $id]);
         return $status;
     }
