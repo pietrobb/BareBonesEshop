@@ -102,7 +102,9 @@ try {
                 // R23: an update, rollback or other migration that is running holds its window; migrating under it and
                 // lifting it at the end opened the shop in the middle of that step. Held is held, failed-marked or not:
                 // a running step marks its window failed (arm()) before its first change.
-                if (!$ownMaintenance && MaintenanceMode::heldElsewhere($root)) {
+                // R24: the step lock first (MaintenanceMode::claim()): an update entering between this check and enter() was
+                // overwritten by this migration's window, which then lifted it while the update still ran.
+                if (!MaintenanceMode::claim($root) || (!$ownMaintenance && MaintenanceMode::heldElsewhere($root))) {
                     throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
                         . '); no migration ran. Wait until that step ends, then run php cli/migrate.php apply again');
                 }
@@ -146,7 +148,9 @@ try {
             }
             // Every migration is applied: a window this run opened, or one a failed run left, ends here.
             // R23: only while the marker is still this run's own — never the window of an update that took over meanwhile.
-            if ($ownMaintenance ? MaintenanceMode::owned($root) : MaintenanceMode::failed($root, 'cli/migrate.php')) MaintenanceMode::leave($root);
+            // R24: a failed migration window is lifted only under the step lock: an update that took it over may be running.
+            if ($ownMaintenance ? MaintenanceMode::owned($root) : MaintenanceMode::failed($root, 'cli/migrate.php') && MaintenanceMode::claim($root)) MaintenanceMode::leave($root);
+            MaintenanceMode::unclaim($root);
             $n = count($applied);
             echo $n === 0 ? "Nothing to apply.\n" : "Applied {$n} migration(s).\n";
             break;

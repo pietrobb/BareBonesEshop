@@ -4,7 +4,7 @@ final class Updater
 {
     private const STATE_FILE = 'installed.json';
     // stores.json is the merchant's (since 2.1 git tracks only stores.example.json): no package may write or delete it.
-    private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json', 'stores.json', MaintenanceMode::FILE];
+    private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json', 'stores.json', MaintenanceMode::FILE, MaintenanceMode::LOCK_FILE];
     private const PROTECTED_PREFIXES = [
         '.git/', '.worktrees/', '.claude/', '.playwright-mcp/',
         'cache/', 'db/', 'extensions/', 'jobs/', 'logs/', 'storage/', 'uploads/',
@@ -244,6 +244,7 @@ final class Updater
         $entered = false;
         $installed = false;
         $keepClosed = null;
+        $this->claimStep();
         $prior = $this->priorMaintenance();
         try {
             $report = $this->check($package);
@@ -356,7 +357,27 @@ final class Updater
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }
+            MaintenanceMode::unclaim($this->root);
             $this->unlock();
+        }
+    }
+
+    /**
+     * R24: the step lock update, rollback, cli/migrate.php apply and cli/restore.php share, taken before the window is
+     * looked at: checked and entered apart, a migration could enter between and lift the window of this running update.
+     */
+    private function claimStep(): void
+    {
+        try {
+            $claimed = MaintenanceMode::claim($this->root);
+        } catch (Throwable $e) {
+            $this->unlock();
+            throw $e;
+        }
+        if (!$claimed) {
+            $this->unlock();
+            throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? 'a migration or restore is starting')
+                . '); wait until that step ends, then retry');
         }
     }
 
@@ -372,6 +393,7 @@ final class Updater
         // this step, it opened the shop while that migration still ran. Held is held, failed-marked or not: a running
         // step marks its window failed (arm()) before its first change; only an unheld failed window is a dead run's.
         if (MaintenanceMode::heldElsewhere($this->root)) {
+            MaintenanceMode::unclaim($this->root);
             $this->unlock();
             throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? '')
                 . '); wait until that step ends, then retry');
@@ -462,6 +484,7 @@ final class Updater
         $restored = false;
         $halfDone = null;
         $stillClosed = null;
+        $this->claimStep();
         $prior = $this->priorMaintenance();
         try {
             $metadata = $this->snapshotMetadata($snapshotId);
@@ -507,6 +530,7 @@ final class Updater
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }
+            MaintenanceMode::unclaim($this->root);
             $this->unlock();
         }
     }
