@@ -100,6 +100,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A Stripe refund is booked once, also when Stripe reports several refunds together** (review round 25). A
+  `charge.refunded` without its refund list is matched against the set of the shop's refunds in flight whose sum it
+  holds (was: only one of exactly that amount — two item refunds of 21.00 reported as 42.00 ended with 84.00 on the
+  ledger of a 42.00 order, and an item refund plus a 5.00 dashboard refund left the payment `refunded`). Only refunds
+  whose job has called Stripe count, so a dashboard refund of the same sum no longer completes an item refund still
+  queued. What it books never exceeds the order total. Stripe refunds carry the shop's refund key in their metadata
+  (`bbe_refund_key`): a `refund.updated` or later `charge.refunded` naming the shop's refund before the job's result
+  only identifies it (was: the money and a credit note twice), and the item refund keeps Stripe's `re_…` id as its
+  payment reference instead of the webhook's ledger key.
 - **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail
   provider with the order. An order placed while the shop only logged mail (the default before SMTP or SES is set up)
   kept sending every later e-mail (paid, shipped, invoice, refund) to the log, and the admin showed it as sent. Now

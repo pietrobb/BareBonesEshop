@@ -5,6 +5,9 @@
  * Zero external dependencies — curl only.
  */
 class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, CancellablePaymentAdapter, SignedWebhookPaymentAdapter {
+    /** The refund metadata key that carries the shop's refund key (the payment_refund job's idempotency key). */
+    public const REFUND_KEY_METADATA = 'bbe_refund_key';
+
     private string $secretKey;
     private string $webhookSecret;
 
@@ -132,6 +135,9 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
     private function performRefund(string $paymentId, int $amount, ?string $idempotencyKey): array {
         $params = ['payment_intent' => $paymentId];
         if ($amount > 0) $params['amount'] = $amount;
+        // R25: the shop's refund key travels with the refund, so a refund.updated or charge.refunded naming this refund is
+        // recognised as the shop's own (PaymentService::bookProviderRefund()), also before this call's result is booked.
+        if ($idempotencyKey !== null) $params['metadata'] = [self::REFUND_KEY_METADATA => $idempotencyKey];
         $headers = $idempotencyKey === null ? [] : ['Idempotency-Key: ' . hash('sha256', $idempotencyKey)];
         $response = $this->apiCall('POST', '/v1/refunds', $params, $headers);
         return [

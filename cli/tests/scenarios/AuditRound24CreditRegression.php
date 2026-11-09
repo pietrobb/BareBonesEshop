@@ -16,8 +16,13 @@ JobQueue::setDir(test_fixture_path('r24c-jobs'));
 (require TEST_CLI_DIR . '/../migrations/20261012090000_operational_incidents.php')->up($pdo, true);
 if (!class_exists('R24cFakeStripe', false)) {
     class R24cFakeStripe extends StripePayment {
+        /** R25: what Stripe reports (webhooks) while this refund call is in flight, before its result is booked. */
+        public static ?Closure $during = null;
         public function __construct() { parent::__construct([]); }
         public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array {
+            $during = self::$during;
+            self::$during = null;
+            if ($during !== null) $during();
             return ['refund_id' => 're_r24c_' . substr(sha1($idempotencyKey), 0, 10), 'status' => 'succeeded'];
         }
     }
@@ -68,16 +73,17 @@ try {
     $credit = InvoiceService::credit($invoiceId, (int)$rma, [$rmaItem => 1], 'r24c-item');
     $amount = -(int)$credit['total_gross'];
     $before = $r24cLast();
-    PaymentService::bookCumulativeRefund($r24cItemOrder, 'stripe', $amount, 'charge.refunded', 'stripe_refund_ch_r24c1_' . $amount, ['charge_id' => 'ch_r24c1']);
-    $r24cCreditJobs($r24cItemOrder, $before);
-    assert_equals([[(int)$credit['total_gross']], 'succeeded', 'partially_refunded'],
-        [$r24cCredits($r24cItemOrder), (string)$pdo->query('SELECT status FROM order_refunds WHERE id = ' . (int)$credit['refund_id'])->fetchColumn(),
-            (string)Orders::byId($r24cItemOrder)['payment_status']],
-        'R24 credit: a cumulative charge.refunded of the item refund in flight completes it, and the item credit note stays the only one (was: a second credit note)');
-
-    $before = $r24cLast();
+    $r24cDuring = [];
+    R24cFakeStripe::$during = static function () use (&$r24cDuring, $r24cItemOrder, $amount, $credit, $before, $r24cCreditJobs, $r24cCredits, $pdo): void {
+        PaymentService::bookCumulativeRefund($r24cItemOrder, 'stripe', $amount, 'charge.refunded', 'stripe_refund_ch_r24c1_' . $amount, ['charge_id' => 'ch_r24c1']);
+        $r24cCreditJobs($r24cItemOrder, $before);
+        $r24cDuring = [$r24cCredits($r24cItemOrder), (string)$pdo->query('SELECT status FROM order_refunds WHERE id = ' . (int)$credit['refund_id'])->fetchColumn(),
+            (string)Orders::byId($r24cItemOrder)['payment_status']];
+    };
     WorkerJobs::handlePaymentRefund(['order_id' => $r24cItemOrder, 'payment_id' => 'pi_r24c-1', 'amount' => $amount,
         'refund_id' => (int)$credit['refund_id'], 'idempotency_key' => 'r24c-item'], []);
+    assert_equals([[(int)$credit['total_gross']], 'succeeded', 'partially_refunded'], $r24cDuring,
+        'R24 credit: a cumulative charge.refunded of the item refund in flight completes it, and the item credit note stays the only one (was: a second credit note)');
     $r24cCreditJobs($r24cItemOrder, $before);
     $refundId = 're_r24c_' . substr(sha1('r24c-item'), 0, 10);
     assert_equals([$amount, 'refund_confirmed', 1], [PaymentService::refundedAmount($r24cItemOrder),
@@ -92,9 +98,10 @@ try {
     $r24cAdminOrder = $r24cOrder('R24C-2');
     PaymentService::requestRefund($r24cAdminOrder, 500, 'admin_refund_request_r24c');
     $before = $r24cLast();
-    PaymentService::bookCumulativeRefund($r24cAdminOrder, 'stripe', 500, 'charge.refunded', 'stripe_refund_ch_r24c2_500', ['charge_id' => 'ch_r24c2']);
-    $r24cCreditJobs($r24cAdminOrder, $before);
-    $before = $r24cLast();
+    R24cFakeStripe::$during = static function () use ($r24cAdminOrder, $before, $r24cCreditJobs): void {
+        PaymentService::bookCumulativeRefund($r24cAdminOrder, 'stripe', 500, 'charge.refunded', 'stripe_refund_ch_r24c2_500', ['charge_id' => 'ch_r24c2']);
+        $r24cCreditJobs($r24cAdminOrder, $before);
+    };
     PaymentService::refund($r24cAdminOrder, 'pi_r24c-2', 500, new R24cFakeStripe(), 'admin_refund_request_r24c_execute');
     $r24cCreditJobs($r24cAdminOrder, $before);
     assert_equals([500, [-500], 'partially_refunded'], [PaymentService::refundedAmount($r24cAdminOrder), $r24cCredits($r24cAdminOrder),
