@@ -34,7 +34,7 @@ $db->exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT
 $db->exec("INSERT INTO orders VALUES (5, 'default', 'R14T-1', 'R14 Time', 'r14t@example.test', 1000, 'eur', 'pending', 'pending', 'bank', '2026-07-01 22:30:00', 0)");
 $db->exec("CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL)");
 $db->exec("CREATE TABLE digital_entitlements (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, download_count INTEGER NOT NULL)");
-$db->exec("CREATE TABLE email_log (id INTEGER PRIMARY KEY, order_id INTEGER NULL, status VARCHAR(20) NOT NULL)");
+$db->exec("CREATE TABLE email_log (id INTEGER PRIMARY KEY, order_id INTEGER NULL, status VARCHAR(20) NOT NULL, adapter VARCHAR(50) NOT NULL DEFAULT 'smtp')");
 $db->exec("CREATE TABLE merchant_notifications (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, status VARCHAR(20) NOT NULL)");
 $db->exec("CREATE TABLE invoices (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL, order_id INTEGER NOT NULL, number VARCHAR(100) NOT NULL, pdf_path VARCHAR(100) NOT NULL)");
 $stores = Bootstrap::stores();

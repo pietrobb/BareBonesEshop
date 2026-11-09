@@ -12,6 +12,18 @@ final class WorkerJobs
     }
 
     /**
+     * R24: the provider an order's e-mail goes out through. Checkout freezes the mail provider with the others, but an
+     * order placed before the shop's SMTP was set up froze 'log' (the default, which only writes the mail to the log):
+     * its payment, shipping and invoice mails went to the log for good, reported as sent. The mail transport is no term
+     * of the order, so 'log' (or a provider no longer installed) gives way to the one configured now. $frozen: a job's own.
+     */
+    public static function orderMailProvider(?array $order, string $frozen = ''): string {
+        $code = strtolower($frozen !== '' ? $frozen : ($order ? self::orderProviderCode($order, 'mail') : ''));
+        if ($code === '' || $code === 'log' || !isset(Adapters::registry('mail')[$code])) return Adapters::defaultProviderCode('mail');
+        return $code;
+    }
+
+    /**
      * Outbox sweep (see OutboxDispatcher): per-endpoint failures are recorded and retried with
      * Outbox::markRetry without blocking other endpoints, and the sweep is time-boxed.
      */
@@ -101,8 +113,7 @@ final class WorkerJobs
         }
 
         // Retry with the provider frozen on the order; legacy jobs use the current default.
-        $providerCode = (string)($payload['_provider_code'] ?? ($order ? self::orderProviderCode($order, 'mail') : ''));
-        if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
+        $providerCode = self::orderMailProvider($order, (string)($payload['_provider_code'] ?? ''));
         // The confirmation carries the terms valid at the time of the order on a durable medium (Directive 2011/83/EU art. 8(7)).
         $attachments = $template === 'order_confirmation' && $order ? [ConsumerNotice::termsAttachment($order, $locale ?: (string)($order['locale'] ?? 'en'))] : [];
         // R23: the payment QR travels as a PNG (mail clients show no inline SVG) with the transfer instructions.
@@ -166,7 +177,7 @@ final class WorkerJobs
             'order_number' => $order['order_number'],
             'customer_name' => $order['customer_name'],
             'download_links' => $formatted,
-        ], $orderId, [], self::orderProviderCode($order, 'mail') ?: Adapters::defaultProviderCode('mail'));
+        ], $orderId, [], self::orderMailProvider($order));
         $ids = array_column($links, 'id');
         if (($result['status'] ?? '') !== 'sent') {
             DigitalDelivery::revokeIssued($ids, 'delivery_email_failed');
@@ -428,7 +439,7 @@ final class WorkerJobs
             $vars,
             $orderId,
             $attachments,
-            self::orderProviderCode($order, 'mail') ?: Adapters::defaultProviderCode('mail')
+            self::orderMailProvider($order)
         );
         // Fail the job so the queue retries delivery; issuing the invoice again is idempotent.
         if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');

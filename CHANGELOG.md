@@ -100,6 +100,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail
+  provider with the order. An order placed while the shop only logged mail (the default before SMTP or SES is set up)
+  kept sending every later e-mail (paid, shipped, invoice, refund) to the log, and the admin showed it as sent. Now
+  such an order's e-mails go out through the provider configured when they are sent, as does one whose provider is no
+  longer installed. In the order list and order detail an e-mail that was only written to the log reads "Logged (not
+  sent)".
 - **An interrupted restore no longer keeps the shop closed for good** (review round 24). A `cli/restore.php` that was
   killed or failed half-way leaves the shop in maintenance with the restore to run again. That run completed, then put
   the earlier failure back, so the shop stayed closed whatever was run next. Now a successful restore of any backup —
@@ -107,6 +113,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   what the failed restore was replacing (the marker records `restore_scope`: the database, the files or both). A
   database-only restore after an interrupted `--files`/`--files-only` restore, or a failed window of a migration or an
   update, stays, and the restore says so.
+  the earlier failure back, so the shop stayed closed whatever was run next. Now the restore the failed window names
+  (the same backup, with at least the same `--files`/`--files-only` scope) lifts it and reopens the shop. A failed
+  window of a migration, an update or a restore of another backup stays, and the restore says so.
+- **No second credit note for a Stripe refund reported in total** (review round 24). When a Stripe `charge.refunded`
+  event came without its list of refunds (and the Stripe API could not list them), the shop booked the refunded total
+  under the payment and issued a credit note for it at once. If that money was the shop's own refund in flight (an
+  item return with its credit note, or a refund requested in the admin), the order got a second credit note, and the
+  refund job's result then booked the same money again. Now such a refund of exactly the amount in flight is booked as
+  that refund: the item return keeps its single credit note, an admin refund gets one, and the job's result only
+  confirms it. A refund made in the Stripe dashboard is credited as before; GoPay, ThePay and Comgate are unchanged.
+  Orders already affected show two credit notes for one refund in their Invoices, and a refunded amount above what
+  left the Stripe account: have the duplicate credit note corrected with your accountant.
 - **Admin language** (review round 23, UX). The dashboard's setup checklist titles its checks in the admin's language
   (they were the doctor's English text; an unknown check still shows that text) and counts "1 problem", not
   "1 problems", in every language. The audit log shows the notes it writes ("Created in the admin", refunds, status
