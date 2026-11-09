@@ -39,8 +39,8 @@ $db->exec("CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER NO
 $db->exec('INSERT INTO order_items VALUES (1,5), (2,7)');
 $db->exec("CREATE TABLE digital_entitlements (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, download_count INTEGER NOT NULL)");
 $db->exec('INSERT INTO digital_entitlements VALUES (1,5,2), (2,6,3), (3,7,11), (4,8,13)');
-$db->exec("CREATE TABLE email_log (id INTEGER PRIMARY KEY, order_id INTEGER NULL, status VARCHAR(20) NOT NULL)");
-$db->exec("INSERT INTO email_log VALUES (1,5,'failed'), (2,7,'failed'), (3,8,'failed'), (4,NULL,'failed')");
+$db->exec("CREATE TABLE email_log (id INTEGER PRIMARY KEY, order_id INTEGER NULL, status VARCHAR(20) NOT NULL, adapter VARCHAR(50) NOT NULL DEFAULT 'smtp')");
+$db->exec("INSERT INTO email_log (id, order_id, status) VALUES (1,5,'failed'), (2,7,'failed'), (3,8,'failed'), (4,NULL,'failed')");
 $db->exec("CREATE TABLE merchant_notifications (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, status VARCHAR(20) NOT NULL)");
 $db->exec("INSERT INTO merchant_notifications VALUES (1,5,'failed'), (2,7,'failed'), (3,8,'failed')");
 $db->exec("CREATE TABLE invoices (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL, order_id INTEGER NOT NULL,
