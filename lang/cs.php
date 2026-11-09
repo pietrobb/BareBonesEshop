@@ -758,6 +758,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_error' => 'Chyba při vytváření požadavku na refundaci.',
     'admin.order.msg.email_resend_refused' => 'E-mail nelze znovu odeslat.',
     'admin.order.msg.email_resent' => 'E-mail znovu odeslán ({adapter}).',
+    'admin.order.msg.email_logged' => 'E-mail se pouze zapsal do logu ({adapter}); nikdo ho nedostal. Odesílání nastavte v části Odesílání e-mailů.',
     'admin.order.msg.email_failed' => 'E-mail se nepodařilo odeslat: {error}',
     'admin.order.msg.unknown_error' => 'neznámá chyba',
     'admin.order.msg.email_resend_error' => 'Chyba při opětovném odesílání e-mailu.',

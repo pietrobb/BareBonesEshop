@@ -213,7 +213,9 @@ assert_true(count($r8lDone['withdrawals']) === 1 && ($r8lRow['order_number'] ?? 
     'R8 withdrawal: the confirmed statement is recorded with the selected line and its receipt time, without a reason (' . json_encode($r8lRow) . ')');
 assert_true(($r8lMail['template'] ?? '') === 'withdrawal_received' && ($r8lMail['recipient'] ?? '') === 'r8l.guest@example.test'
     && ($r8lPayload['received_at'] ?? '') === ShopTime::stamp((string)($r8lRow['received_at'] ?? '-'), 'sk') && ($r8lPayload['items'][0]['name'] ?? '') === 'R8L Chair'
-    && ($r8lRow['confirmation_status'] ?? '') === 'sent' && str_contains((string)$r8lDone['output'], 'sme prijali'),
+    // R25: the suite's shop only logs mail: the receipt reads "logged" and the page does not claim it was sent.
+    && ($r8lRow['confirmation_status'] ?? '') === 'logged' && str_contains((string)$r8lDone['output'], 'sme prijali')
+    && !str_contains((string)$r8lDone['output'], 'Potvrdenie sme poslali'),
     'R8 withdrawal: the consumer gets an acknowledgement e-mail with the statement and its receipt time, and the page confirms it (' . json_encode($r8lMail, JSON_UNESCAPED_UNICODE) . ')');
 assert_true(in_array(['merchant_notify', 'withdrawal'], array_map(static fn(array $j): array => [(string)($j['type'] ?? ''), explode(':', (string)($j['payload']['event'] ?? ''))[0]], $r8lDone['jobs']), true),
     'R8 withdrawal: the merchant is notified through the merchant_notify job');
@@ -302,7 +304,8 @@ assert_true(str_contains((string)$r8lCNoDefect['output'], 'Popíšte vadu tovaru
 $r8lCDone = $r8lDo('c_submit', ['order_number' => 'R8L-OLD', 'email' => 'r8l.guest@example.test', 'item' => $r8lItemIds['R8L-OLD'][1], 'defect' => 'Prasknutá noha stola', 'remedy' => 'replacement']);
 $r8lCRow = $r8lCDone['complaints'][0] ?? [];
 assert_true(count($r8lCDone['complaints']) === 1 && ($r8lCRow['item_name'] ?? '') === 'R8L Table' && ($r8lCRow['remedy'] ?? '') === 'replacement'
-    && ($r8lCRow['status'] ?? '') === 'received' && ($r8lCRow['confirmation_status'] ?? '') === 'sent' && str_contains((string)$r8lCDone['output'], (string)($r8lCRow['complaint_number'] ?? '-'))
+    && ($r8lCRow['status'] ?? '') === 'received' && ($r8lCRow['confirmation_status'] ?? '') === 'logged' && str_contains((string)$r8lCDone['output'], (string)($r8lCRow['complaint_number'] ?? '-'))
+    && !str_contains((string)$r8lCDone['output'], 'Potvrdenie sme poslali')
     && in_array(['merchant_notify', 'complaint'], array_map(static fn(array $j): array => [(string)($j['type'] ?? ''), explode(':', (string)($j['payload']['event'] ?? ''))[0]], $r8lCDone['jobs']), true),
     'R8 complaint: the complaint is recorded for the chosen line with defect and remedy, confirmed on the page, receipt sent, merchant notified (' . json_encode($r8lCRow, JSON_UNESCAPED_UNICODE) . ')');
 assert_equals([], array_values(array_filter(array_map(static fn(array $w): string => (string)$w['order_number'], $r8lCDone['withdrawals']), static fn(string $n): bool => $n === 'R8L-OLD')),

@@ -100,6 +100,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
+  shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
+  database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out
+  through the provider set in Admin → E-mail delivery (or `MAIL_ADAPTER`) when it is sent. A `MAIL_ADAPTER` naming no
+  installed provider writes the mail to the log and raises a critical `mail.provider_invalid` incident instead of
+  failing every order e-mail. Mail the log provider only wrote down no longer reads as sent anywhere: the withdrawal
+  and complaint confirmation pages and admin screens, merchant notifications, the admin "resend" message and the GDPR
+  export say "logged".
 - **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail
   provider with the order. An order placed while the shop only logged mail (the default before SMTP or SES is set up)
   kept sending every later e-mail (paid, shipped, invoice, refund) to the log, and the admin showed it as sent. Now

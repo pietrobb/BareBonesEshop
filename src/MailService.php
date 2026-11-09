@@ -159,6 +159,19 @@ class MailService {
     }
 
     /**
+     * R25: whether a send() result only wrote the mail to the log (the log provider): 'sent' for the job and the retry
+     * logic, but it reached nobody, so nothing tells the customer or the merchant it was sent.
+     */
+    public static function logged(array $result): bool {
+        return ($result['status'] ?? '') === 'sent' && ($result['adapter'] ?? '') === 'log';
+    }
+
+    /** R25: the status an e-mail result reads as for people: 'logged' when the log provider only wrote it down. */
+    public static function shownStatus(array $result): string {
+        return self::logged($result) ? 'logged' : (string)($result['status'] ?? 'failed');
+    }
+
+    /**
      * Re-send an existing email_log row (same template / recipient / vars).
      * Creates a NEW email_log entry — the original row stays immutable.
      */

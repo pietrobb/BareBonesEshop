@@ -758,6 +758,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_error' => 'Błąd podczas tworzenia żądania zwrotu.',
     'admin.order.msg.email_resend_refused' => 'Nie można ponownie wysłać e-maila.',
     'admin.order.msg.email_resent' => 'E-mail wysłany ponownie ({adapter}).',
+    'admin.order.msg.email_logged' => 'E-mail został tylko zapisany w logu ({adapter}); nikt go nie otrzymał. Skonfiguruj wysyłkę w sekcji Wysyłka e-maili.',
     'admin.order.msg.email_failed' => 'Nie udało się wysłać e-maila: {error}',
     'admin.order.msg.unknown_error' => 'nieznany błąd',
     'admin.order.msg.email_resend_error' => 'Błąd podczas ponownego wysyłania e-maila.',

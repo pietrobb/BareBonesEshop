@@ -864,7 +864,9 @@ function handleOrderEmailResend(): void {
     }
     try {
         $res = MailService::resend($logId, $orderId);
-        if (($res['status'] ?? '') === 'sent') {
+        if (MailService::logged($res)) {
+            setFlash('err', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']])); // R25: not "sent again"
+        } elseif (($res['status'] ?? '') === 'sent') {
             setFlash('ok', I18n::format('admin.order.msg.email_resent', ['adapter' => $res['adapter'] ?? '']));
         } else {
             setFlash('err', I18n::format('admin.order.msg.email_failed', ['error' => $res['error'] ?? $res['status'] ?? I18n::t('admin.order.msg.unknown_error')]));
@@ -932,7 +934,9 @@ function handleOrderInvoiceResend(): void {
         $vars = InvoiceService::mailVars($inv, $order ?: []);
         $res = MailService::send('invoice_issued', $order['customer_email'] ?? '', (string)($inv['locale'] ?? ''), $vars, (int)$inv['order_id'],
             [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
-        if (($res['status'] ?? '') === 'sent') {
+        if (MailService::logged($res)) {
+            setFlash('err', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']]));
+        } elseif (($res['status'] ?? '') === 'sent') {
             setFlash('ok', I18n::t('admin.order.msg.invoice_resent'));
         } else {
             setFlash('err', I18n::format('admin.order.msg.email_failed', ['error' => $res['error'] ?? $res['status'] ?? I18n::t('admin.order.msg.unknown_error')]));
