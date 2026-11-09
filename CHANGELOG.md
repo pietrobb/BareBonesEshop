@@ -100,6 +100,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail
+  provider with the order. An order placed while the shop only logged mail (the default before SMTP or SES is set up)
+  kept sending every later e-mail (paid, shipped, invoice, refund) to the log, and the admin showed it as sent. Now
+  such an order's e-mails go out through the provider configured when they are sent, as does one whose provider is no
+  longer installed. In the order list and order detail an e-mail that was only written to the log reads "Logged (not
+  sent)".
 - **Admin language** (review round 23, UX). The dashboard's setup checklist titles its checks in the admin's language
   (they were the doctor's English text; an unknown check still shows that text) and counts "1 problem", not
   "1 problems", in every language. The audit log shows the notes it writes ("Created in the admin", refunds, status

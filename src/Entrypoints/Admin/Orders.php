@@ -43,7 +43,8 @@ function pageSalesOverview(): void {
             (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
             (SELECT COUNT(*) FROM digital_entitlements de WHERE de.order_id = o.id) AS entitlement_count,
             (SELECT COALESCE(SUM(de.download_count), 0) FROM digital_entitlements de WHERE de.order_id = o.id) AS order_download_count,
-            (SELECT el.status FROM email_log el WHERE el.order_id = o.id ORDER BY el.id DESC LIMIT 1) AS email_status
+            (SELECT CASE WHEN el.status = 'sent' AND el.adapter = 'log' THEN 'logged' ELSE el.status END
+                FROM email_log el WHERE el.order_id = o.id ORDER BY el.id DESC LIMIT 1) AS email_status
         FROM orders o
         WHERE {$whereSql}
         ORDER BY o.created_at DESC
@@ -114,7 +115,7 @@ function pageSalesOverview(): void {
                 <td><span class="badge badge-<?= esc($order['status']) ?>"><?= esc(OrderStatusLabels::order((string)$order['status'])) ?></span></td>
                 <td><span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><br><span class="muted" title="<?= esc((string)($order['payment_method'] ?? '')) ?>"><?= esc(PaymentService::adminLabel($order)) ?></span></td>
                 <td><?php if ((int)$order['entitlement_count'] > 0): ?><?= (int)$order['order_download_count'] ?> <?= esc(I18n::t('admin.sales.downloads')) ?><br><span class="muted"><?= (int)$order['entitlement_count'] ?> <?= esc(I18n::t('admin.sales.entitlements')) ?></span><?php else: ?>—<?php endif; ?></td>
-                <td><?php if ($order['email_status']): ?><span class="<?= $order['email_status'] === 'failed' ? 'status-error' : ($order['email_status'] === 'sent' ? 'status-ok' : 'status-warn') ?>"><?= esc($order['email_status']) ?></span><?php else: ?>—<?php endif; ?></td>
+                <td><?php if ($order['email_status']): ?><span class="<?= $order['email_status'] === 'failed' ? 'status-error' : ($order['email_status'] === 'sent' ? 'status-ok' : 'status-warn') ?>"><?= esc(adminCodeLabel('admin.email.status.', (string)$order['email_status'])) ?></span><?php else: ?>—<?php endif; ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$order['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
@@ -459,6 +460,8 @@ function pageOrder(): void {
         <table>
             <tr><th><?= esc(I18n::t('admin.common.template')) ?></th><th><?= esc(I18n::t('admin.order.locale')) ?></th><th><?= esc(I18n::t('admin.order.subject')) ?></th><th><?= esc(I18n::t('admin.order.adapter')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.sent')) ?></th><th></th></tr>
             <?php foreach ($emails as $em): ?>
+            <?php // R24: the log adapter only writes the mail down; it reached nobody, so it does not read "Sent".
+            if ($em['status'] === 'sent' && $em['adapter'] === 'log') $em['status'] = 'logged'; ?>
             <tr>
                 <td><?= esc(adminCodeLabel('admin.email.tpl.', (string)$em['template'])) ?></td>
                 <td><?= esc($em['locale']) ?></td>
