@@ -851,15 +851,19 @@ final class InvoiceService
     public static function creditBookedRefund(int $orderId, string $ledgerKey, int $deferrals = 0): ?array
     {
         $db = Db::get();
-        $stmt = $db->prepare("SELECT amount, provider_ref FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
+        $stmt = $db->prepare("SELECT amount, provider_ref, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
             AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return null;
+        // R24: a Stripe charge.refunded without its refund list books the item refund it settles under the event's key; that
+        // item refund is named in the row (PaymentService::bookCumulativeRefund()).
+        $settles = json_decode((string)($row['raw_response'] ?? ''), true);
+        $settlesKey = is_array($settles) ? (string)($settles['settles_refund_request'] ?? '') : '';
         // An item refund (RMA credit note) already corrects the invoice: its refund is booked under its key or its provider refund id.
         $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store
-            AND (idempotency_key = :key OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
-        $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':ref' => (string)$row['provider_ref']]);
+            AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
+        $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
         if ($item->fetchColumn()) return null;
         // R14 #2: an item refund of the same amount whose provider refund id is not noted yet may be this very refund (its
         // webhook came before the refund job): wait for the job instead of issuing a second credit note.
