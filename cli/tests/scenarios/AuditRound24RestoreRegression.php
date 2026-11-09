@@ -1,0 +1,110 @@
+<?php
+
+// Review round 24 (2026-11-09, "kolo 8"), finding 1 (goal #378): an interrupted cli/restore.php left a failed window that
+// names the restore to run again. That run completed, then put the earlier failure back (cli/restore.php:141,153): the
+// shop stayed in maintenance for good, whatever was run next. A restore that does at least what the failed one did
+// (same backup; database, files or both) now lifts it; a failed window of another step or another backup stays.
+echo "\n--- R24: re-running an interrupted restore reopens the shop ---\n";
+$r24rRepo = dirname(TEST_CLI_DIR);
+$r24rBase = test_fixture_path('r24-restore');
+@mkdir($r24rBase, 0700, true);
+$r24rPhp = static function (array $args): array {
+    $process = proc_open(array_merge([PHP_BINARY], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    fclose($pipes[0]);
+    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    return ['exit' => proc_close($process), 'output' => (string)$out];
+};
+$r24rCopy = static function (string $from, string $to) use (&$r24rCopy): void {
+    @mkdir($to, 0700, true);
+    foreach (new FilesystemIterator($from) as $item) {
+        $target = $to . '/' . $item->getFilename();
+        if ($item->isDir()) $r24rCopy($item->getPathname(), $target);
+        else copy($item->getPathname(), $target);
+    }
+};
+// A restore killed after arm(): its process ends without lifting or replacing the window (no finally runs).
+file_put_contents($r24rBase . '/killed.php', '<?php
+require ' . var_export($r24rRepo . '/src/autoload.php', true) . ';
+MaintenanceMode::enter($argv[1], "cli/restore.php " . $argv[2]);
+MaintenanceMode::arm($argv[1], $argv[3]);
+exit(9);
+');
+$r24rApp = $r24rBase . '/app';
+try {
+    foreach (['src', 'adapters', 'migrations', 'config', 'extensions'] as $directory) {
+        if (is_dir($r24rRepo . '/' . $directory)) $r24rCopy($r24rRepo . '/' . $directory, $r24rApp . '/' . $directory);
+    }
+    foreach (glob($r24rRepo . '/cli/*.php') ?: [] as $script) {
+        @mkdir($r24rApp . '/cli', 0700, true);
+        copy($script, $r24rApp . '/cli/' . basename($script));
+    }
+    foreach (glob($r24rRepo . '/*.json') ?: [] as $file) copy($file, $r24rApp . '/' . basename($file));
+    @mkdir($r24rBase . '/app-db', 0700, true);
+    file_put_contents($r24rApp . '/config.php', '<?php return ' . var_export([
+        'db_driver' => 'sqlite',
+        'db_sqlite_path' => $r24rBase . '/app-db/shop.sqlite',
+        'jobs_dir' => $r24rBase . '/app-jobs',
+        'cache_dir' => $r24rBase . '/app-cache',
+        'backup_storage_dir' => $r24rBase . '/app-private/backups',
+        'backup_log_file' => $r24rBase . '/app-private/backup.log',
+    ], true) . ";\n");
+    $r24rSetup = [$r24rPhp([$r24rApp . '/cli/migrate.php', 'apply']), $r24rPhp([$r24rApp . '/cli/backup.php', '--quiet'])];
+    $r24rList = $r24rPhp([$r24rApp . '/cli/restore.php', '--list']);
+    $r24rPath = (string)strtok(trim($r24rList['output']), " \n");
+    assert_equals([0, 0, true], [$r24rSetup[0]['exit'], $r24rSetup[1]['exit'], str_contains($r24rPath, '.db')],
+        'R24 restore: fixture database and backup — ' . trim(substr($r24rSetup[1]['output'] . $r24rList['output'], -160)));
+
+    $r24rReason = static fn(string $path, string $scope): string => "cli/restore.php {$path} was interrupted before it finished; check the database and files, then run php cli/restore.php "
+        . escapeshellarg($path) . $scope . ' again';
+    $r24rKill = static function (string $path, string $reason) use ($r24rPhp, $r24rBase, $r24rApp): array {
+        $killed = $r24rPhp([$r24rBase . '/killed.php', $r24rApp, $path, $reason]);
+        clearstatcache();
+        return [$killed['exit'], MaintenanceMode::active($r24rApp), MaintenanceMode::failed($r24rApp, 'cli/restore.php ')];
+    };
+    $r24rState = static function () use ($r24rApp): array {
+        clearstatcache();
+        return [is_file(MaintenanceMode::path($r24rApp)), (string)(MaintenanceMode::marker($r24rApp)['reason'] ?? '')];
+    };
+
+    // 1. Killed while restoring the database; the command its marker names completes it and reopens the shop.
+    assert_equals([9, true, true], $r24rKill($r24rPath, $r24rReason($r24rPath, '')),
+        'R24 restore: an interrupted restore leaves a failed window that names the restore to run again');
+    $r24rAgain = $r24rPhp([$r24rApp . '/cli/restore.php', $r24rPath, '--yes']);
+    assert_equals([0, [false, '']], [$r24rAgain['exit'], $r24rState()],
+        'R24 restore: running the restore the failed window names again lifts it and opens the shop (was: the earlier failure was put back, maintenance for good) — '
+        . trim(substr($r24rAgain['output'], -200)));
+
+    // 2. A restore of less than the interrupted one (database only after files) leaves the files half-restored: it stays.
+    $r24rFiles = $r24rReason($r24rPath, ' --files-only');
+    $r24rKill($r24rPath, $r24rFiles);
+    $r24rLess = $r24rPhp([$r24rApp . '/cli/restore.php', $r24rPath, '--yes']);
+    assert_equals([0, [true, $r24rFiles], true], [$r24rLess['exit'], $r24rState(), str_contains($r24rLess['output'], 'stays in maintenance')],
+        'R24 restore: a database-only restore keeps the window of an interrupted files restore, and says so — ' . trim(substr($r24rLess['output'], -200)));
+    MaintenanceMode::leave($r24rApp);
+
+    // 3. Another backup's restore, or another step's failure (a migration), is not what this run completes.
+    $r24rOther = $r24rReason('2000/01/01/other.db', '');
+    $r24rKill('2000/01/01/other.db', $r24rOther);
+    $r24rRun = $r24rPhp([$r24rApp . '/cli/restore.php', $r24rPath, '--yes']);
+    assert_equals([0, [true, $r24rOther]], [$r24rRun['exit'], $r24rState()],
+        'R24 restore: the failed window of a restore of another backup stays — ' . trim(substr($r24rRun['output'], -160)));
+    MaintenanceMode::leave($r24rApp);
+    $r24rMigrate = 'cli/migrate.php failed: r24 probe — run php cli/migrate.php apply again';
+    MaintenanceMode::fail($r24rApp, $r24rMigrate);
+    $r24rRun = $r24rPhp([$r24rApp . '/cli/restore.php', $r24rPath, '--yes']);
+    assert_equals([0, [true, $r24rMigrate]], [$r24rRun['exit'], $r24rState()],
+        'R24 restore: a failed migration window stays after a restore — ' . trim(substr($r24rRun['output'], -160)));
+    MaintenanceMode::leave($r24rApp);
+
+    // The reason the test kills with is the one cli/restore.php arms with.
+    $r24rCli = (string)file_get_contents($r24rRepo . '/cli/restore.php');
+    assert_true(str_contains($r24rCli, 'MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again");'),
+        'R24 restore: cli/restore.php arms its window with the reason this test simulates');
+} catch (Throwable $e) {
+    assert_true(false, 'R24 restore (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+} finally {
+    @unlink(MaintenanceMode::path($r24rApp));
+    if (function_exists('updateTestRemoveTree')) updateTestRemoveTree($r24rBase);
+}

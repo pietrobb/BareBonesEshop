@@ -140,6 +140,17 @@ if (MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && 
 }
 $priorFailure = MaintenanceMode::failed($root) ? (string)(MaintenanceMode::marker($root)['reason'] ?? '') : null;
 $restoreCommand = 'php cli/restore.php ' . escapeshellarg($remotePath) . ($filesOnly ? ' --files-only' : ($withFiles ? ' --files' : ''));
+// R24: a failed window that an interrupted or half-done restore of this backup left names the restore to run again. This
+// run completes it when it restores at least what that one did (database, files or both): put back, it kept the shop in
+// maintenance for good, whatever restore ran next. Any other failed window (a migration, an update) stays.
+$completes = $withFiles && !$filesOnly
+    ? [$restoreCommand, 'php cli/restore.php ' . escapeshellarg($remotePath), 'php cli/restore.php ' . escapeshellarg($remotePath) . ' --files-only']
+    : [$restoreCommand];
+foreach ($completes as $command) {
+    if ($priorFailure !== null && str_starts_with($priorFailure, 'cli/restore.php ') && str_contains($priorFailure, "run {$command} again")) {
+        $priorFailure = null;
+    }
+}
 MaintenanceMode::enter($root, 'cli/restore.php ' . $remotePath);
 // Killed from here on, the shop stays closed with what to run (no finally runs).
 MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again");
@@ -151,6 +162,7 @@ $endWindow = static function (?string $halfDone) use ($root, $priorFailure): voi
         // Another step took the window over meanwhile; it is that step's to lift.
     } elseif ($priorFailure !== null) {
         MaintenanceMode::fail($root, $priorFailure);
+        fwrite(STDERR, "The shop stays in maintenance (503) for the earlier failed step: {$priorFailure}\n");
     } else {
         MaintenanceMode::leave($root);
     }

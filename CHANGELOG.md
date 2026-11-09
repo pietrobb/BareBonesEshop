@@ -106,6 +106,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   such an order's e-mails go out through the provider configured when they are sent, as does one whose provider is no
   longer installed. In the order list and order detail an e-mail that was only written to the log reads "Logged (not
   sent)".
+- **An interrupted restore no longer keeps the shop closed for good** (review round 24). A `cli/restore.php` that was
+  killed or failed half-way leaves the shop in maintenance with the restore to run again. That run completed, then put
+  the earlier failure back, so the shop stayed closed whatever was run next. Now the restore the failed window names
+  (the same backup, with at least the same `--files`/`--files-only` scope) lifts it and reopens the shop. A failed
+  window of a migration, an update or a restore of another backup stays, and the restore says so.
 - **Admin language** (review round 23, UX). The dashboard's setup checklist titles its checks in the admin's language
   (they were the doctor's English text; an unknown check still shows that text) and counts "1 problem", not
   "1 problems", in every language. The audit log shows the notes it writes ("Created in the admin", refunds, status
