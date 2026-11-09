@@ -860,6 +860,8 @@ final class InvoiceService
         // item refund is named in the row (PaymentService::bookCumulativeRefund()).
         $settles = json_decode((string)($row['raw_response'] ?? ''), true);
         $settlesKey = is_array($settles) ? (string)($settles['settles_refund_request'] ?? '') : '';
+        // R25: unless that booking was provisional and turned out to be other money (a dashboard refund).
+        if ($settlesKey !== '' && PaymentService::provisionalRefundVoid($orderId, $ledgerKey)) $settlesKey = '';
         // An item refund (RMA credit note) already corrects the invoice: its refund is booked under its key or its provider refund id.
         $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store
             AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");

@@ -108,7 +108,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   queued. What it books never exceeds the order total. Stripe refunds carry the shop's refund key in their metadata
   (`bbe_refund_key`): a `refund.updated` or later `charge.refunded` naming the shop's refund before the job's result
   only identifies it (was: the money and a credit note twice), and the item refund keeps Stripe's `re_…` id as its
-  payment reference instead of the webhook's ledger key.
+  payment reference instead of the webhook's ledger key. A refund sent to Stripe whose id is not known yet is booked
+  only provisionally: its item refund is completed once its own result or event confirms it, and a refund that names
+  another id (a dashboard refund) and does not fit the unexplained money reclaims that booking. Was: a 25.00 dashboard
+  refund matched with a 21.00 item refund Stripe had not carried out yet left 4.00 unexplained, its own event booked
+  25.00 again (50.00 on the ledger for 46.00 refunded), and the item's credit note was completed even if Stripe then
+  declined it.
 - **A failed restore, update or rollback no longer reopens a shop left half-done** (review round 25). A
   `cli/restore.php` that failed before it replaced anything (a corrupt backup, a refused files archive) lifted the
   window an earlier interrupted restore had left, and the shop reopened on a half-restored database or files; it now

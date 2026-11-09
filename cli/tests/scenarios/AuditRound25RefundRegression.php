@@ -18,13 +18,15 @@ if (!class_exists('R25rFakeStripe', false)) {
     class R25rFakeStripe extends StripePayment {
         /** What Stripe reports (webhooks) while this refund call is in flight, before its result is booked. */
         public static ?Closure $during = null;
+        /** @var list<string> Refund keys Stripe declines. */
+        public static array $failKeys = [];
         public function __construct() { parent::__construct([]); }
         public static function refundIdOf(string $key): string { return 're_r25r_' . substr(sha1($key), 0, 10); }
         public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array {
             $during = self::$during;
             self::$during = null;
             if ($during !== null) $during();
-            return ['refund_id' => self::refundIdOf($idempotencyKey), 'status' => 'succeeded'];
+            return ['refund_id' => self::refundIdOf($idempotencyKey), 'status' => in_array($idempotencyKey, self::$failKeys, true) ? 'failed' : 'succeeded'];
         }
     }
 }
@@ -33,19 +35,21 @@ $r25rSavedAdapters = $r25rAdapters->getValue();
 $r25rAdapters->setValue(null, ['payment' => new R25rFakeStripe()] + $r25rSavedAdapters);
 $r25rProduct = (int)$pdo->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn();
 $r25rOrders = [];
-$r25rOrder = static function (string $number) use ($pdo, $r25rProduct, &$r25rOrders): int {
+$r25rOrder = static function (string $number, int $lines = 2) use ($pdo, $r25rProduct, &$r25rOrders): int {
     $ctx = ['seller_country' => 'SK', 'customer_country' => 'SK', 'tax_provider' => 'vat'];
     $line = ['product_id' => 1, 'variant_id' => null, 'sku' => "{$number}-PB", 'price' => 2100, 'qty' => 1, 'total' => 2100, 'available' => true,
         'currency_mismatch' => false, 'product_type' => 'simple', 'vat_class' => 'books', 'currency' => 'eur', 'price_formatted' => '', 'total_formatted' => ''];
-    $items = Cart::applyVat(['items' => [$line, ['sku' => "{$number}-PB2"] + $line], 'subtotal' => 4200, 'currency' => 'eur'], $ctx)['items'];
+    $skus = ["{$number}-PB"];
+    for ($i = 2; $i <= $lines; $i++) $skus[] = "{$number}-PB{$i}";
+    $items = Cart::applyVat(['items' => array_map(static fn(string $sku): array => ['sku' => $sku] + $line, $skus), 'subtotal' => 2100 * $lines, 'currency' => 'eur'], $ctx)['items'];
     $snapshot = VatService::buildSnapshot($items, $ctx, ['currency' => 'eur', 'effective_date' => ShopTime::date('Y-m-d')]);
     $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount,
             total, currency, status, payment_status, payment_method, payment_id, payment_method_snapshot, shipping_method, vat_scenario, financial_snapshot, store_id, created_at)
-        VALUES (?, 'R25R', 'r25r@example.test', '', '{\"country\":\"SK\"}', 4200, 0, 0, 0, ?, 'eur', 'delivered', 'paid', 'stripe', ?, ?, 'pickup', 'domestic', ?, 'default', " . Db::now() . ")")
-        ->execute([$number, (int)$snapshot['totals']['gross'], 'pi_' . strtolower($number), json_encode(['provider' => 'stripe', 'service_type' => 'online_card']),
+        VALUES (?, 'R25R', 'r25r@example.test', '', '{\"country\":\"SK\"}', ?, 0, 0, 0, ?, 'eur', 'delivered', 'paid', 'stripe', ?, ?, 'pickup', 'domestic', ?, 'default', " . Db::now() . ")")
+        ->execute([$number, 2100 * $lines, (int)$snapshot['totals']['gross'], 'pi_' . strtolower($number), json_encode(['provider' => 'stripe', 'service_type' => 'online_card']),
             json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
     $id = $r25rOrders[] = (int)$pdo->lastInsertId();
-    foreach (["{$number}-PB", "{$number}-PB2"] as $sku) {
+    foreach ($skus as $sku) {
         $pdo->prepare('INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, 1, 2100, 2100)')
             ->execute([$id, $r25rProduct, $sku, "R25R {$sku}"]);
     }
@@ -151,6 +155,44 @@ try {
     PaymentService::bookCumulativeRefund($o5, 'stripe', 999999, 'charge.refunded', 'stripe_refund_ch_r25r5_999999');
     assert_equals((int)Orders::byId($o5)['total'], PaymentService::refundedAmount($o5), 'R25 refunds: a cumulative refund is capped at the order total');
 
+    // 7. Review run 379: an item refund sent to Stripe but not carried out yet, while a larger dashboard refund (25.00) is
+    // reported by charge.refunded without its refund list and then by refund.updated under its own id.
+    $o7 = $r25rOrder('R25R-7', 3);
+    $e = $r25rItemRefund($o7, 0, 'r25r-7a');
+    $dash7 = $e['amount'] + 400;
+    $o7Steps = [];
+    R25rFakeStripe::$during = static function () use ($o7, $e, $dash7, $r25rItem, $r25rCreditJobs, &$o7Steps): void {
+        PaymentService::bookCumulativeRefund($o7, 'stripe', $dash7, 'charge.refunded', 'stripe_refund_ch_r25r7_' . $dash7);
+        $r25rCreditJobs($o7);
+        $o7Steps[] = [PaymentService::refundedAmount($o7), $r25rItem($e['id'])[0]];
+        $o7Steps[] = PaymentService::bookProviderRefund($o7, 'stripe', 're_r25r7_dashboard', $dash7, 'refund.updated', 'stripe_refund_re_r25r7_dashboard');
+        $r25rCreditJobs($o7);
+        $o7Steps[] = PaymentService::refundedAmount($o7);
+    };
+    $r25rJob($o7, $e);
+    $r25rCreditJobs($o7);
+    $o7Late = PaymentService::bookCumulativeRefund($o7, 'stripe', $dash7 + $e['amount'], 'charge.refunded', 'stripe_refund_ch_r25r7_' . ($dash7 + $e['amount']));
+    assert_equals([[$dash7, 'pending'], false, $dash7, $dash7 + $e['amount'], false, ['succeeded', R25rFakeStripe::refundIdOf('r25r-7a')], -($dash7 + $e['amount'])],
+        [...$o7Steps, PaymentService::refundedAmount($o7), $o7Late, $r25rItem($e['id']), array_sum($r25rCredits($o7))],
+        'R25 refunds: a dashboard refund larger than an item refund still at Stripe is booked once — its own id reclaims the money the summary event matched to the item, which is completed only by its own result (was: 50.00 on the ledger for 46.00 refunded)');
+
+    // 8. The same, but Stripe declines the item refund: the summary's money was the dashboard refund alone.
+    $o8 = $r25rOrder('R25R-8', 3);
+    $g = $r25rItemRefund($o8, 0, 'r25r-8a');
+    $dash8 = $g['amount'] + 400;
+    R25rFakeStripe::$failKeys = ['r25r-8a'];
+    R25rFakeStripe::$during = static function () use ($o8, $dash8, $r25rCreditJobs): void {
+        PaymentService::bookCumulativeRefund($o8, 'stripe', $dash8, 'charge.refunded', 'stripe_refund_ch_r25r8_' . $dash8);
+        $r25rCreditJobs($o8);
+    };
+    $r25rJob($o8, $g);
+    $r25rCreditJobs($o8);
+    $o8Dashboard = PaymentService::bookProviderRefund($o8, 'stripe', 're_r25r8_dashboard', $dash8, 'refund.updated', 'stripe_refund_re_r25r8_dashboard');
+    $r25rCreditJobs($o8);
+    assert_equals([$dash8, false, 'failed'],
+        [PaymentService::refundedAmount($o8), $o8Dashboard, $r25rItem($g['id'])[0]],
+        'R25 refunds: an item refund Stripe declined is not completed by a summary event\'s money, and the dashboard refund\'s own id only identifies it');
+
     // 6. The refund key travels with the Stripe refund and is read back from the webhook.
     $r25rStripeSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/adapters/contrib/StripePayment.php');
     assert_true(str_contains($r25rStripeSrc, "\$params['metadata'] = [self::REFUND_KEY_METADATA => \$idempotencyKey]")
@@ -160,6 +202,7 @@ try {
     $r25rFail('cumulative Stripe refund', $e);
 } finally {
     R25rFakeStripe::$during = null;
+    R25rFakeStripe::$failKeys = [];
     $r25rAdapters->setValue(null, $r25rSavedAdapters);
     foreach ($r25rOrders as $r25rCleanup) {
         foreach (['credit_note_items' => 'credit_note_id IN (SELECT id FROM invoices WHERE order_id = ?)', 'order_refunds' => 'order_id = ?', 'payment_transactions' => 'order_id = ?',

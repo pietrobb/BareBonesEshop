@@ -82,14 +82,15 @@ try {
     };
     WorkerJobs::handlePaymentRefund(['order_id' => $r24cItemOrder, 'payment_id' => 'pi_r24c-1', 'amount' => $amount,
         'refund_id' => (int)$credit['refund_id'], 'idempotency_key' => 'r24c-item'], []);
-    assert_equals([[(int)$credit['total_gross']], 'succeeded', 'partially_refunded'], $r24cDuring,
-        'R24 credit: a cumulative charge.refunded of the item refund in flight completes it, and the item credit note stays the only one (was: a second credit note)');
+    // R25 (review run 379): the item refund stays pending until its own refund id confirms it (Stripe may not have carried it out yet).
+    assert_equals([[(int)$credit['total_gross']], 'pending', 'partially_refunded'], $r24cDuring,
+        'R24 credit: a cumulative charge.refunded of the item refund in flight books it, and the item credit note stays the only one (was: a second credit note)');
     $r24cCreditJobs($r24cItemOrder, $before);
     $refundId = 're_r24c_' . substr(sha1('r24c-item'), 0, 10);
-    assert_equals([$amount, 'refund_confirmed', 1], [PaymentService::refundedAmount($r24cItemOrder),
+    assert_equals([$amount, 'refund_confirmed', 1, 'succeeded'], [PaymentService::refundedAmount($r24cItemOrder),
         (string)$pdo->query("SELECT status FROM payment_transactions WHERE order_id = {$r24cItemOrder} AND provider_ref = '{$refundId}'")->fetchColumn(),
-        count($r24cCredits($r24cItemOrder))],
-        'R24 credit: the refund job\'s result then only confirms the refund (was: booked a second time)');
+        count($r24cCredits($r24cItemOrder)), (string)$pdo->query('SELECT status FROM order_refunds WHERE id = ' . (int)$credit['refund_id'])->fetchColumn()],
+        'R24 credit: the refund job\'s result then only confirms the refund (was: booked a second time) and completes the item refund');
     assert_true(!PaymentService::bookProviderRefund($r24cItemOrder, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId),
         'R24 credit: a later refund.updated of the same Stripe refund books nothing');
     assert_equals($amount, PaymentService::refundedAmount($r24cItemOrder), 'R24 credit: the ledger holds the item refund once');
