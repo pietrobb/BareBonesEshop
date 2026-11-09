@@ -71,6 +71,64 @@ final class MaintenanceMode
     }
 
     /**
+     * R25: every failed step a failed marker stands for, the one it shows first: its own and those it carries on under it
+     * (pending_other; R24 wrote a single reason there). Each is ['reason' => …] plus what lifts it: restore_scope (a
+     * restore left half-done: completed by a restore of that much), rollback_snapshot (an update or rollback: completed by
+     * the rollback of that snapshot), neither (a migration: completed by a step that migrates or puts the database back).
+     * Steps match on these fields, never on the reason text: a restore's reason quotes earlier failures ("; earlier: …").
+     * @return list<array{reason: string, restore_scope?: string, rollback_snapshot?: string}> [] when not failed
+     */
+    public static function failures(array $marker): array
+    {
+        if (($marker['failed'] ?? false) !== true) return [];
+        $more = $marker['pending_other'] ?? [];
+        $list = [];
+        foreach (array_merge([$marker], is_array($more) ? array_values($more) : [$more]) as $failure) {
+            if (is_string($failure)) $failure = ['reason' => $failure];
+            if (!is_array($failure) || !is_string($failure['reason'] ?? null) || $failure['reason'] === '') continue;
+            $entry = ['reason' => $failure['reason']];
+            $scope = $failure['restore_scope'] ?? null;
+            $snapshot = $failure['rollback_snapshot'] ?? null;
+            if (in_array($scope, ['db', 'files', 'both'], true)) {
+                $entry['restore_scope'] = $scope;
+            } elseif (str_starts_with($entry['reason'], 'cli/restore.php ')) {
+                $entry['restore_scope'] = 'both'; // R24 kept no scope for a carried restore failure: only a full restore covers it
+            } elseif (is_string($snapshot) && $snapshot !== '') {
+                $entry['rollback_snapshot'] = $snapshot;
+            } elseif (preg_match('/^(?:update|rollback) .*?--snapshot=(\S+)/', $entry['reason'], $named) === 1) {
+                $entry['rollback_snapshot'] = $named[1]; // written before R25: the updater's own reason names its rollback
+            }
+            if (!in_array($entry, $list, true)) $list[] = $entry;
+        }
+        return $list;
+    }
+
+    /**
+     * R25: end a step's window with the failures still open: none lifts it, otherwise the first is shown and the rest
+     * carried on under it (pending_other), so the step that completes the first does not reopen the shop over the others.
+     * @param list<array{reason: string}> $failures
+     */
+    public static function settle(string $root, array $failures): void
+    {
+        if ($failures === []) {
+            self::leave($root);
+            return;
+        }
+        $first = array_shift($failures);
+        self::fail($root, $first['reason'], self::about($first, $failures));
+    }
+
+    /**
+     * R25: the marker fields of a failed step $failure (restore_scope or rollback_snapshot) carrying $pending under it.
+     * @param list<array{reason: string}> $pending
+     */
+    public static function about(array $failure, array $pending): array
+    {
+        unset($failure['reason']);
+        return $failure + ($pending !== [] ? ['pending_other' => array_values($pending)] : []);
+    }
+
+    /**
      * R24: take the step lock for this process (kept until leave(), fail(), restore() or unclaim(); the kernel drops it
      * when the process ends). False while another process runs a step: an update, rollback, migration or restore.
      */

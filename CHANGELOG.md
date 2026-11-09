@@ -100,6 +100,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A failed restore, update or rollback no longer reopens a shop left half-done** (review round 25). A
+  `cli/restore.php` that failed before it replaced anything (a corrupt backup, a refused files archive) lifted the
+  window an earlier interrupted restore had left, and the shop reopened on a half-restored database or files; it now
+  puts that window back as it was, and only a restore that completes lifts it. The command the window names is the one
+  that ran, with `--force` and `--i-stopped-writers` (run again without them it was refused). A restore that leaves
+  pending migrations (an older backup) keeps the shop closed until `php cli/migrate.php apply` has run. An update or
+  rollback started over a failed window (a migration stopped half-way) carries that failure on: killed, its rollback no
+  longer reopens the shop on the half-migrated schema. Which step lifts which failure is read from fields of the
+  `.maintenance` marker (`restore_scope`, `rollback_snapshot`, `pending_other`), no longer from its text, so a
+  restore's "earlier: … --snapshot=X" no longer lets a rollback of code only of X reopen it.
 - **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail
   provider with the order. An order placed while the shop only logged mail (the default before SMTP or SES is set up)
   kept sending every later e-mail (paid, shipped, invoice, refund) to the log, and the admin showed it as sent. Now
