@@ -170,8 +170,12 @@ try {
     $r25uDb = $r25uRoot . '/live.sqlite';
     (new PDO('sqlite:' . $r25uDb, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]))->exec('CREATE TABLE notes (id INTEGER PRIMARY KEY)');
     $r25uArmed = [];
-    $r25rUpdater = new Updater($r25uShop, $r25uRoot . '/private', new PDO('sqlite:' . $r25uDb, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]),
-        static function () use (&$r25uArmed, $r25uShop): void { $r25uArmed = MaintenanceMode::marker($r25uShop); });
+    // A rollback that restored the database lets go of its connection: the next step uses a new updater (as cli/update.php).
+    $r25uNew = static function () use (&$r25uArmed, $r25uShop, $r25uRoot, $r25uDb): Updater {
+        return new Updater($r25uShop, $r25uRoot . '/private', new PDO('sqlite:' . $r25uDb, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]),
+            static function () use (&$r25uArmed, $r25uShop): void { $r25uArmed = MaintenanceMode::marker($r25uShop); });
+    };
+    $r25rUpdater = $r25uNew();
     $r25rUpdater->baseline('25.0.0');
     $r25uState = static fn(): array => [MaintenanceMode::failed($r25uShop), (string)(MaintenanceMode::marker($r25uShop)['reason'] ?? '')];
     $r25uMigrate = 'cli/migrate.php failed: r25 boom — run php cli/migrate.php apply again';
@@ -180,7 +184,7 @@ try {
     $r25uCode = $r25rUpdater->apply(new UpdatePackage($r25uRoot . '/package-code', null, true));
     MaintenanceMode::fail($r25uShop, $r25uMigrate);
     $r25uSchema = $r25rUpdater->apply(new UpdatePackage($r25uRoot . '/package-schema', null, true));
-    assert_equals([(string)$r25uSchema['snapshot'], [['reason' => $r25uMigrate]], [false, '']],
+    assert_equals([(string)$r25uSchema['snapshot'], [['reason' => $r25uMigrate, 'before_snapshots' => [(string)$r25uSchema['snapshot']]]], [false, '']],
         [$r25uArmed['rollback_snapshot'] ?? null, $r25uArmed['pending_other'] ?? null, $r25uState()],
         'R25 updater: an update armed over a failed migration carries it (rollback_snapshot + pending_other); completed with its migrations it lifts both');
     $r25rUpdater->rollback((string)$r25uSchema['snapshot'], true, true);
@@ -200,6 +204,21 @@ try {
     $r25rUpdater->rollback((string)$r25uAgain['snapshot'], true, true);
     assert_equals([true, $r25uRestore], $r25uState(),
         'R25 updater: a code-only rollback does not lift a restore window whose reason quotes --snapshot= (was: matched by a regular expression)');
+    MaintenanceMode::leave($r25uShop);
+
+    // 7d. Killed during an update WITH migrations armed over a failed migration: its database snapshot was taken after that
+    //     failure (half-migrated schema), so the database rollback the marker names keeps the shop closed for it.
+    $r25rUpdater = $r25uNew();
+    $r25rUpdater->apply(new UpdatePackage($r25uRoot . '/package-code', null, true));
+    MaintenanceMode::fail($r25uShop, $r25uMigrate);
+    $r25uKilled = $r25rUpdater->apply(new UpdatePackage($r25uRoot . '/package-schema', null, true));
+    MaintenanceMode::fail($r25uShop, (string)$r25uArmed['reason'], array_intersect_key($r25uArmed, array_flip(['rollback_snapshot', 'pending_other'])));
+    $r25uBack = $r25rUpdater->rollback((string)$r25uKilled['snapshot'], true, true);
+    assert_equals([[true, $r25uMigrate], $r25uMigrate], [$r25uState(), $r25uBack['still_closed'] ?? null],
+        'R25 updater: the database rollback a killed migration update names keeps a migration failure older than its snapshot (was: shop reopened on the half-migrated schema the snapshot holds)');
+    $r25rUpdater = $r25uNew();
+    $r25rUpdater->apply(new UpdatePackage($r25uRoot . '/package-schema', null, true));
+    assert_equals([false, ''], $r25uState(), 'R25 updater: an update that runs the migrations then lifts it');
     MaintenanceMode::leave($r25uShop);
 } catch (Throwable $e) {
     assert_true(false, 'R25 updater (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');

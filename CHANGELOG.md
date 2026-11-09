@@ -107,7 +107,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   that ran, with `--force` and `--i-stopped-writers` (run again without them it was refused). A restore that leaves
   pending migrations (an older backup) keeps the shop closed until `php cli/migrate.php apply` has run. An update or
   rollback started over a failed window (a migration stopped half-way) carries that failure on: killed, its rollback no
-  longer reopens the shop on the half-migrated schema. Which step lifts which failure is read from fields of the
+  longer reopens the shop on the half-migrated schema — also when that rollback restores the database, since the
+  update's snapshot was taken after the migration failed (`before_snapshots`). Which step lifts which failure is read from fields of the
   `.maintenance` marker (`restore_scope`, `rollback_snapshot`, `pending_other`), no longer from its text, so a
   restore's "earlier: … --snapshot=X" no longer lets a rollback of code only of X reopen it.
 - **E-mails of orders placed before SMTP was set up are delivered** (review round 24). Checkout records the mail

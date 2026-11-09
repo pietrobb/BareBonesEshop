@@ -74,9 +74,11 @@ final class MaintenanceMode
      * R25: every failed step a failed marker stands for, the one it shows first: its own and those it carries on under it
      * (pending_other; R24 wrote a single reason there). Each is ['reason' => …] plus what lifts it: restore_scope (a
      * restore left half-done: completed by a restore of that much), rollback_snapshot (an update or rollback: completed by
-     * the rollback of that snapshot), neither (a migration: completed by a step that migrates or puts the database back).
+     * the rollback of that snapshot), neither (a migration: completed by a step that migrates or puts the database back,
+     * but not by the rollback of a snapshot listed in before_snapshots: taken after it failed, that one holds its schema).
      * Steps match on these fields, never on the reason text: a restore's reason quotes earlier failures ("; earlier: …").
-     * @return list<array{reason: string, restore_scope?: string, rollback_snapshot?: string}> [] when not failed
+     * Empty when the marker is not failed.
+     * @return list<array{reason: string, restore_scope?: string, rollback_snapshot?: string, before_snapshots?: list<string>}>
      */
     public static function failures(array $marker): array
     {
@@ -97,6 +99,11 @@ final class MaintenanceMode
                 $entry['rollback_snapshot'] = $snapshot;
             } elseif (preg_match('/^(?:update|rollback) .*?--snapshot=(\S+)/', $entry['reason'], $named) === 1) {
                 $entry['rollback_snapshot'] = $named[1]; // written before R25: the updater's own reason names its rollback
+            }
+            $before = $failure['before_snapshots'] ?? null;
+            if (!isset($entry['restore_scope']) && !isset($entry['rollback_snapshot']) && is_array($before)) {
+                $before = array_values(array_filter($before, static fn($id): bool => is_string($id) && $id !== ''));
+                if ($before !== []) $entry['before_snapshots'] = $before;
             }
             if (!in_array($entry, $list, true)) $list[] = $entry;
         }
@@ -125,7 +132,7 @@ final class MaintenanceMode
     public static function about(array $failure, array $pending): array
     {
         unset($failure['reason']);
-        return $failure + ($pending !== [] ? ['pending_other' => array_values($pending)] : []);
+        return $failure + ($pending !== [] ? ['pending_other' => $pending] : []);
     }
 
     /**
