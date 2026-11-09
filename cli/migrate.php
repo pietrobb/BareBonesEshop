@@ -105,7 +105,7 @@ try {
                 // R24: the step lock first (MaintenanceMode::claim()): an update entering between this check and enter() was
                 // overwritten by this migration's window, which then lifted it while the update still ran.
                 if (!MaintenanceMode::claim($root) || (!$ownMaintenance && MaintenanceMode::heldElsewhere($root))) {
-                    throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
+                    throw new RuntimeException('Another maintenance window is open (' . MaintenanceMode::busy($root)
                         . '); no migration ran. Wait until that step ends, then run php cli/migrate.php apply again');
                 }
                 if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {

@@ -135,7 +135,7 @@ if (!$yes && !$quiet) {
 $root = dirname(__DIR__);
 // R24: the step lock first (MaintenanceMode::claim()): checked and entered apart, an update or migration could start in between.
 if (!MaintenanceMode::claim($root) || MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
-    fwrite(STDERR, 'REFUSED: another maintenance window is open (' . (string)(MaintenanceMode::marker($root)['reason'] ?? '')
+    fwrite(STDERR, 'REFUSED: another maintenance window is open (' . MaintenanceMode::busy($root)
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);
 }

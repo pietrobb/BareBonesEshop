@@ -136,6 +136,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   application root, next to `.maintenance`), taken before they look at the window: while one runs, the others are
   refused with "Another maintenance window is open" and change nothing. The user that runs these commands creates the
   file and needs write access to it, as to `.maintenance`; the updater never replaces it.
+- **The maintenance step lock works for root and the web user alike** (review round 25). `.maintenance.lock` was
+  created 0644 by whoever ran a step first. Made by root, it shut the web user out (cron or a container running as
+  www-data: "Cannot open the maintenance step lock", every migrate, restore, update and rollback failed for good), and
+  any local account could open it to read and lock it, holding off every step with an empty reason. It is now created
+  0660, and a step run as root hands it (also an existing one) to the owner and group of the application root. A step
+  refused while another runs names the process that holds the lock. On a file system without file locks (NFS without
+  lock support, CIFS `nobrl`) the steps were refused for good; they now run with a warning that they must not be
+  started together. If www-data still cannot open the file, the error says its owner and mode and how to fix them.
 - **Payment QR in the payer's standard** (review round 23, UX). The bank-transfer QR was PAY by square only, the
   Slovak standard: a German customer's banking app could not read it, and a CZK order had no QR at all. Now a CZK
   order gets the Czech SPAYD (QR Platba), a EUR order from a Slovak address keeps PAY by square, and a EUR order
