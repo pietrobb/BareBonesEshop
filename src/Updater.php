@@ -376,7 +376,7 @@ final class Updater
         }
         if (!$claimed) {
             $this->unlock();
-            throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? 'a migration or restore is starting')
+            throw new RuntimeException('Another maintenance window is open (' . MaintenanceMode::busy($this->root)
                 . '); wait until that step ends, then retry');
         }
     }

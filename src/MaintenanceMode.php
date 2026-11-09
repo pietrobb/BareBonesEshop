@@ -33,7 +33,7 @@ final class MaintenanceMode
 
     /** @var array<string,resource> marker path => the open handle this process holds the lock on */
     private static array $held = [];
-    /** @var array<string,resource> step lock path => the open handle of the step this process runs (claim()) */
+    /** @var array<string,resource|false> step lock path => the open handle of the step this process runs (claim()); false: no file locks there */
     private static array $claimed = [];
 
     public static function path(string $root): string
@@ -78,14 +78,81 @@ final class MaintenanceMode
     {
         $path = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . self::LOCK_FILE;
         if (isset(self::$claimed[$path])) return true;
-        $handle = @fopen($path, 'c');
-        if (!is_resource($handle)) throw new RuntimeException('Cannot open the maintenance step lock ' . $path);
-        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+        $handle = self::openLock($root, $path);
+        $wouldBlock = 0;
+        if (!flock($handle, LOCK_EX | LOCK_NB, $wouldBlock)) {
             fclose($handle);
+            // R25: a file system without file locks (NFS without lockd, CIFS with nobrl) refuses every lock, not one held.
+            // Every step was refused there for good as "another window is open". Steps then exclude each other as before
+            // R24, by the marker's holder (active(), heldElsewhere()), and say so.
+            if ($wouldBlock !== 1 && PHP_OS_FAMILY !== 'Windows') {
+                fwrite(STDERR, "WARNING: {$path} cannot be locked on this file system (flock unsupported); update, rollback, migrate and restore"
+                    . " are not excluded from each other by the step lock — do not run two of them at once\n");
+                self::$claimed[$path] = false;
+                return true;
+            }
             return false;
         }
+        // R25: who holds it, for the step refused meanwhile (a refused step said "another window is open ()").
+        ftruncate($handle, 0);
+        fwrite($handle, json_encode(['pid' => getmypid(), 'host' => (string)gethostname(), 'since' => gmdate('c'),
+            'command' => implode(' ', array_slice($_SERVER['argv'] ?? [], 0, 3))], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+        fflush($handle);
         self::$claimed[$path] = $handle;
         return true;
+    }
+
+    /** R25: what keeps a step from starting, for its message: the open window's reason, else who holds the step lock. */
+    public static function busy(string $root): string
+    {
+        $reason = (string)(self::marker($root)['reason'] ?? '');
+        return $reason !== '' ? $reason : 'step lock held by ' . self::holder($root);
+    }
+
+    /** R25: who holds the step lock now (the step that claimed it last), for a refused step's message. */
+    public static function holder(string $root): string
+    {
+        $path = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . self::LOCK_FILE;
+        $claim = json_decode((string)@file_get_contents($path), true);
+        if (!is_array($claim) || !isset($claim['pid'])) return 'another process holds ' . $path;
+        return 'pid ' . (int)$claim['pid'] . ' on ' . (string)($claim['host'] ?? '?') . ' since ' . (string)($claim['since'] ?? '?')
+            . (($claim['command'] ?? '') !== '' ? ': ' . $claim['command'] : '');
+    }
+
+    /**
+     * R25: open the step lock read-write, created group-writable (0660) and, when root creates or finds it, handed to the
+     * owner and group of the app root. Created 0644 by whoever ran first, a lock root made shut out the web user (www-data
+     * in cron or a container: every step failed with "Cannot open the maintenance step lock"), and any local account could
+     * open it to read and flock it, holding off every step for as long as it liked.
+     * @return resource
+     */
+    private static function openLock(string $root, string $path)
+    {
+        $old = umask(0007);
+        try {
+            $handle = @fopen($path, 'c');
+        } finally {
+            umask($old);
+        }
+        if (!is_resource($handle)) {
+            $stat = @stat($path);
+            throw new RuntimeException('Cannot open the maintenance step lock ' . $path
+                . (is_array($stat) ? sprintf(' (owner %d, group %d, mode %04o): it must be writable by the user that runs the shop;'
+                    . ' run a step once as root, or chown it to the owner of the app root and chmod 0660', $stat['uid'], $stat['gid'], $stat['mode'] & 07777) : ''));
+        }
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $app = @stat($root);
+            $open = fstat($handle);
+            if (is_array($app) && is_array($open) && ($open['uid'] !== $app['uid'] || $open['gid'] !== $app['gid'] || ($open['mode'] & 0777) !== 0660)) {
+                try {
+                    FileOwnership::handOver($handle, $path, $app['uid'], $app['gid'], 0660);
+                } catch (Throwable $e) {
+                    fclose($handle);
+                    throw $e;
+                }
+            }
+        }
+        return $handle;
     }
 
     /** R24: let go of the step lock (the step ended without leaving or failing its window: another step's, or none). */
@@ -93,16 +160,18 @@ final class MaintenanceMode
     {
         $path = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . self::LOCK_FILE;
         if (!isset(self::$claimed[$path])) return;
-        flock(self::$claimed[$path], LOCK_UN);
-        fclose(self::$claimed[$path]);
+        if (is_resource(self::$claimed[$path])) {
+            ftruncate(self::$claimed[$path], 0);
+            flock(self::$claimed[$path], LOCK_UN);
+            fclose(self::$claimed[$path]);
+        }
         unset(self::$claimed[$path]);
     }
 
     public static function enter(string $root, string $reason): void
     {
         if (!self::claim($root)) {
-            throw new RuntimeException('Another maintenance step is running (' . (string)(self::marker($root)['reason'] ?? 'it has not opened its window yet')
-                . '); wait until that step ends, then retry');
+            throw new RuntimeException('Another maintenance step is running (' . self::busy($root) . '); wait until that step ends, then retry');
         }
         $path = self::path($root);
         self::replace($path, self::own(['since' => gmdate('c'), 'reason' => $reason]));
