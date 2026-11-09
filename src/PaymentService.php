@@ -378,6 +378,9 @@ class PaymentService {
             if ($status === 'succeeded' && (self::refundAlreadyRecorded($orderId, $refundId)
                 || ($refundId === '' && self::refundRequestSettled($orderId, (string)$idempotencyKey, $amount)))) {
                 $status = 'confirmed';
+            } elseif ($refundId !== '' && in_array($status, ['succeeded', 'pending'], true) && self::refundSettledByEvent($orderId, (string)$idempotencyKey)) {
+                // R24: a Stripe charge.refunded without its refund list booked this very refund already (bookCumulativeRefund()).
+                $status = 'confirmed';
             }
             self::logTransaction(
                 orderId:        $orderId,
@@ -751,16 +754,7 @@ class PaymentService {
         $order = Orders::byId($orderId);
         if (!$order) return false;
         if (self::refundedAmount($orderId) + $amount > (int)$order['total']) return true;
-        $requestKey = self::refundRequestKey($executeKey);
-        if ($requestKey === null) return false;
-        $stmt = Db::get()->prepare("SELECT raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
-        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $raw) {
-            $settled = json_decode((string)$raw, true);
-            if (is_array($settled) && ($settled['settles_refund_request'] ?? null) === $requestKey) return true;
-        }
-        return false;
+        return self::refundRequestKey($executeKey) !== null && self::refundSettledByEvent($orderId, $executeKey);
     }
 
     /**
@@ -1274,8 +1268,62 @@ class PaymentService {
     public static function bookCumulativeRefund(int $orderId, string $provider, int $cumulativeAmount, string $eventType, string $eventKey, array $payload = []): bool {
         return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $cumulativeAmount, $eventType, $eventKey, $payload): bool {
             $delta = $cumulativeAmount - self::refundedAmount($orderId);
-            return $delta > 0 && self::bookRefundWithin($order, $provider, '', $delta, $eventType, $eventKey, $payload);
+            if ($delta <= 0) return false;
+            // R24: the shop's own refund in flight (admin request, cancellation, item refund) of exactly this amount is the one
+            // reported. It is booked as that refund, so the item refund's credit note is the only one (creditBookedRefund())
+            // and the refund job's result only confirms it (refundSettledByEvent()). Was: a second credit note, and the job
+            // booked the money again.
+            $settles = self::inFlightRefundOf($order, $delta);
+            if ($settles === null) return self::bookRefundWithin($order, $provider, '', $delta, $eventType, $eventKey, $payload);
+            return self::bookRefundWithin($order, $provider, $settles['refund_id'], $delta, $eventType, $eventKey,
+                $payload + ['settles_refund_request' => $settles['key']], $settles['item_refund_id'],
+                $settles['refund_id'] !== '' ? $settles['refund_id'] : $eventKey);
         });
+    }
+
+    /**
+     * The shop's refund in flight that a provider-reported refund of $amount settles: the refund request of a
+     * refund_pending payment, else the oldest item refund (credit note) whose money is not booked. Its provider refund
+     * id when the refund job noted one already. Null when none has exactly this amount.
+     *
+     * @return array{key:string, refund_id:string, item_refund_id:int}|null
+     */
+    private static function inFlightRefundOf(array $order, int $amount): ?array {
+        $db = Db::get();
+        $request = self::latestRefundRequestRow($order);
+        if ($request !== null && (int)$request['amount'] === $amount) {
+            $key = (string)$request['idempotency_key'];
+            $executed = $db->prepare("SELECT provider_ref FROM payment_transactions WHERE order_id = :order AND store_id = :store
+                AND idempotency_key = :execute AND status = 'refund_pending' AND provider_ref IS NOT NULL AND provider_ref <> '' LIMIT 1");
+            $executed->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':execute' => self::refundExecuteKey($key)]);
+            return ['key' => $key, 'refund_id' => (string)($executed->fetchColumn() ?: ''), 'item_refund_id' => 0];
+        }
+        $item = $db->prepare("SELECT r.id, r.idempotency_key, r.payment_reference FROM order_refunds r
+            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND r.amount = :amount AND NOT EXISTS (
+                SELECT 1 FROM payment_transactions t WHERE t.order_id = r.order_id AND t.store_id = r.store_id
+                  AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded')
+                  AND (t.idempotency_key = r.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))
+            ORDER BY r.id LIMIT 1");
+        $item->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':amount' => $amount]);
+        $row = $item->fetch(\PDO::FETCH_ASSOC);
+        return $row ? ['key' => (string)$row['idempotency_key'], 'refund_id' => (string)($row['payment_reference'] ?? ''), 'item_refund_id' => (int)$row['id']] : null;
+    }
+
+    /**
+     * Whether a provider-reported refund without its refund id (bookCumulativeRefund(), refund.reported) was booked as the
+     * refund this payment_refund job executes ($executeKey: the item refund's key, or the request's execute key).
+     */
+    private static function refundSettledByEvent(int $orderId, string $executeKey): bool {
+        if ($executeKey === '') return false;
+        $keys = array_filter([$executeKey, self::refundRequestKey($executeKey)]);
+        $stmt = Db::get()->prepare("SELECT raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $raw) {
+            $settled = json_decode((string)$raw, true);
+            if (is_array($settled) && in_array($settled['settles_refund_request'] ?? null, $keys, true)) return true;
+        }
+        return false;
     }
 
     /** Whether an order's payment is returned by hand: offline money, or a provider without a refund API. */
@@ -1546,8 +1594,9 @@ class PaymentService {
 
     private static function refundAlreadyRecorded(int $orderId, string $refundId): bool {
         if ($refundId === '') return false;
+        // R24: refund_confirmed too: a job result that confirmed money a refund event booked without this id (refundSettledByEvent()).
         $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND provider_ref = :ref
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') LIMIT 1");
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed') LIMIT 1");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $refundId]);
         return (bool)$stmt->fetchColumn();
     }
