@@ -553,7 +553,12 @@ restores the database; an update or rollback of code only leaves that schema as 
 was and keeps the shop closed (it warns). A failed update or rollback is lifted only
 by the rollback the file names (`--snapshot=...`); any other update or rollback keeps
 the shop closed and warns, and `update_snapshots_keep` never deletes the snapshot the
-file names. Updates are rolled back newest first: a rollback is refused while an
+file names. A restore killed or failed half-way is lifted only by a restore that
+replaces at least as much (database, files or both); a restore that fails before
+it replaces anything leaves the window as it found it, and one that leaves pending
+migrations keeps the shop closed until `migrate.php apply`. A step that starts over a
+failed window carries that failure on in the file, so completing the step does not
+lift the earlier one. Updates are rolled back newest first: a rollback is refused while an
 update applied after its snapshot (or one half-applied, whose automatic rollback
 failed) is still installed, and it names the rollback to run first. A rollback puts
 the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so one
