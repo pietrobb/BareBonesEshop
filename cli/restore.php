@@ -139,30 +139,42 @@ if (!MaintenanceMode::claim($root) || MaintenanceMode::heldElsewhere($root) || (
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);
 }
-$priorFailure = MaintenanceMode::failed($root) ? (string)(MaintenanceMode::marker($root)['reason'] ?? '') : null;
+$priorMarker = MaintenanceMode::failed($root) ? MaintenanceMode::marker($root) : null;
+$priorFailure = $priorMarker !== null ? (string)($priorMarker['reason'] ?? '') : null;
 $restoreCommand = 'php cli/restore.php ' . escapeshellarg($remotePath) . ($filesOnly ? ' --files-only' : ($withFiles ? ' --files' : ''));
-// R24: a failed window that an interrupted or half-done restore of this backup left names the restore to run again. This
-// run completes it when it restores at least what that one did (database, files or both): put back, it kept the shop in
-// maintenance for good, whatever restore ran next. Any other failed window (a migration, an update) stays.
-$completes = $withFiles && !$filesOnly
-    ? [$restoreCommand, 'php cli/restore.php ' . escapeshellarg($remotePath), 'php cli/restore.php ' . escapeshellarg($remotePath) . ' --files-only']
-    : [$restoreCommand];
-foreach ($completes as $command) {
-    if ($priorFailure !== null && str_starts_with($priorFailure, 'cli/restore.php ') && str_contains($priorFailure, "run {$command} again")) {
-        $priorFailure = null;
-    }
+// R24: a failed window that an interrupted or half-done restore left records what it was replacing (restore_scope: db,
+// files or both). A restore of any backup that replaces at least that completes it: it puts back the whole database
+// (and files), also from another backup or the pre-restore-snapshot. Matched on the backup it named, a restore of
+// another one kept the shop in maintenance for good. Less (the database after files) or any other failed window (a
+// migration, an update) stays.
+$scope = $filesOnly ? 'files' : ($withFiles ? 'both' : 'db');
+$priorScope = is_string($priorMarker['restore_scope'] ?? null) ? $priorMarker['restore_scope'] : null;
+// Capability review run 375: the failure of another step (an update, a migration) that a restore window covers. A restore
+// killed on top of it replaced the marker and dropped it, so the next covering restore reopened the shop on half-replaced
+// code or a half-migrated schema. Every restore window carries it on (pending_other) and puts it back when it ends.
+$pendingOther = $priorScope === null ? $priorFailure
+    : (is_string($priorMarker['pending_other'] ?? null) ? $priorMarker['pending_other'] : null);
+if ($priorScope !== null && ($scope === 'both' || $scope === $priorScope)) {
+    $priorFailure = $pendingOther;
+    $priorScope = null;
 }
+// A failure of this run must not hide what an earlier restore still left half-done, nor another step's failure.
+$failScope = $priorScope === null || $priorScope === $scope ? $scope : 'both';
+$earlier = $priorFailure !== null ? "; earlier: {$priorFailure}" : '';
+$failAbout = ['restore_scope' => $failScope] + ($pendingOther !== null ? ['pending_other' => $pendingOther] : []);
 MaintenanceMode::enter($root, 'cli/restore.php ' . $remotePath);
 // Killed from here on, the shop stays closed with what to run (no finally runs).
-MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again");
-$endWindow = static function (?string $halfDone) use ($root, $priorFailure): void {
+MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again"
+    . $earlier, $failAbout);
+$endWindow = static function (?string $halfDone) use ($root, $priorFailure, $priorScope, $pendingOther, $earlier, $failAbout): void {
     if ($halfDone !== null) {
-        MaintenanceMode::fail($root, $halfDone);
+        MaintenanceMode::fail($root, $halfDone . $earlier, $failAbout);
         fwrite(STDERR, "The shop stays in maintenance (503) until that is resolved.\n");
     } elseif (!MaintenanceMode::owned($root)) {
         // Another step took the window over meanwhile; it is that step's to lift.
     } elseif ($priorFailure !== null) {
-        MaintenanceMode::fail($root, $priorFailure);
+        MaintenanceMode::fail($root, $priorFailure, $priorScope === null ? []
+            : ['restore_scope' => $priorScope] + ($pendingOther !== null ? ['pending_other' => $pendingOther] : []));
         fwrite(STDERR, "The shop stays in maintenance (503) for the earlier failed step: {$priorFailure}\n");
     } else {
         MaintenanceMode::leave($root);

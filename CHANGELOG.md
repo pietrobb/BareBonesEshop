@@ -108,9 +108,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   sent)".
 - **An interrupted restore no longer keeps the shop closed for good** (review round 24). A `cli/restore.php` that was
   killed or failed half-way leaves the shop in maintenance with the restore to run again. That run completed, then put
-  the earlier failure back, so the shop stayed closed whatever was run next. Now the restore the failed window names
-  (the same backup, with at least the same `--files`/`--files-only` scope) lifts it and reopens the shop. A failed
-  window of a migration, an update or a restore of another backup stays, and the restore says so.
+  the earlier failure back, so the shop stayed closed whatever was run next. Now a successful restore of any backup —
+  the same one, another one or the `pre-restore-snapshot` — lifts it and reopens the shop when it replaces at least
+  what the failed restore was replacing (the marker records `restore_scope`: the database, the files or both). A
+  database-only restore after an interrupted `--files`/`--files-only` restore, or a failed window of a migration or an
+  update, stays, and the restore says so — also when a restore was killed or failed half-way on top of it (the
+  marker carries that failure on as `pending_other`, and the restore that completes it puts it back).
 - **No second credit note for a Stripe refund reported in total** (review round 24). When a Stripe `charge.refunded`
   event came without its list of refunds (and the Stripe API could not list them), the shop booked the refunded total
   under the payment and issued a credit note for it at once. If that money was the shop's own refund in flight (an
