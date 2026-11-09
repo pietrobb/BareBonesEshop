@@ -539,7 +539,9 @@ before its first change leaves a marker that keeps blocking for an hour (longer,
 24 hours, while the process it names still runs on that host); from the first changed
 file on the window is marked failed, so one killed half-way keeps the shop closed and
 names the rollback to run. `php cli/migrate.php apply` and `php cli/restore.php` use
-the same window (and refuse while an update or migration holds it); a migration that
+the same window (and refuse while an update or migration holds it). These four steps
+take one lock, `.maintenance.lock`, before they look at the window, so only one of
+them runs at a time and none enters or lifts the window of another; a migration that
 fails or is killed, an update whose automatic rollback fails, or a rollback that stops
 after it began restoring marks the window failed: it never expires and the file says
 what to run. A worker run checks the window before every job and stops when it opens. A failed migration is lifted only by a

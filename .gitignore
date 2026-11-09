@@ -12,6 +12,7 @@ cache/
 
 # Updater maintenance marker (MaintenanceMode)
 /.maintenance
+/.maintenance.lock
 
 # Rate limit DB
 rate_limit.sqlite*

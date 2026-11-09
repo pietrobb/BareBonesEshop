@@ -126,6 +126,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   changes, …) in the admin's language; stored entries are unchanged. Attribute types and payment methods in the admin
   forms follow the admin language (they were Slovak everywhere). The web installer asks for the seller's BIC, company ID
   (IČO) and tax ID (DIČ), checked like in Admin → Stores.
+- **A migration can no longer open the shop in the middle of an update** (review round 24). `cli/migrate.php apply`
+  and `cli/update.php` each checked that no other step held the maintenance window and then entered it; one starting
+  in between could enter as well, and a migration ending first lifted the window of the update still running. Update,
+  rollback, `cli/migrate.php apply` and `cli/restore.php` now share one step lock (`.maintenance.lock` in the
+  application root, next to `.maintenance`), taken before they look at the window: while one runs, the others are
+  refused with "Another maintenance window is open" and change nothing. The user that runs these commands creates the
+  file and needs write access to it, as to `.maintenance`; the updater never replaces it.
 - **Payment QR in the payer's standard** (review round 23, UX). The bank-transfer QR was PAY by square only, the
   Slovak standard: a German customer's banking app could not read it, and a CZK order had no QR at all. Now a CZK
   order gets the Czech SPAYD (QR Platba), a EUR order from a Slovak address keeps PAY by square, and a EUR order

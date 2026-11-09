@@ -31,7 +31,8 @@ $themeUpgradeGateExit = (static function(): int {
     $treeHash = static function(string $root): string {
         $rows = [];
         foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)) as $item) {
-            if ($item->isFile()) $rows[] = str_replace('\\', '/', substr($item->getPathname(), strlen($root) + 1)) . ':' . hash_file('sha256', $item->getPathname());
+            // R24: the empty step lock (MaintenanceMode::LOCK_FILE) stays once a step ran; no package file, never unlinked.
+            if ($item->isFile() && $item->getFilename() !== MaintenanceMode::LOCK_FILE) $rows[] = str_replace('\\', '/', substr($item->getPathname(), strlen($root) + 1)) . ':' . hash_file('sha256', $item->getPathname());
         }
         sort($rows);
         return hash('sha256', implode("\n", $rows));
