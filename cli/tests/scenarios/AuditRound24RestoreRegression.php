@@ -4,7 +4,8 @@
 // names the restore to run again. That run completed, then put the earlier failure back (cli/restore.php:141,153): the
 // shop stayed in maintenance for good, whatever was run next. A restore of any backup (capability review run 373: also
 // another one or the pre-restore-snapshot) that replaces at least what the failed one did (restore_scope: database, files
-// or both) now lifts it; less, or a failed window of another step, stays.
+// or both) now lifts it; less, or a failed window of another step, stays — also under a restore killed on top of it
+// (capability review run 375).
 echo "\n--- R24: re-running an interrupted restore reopens the shop ---\n";
 $r24rRepo = dirname(TEST_CLI_DIR);
 $r24rBase = test_fixture_path('r24-restore');
@@ -118,10 +119,35 @@ try {
         'R24 restore: a failed migration window stays after a restore — ' . trim(substr($r24rRun['output'], -160)));
     MaintenanceMode::leave($r24rApp);
 
+    // 7. Capability review run 375: a restore killed ON TOP of a failed update or migration. Its own window (restore_scope)
+    //    replaced the marker and dropped the earlier failure, so the next restore that covered it reopened the shop on
+    //    half-replaced code or a half-migrated schema. The real cli/restore.php is killed right after its arm().
+    $r24rCliCopy = (string)file_get_contents($r24rApp . '/cli/restore.php');
+    $r24rArmAt = strpos($r24rCliCopy, 'MaintenanceMode::arm($root,');
+    $r24rArmEnd = $r24rArmAt === false ? false : strpos($r24rCliCopy, ");\n", $r24rArmAt);
+    assert_true($r24rArmEnd !== false, 'R24 restore: the arm() call of cli/restore.php is found for the kill probe');
+    file_put_contents($r24rApp . '/cli/restore-killed.php', substr($r24rCliCopy, 0, (int)$r24rArmEnd + 3) . "exit(9);\n" . substr($r24rCliCopy, (int)$r24rArmEnd + 3));
+    $r24rUpdate = 'update 24.0.1 failed half-way (r24 probe); run php cli/update.php rollback --snapshot=r24-probe --force';
+    foreach ([[$r24rUpdate, '', 'an update'], [$r24rMigrate, '', 'a migration'], [$r24rUpdate, '--files', 'an update (database + files restore)']] as [$r24rOther, $r24rFlag, $r24rWhat]) {
+        MaintenanceMode::fail($r24rApp, $r24rOther);
+        $r24rArgs = array_values(array_filter([$r24rPath, $r24rFlag, '--yes']));
+        $r24rKilled = $r24rPhp(array_merge([$r24rApp . '/cli/restore-killed.php'], $r24rArgs));
+        clearstatcache();
+        $r24rKilledMarker = MaintenanceMode::marker($r24rApp);
+        assert_equals([9, true, true], [$r24rKilled['exit'], MaintenanceMode::failed($r24rApp), str_contains((string)($r24rKilledMarker['reason'] ?? ''), $r24rOther)],
+            "R24 restore: a restore killed on top of {$r24rWhat} failure still names that failure — " . trim(substr($r24rKilled['output'], -160)));
+        // Killed twice: the second restore's window carries the earlier failure on.
+        $r24rPhp(array_merge([$r24rApp . '/cli/restore-killed.php'], $r24rArgs));
+        $r24rRun = $r24rPhp(array_merge([$r24rApp . '/cli/restore.php'], $r24rArgs));
+        assert_equals([0, [true, $r24rOther], true], [$r24rRun['exit'], $r24rState(), str_contains($r24rRun['output'], 'stays in maintenance')],
+            "R24 restore: a restore that completes interrupted ones keeps {$r24rWhat} failure under them (was: reopened the shop) — " . trim(substr($r24rRun['output'], -200)));
+        MaintenanceMode::leave($r24rApp);
+    }
+
     // The reason the test kills with is the one cli/restore.php arms with.
     $r24rCli = (string)file_get_contents($r24rRepo . '/cli/restore.php');
     assert_true(str_contains($r24rCli, 'MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted before it finished; check the database and files, then run {$restoreCommand} again"')
-        && str_contains($r24rCli, "['restore_scope' => \$failScope]);"),
+        && str_contains($r24rCli, "\$failAbout = ['restore_scope' => \$failScope]"),
         'R24 restore: cli/restore.php arms its window with the reason and restore_scope this test simulates');
 } catch (Throwable $e) {
     assert_true(false, 'R24 restore (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
