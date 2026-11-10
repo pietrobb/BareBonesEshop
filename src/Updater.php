@@ -57,6 +57,17 @@ final class Updater
             throw new RuntimeException('Update state directory must be outside the public application root');
         }
         self::assertStateAccessible($this->stateDirectory);
+        // R28 (finding 5): root keeps root only in a tree no other account can change (cli/cli-only.php), but the update
+        // directory was not checked: in the private directory the web user writes (SQLite), it put code into a snapshot,
+        // a rollback installed it root:root and the next step ran it as root. Root needs that directory to be root's too.
+        if (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() === 0 && function_exists('cli_not_root_only')) {
+            $why = cli_not_root_only($this->stateDirectory);
+            if ($why !== null) {
+                throw new RuntimeException("REFUSED: this step runs as root, but the update directory is not root's alone: {$why},"
+                    . ' and root would install the files it holds. Run the step as the owner of the application root, or set'
+                    . ' update_storage_dir to a directory only root can write (not under a directory the web user writes).');
+            }
+        }
         $this->database = $database;
         $this->migrationRunner = $migrationRunner;
         $this->databaseBackup = $databaseBackup;
