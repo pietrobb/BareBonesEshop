@@ -147,13 +147,15 @@ final class PaymentLink {
             return ['status' => 'no_app_url'];
         }
         $locale = (string)($order['locale'] ?? '');
+        $provider = MailService::providerCode($order, $fellBack);
         $result = MailService::send('order_payment_link', (string)$order['customer_email'], $locale, [
             'customer_name' => (string)($order['customer_name'] ?? ''), 'order_number' => (string)$order['order_number'],
             'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),
             'pay_url' => $payUrl, 'valid_days' => (string)intdiv(self::LINK_TTL, 86400),
-        ], (int)$order['id']);
-        // R26: a link only written to the log reached nobody, so it is 'logged', never 'sent'.
-        return MailService::logged($result) ? ['status' => 'logged'] + $result : $result;
+        ], (int)$order['id'], [], $provider);
+        // R26: a link only written to the log reached nobody, so it is 'logged', never 'sent'. R27: fell_back tells it was
+        // written there for a misconfigured provider (not MAIL_ADAPTER=log on purpose), so it is worth sending again.
+        return MailService::logged($result) ? ['status' => 'logged', 'fell_back' => $fellBack] + $result : $result;
     }
 
     /**

@@ -109,6 +109,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
+  fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached
+  nobody and were never sent again (the download links were even marked delivered). They are now tried again like order
+  mail: every 30 minutes, at most 48 times; logged download links are revoked and new ones mailed. With `MAIL_ADAPTER=log`
+  on purpose nothing is tried again.
 - **"Back in stock" notices are retried once per request and not refused after a provider fix** (review round 27).
   The recipient limit (10 an hour) counted the copies only written to the log while the mail provider was
   misconfigured, so the real notice was refused once it was fixed; such copies no longer count for a real provider

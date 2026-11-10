@@ -156,7 +156,8 @@ final class ManualOrder {
         if ($order === null) return;
         try {
             if (PaymentLink::payable($order)) {
-                PaymentLink::send($order);
+                // R27: only written to the log for a misconfigured mail provider: sent again once it may be fixed.
+                if (!empty(PaymentLink::send($order)['fell_back'])) WorkerJobs::requeueLoggedMail('payment_link_send', ['order_id' => $orderId]);
             } elseif (!OrderWorkflow::confirmedAtPayment($order)) {
                 JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => (string)$order['customer_email'], 'order_id' => $orderId]);
             }
