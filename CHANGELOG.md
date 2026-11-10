@@ -106,10 +106,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   it loads code of `src/` (a notice says so); in a tree root owns, root stays only when no other account can change
   anything in the tree or above it, else the step is refused. That switch is code in the tree itself (`cli/cli-only.php`):
   an account that can write the tree, often the web user, can change or replace it, and root then runs its copy. It is a
-  second line of defence, not a fix: run steps as the owner (`sudo -u <owner> php cli/….php`), or install the wrapper
+  second line of defence, not a fix: run steps as the owner (`sudo -u <owner> php cli/….php`, with `Defaults use_pty`
+  in sudoers, the default from sudo 1.9.14, or the step can type commands into root's terminal), or install the wrapper
   `deploy/bbe-step.sh` outside the tree (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`)
   and run `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group root) before any PHP of the
-  shop runs and refuses a root-owned tree. A step now changes only what that owner can write: run backups and restores
+  shop runs, in a session of its own without root's terminal as controlling terminal, and refuses a root-owned tree.
+  Ctrl-C or a dropped ssh connection no longer stops a step started through `bbe-step`; stop it with `kill`. A step now changes only what that owner can write: run backups and restores
   as the user that owns the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook says). The
   Docker `setup` service hands the directories it fills to the checkout's owner for the command and to `www-data`
   afterwards.
@@ -133,6 +135,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   E-mail delivery already showed it: it replaced the saved server with an empty host and port 0. An invoice to pay by
   transfer prints the seller's BIC next to the IBAN (for payments from abroad); the installer and Admin → Stores
   collected it for the invoices but it was never printed.
+- **Root: the shop decides, the update directory counts, no group root, ACLs count** (review round 28, findings 4 and
+  5, lows). `cli/update.php --installed=<shop>` run as root decided by the owner of the release tree (root) that it may
+  stay root, then ran the shop's `config.php` and changed its files as root; it now switches to the owner of the shop
+  (or refuses) before it reads anything of it, so the release tree must be readable for that owner. Root kept root in
+  a root-owned tree without a look at the update directory, which in the private directory the web user writes held
+  snapshots it could change: a rollback installed their files root:root and the next step ran them as root. Root now
+  needs `update_storage_dir` to be root's alone as well, else the step is refused. A tree of group root (`www-data:root`)
+  no longer leaves the step group 0 (it takes the owner's primary group, or refuses), and in a root-owned tree any group
+  write counts as another account's (a POSIX ACL such as `setfacl -m u:www-data:rwx src/` shows only as these bits).
 - **A rollback stopped half-way can be finished by the command `.maintenance` names** (review round 28, finding 3).
   Only the updater's own files waited for the end, not the classes they load: the rollback of 2.1.3 removed
   `src/AppConfig.php` and `src/FileOwnership.php` (new in 2.1.3) first, and stopped half-way, the named rollback and
@@ -150,7 +161,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (review round 28, findings 1 and 6). Round 27 called the root hole fixed by `cli/cli-only.php`, but that file is in
   the tree the web user may write, so a changed copy ran as root. New `deploy/bbe-step.sh`, installed root-owned outside
   the shop, switches a step to the owner of the application root (never group root) before any PHP of the shop runs and
-  refuses a root-owned tree. The theme check of a new release started as root (by the 2.1.2 updater) now says "Not a
+  refuses a root-owned tree. It starts the step in a new session (`setsid`), so the step has no controlling terminal: a
+  changed step can no longer push commands into root's shell with `TIOCSTI` for root to run after it ends (capability
+  review of round 28; reproduced as uid 33 → `uid=0(root)` with `dev.tty.legacy_tiocsti=1`). The theme check of a new release started as root (by the 2.1.2 updater) now says "Not a
   theme problem: the updater runs as root" instead of failing as a theme that breaks checkout, and an update directory,
   `installed.json` or snapshot left by an update run as root is refused with the `chown` to run (was: "version unknown"
   and "no snapshots").
@@ -168,6 +181,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   belonged to the deploy user, the shop could not open it, and the restore reported success. A restore, files restore or
   update rollback of the SQLite database that cannot give the replacement the owner and group of what it replaces is
   now refused before anything changes, naming the file, its owner and how to run it (see the operations runbook).
+
+- **A refund made at the provider while an admin refund is in flight no longer frees the money that refund promised**
+  (review round 28). A Stripe dashboard refund (or another provider refund event) booked during an admin refund or a
+  cancellation refund moved the payment from refund_pending to partially refunded: the request counted as settled, so a
+  credit note or another refund could promise its money again, and the request's own result, no longer finding a pending
+  payment, left a payment whose money was all returned "partially refunded". Such a refund is now booked while the
+  payment stays refund_pending until the request settles; one leaving less than the request in flight raises the critical
+  incident `payment.refund_overcommitted`.
 
 - **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
   fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached

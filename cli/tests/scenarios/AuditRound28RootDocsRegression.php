@@ -102,6 +102,21 @@ try {
     assert_true($r28dExit === 0 && ($r28dIds[0] ?? '') === '65534' && ($r28dIds[1] ?? '0') !== '0'
         && !in_array('0', explode(',', $r28dIds[2] ?? '0'), true),
         'R28 wrapper: a step runs as the owner of the application root, never with group root (' . trim($r28dErr . $r28dOut) . ')');
+    // Capability review run 399: the step must not keep root's terminal as its controlling terminal, or code the owner
+    // can change types into root's shell with TIOCSTI. Run on a pty (script); the step may use the terminal for its
+    // output but cannot open /dev/tty, so TIOCSTI fails whatever dev.tty.legacy_tiocsti says. Its exit status comes back.
+    file_put_contents($r28dDir . '/app/cli/tty.php', "<?php \$t = @fopen('/dev/tty', 'r');\n"
+        . "echo 'TTY0=', posix_isatty(0) ? 'yes' : 'no', ' CTTY=', \$t === false ? 'none' : 'root-terminal', ' SID=', posix_getsid(0) === posix_getpid() ? 'own' : 'shared', \"\\n\";\nexit(3);\n");
+    if (trim((string)shell_exec('command -v script 2>/dev/null')) !== '') {
+        $r28dCmd = '/bin/sh ' . escapeshellarg($r28dRoot . '/deploy/bbe-step.sh') . ' ' . escapeshellarg($r28dDir . '/app') . ' tty.php';
+        [, $r28dOut, $r28dErr] = $r28dRun(['script', '-qec', $r28dCmd, '/dev/null']);
+        assert_true(str_contains($r28dOut, 'TTY0=yes CTTY=none SID=own'),
+            'R28 wrapper: on root\'s terminal the step runs in its own session without a controlling terminal, so it cannot type into root\'s shell (' . trim($r28dErr . $r28dOut) . ')');
+    } else {
+        echo "  [SKIP] R28 wrapper on a terminal: no script(1)\n";
+    }
+    [$r28dExit, $r28dOut] = $r28dRun(['/bin/sh', $r28dRoot . '/deploy/bbe-step.sh', $r28dDir . '/app', 'tty.php']);
+    assert_true($r28dExit === 3 && str_contains($r28dOut, 'CTTY=none'), 'R28 wrapper: the step\'s exit status is the wrapper\'s, and the step has no controlling terminal (' . trim($r28dOut) . ')');
     [$r28dExit, , $r28dErr] = $r28dRun(['/bin/sh', $r28dRoot . '/deploy/bbe-step.sh', $r28dDir . '/app', '../whoami.php']);
     assert_true($r28dExit === 2 && str_contains($r28dErr, 'file name in cli/'), 'R28 wrapper: a path as step is refused');
     chown($r28dDir . '/app', 0);

@@ -106,7 +106,9 @@ try {
     assert_true($r1Job !== null, 'ARR 1: cancelling a paid order queues its refund');
     $r1Refund = ArrFakeStripe::refundIdFor('order_refund_' . $r1);
     applyStripeChargeRefunded(['id' => 'ch_arr_1', 'payment_intent' => 'pi_arr_1', 'amount_refunded' => 1000,
-        'refunds' => ['data' => [['id' => $r1Refund, 'amount' => 1000, 'status' => 'succeeded']], 'has_more' => false]], 'pi_arr_1', $r1);
+        // R28: as Stripe sends the shop's refund, with the refund key the worker set (StripePayment::REFUND_KEY_METADATA).
+        'refunds' => ['data' => [['id' => $r1Refund, 'amount' => 1000, 'status' => 'succeeded',
+            'metadata' => [StripePayment::REFUND_KEY_METADATA => 'order_refund_' . $r1]]], 'has_more' => false]], 'pi_arr_1', $r1);
     assert_equals(['refunded', 'refunded', 1000], $arrState($r1), 'ARR 1: the webhook seen first books the refund and closes the order');
     WorkerJobs::handlePaymentRefund($r1Job['payload'], $r1Job);
     assert_equals(['refunded', 'refunded', 1000], $arrState($r1), 'ARR 1: the worker then finds the refund id on the ledger and books nothing more (was 2000)');

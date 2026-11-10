@@ -605,13 +605,45 @@ class PaymentService {
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $raw = json_decode((string)($row['raw_response'] ?? ''), true);
             if (!is_array($raw) || ($raw['event_type'] ?? null) !== 'refund.requested') continue;
-            // One request at a time: a refund booked after the latest one settled it, so a later item refund is in flight.
-            $later = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
-                AND id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed') LIMIT 1");
+            // One request at a time: a refund booked after the latest one that settles it means a later item refund is in
+            // flight. R28: only one that settles it; any refund booked meanwhile (a refund event during an admin refund)
+            // released the request's money for a second refund or credit note.
+            $later = Db::get()->prepare("SELECT idempotency_key, provider_ref, amount, raw_response FROM payment_transactions WHERE order_id = :order
+                AND store_id = :store AND id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')");
             $later->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':id' => (int)$row['id']]);
-            return $later->fetchColumn() ? null : $row;
+            $executeKey = self::refundExecuteKey((string)$row['idempotency_key']);
+            foreach ($later->fetchAll(\PDO::FETCH_ASSOC) as $booked) {
+                $bookedRaw = json_decode((string)($booked['raw_response'] ?? ''), true);
+                if ((string)$booked['idempotency_key'] === $executeKey
+                    || self::settlesRefundRequest($order, $row, is_array($bookedRaw) ? $bookedRaw : [], (string)($booked['provider_ref'] ?? ''), (int)$booked['amount'])) {
+                    return null;
+                }
+            }
+            return $row;
         }
         return null;
+    }
+
+    /**
+     * R28: whether a booked refund (its ledger payload, provider refund id and amount) executes this refund request. Named by
+     * the request (settles_refund_request) or by the refund id its job recorded under the execute key. A Stripe refund of
+     * the shop carries its refund key, so one without is another refund (the dashboard's). Unnamed elsewhere, one of the
+     * requested amount: a provider executes the amount asked for. Money returned by hand names no request: any refund.
+     */
+    private static function settlesRefundRequest(array $order, array $request, array $payload, string $refundId, int $amount): bool {
+        $requestKey = (string)$request['idempotency_key'];
+        $executeKey = self::refundExecuteKey($requestKey);
+        $named = (string)($payload['settles_refund_request'] ?? '');
+        if ($named !== '') return in_array($named, [$requestKey, $executeKey], true);
+        if (self::refundsByHand($order)) return true;
+        if ($refundId !== '') {
+            $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
+                AND idempotency_key = :execute AND provider_ref = :ref LIMIT 1");
+            $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':execute' => $executeKey, ':ref' => $refundId]);
+            if ($stmt->fetchColumn()) return true;
+            if ((string)($payload['provider'] ?? '') === 'stripe') return false;
+        }
+        return $amount === (int)$request['amount'];
     }
 
     /**
@@ -1414,6 +1446,23 @@ class PaymentService {
         }
         $to = self::refundedAmount($orderId) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
         $ref = $refundId !== '' ? $refundId : (string)($order['payment_id'] ?? '');
+        // R28: a refund event while the shop's own refund is in flight (admin refund, cancellation) that is not that refund
+        // moved the payment out of refund_pending: the request's money counted as free again (a second refund or credit note
+        // could promise it) and its job's result no longer moved the payment (settleRefundJob()). Its money is booked; the
+        // payment stays refund_pending until the request settles.
+        $request = $from === 'refund_pending' ? self::latestRefundRequestRow($order, true) : null;
+        if ($request !== null && !self::settlesRefundRequest($order, $request, $payload, $refundId, $amount)) {
+            self::recordEvent($orderId, $eventType, $to, $amount, $currency, $eventKey, $payload, $provider, $ref);
+            AuditLog::log('order_refund', $orderId, $from, $from, "{$provider} refund {$ref} of " . AuditLogLabels::amount($amount, $currency)
+                . ' booked while the refund of ' . AuditLogLabels::amount((int)$request['amount'], $currency) . ' is in flight');
+            if (self::refundedAmount($orderId) + (int)$request['amount'] > (int)$order['total']) {
+                // Together with the refund in flight more than was paid: the provider refuses or pays the customer twice.
+                IncidentMonitor::report('payment.refund_overcommitted', 'payment', 'critical', ['order_id' => $orderId]);
+            }
+            if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $itemReference);
+            else self::completeItemRefundWithin($orderId, $refundId);
+            return true;
+        }
         if ($to !== $from && self::canPaymentTransition($from, $to)) {
             self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload, $ref);
         } elseif ($to === 'partially_refunded' && $from === $to) {
