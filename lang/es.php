@@ -192,7 +192,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'saved_for_later_price_changed' => 'El precio ha cambiado de {old} a {new}.',
     'saved_for_later_was' => 'Antes {price}',
     'saved_for_later_unavailable' => 'No disponible ahora',
-    'saved_for_later_full' => 'Tu lista «Comprar más tarde» está llena. Elimina antes algún artículo.',
+    'saved_for_later_full' => 'Su lista «Comprar más tarde» está llena. Elimine antes algún artículo.',
     'saved_for_later_unit_price' => 'Precio/ud.',
     'checkout_title' => 'Finalizar compra',
     'your_order' => 'Su pedido',
