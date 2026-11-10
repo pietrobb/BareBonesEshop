@@ -110,6 +110,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
     the shop and every later restore stayed refused until the copy was moved back by hand. The next request or step
     now moves the copy (`<db>.pre-restore-*.rollback`) back once the killed process is gone. The shop stays closed for
     the interrupted restore, which can be run again.
+- **Stripe refunds booked ahead of their result are corrected, not booked twice** (review round 26). When a Stripe
+  `charge.refunded` without its refund list was booked as an item refund still at Stripe:
+  - a smaller refund from the Stripe dashboard took the whole booking, and the item's own refund then booked it again
+    (a 42.00 order showed 42.00 refunded for 26.00 returned, was "refunded" with nothing left to refund, and had credit
+    notes of -21.00 twice). The dashboard refund now takes only its own amount; the credit notes are -21.00 and -5.00.
+  - with two item refunds of the same amount in flight it was matched to the older one; when that one failed its money
+    was booked again by the other's result (42.00 for 21.00 returned). The booking now moves to the other refund, or is
+    taken back when that refund was already booked on its own.
+  - a refund Stripe answered "pending" and failed later stayed booked for good (only a critical incident). It is now
+    taken back, and its item refund and credit note are released; one that succeeds later is completed once. The item
+    stays pending until then.
+  - the internal "refund dispatched" marker is removed once the refund call's result is recorded.
 - **Security: the maintenance step lock no longer lets the web user take over root's files** (review round 26). Run as
   root, `cli/restore.php`, `cli/update.php` and `cli/migrate.php` opened `.maintenance.lock` following a symbolic link,
   then gave the file it pointed at to the owner of the application root (0660) and emptied it. The web user can write
