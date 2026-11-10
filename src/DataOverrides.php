@@ -93,16 +93,14 @@ final class DataOverrides
         $upgraded = $source === $legacy ? self::upgradeLegacyStores($data) : null;
         if ($upgraded !== null) {
             $json = json_encode($upgraded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
-            if (!self::ensureDir($dir) || !self::atomicWrite($target, $json)) throw new RuntimeException("Cannot write {$target}");
-            @chmod($target, 0640);
+            if (!self::ensureDir($dir) || !self::atomicWrite($target, $json, 0640)) throw new RuntimeException("Cannot write {$target}");
             return ['path' => $target, 'action' => 'upgraded from the v1.x format (main store "' . self::legacyMainStore($data)
                 . '" is now "default"); the application root file is kept unchanged for a rollback'];
         }
         // The example's sample stores (cz, pl, hu, de, us with made-up sellers) come in hidden: no storefront until the
         // merchant enters the seller and publishes the store in Admin → Stores and seller.
         if ($source !== $legacy) $content = (string)preg_replace('/"sample"\s*:\s*true\b/', '"public": false', $content);
-        if (!self::ensureDir($dir) || !self::atomicWrite($target, $content)) throw new RuntimeException("Cannot write {$target}");
-        @chmod($target, 0640);
+        if (!self::ensureDir($dir) || !self::atomicWrite($target, $content, 0640)) throw new RuntimeException("Cannot write {$target}");
         if ($source !== $legacy) return ['path' => $target, 'action' => 'created from ' . self::STORES_EXAMPLE];
         // A read-only code directory (Docker) keeps the old file; the data directory copy takes precedence anyway.
         return ['path' => $target, 'action' => @unlink($legacy) ? 'moved from the application root' : 'copied from the application root'];
@@ -238,17 +236,29 @@ final class DataOverrides
         return StoreContext::hasCurrent() ? StoreContext::current()->id() : 'default';
     }
 
-    /** Readers see the old or the new file, never a half-written one. */
-    public static function atomicWrite(string $file, string $content): bool
+    /**
+     * Readers see the old or the new file, never a half-written one. The new file gets $mode, else the mode of the regular
+     * file it replaces (read without following a link), else the umask's.
+     * R27 (finding 1): the temporary file is created exclusively with that mode (umask), never chmodded by its name. The
+     * directory may be the web user's: it renamed a symbolic link to /etc/shadow over the temporary file between its write
+     * and the chmod, and a step run as root made /etc/shadow 0666.
+     */
+    public static function atomicWrite(string $file, string $content, ?int $mode = null): bool
     {
+        clearstatcache(true, $file);
+        $old = @lstat($file);
+        $mode ??= is_array($old) && ($old['mode'] & 0170000) === 0100000 ? $old['mode'] & 0666 : null;
         $tmp = $file . '.' . bin2hex(random_bytes(6)) . '.tmp';
-        if (@file_put_contents($tmp, $content, LOCK_EX) === false) {
-            @unlink($tmp);
-            return false;
+        $umask = $mode !== null ? umask(~$mode & 0777) : null;
+        try {
+            $handle = @fopen($tmp, 'x');
+        } finally {
+            if ($umask !== null) umask($umask);
         }
-        $mode = @fileperms($file);
-        if ($mode !== false) @chmod($tmp, $mode & 0777);
-        if (!@rename($tmp, $file)) {
+        if (!is_resource($handle)) return false;
+        $written = @fwrite($handle, $content) === strlen($content) && @fflush($handle);
+        fclose($handle);
+        if (!$written || !@rename($tmp, $file)) {
             @unlink($tmp);
             return false;
         }

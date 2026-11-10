@@ -542,8 +542,8 @@ names the rollback to run. `php cli/migrate.php apply` and `php cli/restore.php`
 the same window (and refuse while an update or migration holds it). These four steps
 take one lock, `.maintenance.lock`, before they look at the window, so only one of
 them runs at a time and none enters or lifts the window of another (the file is
-created 0660 by the owner and group of the application root, also when root runs the
-step, so the web user can take it after root; a symbolic or hard link at that name
+created 0660 by the owner and group of the application root; a step started as root
+runs as that owner (see Root below); a symbolic or hard link at that name
 refuses every step until you check and remove it; a lock other accounts could use is
 replaced, never chmodded; on a file system without file locks the steps exclude each
 other by `.maintenance.lock.held` instead, which a step killed on another host leaves
@@ -566,6 +566,13 @@ update applied after its snapshot (or one half-applied, whose automatic rollback
 failed) is still installed, and it names the rollback to run first. A rollback puts
 the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so one
 that stops half-way is finished by the updater that started it.
+
+**Root.** Any `php cli/….php` started as root runs as the owner and group of the
+application root, switched for good before it loads any code (the web user can often
+write that tree, so code and files root would use there could be its own). In a tree
+root owns it stays root only when no other account can change any file or directory
+in it or above it (`config.php` included); otherwise it refuses to run. Run backups, restores and updates as
+the user that owns the files they change.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The

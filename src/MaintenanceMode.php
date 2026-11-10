@@ -24,6 +24,8 @@ declare(strict_types=1);
  *   left a gap: a migration and an update could both enter, and the migration ending first lifted the window of the
  *   update still running.
  * - R26: the step lock is opened without following a link and no step changes a file it did not create (openLock()).
+ * - R27: a step started as root runs as the app root's owner (cli/cli-only.php); root opens the lock only in an app root
+ *   no other account can write, and no step writes into a lock that holds anything but a holder record.
  */
 final class MaintenanceMode
 {
@@ -50,9 +52,9 @@ final class MaintenanceMode
     {
         $path = self::path($root);
         clearstatcache(true, $path);
-        $since = @filemtime($path);
-        if ($since === false) return false;
         $marker = self::marker($root);
+        $since = self::openedAt($path, $marker);
+        if ($since === false) return false;
         if (($marker['failed'] ?? false) === true) return true;
         if ($since > time() - self::STALE_AFTER) return true;
         if ($since <= time() - self::MAX_AGE) return false;
@@ -241,8 +243,8 @@ final class MaintenanceMode
      * follows a symbolic link, then handed the file to the app root's owner (0660) and emptied it: the web user, who can
      * write the app root, linked .maintenance.lock to /etc/passwd or /etc/shadow and the next restore, update or migration
      * gave it that file. Now
-     * - a new lock is created exclusively (O_EXCL: never through a link), by root as the app root's owner and group
-     *   (seteuid, so no chown and no /proc is needed: R25 died on every root step without /proc and protected hard links);
+     * - a new lock is created exclusively (O_EXCL: never through a link), by root in the app root's group (setegid, so no
+     *   chown and no /proc is needed: R25 died on every root step without /proc and protected hard links);
      * - an existing one is used only when the name is a regular file with one link (not a symbolic or hard link to another
      *   file) and the file opened is that same file (dev and inode), else the step is refused;
      * - its owner and mode are never changed: one the app root's owner or group cannot use (0644 from before R25, a
@@ -259,7 +261,13 @@ final class MaintenanceMode
         }
         $app = @stat($root);
         $app = is_array($app) ? $app : null;
+        if ($app !== null && function_exists('posix_geteuid') && posix_geteuid() === 0 && !self::rootOnly($app)) {
+            // R27: cli/cli-only.php runs a root step as the app root's owner; root reaching here is not a step's CLI.
+            throw new RuntimeException(sprintf('REFUSED: root does not open the maintenance step lock in %s (owner %d, group %d, mode %04o):'
+                . ' another account can write that directory; run the step as the owner of the app root', $root, $app['uid'], $app['gid'], $app['mode'] & 07777));
+        }
         for ($attempt = 0; $attempt < 3; $attempt++) {
+            clearstatcache(true, $path);
             $handle = self::create($path, $app);
             if (is_resource($handle)) return [$handle, true];
             $link = @lstat($path);
@@ -277,7 +285,10 @@ final class MaintenanceMode
                     $path, $link['uid'], $link['gid'], $link['mode'] & 07777));
             }
             $open = @fstat($handle);
-            if (is_array($open) && $open['dev'] === $link['dev'] && $open['ino'] === $link['ino']) return [$handle, self::fits($open, $app)];
+            if (is_array($open) && $open['dev'] === $link['dev'] && $open['ino'] === $link['ino']) {
+                self::refuseForeign($path, $handle);
+                return [$handle, self::fits($open, $app)];
+            }
             fclose($handle); // the name was swapped between the check and the open: look again
         }
         throw new RuntimeException('Cannot open the maintenance step lock ' . $path . ': it keeps changing while it is opened');
@@ -293,7 +304,7 @@ final class MaintenanceMode
     {
         $old = umask(0007);
         try {
-            $handle = self::asAppOwner($app, static fn() => @fopen($path, 'x+'));
+            $handle = self::asAppGroup($app, static fn() => @fopen($path, 'x+'));
         } finally {
             umask($old);
         }
@@ -315,22 +326,18 @@ final class MaintenanceMode
     }
 
     /**
-     * R26: run $open as the owner and group of the app root when this process is root (effective IDs only, put back
-     * right after), so the file it creates belongs to them without a chown.
+     * R26: run $open as the group of the app root when this process is root (effective ID only, put back right after), so
+     * the file it creates belongs to that group without a chown. R27: root gets here only for an app root it owns
+     * (openLock()), so the owner is root already; R26 also switched to another owner.
      */
-    private static function asAppOwner(?array $app, callable $open): mixed
+    private static function asAppGroup(?array $app, callable $open): mixed
     {
-        if ($app === null || !function_exists('posix_geteuid') || posix_geteuid() !== 0 || ($app['uid'] === 0 && $app['gid'] === 0)) return $open();
+        if ($app === null || !function_exists('posix_geteuid') || posix_geteuid() !== 0 || $app['gid'] === 0) return $open();
         $gid = posix_getegid();
         if (!@posix_setegid($app['gid'])) throw new RuntimeException('Cannot switch to the group of the app root (' . $app['gid'] . ') to create the maintenance step lock');
-        if (!@posix_seteuid($app['uid'])) {
-            posix_setegid($gid);
-            throw new RuntimeException('Cannot switch to the owner of the app root (' . $app['uid'] . ') to create the maintenance step lock');
-        }
         try {
             return $open();
         } finally {
-            posix_seteuid(0);
             posix_setegid($gid);
         }
     }
@@ -343,6 +350,28 @@ final class MaintenanceMode
         if ($what === null) return;
         throw new RuntimeException("REFUSED: the maintenance step lock {$path} is {$what}; it could stand for any file, so no step opens it."
             . " Check who made it, then remove it (rm {$path}) and run the step again");
+    }
+
+    /**
+     * R27: refuse a lock that holds anything but a holder record (or nothing). The web user can rename a file of the app
+     * root's owner (.env, 0600) to the lock's name: a step emptied it when it wrote its record.
+     * @param resource $handle
+     */
+    private static function refuseForeign(string $path, $handle): void
+    {
+        $content = (string)stream_get_contents($handle, 65537, 0);
+        rewind($handle);
+        if ($content === '' || (strlen($content) <= 65536 && isset(json_decode($content, true)['pid']))) return;
+        fclose($handle);
+        throw new RuntimeException("REFUSED: the maintenance step lock {$path} holds something else than a step's record; it may be a file"
+            . " renamed to that name, so no step writes to it. Check what it is, move it back or remove it, then run the step again");
+    }
+
+    /** R27: whether a directory belongs to root and no other account can write it. */
+    private static function rootOnly(array $stat): bool
+    {
+        $mode = (int)$stat['mode'];
+        return (int)$stat['uid'] === 0 && ($mode & 0002) === 0 && (($mode & 0020) === 0 || (int)$stat['gid'] === 0);
     }
 
     /** R26: whether the app root's owner or group can use a lock with this stat and no other account can (unknown root: yes). */
@@ -421,10 +450,12 @@ final class MaintenanceMode
     private static function claimWithoutFlock(string $path): bool
     {
         $claim = $path . self::HELD_SUFFIX;
+        $app = @stat(dirname($path));
         for ($attempt = 0; $attempt < 2; $attempt++) {
             $old = umask(0007);
             try {
-                $handle = @fopen($claim, 'x');
+                // R27: in the app root's group (root made it root:root, so its holder could not be read by the group)
+                $handle = self::asAppGroup(is_array($app) ? $app : null, static fn() => @fopen($claim, 'x'));
             } finally {
                 umask($old);
             }
@@ -490,13 +521,23 @@ final class MaintenanceMode
      * Put back a window found before a step that then changed nothing (content and age): a failed one stays failed,
      * the fresh marker of an updater killed half-way keeps blocking exactly as long as it did.
      */
-    public static function restore(string $root, array $marker, int $modifiedAt): void
+    public static function restore(string $root, array $marker): void
     {
-        $path = self::path($root);
-        self::replace($path, $marker);
-        @touch($path, $modifiedAt);
-        clearstatcache(true, $path);
+        // R27: its age comes back with its 'since' (openedAt()). R26 dated the file back with touch(), which follows a
+        // symbolic link and creates its target: a dangling link swapped in for the marker made root create any file.
+        self::replace(self::path($root), $marker);
         self::unclaim($root);
+    }
+
+    /**
+     * R27: when the window opened: the marker's 'since' where that is earlier than the file's time (a marker restore()
+     * put back), else the file's time; false without a marker.
+     */
+    private static function openedAt(string $path, array $marker): int|false
+    {
+        $modified = @filemtime($path);
+        $since = is_string($marker['since'] ?? null) ? strtotime($marker['since']) : false;
+        return $modified !== false && $since !== false ? min($modified, $since) : $modified;
     }
 
     /** R23: whether the marker is the one this process wrote (another may have taken the window over since). */

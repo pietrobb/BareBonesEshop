@@ -7,6 +7,100 @@ if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && !defined('BBE_WEB_WORKER')) 
 }
 
 /**
+ * R27 (review round 27, finding 1): a CLI step started as root runs as the owner of the application root instead, before
+ * any code of src/ is loaded. Root steps worked in a tree the web user can write: it planted a symbolic link where root
+ * chmodded a temporary file (DataOverrides::atomicWrite) and gave itself /etc/shadow, or replaced src/ and root ran its
+ * code. Patching each file root touched left the next one open, so root keeps no rights a step needs: the owner of the
+ * application root can do everything the step does. Root stays root only for a tree that root owns and in which no other
+ * account can change anything (cli_not_root_only()); otherwise the step is refused. cli/test.php keeps root (BBE_CLI_KEEP_ROOT) for the
+ * scenarios that test the root paths.
+ */
+function cli_drop_root(string $root): void
+{
+    $euid = function_exists('posix_geteuid') ? posix_geteuid() : null;
+    if ($euid === null && is_readable('/proc/self/status') && preg_match('/^Uid:\s+\d+\s+(\d+)/m', (string)@file_get_contents('/proc/self/status'), $m) === 1) {
+        $euid = (int)$m[1];
+    }
+    if ($euid !== 0) return;
+    $refuse = static function (string $why): never {
+        fwrite(STDERR, "REFUSED: this step runs as root, but {$why}. Run it as the owner of the application root"
+            . " (e.g. sudo -u <owner> php " . ($_SERVER['argv'][0] ?? 'cli/<step>.php') . " …).\n");
+        exit(1);
+    };
+    if (!function_exists('posix_setuid')) $refuse('PHP has no posix extension to switch to the owner of the application root');
+    clearstatcache();
+    $app = @stat($root);
+    if (!is_array($app)) $refuse("the application root {$root} cannot be read");
+    [$uid, $gid] = [(int)$app['uid'], (int)$app['gid']];
+    if ($uid !== 0) {
+        $user = posix_getpwuid($uid);
+        $name = is_array($user) ? (string)$user['name'] : (string)$uid;
+        // initgroups first: root's supplementary groups (0 among them) must not stay with the step.
+        if (!@posix_initgroups($name, $gid) || !@posix_setgid($gid) || !@posix_setuid($uid)) {
+            $refuse("it cannot switch to the owner of the application root ({$name}, uid {$uid}, gid {$gid})");
+        }
+        $groups = posix_getgroups();
+        if (posix_getuid() !== $uid || posix_geteuid() !== $uid || @posix_seteuid(0) || ($gid !== 0 && in_array(0, is_array($groups) ? $groups : [0], true))) {
+            $refuse('root rights could not be given up for good');
+        }
+        if (is_array($user)) putenv('HOME=' . $user['dir']); // mysqldump & co. read the owner's ~/.my.cnf, not root's
+        fwrite(STDERR, "NOTICE: started as root; this step runs as {$name} (uid {$uid}, gid {$gid}), the owner of the application root.\n");
+        return;
+    }
+    $why = cli_not_root_only($root);
+    if ($why !== null) $refuse($why . ', and root would run the code it holds');
+}
+
+/**
+ * Why root may not run the code of a root-owned application root, or null. Capability review (run 390): checking the app
+ * root, src/ and cli/ left config.php (the web installer writes it), adapters/, vendor/, lang/ and every file in them to
+ * whoever owned them, and root ran them. Root keeps its rights only when no other account can change anything it may
+ * load: every directory above the app root, and every entry in it (lstat, links not followed), belongs to root and only
+ * root (or root's group) can write it; a link must stay inside the tree, whose walk checks its target.
+ */
+function cli_not_root_only(string $root): ?string
+{
+    $foreign = static fn(array $s): bool => (int)$s['uid'] !== 0 || ((int)$s['mode'] & 0002) !== 0
+        || (((int)$s['mode'] & 0020) !== 0 && (int)$s['gid'] !== 0);
+    $describe = static fn(string $path, array $s): string => sprintf('%s (owner %d, group %d, mode %04o) is writable by another account',
+        $path, $s['uid'], $s['gid'], (int)$s['mode'] & 07777);
+    $real = realpath($root);
+    if ($real === false) return "the application root {$root} cannot be resolved";
+    // Above the app root: a directory another account can write could swap the whole tree, unless its sticky bit keeps
+    // others from renaming root's entries.
+    for ($dir = dirname($real); ; $dir = dirname($dir)) {
+        $s = @stat($dir);
+        if (!is_array($s)) return "{$dir} cannot be read";
+        if ((int)$s['uid'] !== 0 || ($foreign($s) && ((int)$s['mode'] & 01000) === 0)) return $describe($dir, $s);
+        if ($dir === dirname($dir)) break;
+    }
+    $pending = [$real];
+    while ($pending !== []) {
+        $path = array_pop($pending);
+        $s = @lstat($path);
+        if (!is_array($s)) return "{$path} cannot be read";
+        if (is_link($path)) {
+            $target = realpath($path);
+            if ((int)$s['uid'] !== 0 || $target === false || ($target !== $real && !str_starts_with($target, $real . '/'))) {
+                return "{$path} is a symbolic link out of the application root (" . ($target === false ? 'dangling' : $target) . ')';
+            }
+            continue;
+        }
+        if ($foreign($s)) return $describe($path, $s);
+        if (is_dir($path)) {
+            $entries = @scandir($path);
+            if ($entries === false) return "{$path} cannot be listed";
+            foreach ($entries as $entry) {
+                if ($entry !== '.' && $entry !== '..') $pending[] = $path . '/' . $entry;
+            }
+        }
+    }
+    return null;
+}
+
+if (PHP_OS_FAMILY !== 'Windows' && !defined('BBE_WEB_WORKER') && !defined('BBE_CLI_KEEP_ROOT')) cli_drop_root(dirname(__DIR__));
+
+/**
  * getopt() for "script.php <command> --option=value": PHP's getopt() stops at the first
  * non-option argument, so options after a subcommand were silently dropped.
  * Spec as getopt long options: 'name:' required value, 'name::' optional (=value), 'name' flag.

@@ -16,6 +16,8 @@ sort($cliEntrypoints);
 foreach ($cliEntrypoints as $cliEntrypoint) {
     if (basename($cliEntrypoint) === basename($cliGuardPath)) continue;
     $source = str_replace("\r\n", "\n", (string)file_get_contents($cliEntrypoint));
+    // R27: the test runner alone keeps root (cli-only.php runs every step started as root as the app root's owner).
+    if (basename($cliEntrypoint) === 'test.php') $source = (string)preg_replace('/^<\?php\nconst BBE_CLI_KEEP_ROOT = true;[^\n]*\n/', "<?php\n", $source);
     $guardPrefix = "<?php\nrequire_once __DIR__ . '/cli-only.php';";
     assert_true(str_starts_with($source, $guardPrefix), 'CLI guard: ' . basename($cliEntrypoint) . ' includes guard first');
 }
