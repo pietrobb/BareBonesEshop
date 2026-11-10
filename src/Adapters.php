@@ -227,7 +227,8 @@ class Adapters {
     public static function defaultProviderCode(string $type): string {
         $cfg = self::cfg();
         if ($type === 'mail') {
-            $environmentCode = strtolower((string)(getenv('MAIL_ADAPTER') ?: ''));
+            // R26: trimmed, as MailSettings::providerCode() reads it ("smtp " threw here while the admin showed smtp).
+            $environmentCode = strtolower(trim((string)(getenv('MAIL_ADAPTER') ?: '')));
             if ($environmentCode !== '') {
                 self::assertProviderCode($environmentCode);
                 if (!isset(self::registry('mail')[$environmentCode])) {

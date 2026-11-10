@@ -223,6 +223,7 @@ assert_true(str_contains($r10xSoldOutPage, 'data-back-in-stock') && str_contains
 $r10xCfg = new ReflectionProperty(Security::class, 'cfg');
 $r10xCfgBase = Security::config();
 $r10xCfg->setValue(null, ['app_url' => 'https://r10x.example.test'] + $r10xCfgBase);
+MailService::useAdapter(capture_mail()); // R26: the log provider's mail reads as not sent (reset below).
 $r10xOutcomes = [BackInStock::subscribe(9774, 'R10x-Wait@Example.com', 'sk'), BackInStock::subscribe(9774, 'r10x-wait@example.com', 'sk'),
     BackInStock::subscribe(9774, 'not-an-email', 'sk'), BackInStock::subscribe(999999, 'r10x-wait@example.com', 'sk'), BackInStock::subscribe(9772, 'r10x-wait@example.com', 'sk')];
 assert_equals(['confirm_sent', 'confirm_sent', 'invalid', 'invalid', 'available'], $r10xOutcomes, 'R10 UX8: subscribe outcomes (repeat, bad e-mail, unknown product, product in stock)');
@@ -283,6 +284,7 @@ try {
     assert_equals([1, 0], [$r10xSharedMails() - $r10xSharedBefore, (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = 'r10xb'")->fetchColumn()],
         'R10 UX8 shared catalog: the second store\'s shopper gets one e-mail and the request is deleted');
 } finally {
+    MailService::useAdapter(null);
     $r10xCfg->setValue(null, $r10xCfgBase);
     $r10xStoresProp->setValue(null, $r10xStoresBefore);
     StoreContext::reset();

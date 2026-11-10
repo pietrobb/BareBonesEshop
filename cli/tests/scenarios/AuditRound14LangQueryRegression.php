@@ -18,7 +18,7 @@ $r14qSavedStore = StoreContext::current();
 [$r14qSavedDb, $r14qSavedDriver] = [Db::get(), Db::driver()];
 $r14qDir = test_fixture_path('r14-lang-query');
 @mkdir($r14qDir, 0700, true);
-MailService::useAdapter(new LogMail(['log_file' => $r14qDir . '/emails.log']));
+MailService::useAdapter(capture_mail(['log_file' => $r14qDir . '/emails.log']));
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));
 try {
     $r14qDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);

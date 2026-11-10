@@ -148,3 +148,13 @@ function with_expected_error_log(string $message, callable $callback): mixed {
 function test_fixture_path(string $name): string {
     return sys_get_temp_dir() . '/barebones-' . $name . '-' . getmypid() . '-' . bin2hex(random_bytes(4));
 }
+
+/**
+ * A mail provider that delivers, for tests that need mail to count as sent: R26 reports mail the log provider only
+ * wrote down as not sent (MailService::logged()). It captures like LogMail (LogMail::captured()) under its own id.
+ */
+function capture_mail(array $cfg = []): LogMail {
+    return new class($cfg) extends LogMail {
+        public function adapterId(): string { return 'capture'; }
+    };
+}

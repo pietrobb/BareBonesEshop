@@ -230,7 +230,7 @@ try {
     $r6mStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
     $r6mSavedStores = $r6mStoresProp->getValue();
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
-    MailService::useAdapter(new LogMail(['log_file' => sys_get_temp_dir() . '/bbe-r6m-mail-' . getmypid() . '.log']));
+    MailService::useAdapter(capture_mail(['log_file' => sys_get_temp_dir() . '/bbe-r6m-mail-' . getmypid() . '.log']));
     try {
         try {
             $r6mCfg = ['app_url' => 'https://r6m-main.example'];

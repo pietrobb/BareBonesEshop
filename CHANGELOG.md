@@ -114,6 +114,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   exception). On a file system without file locks the steps exclude each other again, by a claim file
   `.maintenance.lock.held` (one left by a killed step on this host is taken over; one from another host is honoured for
   a day). A refused step prints the lock holder's record as plain text only.
+- **A mistyped `MAIL_ADAPTER` no longer breaks mail** (review round 26). A value of an invalid format (`smtp.`) threw
+  for every mail — a password reset, an e-mail verification, an order mail — instead of writing it to the log with an
+  incident as R25 did for a provider that is not installed; one with a trailing space (`smtp `) threw while the admin
+  showed smtp. The value is now trimmed, and any invalid one writes the mail to the log and raises
+  `mail.provider_invalid`. An order mail written to the log that way is tried again every 30 minutes for a day, so it
+  goes out once the setting is fixed. Mail only written to the log is no longer counted or shown as sent (password
+  reset, e-mail verification, guest account link, back-in-stock confirmation and notification, stock alerts, the
+  admin's payment link).
 - **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
   shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
   database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out

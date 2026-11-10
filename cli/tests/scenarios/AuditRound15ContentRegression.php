@@ -209,6 +209,7 @@ $r15bToken = static function (): string {
     return preg_match('~page=stock-notify&(?:amp;)?confirm=([a-f0-9]{64})~', (string)($mail['html'] ?? ''), $m) ? $m[1] : '';
 };
 try {
+    MailService::useAdapter(capture_mail()); // R26: the log provider's mail reads as not sent.
     LogMail::clearCaptured();
     $r15bAsked = BackInStock::subscribe(9781, 'R15B-Shop@Example.test', 'en');
     $r15bMail = LogMail::lastCaptured() ?? [];
@@ -259,6 +260,7 @@ try {
     assert_true(is_file(dirname(TEST_CLI_DIR) . '/templates/emails/sk/back_in_stock_confirm.html') && is_file(dirname(TEST_CLI_DIR) . '/templates/emails/de/back_in_stock_confirm.subject.txt'),
         'R15 back in stock: the confirmation e-mail exists in every language');
 } finally {
+    MailService::useAdapter(null);
     $_SERVER = $r15bServer;
     $r15bCfg->setValue(null, $r15bCfgBase);
     $_GET = $_POST = [];

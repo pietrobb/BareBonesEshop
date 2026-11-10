@@ -333,7 +333,7 @@ class Customers {
 
     /**
      * Forgot-password request. Callers show one generic result whatever happens;
-     * the outcome (sent|unknown|unavailable|failed) is only for logs and tests.
+     * the outcome (sent|logged|unknown|unavailable|failed) is only for logs and tests.
      */
     public static function requestPasswordReset(string $email, string $locale, array $cfg): string {
         try {
@@ -357,7 +357,9 @@ class Customers {
             Logger::error('password_reset.mail_not_sent', ['status' => $mail['status'] ?? '', 'error' => $mail['error'] ?? '']);
             return 'failed';
         }
-        return 'sent';
+        // R26: only written to the log (the log provider), it reached nobody: not 'sent' (that counts against the
+        // recipient's reset budget, and the account offer says the link was sent).
+        return MailService::logged($mail) ? 'logged' : 'sent';
     }
 
     /**
@@ -394,7 +396,7 @@ class Customers {
     }
 
     /**
-     * Sends (or re-sends) the verification e-mail. Outcome: sent|verified|unknown|throttled|unavailable|failed.
+     * Sends (or re-sends) the verification e-mail. Outcome: sent|logged|verified|unknown|throttled|unavailable|failed.
      * Re-sends are throttled per customer so the address cannot be mail-bombed through the account.
      */
     public static function requestEmailVerification(int $customerId, string $locale, array $cfg): string {
@@ -420,7 +422,8 @@ class Customers {
             Logger::error('email_verification.mail_not_sent', ['status' => $mail['status'] ?? '', 'error' => $mail['error'] ?? '']);
             return 'failed';
         }
-        return 'sent';
+        // R26: only written to the log, it reached nobody: the account page does not say it was sent.
+        return MailService::logged($mail) ? 'logged' : 'sent';
     }
 
     /**

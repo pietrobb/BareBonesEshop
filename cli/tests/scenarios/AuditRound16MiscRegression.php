@@ -27,6 +27,7 @@ $r16mToken = static function (): string {
     return preg_match('~page=stock-notify&(?:amp;)?confirm=([a-f0-9]{64})~', (string)($mail['html'] ?? ''), $m) ? $m[1] : '';
 };
 try {
+    MailService::useAdapter(capture_mail()); // R26: the log provider's mail reads as not sent.
     LogMail::clearCaptured();
     $r16mFirst = BackInStock::subscribe(9791, $r16mEmail, 'en');
     $r16mLink = $r16mToken();
@@ -52,6 +53,7 @@ try {
     assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/GuestPages.php'), "'back_in_stock.' . \$result")
         && I18n::t('back_in_stock.throttled') !== 'back_in_stock.throttled', 'R16 back in stock: the storefront shows the "too many requests" text for a refused request');
 } finally {
+    MailService::useAdapter(null);
     $r16mCfg->setValue(null, $r16mCfgBase);
     $pdo->exec('DELETE FROM back_in_stock_requests WHERE product_id IN (9791, 9792, 9793, 9794)');
     $pdo->exec("DELETE FROM warehouse_stock WHERE sku LIKE 'R16M-%'");

@@ -64,7 +64,8 @@ class GuestCheckoutAccount {
             'customer_name' => (string)(($order['customer_name'] ?? '') ?: $email), 'order_number' => (string)$order['order_number'],
             'claim_url' => $baseUrl . '/?page=account-claim&token=' . $token, 'valid_hours' => (string)intdiv(self::LINK_TTL, 3600),
         ]);
-        return ($mail['status'] ?? '') === 'sent' ? 'sent' : 'failed';
+        // R26: a link only written to the log reached nobody: the page does not say it was sent.
+        return ($mail['status'] ?? '') === 'sent' && !MailService::logged($mail) ? 'sent' : 'failed';
     }
 
     /** The order an unused link of this store was sent for, while the link is fresh and the e-mail still has no account. */

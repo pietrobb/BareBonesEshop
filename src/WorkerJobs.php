@@ -20,17 +20,15 @@ final class WorkerJobs
      * (a staging copy of the database), and one frozen on SES failed every attempt once the shop moved to SMTP. Every
      * order mail goes through the provider configured now; the order's frozen code (and a job's _provider_code) is not consulted.
      * A MAIL_ADAPTER naming no installed provider writes the mail to the log (it reaches nobody) and raises an incident,
-     * instead of failing every order mail (R24) or sending through a provider nobody chose.
+     * instead of failing every order mail (R24) or sending through a provider nobody chose (MailService::providerCode()).
      */
-    public static function orderMailProvider(?array $order): string {
-        try {
-            return Adapters::defaultProviderCode('mail');
-        } catch (\RuntimeException $e) {
-            Logger::error('mail provider misconfigured; order mail written to the log', ['error' => $e->getMessage()]);
-            IncidentMonitor::report('mail.provider_invalid', 'mail', 'critical', $order ? ['order_id' => (int)$order['id']] : []);
-            return 'log';
-        }
+    public static function orderMailProvider(?array $order, ?bool &$fellBack = null): string {
+        return MailService::providerCode($order, $fellBack);
     }
+
+    /** R26: how often an order mail written to the log for a misconfigured provider is tried again, and how far apart. */
+    private const MAIL_FALLBACK_RETRIES = 48;
+    private const MAIL_FALLBACK_DELAY = 1800;
 
     /**
      * Outbox sweep (see OutboxDispatcher): per-endpoint failures are recorded and retried with
@@ -122,7 +120,7 @@ final class WorkerJobs
         }
 
         // R25: the provider configured now (orderMailProvider()), not one frozen on the order or the job.
-        $providerCode = self::orderMailProvider($order);
+        $providerCode = self::orderMailProvider($order, $fellBack);
         // The confirmation carries the terms valid at the time of the order on a durable medium (Directive 2011/83/EU art. 8(7)).
         $attachments = $template === 'order_confirmation' && $order ? [ConsumerNotice::termsAttachment($order, $locale ?: (string)($order['locale'] ?? 'en'))] : [];
         // R23: the payment QR travels as a PNG (mail clients show no inline SVG) with the transfer instructions.
@@ -132,6 +130,12 @@ final class WorkerJobs
         if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
         // Rate-limited order mail is queued again after the limit window instead of being dropped.
         if (($result['status'] ?? '') === 'rate_limited') MailService::deferRateLimited($payload, $result);
+        // R26: written to the log only because the provider is misconfigured, it reached nobody: tried again once the
+        // configuration may be fixed (was: never sent after the fix). Each try logs a copy until it goes out.
+        $tries = (int)($payload['_mail_fallback_tries'] ?? 0);
+        if ($fellBack && ($result['status'] ?? '') !== 'rate_limited' && $tries < self::MAIL_FALLBACK_RETRIES) {
+            JobQueue::pushDelayed('email_send', ['_mail_fallback_tries' => $tries + 1] + $payload, self::MAIL_FALLBACK_DELAY);
+        }
     }
 
     public static function handleDigitalFulfill(array $payload, array $job): void {
