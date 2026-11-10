@@ -73,10 +73,7 @@ fgets(STDIN);
     $r25lNoLock = PHP_OS_FAMILY === 'Windows' ? true : MaintenanceMode::claim('r25nolock://shop');
     MaintenanceMode::unclaim('r25nolock://shop');
     assert_true($r25lNoLock, 'R25 step lock: without file locks a step runs (was: refused for good as "another window is open")');
-
-    $r25lSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/MaintenanceMode.php');
-    assert_true(str_contains($r25lSource, 'FileOwnership::handOver($handle, $path, $app[\'uid\'], $app[\'gid\'], 0660)'),
-        'R25 step lock: run as root, the lock goes to the owner and group of the app root (0660)');
+    // (R26: run as root, the lock is created as the owner and group of the app root: AuditRound26StepLockRegression.)
 } catch (Throwable $e) {
     assert_true(false, 'R25 step lock (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
