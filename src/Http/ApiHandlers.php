@@ -1228,6 +1228,7 @@ function stripeChargeRefunds(array $charge): ?array {
     try {
         return $gateway->chargeRefunds((string)($charge['id'] ?? ''));
     } catch (\RuntimeException $e) {
+        Logger::exception('payment.stripe_refund_list_unavailable', $e, ['charge_id' => (string)($charge['id'] ?? '')]);
         return null; // R27: Stripe unreachable or the list incomplete: deferred like a list that is not available
     }
 }
