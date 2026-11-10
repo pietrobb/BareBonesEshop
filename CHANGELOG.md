@@ -110,18 +110,6 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
     the shop and every later restore stayed refused until the copy was moved back by hand. The next request or step
     now moves the copy (`<db>.pre-restore-*.rollback`) back once the killed process is gone. The shop stays closed for
     the interrupted restore, which can be run again.
-- **Stripe refunds booked ahead of their result are corrected, not booked twice** (review round 26). When a Stripe
-  `charge.refunded` without its refund list was booked as an item refund still at Stripe:
-  - a smaller refund from the Stripe dashboard took the whole booking, and the item's own refund then booked it again
-    (a 42.00 order showed 42.00 refunded for 26.00 returned, was "refunded" with nothing left to refund, and had credit
-    notes of -21.00 twice). The dashboard refund now takes only its own amount; the credit notes are -21.00 and -5.00.
-  - with two item refunds of the same amount in flight it was matched to the older one; when that one failed its money
-    was booked again by the other's result (42.00 for 21.00 returned). The booking now moves to the other refund, or is
-    taken back when that refund was already booked on its own.
-  - a refund Stripe answered "pending" and failed later stayed booked for good (only a critical incident). It is now
-    taken back, and its item refund and credit note are released; one that succeeds later is completed once. The item
-    stays pending until then.
-  - the internal "refund dispatched" marker is removed once the refund call's result is recorded.
 - **Security: the maintenance step lock no longer lets the web user take over root's files** (review round 26). Run as
   root, `cli/restore.php`, `cli/update.php` and `cli/migrate.php` opened `.maintenance.lock` following a symbolic link,
   then gave the file it pointed at to the owner of the application root (0660) and emptied it. The web user can write
@@ -156,22 +144,6 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   failing every order e-mail. Mail the log provider only wrote down no longer reads as sent anywhere: the withdrawal
   and complaint confirmation pages and admin screens, merchant notifications, the admin "resend" message and the GDPR
   export say "logged".
-- **A Stripe refund is booked once, also when Stripe reports several refunds together** (review round 25). A
-  `charge.refunded` without its refund list is matched against the set of the shop's refunds in flight whose sum it
-  holds (was: only one of exactly that amount — two item refunds of 21.00 reported as 42.00 ended with 84.00 on the
-  ledger of a 42.00 order, and an item refund plus a 5.00 dashboard refund left the payment `refunded`). Only refunds
-  whose job has called Stripe count, so a dashboard refund of the same sum no longer completes an item refund still
-  queued. What it books never exceeds the order total. Stripe refunds carry the shop's refund key in their metadata
-  (`bbe_refund_key`): a `refund.updated` or later `charge.refunded` naming the shop's refund before the job's result
-  only identifies it (was: the money and a credit note twice), and the item refund keeps Stripe's `re_…` id as its
-  payment reference instead of the webhook's ledger key. A refund sent to Stripe whose id is not known yet is booked
-  only provisionally: its item refund is completed once its own result or event confirms it, and a refund that names
-  another id (a dashboard refund) and does not fit the unexplained money reclaims that booking. Was: a 25.00 dashboard
-  refund matched with a 21.00 item refund Stripe had not carried out yet left 4.00 unexplained, its own event booked
-  25.00 again (50.00 on the ledger for 46.00 refunded), and the item's credit note was completed even if Stripe then
-  declined it. This holds in whatever order the events arrive: when the item's result or its own event confirmed the
-  booking before the dashboard refund's event, that event still reclaims it, and the item's money is booked once under
-  its own refund (was: 25.00 booked again).
 - **A failed restore, update or rollback no longer reopens a shop left half-done** (review round 25). A
   `cli/restore.php` that failed before it replaced anything (a corrupt backup, a refused files archive) lifted the
   window an earlier interrupted restore had left, and the shop reopened on a half-restored database or files; it now
@@ -197,14 +169,20 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   database-only restore after an interrupted `--files`/`--files-only` restore, or a failed window of a migration or an
   update, stays, and the restore says so — also when a restore was killed or failed half-way on top of it (the
   marker carries that failure on as `pending_other`, and the restore that completes it puts it back).
-- **No second credit note for a Stripe refund reported in total** (review round 24). When a Stripe `charge.refunded`
-  event came without its list of refunds (and the Stripe API could not list them), the shop booked the refunded total
-  under the payment and issued a credit note for it at once. If that money was the shop's own refund in flight (an
-  item return with its credit note, or a refund requested in the admin), the order got a second credit note, and the
-  refund job's result then booked the same money again. Now such a refund of exactly the amount in flight is booked as
-  that refund: the item return keeps its single credit note, an admin refund gets one, and the job's result only
-  confirms it. A refund made in the Stripe dashboard is credited as before; GoPay, ThePay and Comgate are unchanged.
-  Orders already affected show two credit notes for one refund in their Invoices, and a refunded amount above what
+- **A Stripe refund is booked once, by its Stripe refund id** (review rounds 24–27). A `charge.refunded` event without
+  its list of refunds (when the Stripe API could not list them either) booked the refunded total at once. When that
+  money was the shop's own refund in flight (an item return with its credit note, or a refund requested in the admin)
+  the order got a second credit note and the refund job's result booked the same money again; refunds reported
+  together, a dashboard refund next to an item refund, or a refund Stripe failed later left the refunded amount off
+  what Stripe returned. Now such an event books nothing: the webhook answers 503 and Stripe delivers it again (with
+  backoff, for up to three days), logging a `payment.webhook_deferred` warning each time; a Stripe API error while
+  listing the refunds is handled the same way (was: a 500 with a critical incident). Every refund is booked by its
+  Stripe refund id — from the event's refund list, `refund.updated` or the refund job's result, whichever comes
+  first — so the ledger holds exactly what Stripe returned. Stripe refunds carry the shop's refund key in their
+  metadata (`bbe_refund_key`): one reported before the job's result is booked as that refund (an item return keeps its
+  single credit note, an admin refund gets one, and the job's result only confirms it). A refund Stripe answered
+  "pending" and failed later is never booked, also when its `refund.failed` arrives before the job's result; its item
+  refund is released and its credit note reversed. Orders already affected under 2.1.2 show two credit notes for one refund in their Invoices, and a refunded amount above what
   left the Stripe account: have the duplicate credit note corrected with your accountant.
 - **Admin language** (review round 23, UX). The dashboard's setup checklist titles its checks in the admin's language
   (they were the doctor's English text; an unknown check still shows that text) and counts "1 problem", not
