@@ -1486,7 +1486,7 @@ final class InvoiceService
     private static function sellerSnapshot(array $legal): array
     {
         $keys = ['name', 'street', 'city', 'zip', 'country', 'ico', 'dic', 'ic_dph',
-                 'iban', 'bank', 'email', 'phone', 'register_note', 'vat_registered'];
+                 'iban', 'bic', 'bank', 'email', 'phone', 'register_note', 'vat_registered'];
         $out = [];
         foreach ($keys as $k) $out[$k] = (string)($legal[$k] ?? '');
         return $out;
@@ -2208,7 +2208,9 @@ final class InvoiceService
             $y += 5;
         } elseif (!$creditNote && !empty($sellerSnap['iban']) && !self::orderPaysOnDelivery((int)($invoice['order_id'] ?? 0))) {
             // R14 T18: cash on delivery is paid to the carrier; the IBAN read as a second request to pay.
-            $pdf->text(20, $y, $L['iban'] . ': ' . $sellerSnap['iban'], ['size' => 9]);
+            // R28: with the BIC the installer and Admin → Stores collect for it (payments from abroad); was never printed.
+            $bic = strtoupper(trim((string)($sellerSnap['bic'] ?? '')));
+            $pdf->text(20, $y, $L['iban'] . ': ' . $sellerSnap['iban'] . ($bic !== '' ? '   BIC: ' . $bic : ''), ['size' => 9]);
             $y += 5;
             $qrBottom = self::drawPaymentQr($pdf, $invoice, $sellerSnap, $customerSnap, $y - 9);
         }

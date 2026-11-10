@@ -111,6 +111,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The e-mail delivery settings are in the backup; an empty `SMTP_*` variable no longer blanks the server; the invoice
+  prints the BIC** (review round 28). `mail.json` (Admin → E-mail delivery) is a backup file source and a restore brings
+  it back readable by the owner only (0600): a restored shop logged its mail instead of sending it. An empty `SMTP_HOST=`,
+  `SMTP_PORT=` or `SMTP_ENCRYPTION=` (an `.env` line or a compose `${SMTP_HOST}` left unset) counts as unset, as Admin →
+  E-mail delivery already showed it: it replaced the saved server with an empty host and port 0. An invoice to pay by
+  transfer prints the seller's BIC next to the IBAN (for payments from abroad); the installer and Admin → Stores
+  collected it for the invoices but it was never printed.
 - **New: "Buy later" in the cart** (save for later, as Amazon's "Saved for later"). Each cart line has a "Buy later"
   button that moves it, with its variant and quantity, to a "Buy later (N)" list under the cart; each saved line shows
   its quantity and today's unit price and has "Move to cart" and remove, and the list has "Clear saved". Saved lines

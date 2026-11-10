@@ -1149,7 +1149,9 @@ class BackupService
                     $refused[] = "{$entry} ({$directory['existing']} is not writable by this user)";
                     continue;
                 }
-                $ownership = self::restoredFileOwnership($target, $directory['existing'], in_array($name, ['gdpr_salt', 'stores'], true));
+                $ownership = self::restoredFileOwnership($target, $directory['existing'], match ($name) {
+                    'gdpr_salt', 'stores' => 0640, 'mail' => 0600, default => 0666,
+                });
                 // R27 (run 397): a file or directory this user cannot give the owner and group it must have is refused.
                 $keep = $ownership['uid'] !== null && $ownership['gid'] !== null ? FileOwnership::cannotKeep($target, $ownership['uid'], $ownership['gid']) : null;
                 if ($keep === null && $directory['create'] !== [] && $ownership['dir_uid'] !== null && $ownership['dir_gid'] !== null) {
@@ -1360,13 +1362,13 @@ class BackupService
      * so a restore run as root does not leave files the web server cannot read. New directories copy
      * the mode and owner of that directory.
      */
-    private static function restoredFileOwnership(string $target, string $directory, bool $secret): array
+    private static function restoredFileOwnership(string $target, string $directory, int $newFileMask): array
     {
         $file = is_file($target) ? @stat($target) : false;
         $dir = @stat($directory);
         $dirMode = is_array($dir) ? $dir['mode'] & 07777 : 0750;
-        $mode = is_array($file) ? $file['mode'] & 07777 : ($dirMode & 0666);
-        if (!is_array($file) && $secret) $mode &= 0640;
+        // A new file of a secret ($newFileMask 0640, mail.json 0600) never gets more than that from its directory.
+        $mode = is_array($file) ? $file['mode'] & 07777 : ($dirMode & 0666 & $newFileMask);
         $template = is_array($file) ? $file : $dir;
         return [
             'mode'     => $mode,
@@ -1430,6 +1432,8 @@ class BackupService
             'stores'    => $runtime !== '' && (is_file($runtime . '/stores.json') || !is_file($legacyStores)) ? $runtime . '/stores.json' : $legacyStores,
             'legal'     => $runtime !== '' ? $runtime . '/legal' : '',
             'downloads' => (string)($appCfg['digital_assets_base_dir'] ?? $private . '/downloads'),
+            // R28: the e-mail delivery settings (Admin → E-mail delivery); a restored shop logged its mail instead of sending it.
+            'mail'      => $runtime !== '' ? $runtime . '/' . MailSettings::FILE : '',
         ];
     }
 
