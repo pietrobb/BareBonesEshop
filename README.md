@@ -570,8 +570,8 @@ that stops half-way is finished by the updater that started it.
 **Root.** Any `php cli/….php` started as root runs as the owner and group of the
 application root, switched for good before it loads any code (the web user can often
 write that tree, so code and files root would use there could be its own). In a tree
-root owns it stays root only when no other account can write the application root,
-`src/` or `cli/`; otherwise it refuses to run. Run backups, restores and updates as
+root owns it stays root only when no other account can change any file or directory
+in it or above it (`config.php` included); otherwise it refuses to run. Run backups, restores and updates as
 the user that owns the files they change.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a

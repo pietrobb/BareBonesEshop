@@ -99,7 +99,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   store's catalog is priced in that catalog's currency.
 - **Steps started as root run as the owner of the application root.** Every `php cli/….php` run by root switches to
   the owner and group of the application root before it loads any code (a notice says so); in a tree root owns, root
-  stays only when no other account can write the application root, `src/` or `cli/`, else the step is refused. A step
+  stays only when no other account can change anything in the tree or above it (every file and directory, `config.php`,
+  `adapters/` and `vendor/` included; links must stay inside the tree), else the step is refused. A step
   now changes only what that owner can write: run backups, restores and updates as that owner or as the user that owns
   the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook already says). The Docker `setup`
   service hands the directories it fills to the checkout's owner for the command and to `www-data` afterwards.

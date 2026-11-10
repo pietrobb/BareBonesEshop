@@ -125,6 +125,7 @@ try {
             copy(TEST_CLI_DIR . '/cli-only.php', $app . '/cli/cli-only.php');
             copy(TEST_CLI_DIR . '/update.php', $app . '/cli/update.php');
             file_put_contents($app . '/src/autoload.php', '<?php
+if (is_file(dirname(__DIR__) . "/config.php")) require dirname(__DIR__) . "/config.php"; // as src/Db.php does
 file_put_contents(sys_get_temp_dir() . "/' . basename($app) . '.json", json_encode(["euid" => posix_geteuid(), "uid" => posix_getuid(),
     "egid" => posix_getegid(), "groups" => posix_getgroups(), "regained" => @posix_seteuid(0)]));
 exit(0);');
@@ -160,6 +161,37 @@ exit(0);');
         [$r27Code, $r27Ran] = $r27Run($r27Own);
         assert_equals(0, $r27Ran['euid'] ?? null, 'R27 root: a root-only tree runs as root');
 
+        // 5b. Capability review (run 390): in a root-owned 0755 tree, code another account owns — config.php (the web
+        //     installer writes it), a file of adapters/, a symbolic link out of the tree — is refused before root
+        //     loads it (was: only the app root, src/ and cli/ were checked, and root ran the web user's config.php).
+        $r27CfgReport = sys_get_temp_dir() . '/r27cfg-' . getmypid() . '.json';
+        $r27Planted = [];
+        foreach (['config', 'adapter', 'link'] as $r27Kind) {
+            $r27Tree = $r27App('planted-' . $r27Kind, 0, 0, 0755);
+            $r27Planted[] = $r27Tree;
+            $r27Php = '<?php file_put_contents(' . var_export($r27CfgReport, true) . ', json_encode(["euid" => posix_geteuid()])); return [];';
+            if ($r27Kind === 'config') {
+                file_put_contents($r27Tree . '/config.php', $r27Php);
+                chown($r27Tree . '/config.php', 65534);
+                chmod($r27Tree . '/config.php', 0644);
+            } elseif ($r27Kind === 'adapter') {
+                mkdir($r27Tree . '/adapters', 0755);
+                file_put_contents($r27Tree . '/adapters/PaymentAdapter.php', $r27Php);
+                chown($r27Tree . '/adapters/PaymentAdapter.php', 65534);
+            } else {
+                $r27Outside = $r27Tree . '-outside';
+                $r27Planted[] = $r27Outside;
+                mkdir($r27Outside, 0755);
+                chown($r27Outside, 65534);
+                symlink($r27Outside, $r27Tree . '/vendor');
+            }
+            @unlink($r27CfgReport);
+            [$r27Code, $r27Ran, $r27Err] = $r27Run($r27Tree);
+            assert_equals([1, null, false, true], [$r27Code, $r27Ran, is_file($r27CfgReport), str_contains($r27Err, 'REFUSED')],
+                "R27 root ({$r27Kind}): code of another account in a root-owned tree is refused before root runs it — " . $r27Err);
+            @unlink($r27CfgReport);
+        }
+
         // 6. MaintenanceMode as root outside a step's CLI: the lock of an app root another account can write is refused.
         $r27ForeignLock = $r27Foreign . '/' . MaintenanceMode::LOCK_FILE;
         try {
@@ -182,7 +214,7 @@ exit(0);');
             filegroup($r27GroupedLock . MaintenanceMode::HELD_SUFFIX), fileperms($r27GroupedLock . MaintenanceMode::HELD_SUFFIX) & 0777],
             'R27 step lock (root): the claim file without flock belongs to the app root\'s group, 0660');
         MaintenanceMode::unclaim($r27Grouped);
-        foreach ([$r27Foreign, $r27Shared, $r27Own, $r27Grouped] as $r27Tree) {
+        foreach ([$r27Foreign, $r27Shared, $r27Own, $r27Grouped, ...$r27Planted] as $r27Tree) {
             if (function_exists('updateTestRemoveTree')) updateTestRemoveTree($r27Tree);
         }
     }
