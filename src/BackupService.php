@@ -1800,8 +1800,11 @@ class BackupService
         }
         $deadline = microtime(true) + 10.0;
         while (true) {
-            if (flock($h, LOCK_EX | LOCK_NB)) {
-                return $h;
+            try {
+                if (FileSystem::tryLock($h, $lockPath)) return $h;
+            } catch (RuntimeException $e) {
+                fclose($h);
+                throw $e;
             }
             if (microtime(true) > $deadline) {
                 fclose($h);
