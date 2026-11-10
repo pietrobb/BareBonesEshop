@@ -11,8 +11,8 @@ if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && !defined('BBE_WEB_WORKER')) 
  * any code of src/ is loaded. Root steps worked in a tree the web user can write: it planted a symbolic link where root
  * chmodded a temporary file (DataOverrides::atomicWrite) and gave itself /etc/shadow, or replaced src/ and root ran its
  * code. Patching each file root touched left the next one open, so root keeps no rights a step needs: the owner of the
- * application root can do everything the step does. Root stays root only for a tree that root owns and no other account
- * can write (app root, src/, cli/); otherwise the step is refused. cli/test.php keeps root (BBE_CLI_KEEP_ROOT) for the
+ * application root can do everything the step does. Root stays root only for a tree that root owns and in which no other
+ * account can change anything (cli_not_root_only()); otherwise the step is refused. cli/test.php keeps root (BBE_CLI_KEEP_ROOT) for the
  * scenarios that test the root paths.
  */
 function cli_drop_root(string $root): void
@@ -47,15 +47,55 @@ function cli_drop_root(string $root): void
         fwrite(STDERR, "NOTICE: started as root; this step runs as {$name} (uid {$uid}, gid {$gid}), the owner of the application root.\n");
         return;
     }
-    foreach (['', '/src', '/cli'] as $dir) {
-        $stat = @stat($root . $dir);
-        if (!is_array($stat)) continue;
-        $mode = (int)$stat['mode'];
-        if ((int)$stat['uid'] !== 0 || ($mode & 0002) !== 0 || (($mode & 0020) !== 0 && (int)$stat['gid'] !== 0)) {
-            $refuse(sprintf('%s (owner %d, group %d, mode %04o) is writable by another account, and root would run the code it holds',
-                $root . ($dir === '' ? '' : $dir), $stat['uid'], $stat['gid'], $mode & 07777));
+    $why = cli_not_root_only($root);
+    if ($why !== null) $refuse($why . ', and root would run the code it holds');
+}
+
+/**
+ * Why root may not run the code of a root-owned application root, or null. Capability review (run 390): checking the app
+ * root, src/ and cli/ left config.php (the web installer writes it), adapters/, vendor/, lang/ and every file in them to
+ * whoever owned them, and root ran them. Root keeps its rights only when no other account can change anything it may
+ * load: every directory above the app root, and every entry in it (lstat, links not followed), belongs to root and only
+ * root (or root's group) can write it; a link must stay inside the tree, whose walk checks its target.
+ */
+function cli_not_root_only(string $root): ?string
+{
+    $foreign = static fn(array $s): bool => (int)$s['uid'] !== 0 || ((int)$s['mode'] & 0002) !== 0
+        || (((int)$s['mode'] & 0020) !== 0 && (int)$s['gid'] !== 0);
+    $describe = static fn(string $path, array $s): string => sprintf('%s (owner %d, group %d, mode %04o) is writable by another account',
+        $path, $s['uid'], $s['gid'], (int)$s['mode'] & 07777);
+    $real = realpath($root);
+    if ($real === false) return "the application root {$root} cannot be resolved";
+    // Above the app root: a directory another account can write could swap the whole tree, unless its sticky bit keeps
+    // others from renaming root's entries.
+    for ($dir = dirname($real); ; $dir = dirname($dir)) {
+        $s = @stat($dir);
+        if (!is_array($s)) return "{$dir} cannot be read";
+        if ((int)$s['uid'] !== 0 || ($foreign($s) && ((int)$s['mode'] & 01000) === 0)) return $describe($dir, $s);
+        if ($dir === dirname($dir)) break;
+    }
+    $pending = [$real];
+    while ($pending !== []) {
+        $path = array_pop($pending);
+        $s = @lstat($path);
+        if (!is_array($s)) return "{$path} cannot be read";
+        if (is_link($path)) {
+            $target = realpath($path);
+            if ((int)$s['uid'] !== 0 || $target === false || ($target !== $real && !str_starts_with($target, $real . '/'))) {
+                return "{$path} is a symbolic link out of the application root (" . ($target === false ? 'dangling' : $target) . ')';
+            }
+            continue;
+        }
+        if ($foreign($s)) return $describe($path, $s);
+        if (is_dir($path)) {
+            $entries = @scandir($path);
+            if ($entries === false) return "{$path} cannot be listed";
+            foreach ($entries as $entry) {
+                if ($entry !== '.' && $entry !== '..') $pending[] = $path . '/' . $entry;
+            }
         }
     }
+    return null;
 }
 
 if (PHP_OS_FAMILY !== 'Windows' && !defined('BBE_WEB_WORKER') && !defined('BBE_CLI_KEEP_ROOT')) cli_drop_root(dirname(__DIR__));
