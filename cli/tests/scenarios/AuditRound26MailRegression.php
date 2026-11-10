@@ -139,10 +139,75 @@ try {
     $r26mSource = static fn(string $file): string => (string)file_get_contents($r26mRoot . '/' . $file);
     assert_true(substr_count($r26mSource('src/Customers.php'), "return MailService::logged(\$mail) ? 'logged' : 'sent';") === 2
         && str_contains($r26mSource('src/BackInStock.php'), "=== 'sent' && !MailService::logged(\$mail) ? 'confirm_sent' : 'failed';")
-        && str_contains($r26mSource('src/BackInStock.php'), 'if (MailService::logged($result)) continue;')
         && str_contains($r26mSource('src/GuestCheckoutAccount.php'), "=== 'sent' && !MailService::logged(\$mail) ? 'sent' : 'failed';")
         && str_contains($r26mSource('src/StockAlerts.php'), 'if (MailService::logged($mail)) $logged++;'),
-        'R26 mail: the admin payment link, e-mail verification, password reset, back-in-stock (confirmation and notice), the account offer and stock alerts do not count logged mail as sent');
+        'R26 mail: the admin payment link, e-mail verification, password reset, back-in-stock confirmation, the account offer and stock alerts do not count logged mail as sent');
+
+    // 7. Review run 388: a back-in-stock notice only written to the log is not lost. The request stays and the job is
+    //    queued again, so the shopper is told once the configuration is fixed, without another refill.
+    $r26mCfgBefore = $r26mCfgProp->getValue();
+    try {
+        $r26mCfgProp->setValue(null, ['app_url' => 'https://r26m.example.test'] + (is_array($r26mCfgBefore) ? $r26mCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR))));
+        (require TEST_CLI_DIR . '/../migrations/20261025120000_back_in_stock_requests.php')->up($r26mDb, Db::isSqlite());
+        (require TEST_CLI_DIR . '/../migrations/20261104120000_back_in_stock_double_opt_in.php')->up($r26mDb, Db::isSqlite());
+        $r26mWh = (int)$r26mDb->query("SELECT id FROM warehouses WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
+        $r26mDb->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+            VALUES (92688, 'default', 1, 'R26MB item', 'r26mb-item', 'R26MB-S', 'simple', 900, 'eur', 'active', 0, 'deny')")->execute();
+        $r26mDb->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', ?, 'R26MB-S', 0, 0)")->execute([$r26mWh]);
+        $r26mDb->prepare('INSERT INTO back_in_stock_requests (store_id, product_id, email, locale, created_at, confirmed_at) VALUES (?, 92688, ?, ?, ' . Db::now() . ', ' . Db::now() . ')')
+            ->execute(['default', 'r26mb-wait@r26m.example.test', 'en']);
+        $r26mWaiting = static fn(): int => (int)$r26mDb->query('SELECT COUNT(*) FROM back_in_stock_requests WHERE product_id = 92688')->fetchColumn();
+        // The back_in_stock jobs waiting in the queue (a retry waits LOGGED_DELAY, so pull() would not hand it out yet).
+        $r26mBisJobs = static function () use ($r26mJobs): array {
+            $found = [];
+            if (!is_dir($r26mJobs)) return [];
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r26mJobs, FilesystemIterator::SKIP_DOTS)) as $file) {
+                $job = json_decode((string)file_get_contents($file->getPathname()), true);
+                if (is_array($job) && ($job['type'] ?? '') === 'back_in_stock' && in_array('R26MB-S', (array)($job['payload']['skus'] ?? []), true)) {
+                    $found[] = $job['payload'];
+                    @unlink($file->getPathname());
+                }
+            }
+            return $found;
+        };
+        $r26mBisJobs();
+        putenv('MAIL_ADAPTER=smtp.');
+        BackInStock::flush();
+        Warehouse::setStock($r26mWh, 'R26MB-S', 3, 'count');
+        Warehouse::syncProductStock(['R26MB-S']);
+        BackInStock::flush();
+        $r26mRefill = $r26mBisJobs();
+        $r26mError = '';
+        $r26mNotified = -1;
+        try {
+            foreach ($r26mRefill as $r26mPayload) $r26mNotified = BackInStock::process((array)$r26mPayload['skus']);
+        } catch (Throwable $e) {
+            $r26mError = get_class($e) . ': ' . $e->getMessage();
+        }
+        $r26mAgain = $r26mBisJobs();
+        assert_equals([1, '', 0, 1, [1]], [count($r26mRefill), $r26mError, $r26mNotified, $r26mWaiting(), array_map(static fn(array $p): int => (int)($p['_mail_logged_tries'] ?? 0), $r26mAgain)],
+            'R26 mail: a back-in-stock notice only logged (MAIL_ADAPTER="smtp.") keeps the request and queues the job again (was: nothing would send it)');
+        // The configuration fixed, stock unchanged: the queued job sends the notice once and the request is gone.
+        putenv('MAIL_ADAPTER=smtp');
+        $r26mCapture = new R26mCaptureMail();
+        MailService::useAdapter($r26mCapture);
+        foreach ($r26mAgain as $r26mPayload) BackInStock::handleJob($r26mPayload);
+        assert_equals([['r26mb-wait@r26m.example.test'], ['back_in_stock'], 0, []],
+            [array_column($r26mCapture->sent, 'to'), array_map(static fn(array $m): string => (string)($m['headers']['X-Template'] ?? ''), $r26mCapture->sent), $r26mWaiting(), $r26mBisJobs()],
+            'R26 mail: once the configuration is fixed the waiting shopper gets the back-in-stock notice, without another refill (was: never)');
+        MailService::useAdapter(null);
+        // ... and the retries stop after their budget.
+        putenv('MAIL_ADAPTER=smtp.');
+        $r26mDb->prepare('INSERT INTO back_in_stock_requests (store_id, product_id, email, locale, created_at, confirmed_at) VALUES (?, 92688, ?, ?, ' . Db::now() . ', ' . Db::now() . ')')
+            ->execute(['default', 'r26mb-late@r26m.example.test', 'en']);
+        BackInStock::handleJob(['skus' => ['R26MB-S'], '_mail_logged_tries' => 48]);
+        assert_equals([[], 1], [$r26mBisJobs(), $r26mWaiting()], 'R26 mail: a logged back-in-stock notice is tried again at most 48 times');
+    } finally {
+        MailService::useAdapter(null);
+        putenv('MAIL_ADAPTER');
+        $r26mCfgProp->setValue(null, $r26mCfgBefore);
+        $r26mDb->exec("DELETE FROM back_in_stock_requests WHERE product_id = 92688");
+    }
 } catch (Throwable $e) {
     assert_true(false, 'R26 mail (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {

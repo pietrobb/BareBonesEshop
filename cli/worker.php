@@ -53,7 +53,7 @@ $handlers = [
     'cache_rebuild'     => [WorkerJobs::class, 'handleCacheRebuild'],
     'email_send'        => [WorkerJobs::class, 'handleEmailSend'],
     'stock_alert'       => [WorkerJobs::class, 'handleStockAlert'],
-    'back_in_stock'     => static fn(array $payload): int => BackInStock::process(array_map('strval', (array)($payload['skus'] ?? []))),
+    'back_in_stock'     => [BackInStock::class, 'handleJob'],
     'search_reindex'    => [WorkerJobs::class, 'handleSearchReindex'],
     'payment_refund'    => [WorkerJobs::class, 'handlePaymentRefund'],
     'payment_cancel'    => [WorkerJobs::class, 'handlePaymentCancel'],
