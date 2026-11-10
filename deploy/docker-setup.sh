@@ -6,6 +6,9 @@
 set -u
 cd /var/www/html
 mkdir -p cache uploads import logs
+# PHP steps started as root run as the owner of the checkout (cli/cli-only.php, review round 27): let it write the
+# directories the command fills; they go to www-data below.
+chown -R -h "$(stat -c %u:%g .)" cache uploads import logs /var/www/bareboneseshop-private
 "$@"
 status=$?
 chown -R www-data:www-data cache uploads import logs /var/www/bareboneseshop-private

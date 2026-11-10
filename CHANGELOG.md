@@ -97,8 +97,28 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Admin orders:** recording "Paid" with less than the order total is refused with the missing amount. A manual order
   starts with no shipping or payment method chosen; pick both. A product created in a store that shares another
   store's catalog is priced in that catalog's currency.
+- **Steps started as root run as the owner of the application root.** Every `php cli/….php` run by root switches to
+  the owner and group of the application root before it loads any code (a notice says so); in a tree root owns, root
+  stays only when no other account can write the application root, `src/` or `cli/`, else the step is refused. A step
+  now changes only what that owner can write: run backups, restores and updates as that owner or as the user that owns
+  the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook already says). The Docker `setup`
+  service hands the directories it fills to the checkout's owner for the command and to `www-data` afterwards.
 
 ### Changes
+
+- **Security: a step run as root no longer gives the web user root** (review round 27). The web user can write the
+  application root, and steps run as root worked in it: `DataOverrides::atomicWrite()` (the maintenance marker, the
+  data directory's `stores.json`, the update key) chmodded its temporary file by name to the mode of the file it
+  replaced, so a planted 0666 `.maintenance` and a symbolic link to `/etc/shadow` swapped in for `.maintenance.*.tmp`
+  made `/etc/shadow` 0666 within seconds; `MaintenanceMode::restore()` dated the marker back with `touch()`, which
+  creates the target of a dangling link; and a `src/` the web user replaced ran as root. Fixed for every step at once:
+  `cli/cli-only.php`, the first file each CLI step loads, runs a step started as root as the owner of the application
+  root for good (its groups too; no way back to root) before any code of `src/` is loaded, and refuses one in a
+  root-owned tree another account can write. Besides, the temporary file is created exclusively with its final mode
+  (no chmod by name; `stores.json` 0640 the same way), a marker put back keeps its age through its `since` (no
+  `touch()`), root opens `.maintenance.lock` only in an application root no other account can write, a step refuses a
+  lock that holds anything but a holder record (a `.env` renamed to that name was emptied), and the claim file without
+  file locks belongs to the application root's group. CI runs these root paths as root with `/proc` hidden.
 
 - **A rollback no longer reopens the shop over a half-migrated database, and a killed SQLite restore recovers**
   (review round 26).

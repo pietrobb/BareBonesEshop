@@ -74,13 +74,14 @@ jobs:
           TEST_REDIS_PORT: '6379'
         run: php cli/test.php
 
-      # The suite runs as the runner account, which skips the step lock's root path. Run that scenario as root in a
-      # mount namespace with /proc hidden (review round 26, findings 1 and 3), then give the workspace back.
-      - name: Step lock as root without /proc
+      # The suite runs as the runner account, which skips the root paths. Run those scenarios as root in a mount namespace
+      # with /proc hidden (review round 26, findings 1 and 3; round 27, finding 1: a step started as root runs as the app
+      # root's owner), then give the workspace back.
+      - name: Step lock and root steps as root without /proc
         run: |
           status=0
           sudo BAREBONES_REQUIRE_ROOT_TEST=1 unshare --mount --propagation private sh -c \
-            'mount -t tmpfs none /proc && exec "$0" cli/test.php --only=AuditRound26StepLockRegression.php' "$(command -v php)" || status=$?
+            'mount -t tmpfs none /proc && exec "$0" cli/test.php --only=AuditRound26StepLockRegression.php,AuditRound27RootRegression.php' "$(command -v php)" || status=$?
           sudo chown -R "$(id -u):$(id -g)" .
           exit $status
 

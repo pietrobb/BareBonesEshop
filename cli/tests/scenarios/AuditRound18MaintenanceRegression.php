@@ -62,13 +62,12 @@ try {
     $r18mKilled = ['since' => gmdate('c', time() - 600), 'reason' => 'update 18.0.1', 'pid' => 999999, 'host' => (string)gethostname()];
     file_put_contents(MaintenanceMode::path($r18mShop), json_encode($r18mKilled));
     touch(MaintenanceMode::path($r18mShop), time() - 600);
-    clearstatcache();
-    $r18mKilledAt = filemtime(MaintenanceMode::path($r18mShop));
     file_put_contents($r18mShop . '/src/Core.php', "half\n");
     $r18mChanged = $r18mError(static fn() => $r18mUpdater->rollback($r18mSnapshot, false, true));
     clearstatcache();
-    assert_equals([true, true, $r18mKilled, $r18mKilledAt], [str_contains($r18mChanged, 'src/Core.php'), MaintenanceMode::active($r18mShop),
-        MaintenanceMode::marker($r18mShop), @filemtime(MaintenanceMode::path($r18mShop))],
+    // R27: the marker keeps its age through its 'since' (no touch() by name), so the window still expires when it did.
+    assert_equals([true, true, $r18mKilled], [str_contains($r18mChanged, 'src/Core.php'), MaintenanceMode::active($r18mShop),
+        MaintenanceMode::marker($r18mShop)],
         'R18 rollback: a rollback refused for a changed file keeps the window of a killed updater as it was (' . $r18mChanged . ')');
     file_put_contents($r18mShop . '/src/Core.php', "core v2\n");
     MaintenanceMode::leave($r18mShop);
@@ -121,6 +120,6 @@ assert_equals([true, true, false], [$r18mLocked, $r18mHour, $r18mDay],
 // 7. cli/migrate.php: a run that stopped before its first migration (the pre-migration backup failed) changed nothing,
 //    so it restores the window it found instead of a permanent 503 (end-to-end run in the PR proof).
 $r18mScript = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/migrate.php');
-assert_true(preg_match('/if \(\$ownMaintenance && !\$schemaTouched\) \{\s*if \(\$priorMarker !== null\) \{\s*MaintenanceMode::restore\(\$root, \$priorMarker, \$priorAt\);.*?\} else \{\s*MaintenanceMode::leave\(\$root\);/s', $r18mScript) === 1
+assert_true(preg_match('/if \(\$ownMaintenance && !\$schemaTouched\) \{\s*if \(\$priorMarker !== null\) \{\s*MaintenanceMode::restore\(\$root, \$priorMarker\);.*?\} else \{\s*MaintenanceMode::leave\(\$root\);/s', $r18mScript) === 1
     && preg_match('/\$preApplyHook\(\$names, \$log\);\s*\$backupTaken = true;\s*\}\s*(?:\/\/[^\n]*\n\s*)?if \(\$ownMaintenance\) \{\s*MaintenanceMode::arm\(\$root, (?s:.*?)\);\s*\}\s*\$schemaTouched = true;/', $r18mScript) === 1,
     'R18 migrate.php: a failed pre-migration backup reopens the unchanged shop (or keeps an earlier failed window)');
