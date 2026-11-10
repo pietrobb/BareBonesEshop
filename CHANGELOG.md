@@ -100,6 +100,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A rollback no longer reopens the shop over a half-migrated database, and a killed SQLite restore recovers**
+  (review round 26).
+  - An update that completed a migration stopped half-way reopened the shop, but its snapshot held that half-migrated
+    database; a later `cli/update.php rollback --snapshot=...` of it restored that database and reopened the shop. The
+    snapshot now records the failed migration, and its rollback keeps the shop closed until `php cli/migrate.php apply`
+    (or an update that migrates) completes it.
+  - A restore killed between moving the live SQLite database aside and moving the restored copy in left no database:
+    the shop and every later restore stayed refused until the copy was moved back by hand. The next request or step
+    now moves the copy (`<db>.pre-restore-*.rollback`) back once the killed process is gone. The shop stays closed for
+    the interrupted restore, which can be run again.
 - **Stripe refunds booked ahead of their result are corrected, not booked twice** (review round 26). When a Stripe
   `charge.refunded` without its refund list was booked as an item refund still at Stripe:
   - a smaller refund from the Stripe dashboard took the whole booking, and the item's own refund then booked it again
