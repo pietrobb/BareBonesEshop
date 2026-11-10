@@ -128,6 +128,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The e-mail delivery settings are in the backup; an empty `SMTP_*` variable no longer blanks the server; the invoice
+  prints the BIC** (review round 28). `mail.json` (Admin → E-mail delivery) is a backup file source and a restore brings
+  it back readable by the owner only (0600): a restored shop logged its mail instead of sending it. An empty `SMTP_HOST=`,
+  `SMTP_PORT=` or `SMTP_ENCRYPTION=` (an `.env` line or a compose `${SMTP_HOST}` left unset) counts as unset, as Admin →
+  E-mail delivery already showed it: it replaced the saved server with an empty host and port 0. An invoice to pay by
+  transfer prints the seller's BIC next to the IBAN (for payments from abroad); the installer and Admin → Stores
+  collected it for the invoices but it was never printed.
 - **Root: the shop decides, the update directory counts, no group root, ACLs count** (review round 28, findings 4 and
   5, lows). `cli/update.php --installed=<shop>` run as root decided by the owner of the release tree (root) that it may
   stay root, then ran the shop's `config.php` and changed its files as root; it now switches to the owner of the shop

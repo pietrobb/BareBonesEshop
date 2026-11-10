@@ -30,7 +30,9 @@ class SmtpMail implements MailAdapter {
     public function __construct(array $cfg = []) {
         // R23: environment first, then what the owner saved in Admin → E-mail delivery, then config.php's smtp_* keys.
         $cfg = MailSettings::smtpConfig() + $cfg;
-        $env = fn(string $k, $def = '') => getenv($k) !== false ? getenv($k) : ($cfg[strtolower($k)] ?? $def);
+        // R28: an empty variable is unset (MailSettings::environmentOverrides()): `SMTP_HOST=` from an .env file or a compose
+        // `${SMTP_HOST}` replaced the saved server with '' (and SMTP_PORT= with port 0) while the admin showed the saved one.
+        $env = fn(string $k, $def = '') => (string)getenv($k) !== '' ? getenv($k) : ($cfg[strtolower($k)] ?? $def);
         $this->host       = (string)$env('SMTP_HOST', 'localhost');
         $this->port       = (int)$env('SMTP_PORT', 587);
         $this->username   = (string)$env('SMTP_USER', '');
