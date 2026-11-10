@@ -564,8 +564,11 @@ failed window carries that failure on in the file, so completing the step does n
 lift the earlier one. Updates are rolled back newest first: a rollback is refused while an
 update applied after its snapshot (or one half-applied, whose automatic rollback
 failed) is still installed, and it names the rollback to run first. A rollback puts
-the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so one
-that stops half-way is finished by the updater that started it.
+back last what the updater runs (all of `src/`, `cli/cli-only.php`, `cli/update.php`
+last of all), then removes the files the older release lacks and writes the version
+state, so one that stops half-way is finished by the updater that started it. Locks
+need a file system with file locks: on one without (some NFS/SMB mounts) a step
+says so instead of reporting another step as running.
 
 **Root.** Any `php cli/….php` started as root runs as the owner and group of the
 application root, switched for good before it loads any code (the web user can often

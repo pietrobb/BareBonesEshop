@@ -46,17 +46,17 @@ try {
     assert_equals([['cli/update.php' => 'u1', 'src/Updater.php' => 'p1', 'src/A.php' => 'a1', 'src/B.php' => 'b1'], false],
         [$r22uTree(), is_file(MaintenanceMode::path($r22uShop))], 'R22 rollback: completed, every file is back and the shop reopens');
 
-    // 1b. Stopped at the version state (it cannot be replaced): the updater files come after the state and the SQLite
-    // database, so the updater that wrote the window is still the one on disk.
+    // 1b. Stopped at the version state (it cannot be replaced). R28: the state is written last, after the updater's
+    // files, so a rollback killed before it still says the newer version (no apply of that package over a mix).
     $r22uStateFile = $r22uRoot . '/private/installed.json';
     $r22uAgain = (string)$r22uUpdater->apply(new UpdatePackage($r22uRoot . '/package-2', null, true))['snapshot'];
     $r22uStateJson = (string)file_get_contents($r22uStateFile);
     unlink($r22uStateFile);
     mkdir($r22uStateFile . '/x', 0700, true);
     $r22uAtState = $r22uError(static fn() => $r22uUpdater->rollback($r22uAgain, true, true));
-    assert_equals([true, 'a1', 'u2', 'p2', true], [$r22uAtState !== '', $r22uRead('src/A.php'), $r22uRead('cli/update.php'),
+    assert_equals([true, 'a1', 'u1', 'p1', true], [$r22uAtState !== '', $r22uRead('src/A.php'), $r22uRead('cli/update.php'),
         $r22uRead('src/Updater.php'), MaintenanceMode::failed($r22uShop)],
-        'R22 rollback: stopped at the version state, the updater that wrote the window is still installed (was: the old updater, state and database still new)');
+        'R22/R28 rollback: stopped at the version state (written last), every file is back and the window stays failed');
     rmdir($r22uStateFile . '/x');
     rmdir($r22uStateFile);
     file_put_contents($r22uStateFile, $r22uStateJson);

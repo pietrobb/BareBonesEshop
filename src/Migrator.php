@@ -467,9 +467,14 @@ PHP;
         }
         $deadline = microtime(true) + self::LOCK_TIMEOUT_SECONDS;
         while (true) {
-            if (flock($this->lockHandle, LOCK_EX | LOCK_NB)) {
+            if (flock($this->lockHandle, LOCK_EX | LOCK_NB, $wouldBlock)) {
                 $this->lockDatabase(max(0, (int)ceil($deadline - microtime(true))));
                 return;
+            }
+            if ((int)$wouldBlock !== 1 && PHP_OS_FAMILY !== 'Windows') { // R28: no file locks, not another migrate
+                fclose($this->lockHandle);
+                $this->lockHandle = null;
+                throw new \RuntimeException(\FileSystem::noFileLocks($this->lockFile));
             }
             if (microtime(true) >= $deadline) {
                 fclose($this->lockHandle);

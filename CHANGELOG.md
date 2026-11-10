@@ -111,6 +111,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A rollback stopped half-way can be finished by the command `.maintenance` names** (review round 28, finding 3).
+  Only the updater's own files waited for the end, not the classes they load: the rollback of 2.1.3 removed
+  `src/AppConfig.php` and `src/FileOwnership.php` (new in 2.1.3) first, and stopped half-way, the named rollback and
+  every `cli/update.php` failed with `Class "AppConfig" not found`, the shop stayed on 503. A rollback now restores the
+  shop's other files first, then all of `src/` and every file the running updater loaded (`cli/update.php` last), then
+  removes the files the older release lacks, and writes the version state last: one killed before it still names the
+  newer version, so the same package cannot be applied over a mix of both releases. If such a command still fails
+  with `Class "…" not found` (a rollback stopped by an older updater), copy the named file from the package's
+  `payload/` into the shop and run the command again.
+- **Without file locks a step says so** (review round 28). On a private directory without file locks (some NFS/SMB
+  mounts) the update, backup, migration and SQLite maintenance locks failed as "Another update process is already
+  running", "lock acquisition timed out" or a maintenance "already in progress"; they now name the file system. A MySQL
+  probe database left by a killed update or rollback is refused with the `DROP DATABASE` to run.
 - **New: "Buy later" in the cart** (save for later, as Amazon's "Saved for later"). Each cart line has a "Buy later"
   button that moves it, with its variant and quantity, to a "Buy later (N)" list under the cart; each saved line shows
   its quantity and today's unit price and has "Move to cart" and remove, and the list has "Clear saved". Saved lines

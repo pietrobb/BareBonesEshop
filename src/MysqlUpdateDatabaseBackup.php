@@ -461,7 +461,10 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
     {
         $server = $this->serverConnection();
         if ($this->schemaExists($server, $this->probeDatabase)) {
-            throw new RuntimeException("Refusing to overwrite existing MySQL probe database {$this->probeDatabase}");
+            // R28 (low): an update or rollback killed while it verified a dump leaves the probe behind; say what to do.
+            throw new RuntimeException("Refusing to overwrite existing MySQL probe database {$this->probeDatabase}: an update or"
+                . ' rollback killed while it verified a dump leaves it behind. It holds only a copy of a dump; once no update'
+                . " runs, drop it (DROP DATABASE `{$this->probeDatabase}`) and run the command again");
         }
 
         $created = false;

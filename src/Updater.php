@@ -963,9 +963,30 @@ final class Updater
     {
         $rank = array_flip(self::UPDATER_FILES);
         $indexed = [];
-        foreach ($rows as $i => $row) $indexed[] = [$rank[(string)($row['path'] ?? '')] ?? -1, $i, $row];
-        usort($indexed, static fn(array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
-        return array_column($indexed, 2);
+        foreach ($rows as $i => $row) {
+            // R28: removals of files the old release lacks come after every replacement (the new updater needs them).
+            $indexed[] = [empty($row['existed']) ? 1 : 0, $rank[(string)($row['path'] ?? '')] ?? -1, $i, $row];
+        }
+        usort($indexed, static fn(array $a, array $b): int => [$a[0], $a[1], $a[2]] <=> [$b[0], $b[1], $b[2]]);
+        return array_column($indexed, 3);
+    }
+
+    /**
+     * R28 (review round 28, finding 3): only UPDATER_FILES waited for the end, not what they load. A 2.1.3 rollback
+     * removed AppConfig.php and FileOwnership.php (new in 2.1.3) first; stopped half-way, the command .maintenance names
+     * failed with 'Class "AppConfig" not found' and so did every update.php. Everything the updater can load waits:
+     * all of src/ (autoloaded on demand, also in error paths), the updater's files and every file this process loaded.
+     */
+    private function updaterRuntimeFiles(): array
+    {
+        $paths = array_fill_keys(self::UPDATER_FILES, true);
+        foreach (get_included_files() as $file) {
+            $real = realpath($file);
+            if ($real !== false && $this->isInside($real, $this->root)) {
+                $paths[str_replace('\\', '/', substr($real, strlen($this->root) + 1))] = true;
+            }
+        }
+        return $paths;
     }
 
     private function snapshotMetadata(string $snapshotId): array
@@ -1061,17 +1082,12 @@ final class Updater
                 }
             };
             $ordered = self::updaterFilesLast($metadata['files']);
-            $isUpdaterFile = static fn(array $row): bool => in_array((string)($row['path'] ?? ''), self::UPDATER_FILES, true);
+            $runtime = $this->updaterRuntimeFiles();
+            $isUpdaterFile = static function (array $row) use ($runtime): bool {
+                $path = (string)($row['path'] ?? '');
+                return isset($runtime[$path]) || str_starts_with($path, 'src/');
+            };
             $restoreFiles(array_values(array_filter($ordered, static fn(array $row): bool => !$isUpdaterFile($row))));
-
-            $statePath = $this->statePath();
-            if (!empty($metadata['state_existed'])) {
-                $this->installAbsoluteFile($directory . DIRECTORY_SEPARATOR . 'version-state.json', $statePath);
-                $touched = true;
-            } elseif (is_file($statePath)) {
-                if (!unlink($statePath)) throw new RuntimeException('Cannot remove installed version state during rollback');
-                $touched = true;
-            }
 
             if ($sqliteSource !== null) {
                 $touched = true;
@@ -1087,8 +1103,19 @@ final class Updater
                 }
             }
 
-            // Last of all, after the version state and the SQLite database: the updater's own files.
+            // After the SQLite database: what the updater runs (cli/update.php last of the replacements, then the removals).
             $restoreFiles(array_values(array_filter($ordered, $isUpdaterFile)));
+
+            // R28 (low): the version state last. Written before the updater's files, a rollback killed in between said
+            // "2.1.2" over a 2.1.3 updater, and the next apply of the 2.1.3 package mixed the releases.
+            $statePath = $this->statePath();
+            if (!empty($metadata['state_existed'])) {
+                $this->installAbsoluteFile($directory . DIRECTORY_SEPARATOR . 'version-state.json', $statePath);
+                $touched = true;
+            } elseif (is_file($statePath)) {
+                if (!unlink($statePath)) throw new RuntimeException('Cannot remove installed version state during rollback');
+                $touched = true;
+            }
         };
 
         if ($sqliteSource === null) {
@@ -1615,7 +1642,7 @@ final class Updater
     {
         $path = $this->stateDirectory . DIRECTORY_SEPARATOR . '.update.lock';
         $this->lockHandle = fopen($path, 'c');
-        if (!is_resource($this->lockHandle) || !flock($this->lockHandle, LOCK_EX | LOCK_NB)) {
+        if (!is_resource($this->lockHandle) || !FileSystem::tryLock($this->lockHandle, $path)) {
             if (is_resource($this->lockHandle)) {
                 fclose($this->lockHandle);
             }
