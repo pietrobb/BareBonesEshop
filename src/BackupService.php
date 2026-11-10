@@ -693,6 +693,12 @@ class BackupService
         if ($verifyRes !== 'ok') {
             throw new RuntimeException("Restore: backup integrity_check failed: {$verifyRes}");
         }
+        // R27 (capability review run 397): refused before the snapshot when the restored file could not keep live's owner.
+        $live = is_file(self::$livePath) ? @stat(self::$livePath) : false;
+        $keep = is_array($live) ? FileOwnership::cannotKeep(self::$livePath, (int)$live['uid'], (int)$live['gid']) : null;
+        if ($keep !== null) {
+            throw new RuntimeException("Restore refused, nothing was changed: {$keep}");
+        }
 
         // 2. pre-restore-snapshot (BEFORE acquiring restore lock — create() owns its own lock)
         $snapshotPath = null;
@@ -714,7 +720,8 @@ class BackupService
         }
         $restoreTemp = $livePath . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
         // The restored file replaces live: keep live's mode, owner and group, or a restore run from the CLI leaves
-        // www-data with a read-only database (only root can hand the file to another owner). The database directory
+        // www-data with a read-only database (only root can hand the file to another owner; a user only to a group it is
+        // in, FileOwnership::cannotKeep() refused the rest above). The database directory
         // belongs to the web user, so the copy is created exclusively with live's mode and owned via lchown on that
         // inode (T7): chmod/chown by path followed a symlink swapped in by the web user (R23 G5: and a hard link).
         $liveOwner = @fileowner($livePath);
@@ -1142,7 +1149,17 @@ class BackupService
                     $refused[] = "{$entry} ({$directory['existing']} is not writable by this user)";
                     continue;
                 }
-                $plan[] = [$entry, $source, $target, $base, self::restoredFileOwnership($target, $directory['existing'], in_array($name, ['gdpr_salt', 'stores'], true)), $overwrite];
+                $ownership = self::restoredFileOwnership($target, $directory['existing'], in_array($name, ['gdpr_salt', 'stores'], true));
+                // R27 (run 397): a file or directory this user cannot give the owner and group it must have is refused.
+                $keep = $ownership['uid'] !== null && $ownership['gid'] !== null ? FileOwnership::cannotKeep($target, $ownership['uid'], $ownership['gid']) : null;
+                if ($keep === null && $directory['create'] !== [] && $ownership['dir_uid'] !== null && $ownership['dir_gid'] !== null) {
+                    $keep = FileOwnership::cannotKeep($directory['create'][0], $ownership['dir_uid'], $ownership['dir_gid']);
+                }
+                if ($keep !== null) {
+                    $refused[] = "{$entry} ({$keep})";
+                    continue;
+                }
+                $plan[] = [$entry, $source, $target, $base, $ownership, $overwrite];
             }
             if ($refused !== []) {
                 throw new RuntimeException('Restore: ' . count($refused) . ' target(s) cannot be restored safely, nothing was written: '
@@ -1362,14 +1379,17 @@ class BackupService
     }
 
     /**
-     * Owner and group are applied only when running as root (an unprivileged user cannot give files away), with
-     * lchown/lchgrp on the inode created by this restore ($ino from lstat): the directory belongs to the web user,
-     * who could swap the path for a symlink or hard link to /etc/shadow between two calls. chown followed it (T7).
+     * Owner and group that differ are applied with lchown/lchgrp on the inode created by this restore ($ino from lstat):
+     * the directory belongs to the web user, who could swap the path for a symlink or hard link to /etc/shadow between
+     * two calls. chown followed it (T7). R27 (run 397): not only as root (a step started as root no longer runs as root);
+     * what a user cannot set fails instead of being skipped, FileOwnership::cannotKeep() refused it before any write.
      */
     private static function applyOwnership(string $path, ?int $uid, ?int $gid, ?int $ino = null): void
     {
-        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) return;
+        if (!function_exists('posix_geteuid')) return;
         self::assertSameInode($path, $ino);
+        [$uid, $gid] = self::ownershipChange((array)@lstat($path), $uid, $gid);
+        if ($uid === null && $gid === null) return;
         if ($uid !== null && !@lchown($path, $uid)) {
             throw new RuntimeException("Restore: cannot set the owner of {$path}");
         }
@@ -1420,14 +1440,18 @@ class BackupService
      */
     private static function stageExclusive(string $source, string $temporary, int $mode, ?int $uid = null, ?int $gid = null): ?int
     {
-        $inode = self::withMode($mode, static function () use ($source, $temporary, $uid, $gid): ?int {
+        $handedOver = false;
+        $inode = self::withMode($mode, static function () use ($source, $temporary, $uid, $gid, &$handedOver): ?int {
             $in = @fopen($source, 'rb');
             $out = $in ? @fopen($temporary, 'xb') : false;
             try {
                 $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
                 $stat = $copied ? fstat($out) : false;
-                if (is_array($stat) && ($uid !== null || $gid !== null) && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+                // R27 (run 397): not only as root; a user gives its file a group it is in, anything else fails here (not silently).
+                [$uid, $gid] = is_array($stat) && function_exists('posix_geteuid') ? self::ownershipChange($stat, $uid, $gid) : [null, null];
+                if ($uid !== null || $gid !== null) {
                     FileOwnership::handOver($out, "Restore: {$temporary}", $uid, $gid);
+                    $handedOver = true;
                 }
                 return is_array($stat) ? (int)$stat['ino'] : null;
             } catch (\Throwable $e) {
@@ -1438,10 +1462,16 @@ class BackupService
                 if ($out) fclose($out);
             }
         });
-        if ($inode !== null && ($uid !== null || $gid !== null) && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+        if ($inode !== null && $handedOver) {
             self::assertSameInode($temporary, $inode);
         }
         return $inode;
+    }
+
+    /** The owner and group (null: unchanged) a new file with $stat still needs to become $uid/$gid. */
+    private static function ownershipChange(array $stat, ?int $uid, ?int $gid): array
+    {
+        return [$uid !== null && $uid !== (int)$stat['uid'] ? $uid : null, $gid !== null && $gid !== (int)$stat['gid'] ? $gid : null];
     }
 
     /** Run $create with the umask that gives exactly $mode, so no chmod by path (which follows links) is needed. */

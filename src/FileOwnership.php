@@ -34,6 +34,28 @@ final class FileOwnership
         }
     }
 
+    /**
+     * R27 (capability review run 397): why this process cannot give a new file replacing $path that file's owner $uid and
+     * group $gid, or null. A step started as root runs as the owner of the application root (cli/cli-only.php), and a
+     * user can neither give a file away nor give it a group it is not in: `sudo php cli/restore.php` left the database of
+     * www-data to the deploy user, unreadable for the shop, and reported success.
+     */
+    public static function cannotKeep(string $path, int $uid, int $gid): ?string
+    {
+        if (!function_exists('posix_geteuid')) return null;
+        $euid = posix_geteuid();
+        $groups = posix_getgroups();
+        if ($euid === 0 || ($uid === $euid && ($gid === posix_getegid() || in_array($gid, is_array($groups) ? $groups : [], true)))) {
+            return null;
+        }
+        $user = static fn(int $id): string => (string)(posix_getpwuid($id)['name'] ?? $id);
+        $group = static fn(int $id): string => (string)(posix_getgrgid($id)['name'] ?? $id);
+        [$owner, $me] = [$user($uid), $user($euid)];
+        return "{$path} belongs to {$owner}:{$group($gid)}, but this step runs as {$me}:{$group(posix_getegid())} and cannot give"
+            . " its replacement that owner and group ({$owner} would be left with a file it cannot use); run the step as {$owner}"
+            . " (sudo -u {$owner} php …), or hand {$path} to {$me} for the step and back to {$owner} afterwards";
+    }
+
     /** @param resource $handle */
     private static function descriptorPath($handle): ?string
     {
