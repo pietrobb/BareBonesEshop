@@ -8,16 +8,17 @@ function renderCart(): string {
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
         ['url' => '', 'label' => $t('cart'), 'current' => true],
     ];
-    if (!Cart::enriched()['items']) {
-        return Template::render('storefront/cart-empty', [
-            'breadcrumbs' => $breadcrumbs, 'title' => $t('cart_title'), 'message' => $t('cart_empty'),
-            'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'), 't' => I18n::all(),
-        ]);
-    }
-
     // Priced like checkout in the buyer's VAT scenario (default country and a signed-in company's VAT ID).
     $state = CheckoutService::formState([], false);
     ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($state['country'], $state['values'], ''); // goods: what checkout orders; unavailable lines stay listed
+    // "Buy later" lines under the cart: priced the same way, never part of its totals.
+    $saved = SavedForLater::view($vat['context'], Template::storeUrl('/?page=cart'), Security::csrfToken());
+    if (!$cartData['items']) {
+        return Template::render('storefront/cart-empty', [
+            'breadcrumbs' => $breadcrumbs, 'title' => $t('cart_title'), 'message' => $t('cart_empty'),
+            'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'), 'saved' => $saved, 't' => I18n::all(),
+        ]);
+    }
     [$price, $cart] = [storefrontCartPrice($cartData), $cartData['items']];
     $subtotal = (int)$cartData['subtotal'];
     // Free shipping thresholds see the goods after automatic promotions, as checkout does (no coupon entered yet).
@@ -29,7 +30,7 @@ function renderCart(): string {
         'url' => Template::storeUrl('/product/' . rawurlencode((string)$item['slug'])), // canonical product path
         'name' => (string)$item['name'], 'variant_name' => (string)($item['variant_name'] ?? ''), 'sku' => (string)$item['sku'], 'price' => $price((int)$item['price']),
         'quantity' => (int)$item['qty'], 'line_total' => $price((int)$item['total']),
-        'remove_label' => $t('remove'),
+        'remove_label' => $t('remove'), 'save_label' => $t('save_for_later'),
     ], $cart);
 
     return Template::render('storefront/cart', [
@@ -41,7 +42,7 @@ function renderCart(): string {
         'free_shipping_hint' => $quote['hint'],
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal + $shipping), 'checkout_url' => Template::storeUrl('/?page=checkout'),
         'checkout_label' => $t('to_checkout'), 'csrf_token' => Security::csrfToken(), 'cart_url' => Template::storeUrl('/?page=cart'), 'clear_label' => $t('clear_cart'),
-        't' => I18n::all(),
+        'saved' => $saved, 't' => I18n::all(),
     ]);
 }
 

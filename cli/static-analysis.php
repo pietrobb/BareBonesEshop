@@ -302,7 +302,7 @@ $architectureBudgets = [
     // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
     // +7 lines, +1 coupling R10 UX8: checkout sign-in link + save address, account offer on a guest order's confirmation (GuestPages, GuestCheckoutAccount).
     // +1 line R11: the page after paying asks PaymentLink::returnStatus() whether a retry is paid but not yet confirmed.
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 267, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 17],
+    /* #399: the cart page shows the "Buy later" list (SavedForLater::view, +1 coupling) */ 'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 267, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 18],
     // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
     'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // R11 H1: ?page=account-claim — the e-mailed link creates the guest's account; the rules live in GuestCheckoutAccount.

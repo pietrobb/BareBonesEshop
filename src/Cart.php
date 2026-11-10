@@ -138,7 +138,15 @@ class Cart {
      *   - at_date (string|null)                — Y-m-d, defaults today
      */
     public static function enriched(?array $vatContext = null): array {
-        $cart = self::get();
+        return self::enrichLines(self::get(), $vatContext, true);
+    }
+
+    /**
+     * enriched() for any lines in the cart's shape (key => product_id, variant_id, qty). Only the session cart
+     * ($sessionCart) drops its lines whose product is gone and caps a download at 1; other lines (SavedForLater)
+     * are priced read-only.
+     */
+    public static function enrichLines(array $cart, ?array $vatContext = null, bool $sessionCart = false): array {
         if (empty($cart)) return ['items' => [], 'subtotal' => 0, 'count' => 0];
 
         $db = Db::get();
@@ -189,7 +197,7 @@ class Cart {
 
         foreach ($cart as $key => $item) {
             $product = $products[$item['product_id']] ?? null;
-            if (!$product) { unset($_SESSION['cart'][$key]); continue; }
+            if (!$product) { if ($sessionCart) unset($_SESSION['cart'][$key]); continue; }
             $isDigital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
             $availability = (string)($product['availability'] ?? VariantAvailability::ACTIVE);
             // Same policy resolution as VariantAvailability::isPurchasable and Inventory::reserveSku.
@@ -206,7 +214,7 @@ class Cart {
 
             if (!empty($item['variant_id'])) {
                 $variant = $variants[$item['variant_id']] ?? null;
-                if (!$variant) { unset($_SESSION['cart'][$key]); continue; }
+                if (!$variant) { if ($sessionCart) unset($_SESSION['cart'][$key]); continue; }
                 // A negative delta can outgrow a later-lowered base price. Such a line is not sold
                 // (unavailable, incident raised below) instead of being clamped to a free item.
                 $price = $variant['price_absolute'] !== null
@@ -244,7 +252,7 @@ class Cart {
             // Backorder/preorder lines keep the requested quantity; the shortfall is frozen at reservation.
             $allowsShortfall = in_array($policy, [Inventory::BACKORDER, Inventory::PREORDER], true);
             $qty = $isDigital ? 1 : ($allowsShortfall ? (int)$item['qty'] : min((int)$item['qty'], $stock));
-            if ($isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
+            if ($sessionCart && $isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
             // A download (digital product or variant) without its file is not sold: the customer would pay for nothing.
             if ($available && $isDigital && !VariantAvailability::hasDownload((string)$sku)) $available = false;

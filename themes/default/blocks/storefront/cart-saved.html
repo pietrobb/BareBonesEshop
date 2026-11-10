@@ -1,0 +1,10 @@
+{{#if saved.items}}<section class="saved-later" aria-labelledby="saved-later-title">
+  <div class="saved-later-head"><h2 id="saved-later-title">{{saved.title}}</h2><form method="post" action="{{saved.cart_url}}"><input type="hidden" name="csrf_token" value="{{saved.csrf_token}}"><input type="hidden" name="cart_action" value="saved_clear"><input type="hidden" name="redirect" value="{{saved.cart_url}}"><button type="submit" class="saved-later-clear">{{saved.clear_label}}</button></form></div>
+  <p class="saved-later-note">{{saved.note}}</p>
+  <ul class="saved-later-list">{{#each saved.items}}<li class="saved-later-item">
+    <div class="saved-later-info"><a href="{{url}}" class="prod-name">{{name}}</a>{{#if variant_name}}<div class="prod-variant">{{variant_name}}</div>{{/if}}<div class="prod-sku">{{sku}}</div>{{#if unavailable}}<div class="saved-later-unavailable">{{unavailable}}</div>{{/if}}{{#if price_changed}}<div class="saved-later-price-changed">{{price_changed}}</div>{{/if}}</div>
+    <div class="saved-later-qty"><span class="saved-later-label">{{quantity_label}}</span> {{quantity}}</div>
+    <div class="saved-later-price"><span class="saved-later-label">{{price_label}}</span> {{price}}</div>
+    <div class="saved-later-actions"><form method="post" action="{{cart_url}}"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="cart_action" value="saved_to_cart"><input type="hidden" name="saved_key" value="{{key}}"><input type="hidden" name="redirect" value="{{cart_url}}"><button type="submit" class="btn-saved-to-cart" aria-label="{{to_cart_label}}: {{name}}">{{to_cart_label}}</button></form><form method="post" action="{{cart_url}}"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="cart_action" value="saved_remove"><input type="hidden" name="saved_key" value="{{key}}"><input type="hidden" name="redirect" value="{{cart_url}}"><button type="submit" class="btn-remove" title="{{remove_label}}" aria-label="{{remove_label}}: {{name}}">&#10005;</button></form></div>
+  </li>{{/each}}</ul>
+</section>{{/if}}

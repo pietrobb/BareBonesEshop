@@ -119,6 +119,12 @@ class Customers {
         $_SESSION['customer_email'] = $c['email'];
         $_SESSION['customer_auth_hash'] = hash('sha256', (string)$c['password_hash']);
         $_SESSION['customer_last_seen'] = time();
+        try {
+            SavedForLater::mergeGuest((int)$c['id']);
+        } catch (\Throwable $e) {
+            // The guest's "buy later" list must never block signing in.
+            Logger::safeWrite('error', 'saved_for_later.merge_failed', ['exception' => get_class($e)]);
+        }
         $db->prepare("UPDATE customers SET last_login_at = " . Db::now() . ", updated_at = " . Db::now() . " WHERE id = ? AND store_id = ?")
            ->execute([$c['id'], StoreContext::current()->id()]);
         unset($c['password_hash']);
@@ -131,7 +137,7 @@ class Customers {
         foreach (self::SESSION_AUTH_KEYS as $key) unset($_SESSION[$key]);
         unset($_SESSION['customer_store_logins']);
         // The next person at a shared computer must not inherit the cart, its contact e-mail or a coupon.
-        unset($_SESSION['cart'], $_SESSION['cart_email'], $_SESSION['cart_email_at'], $_SESSION['checkout_coupon'], $_SESSION[CheckoutService::DRAFT_KEY]);
+        unset($_SESSION['cart'], $_SESSION['cart_email'], $_SESSION['cart_email_at'], $_SESSION['checkout_coupon'], $_SESSION[CheckoutService::DRAFT_KEY], $_SESSION['saved_for_later']);
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }

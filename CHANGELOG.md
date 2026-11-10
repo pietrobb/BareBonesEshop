@@ -74,6 +74,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   last sync refused and why (also for a scheduled sync), not only their count.
 - **Migration** `20261110120000_back_in_stock_retry` adds `back_in_stock_requests.mail_tries` and `next_try_at`: a
   "back in stock" notice not delivered yet keeps its request and one retry series (review round 27).
+- **Migration** `20261110190000_saved_for_later_items` adds `saved_for_later_items`: the "Buy later" list of a
+  signed-in customer (see below). Nothing to configure; GDPR export and erasure include it.
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -82,7 +84,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.5 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.6 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -109,6 +111,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **New: "Buy later" in the cart** (save for later, as Amazon's "Saved for later"). Each cart line has a "Buy later"
+  button that moves it, with its variant and quantity, to a "Buy later (N)" list under the cart; each saved line shows
+  its quantity and today's unit price and has "Move to cart" and remove, and the list has "Clear saved". Saved lines
+  are not ordered: the cart total, item count, shipping, coupons and stock reservation do not include them. "Move to
+  cart" checks today's price and stock: a changed price is shown (in the list and when moved), a sold-out line stays
+  saved and says so. A guest's list is kept in the session and joins the account on login (a line in both is kept
+  once); a signed-in customer's list is kept per store. The wishlist (favourites from the product page) is unchanged.
+  Themes: `storefront/cart-saved` (included by `cart` and `cart-empty`).
 - **`sudo php cli/restore.php` no longer leaves the shop a database it cannot open** (review round 27, capability review).
   A step started as root runs as the owner of the application root, and a restore gave the restored database, uploads
   and files their live owner and group only as root: in a deploy user's checkout the restored database of `www-data`
@@ -423,7 +433,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   is another store's own (`/product/x?lang=cs` in the SK store, English in the HU store) is canonical to itself (it was
   the store's default-language page, Slovak) and is announced as hreflang language-region by the store's seller
   country (`cs-SK`, `en-HU`; `Bootstrap::hreflangAlternates()` returns them as `regional`). `canonicalSecondaryLocale()`
-  is removed: use `secondaryLocale()`. Default theme 2.3.5, bookshop theme 1.0.1.
+  is removed: use `secondaryLocale()`. Default theme 2.3.6, bookshop theme 1.0.1.
 - **Admin, documents and languages** (review round 20, low). A withdrawn line of which only some units left (1 of 3)
   says how many were sent and that the rest must not ship; it read "already sent". The invoice's VAT scenario in the
   order detail and the status values in the audit log ("shipped", `{"status":"draft"}`) are shown by their names. The
