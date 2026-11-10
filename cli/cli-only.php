@@ -14,6 +14,8 @@ if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && !defined('BBE_WEB_WORKER')) 
  * application root can do everything the step does. Root stays root only for a tree that root owns and in which no other
  * account can change anything (cli_not_root_only()); otherwise the step is refused. cli/test.php keeps root (BBE_CLI_KEEP_ROOT) for the
  * scenarios that test the root paths.
+ * R28 (finding 1): this file is itself in the tree; an account that can write the tree can change it and root runs the
+ * copy. It is a second line of defence only: root must never run PHP of such a tree (deploy/bbe-step.sh switches outside).
  */
 function cli_drop_root(string $root): void
 {

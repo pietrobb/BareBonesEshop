@@ -101,16 +101,39 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Admin orders:** recording "Paid" with less than the order total is refused with the missing amount. A manual order
   starts with no shipping or payment method chosen; pick both. A product created in a store that shares another
   store's catalog is priced in that catalog's currency.
-- **Steps started as root run as the owner of the application root.** Every `php cli/….php` run by root switches to
-  the owner and group of the application root before it loads any code (a notice says so); in a tree root owns, root
-  stays only when no other account can change anything in the tree or above it (every file and directory, `config.php`,
-  `adapters/` and `vendor/` included; links must stay inside the tree), else the step is refused. A step
-  now changes only what that owner can write: run backups, restores and updates as that owner or as the user that owns
-  the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook already says). The Docker `setup`
-  service hands the directories it fills to the checkout's owner for the command and to `www-data` afterwards.
+- **Root must never run PHP of a tree another account can write; run every step as the owner of the application
+  root.** From 2.1.3 every `php cli/….php` run by root switches to the owner and group of the application root before
+  it loads code of `src/` (a notice says so); in a tree root owns, root stays only when no other account can change
+  anything in the tree or above it, else the step is refused. That switch is code in the tree itself (`cli/cli-only.php`):
+  an account that can write the tree, often the web user, can change or replace it, and root then runs its copy. It is a
+  second line of defence, not a fix: run steps as the owner (`sudo -u <owner> php cli/….php`), or install the wrapper
+  `deploy/bbe-step.sh` outside the tree (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`)
+  and run `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group root) before any PHP of the
+  shop runs and refuses a root-owned tree. A step now changes only what that owner can write: run backups and restores
+  as the user that owns the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook says). The
+  Docker `setup` service hands the directories it fills to the checkout's owner for the command and to `www-data`
+  afterwards.
+- **Install 2.1.3 as the owner of the application root, not as root.** The 2.1.2 updater keeps root, and the theme
+  check of 2.1.3 runs no code of the shop as root: `apply` started as root is refused with
+  `Theme checkout contract: Not a theme problem: the updater runs as root …` (2.1.2 adds "would break checkout"; your
+  theme is not the cause). If an
+  update ever ran as root, it left the update directory, its snapshots and the backups to root, and the next step,
+  which runs as the owner, could not read them (it reported "version unknown" and "no snapshots"; 2.1.3 refuses and
+  names the path). Before the update, as root: `chown -R <owner>: <update_storage_dir> <backup storage_dir>` (and the
+  private directory if root created it), and make the package directory readable for the owner
+  (`chmod -R o+rX /srv/releases/update-2.1.3` or `chown -R <owner>:`). Then run
+  `sudo -u <owner> php cli/update.php apply --package=…` (or `bbe-step`).
 
 ### Changes
 
+- **Root steps: the docs no longer promise a protection the tree cannot give, and a wrapper outside the tree does**
+  (review round 28, findings 1 and 6). Round 27 called the root hole fixed by `cli/cli-only.php`, but that file is in
+  the tree the web user may write, so a changed copy ran as root. New `deploy/bbe-step.sh`, installed root-owned outside
+  the shop, switches a step to the owner of the application root (never group root) before any PHP of the shop runs and
+  refuses a root-owned tree. The theme check of a new release started as root (by the 2.1.2 updater) now says "Not a
+  theme problem: the updater runs as root" instead of failing as a theme that breaks checkout, and an update directory,
+  `installed.json` or snapshot left by an update run as root is refused with the `chown` to run (was: "version unknown"
+  and "no snapshots").
 - **New: "Buy later" in the cart** (save for later, as Amazon's "Saved for later"). Each cart line has a "Buy later"
   button that moves it, with its variant and quantity, to a "Buy later (N)" list under the cart; each saved line shows
   its quantity and today's unit price and has "Move to cart" and remove, and the list has "Clear saved". Saved lines
@@ -138,15 +161,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   delivered and its request closed; it now stays and is tried again after the window. A restock while a notice waited
   started a second retry series; the series now lives on the request (`mail_tries`, `next_try_at`). With
   `MAIL_ADAPTER=log` on purpose the notice is not retried (was: 48 tries), as order mail.
-- **Security: a step run as root no longer gives the web user root** (review round 27). The web user can write the
+- **Security: a step run as root no longer works as root in files the web user can change** (review round 27; the
+  limits are in round 28 below). The web user can write the
   application root, and steps run as root worked in it: `DataOverrides::atomicWrite()` (the maintenance marker, the
   data directory's `stores.json`, the update key) chmodded its temporary file by name to the mode of the file it
   replaced, so a planted 0666 `.maintenance` and a symbolic link to `/etc/shadow` swapped in for `.maintenance.*.tmp`
   made `/etc/shadow` 0666 within seconds; `MaintenanceMode::restore()` dated the marker back with `touch()`, which
-  creates the target of a dangling link; and a `src/` the web user replaced ran as root. Fixed for every step at once:
+  creates the target of a dangling link; and a `src/` the web user replaced ran as root. For every step at once,
   `cli/cli-only.php`, the first file each CLI step loads, runs a step started as root as the owner of the application
   root for good (its groups too; no way back to root) before any code of `src/` is loaded, and refuses one in a
-  root-owned tree another account can write. Besides, the temporary file is created exclusively with its final mode
+  root-owned tree another account can write. This holds only while `cli/` itself is not changed: an account that can
+  write the tree can change `cli/cli-only.php` or replace `cli/`, and root runs its copy. Root must never run PHP of a
+  tree another account can write (see the upgrade notes and `deploy/bbe-step.sh`). Besides, the temporary file is created exclusively with its final mode
   (no chmod by name; `stores.json` 0640 the same way), a marker put back keeps its age through its `since` (no
   `touch()`), root opens `.maintenance.lock` only in an application root no other account can write, a step refuses a
   lock that holds anything but a holder record (a `.env` renamed to that name was emptied), and the claim file without

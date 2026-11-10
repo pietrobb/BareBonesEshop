@@ -56,6 +56,7 @@ final class Updater
         if ($this->isInside($this->stateDirectory, $this->root)) {
             throw new RuntimeException('Update state directory must be outside the public application root');
         }
+        self::assertStateAccessible($this->stateDirectory);
         $this->database = $database;
         $this->migrationRunner = $migrationRunner;
         $this->databaseBackup = $databaseBackup;
@@ -1599,6 +1600,38 @@ final class Updater
     private function snapshotDirectory(string $id): string
     {
         return $this->stateDirectory . DIRECTORY_SEPARATOR . 'snapshots' . DIRECTORY_SEPARATOR . $id;
+    }
+
+    /**
+     * R28 (review round 28, finding 6): an update once run as root (the 2.1.2 updater, which kept root) left the state
+     * directory, installed.json or snapshots owned by root. The next step runs as the owner of the application root and
+     * read nothing there: it reported "version unknown" and "no snapshots" instead of the cause. Refuse with the fix.
+     */
+    private static function assertStateAccessible(string $directory): void
+    {
+        if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || posix_geteuid() === 0) return;
+        $pending = [$directory];
+        while ($pending !== []) {
+            $path = array_pop($pending);
+            $isDirectory = is_dir($path) && !is_link($path);
+            $usable = $isDirectory ? is_readable($path) && is_writable($path) && is_executable($path) : is_readable($path);
+            if (!$usable) {
+                clearstatcache(true, $path);
+                $owner = @fileowner($path);
+                $ownerName = $owner === false ? '?' : (string)((posix_getpwuid($owner) ?: [])['name'] ?? $owner);
+                $self = posix_geteuid();
+                $selfName = (string)((posix_getpwuid($self) ?: [])['name'] ?? $self);
+                throw new RuntimeException("The update state {$path} belongs to {$ownerName} and this step's user {$selfName}"
+                    . " (uid {$self}) cannot " . ($isDirectory ? 'list and write' : 'read') . ' it (an update run as root leaves'
+                    . " it so). As root run: chown -R {$selfName}: " . escapeshellarg($directory)
+                    . ", then run this step again as {$selfName}, never as root.");
+            }
+            if ($isDirectory) {
+                foreach (scandir($path) ?: [] as $entry) {
+                    if ($entry !== '.' && $entry !== '..') $pending[] = $path . DIRECTORY_SEPARATOR . $entry;
+                }
+            }
+        }
     }
 
     private function ensureDirectory(string $path, int $mode): void
