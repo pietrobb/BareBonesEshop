@@ -81,7 +81,7 @@ jobs:
         run: |
           status=0
           sudo BAREBONES_REQUIRE_ROOT_TEST=1 unshare --mount --propagation private sh -c \
-            'mount -t tmpfs none /proc && exec "$0" cli/test.php --only=AuditRound26StepLockRegression.php,AuditRound27RootRegression.php,AuditRound27RestoreOwnerRegression.php,AuditRound28RootChecksRegression.php' "$(command -v php)" || status=$?
+            'mount -t tmpfs none /proc && exec "$0" cli/test.php --only=AuditRound26StepLockRegression.php,AuditRound27RootRegression.php,AuditRound27RestoreOwnerRegression.php,AuditRound28RootDocsRegression.php,AuditRound28RootChecksRegression.php' "$(command -v php)" || status=$?
           sudo chown -R "$(id -u):$(id -g)" .
           exit $status
 
