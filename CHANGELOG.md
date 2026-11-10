@@ -119,6 +119,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   saved and says so. A guest's list is kept in the session and joins the account on login (a line in both is kept
   once); a signed-in customer's list is kept per store. The wishlist (favourites from the product page) is unchanged.
   Themes: `storefront/cart-saved` (included by `cart` and `cart-empty`).
+- **`sudo php cli/restore.php` no longer leaves the shop a database it cannot open** (review round 27, capability review).
+  A step started as root runs as the owner of the application root, and a restore gave the restored database, uploads
+  and files their live owner and group only as root: in a deploy user's checkout the restored database of `www-data`
+  belonged to the deploy user, the shop could not open it, and the restore reported success. A restore, files restore or
+  update rollback of the SQLite database that cannot give the replacement the owner and group of what it replaces is
+  now refused before anything changes, naming the file, its owner and how to run it (see the operations runbook).
+
 - **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
   fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached
   nobody and were never sent again (the download links were even marked delivered). They are now tried again like order

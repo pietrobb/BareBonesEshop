@@ -1023,6 +1023,13 @@ final class Updater
         if (!empty($metadata['state_existed']) && !is_file($directory . DIRECTORY_SEPARATOR . 'version-state.json')) {
             throw new RuntimeException('Snapshot version state is missing');
         }
+        // R27 (capability review run 397): run as the owner of the application root, the rollback cannot give the database
+        // back to the web user that owns it; refused before the first change instead of leaving it a database it cannot open.
+        $live = $sqliteSource !== null ? @stat((string)$database['live_path']) : false;
+        $keep = is_array($live) ? FileOwnership::cannotKeep((string)$database['live_path'], (int)$live['uid'], (int)$live['gid']) : null;
+        if ($keep !== null) {
+            throw new RuntimeException("Rollback refused, nothing was changed: {$keep}");
+        }
 
         $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource, $numbering, &$numberingRaised, &$touched): void {
             if ($isMysql) {
@@ -1071,7 +1078,7 @@ final class Updater
                 $livePath = (string)$database['live_path'];
                 @unlink($livePath . '-wal');
                 @unlink($livePath . '-shm');
-                $this->installAbsoluteFile($sqliteSource, $livePath);
+                $this->installAbsoluteFile($sqliteSource, $livePath, true);
                 @unlink($livePath . '-wal');
                 @unlink($livePath . '-shm');
                 if ($numbering !== []) {
@@ -1141,17 +1148,18 @@ final class Updater
      * for a symlink to /etc/shadow between two calls; run as root, chmod/chown by path followed it. The staged file is
      * now created exclusively with its mode, and handed over with lchown/lchgrp on the inode this call created.
      */
-    private function installAbsoluteFile(string $source, string $target): void
+    private function installAbsoluteFile(string $source, string $target, bool $keepOwner = false): void
     {
         $existing = is_file($target) && !is_link($target) ? @stat($target) : false;
         // Only root can hand the file to another owner (cli/update.php run as root); otherwise the mode carries the access.
         // R23 G5: through the open descriptor, so a hard link swapped in under the staged name is never chowned.
-        $handOver = is_array($existing) && function_exists('posix_geteuid') && posix_geteuid() === 0
+        // R27 (run 397): the live database ($keepOwner) also as another user: its group, or a failure, never silently skipped.
+        $handOver = is_array($existing) && function_exists('posix_geteuid') && (posix_geteuid() === 0 || $keepOwner)
             ? static function ($handle) use ($existing, $target): void {
                 $staged = fstat($handle);
-                FileOwnership::handOver($handle, "the staged {$target}",
-                    (int)$existing['uid'] !== (int)$staged['uid'] ? (int)$existing['uid'] : null,
-                    (int)$existing['gid'] !== (int)$staged['gid'] ? (int)$existing['gid'] : null);
+                $uid = (int)$existing['uid'] !== (int)$staged['uid'] ? (int)$existing['uid'] : null;
+                $gid = (int)$existing['gid'] !== (int)$staged['gid'] ? (int)$existing['gid'] : null;
+                if ($uid !== null || $gid !== null) FileOwnership::handOver($handle, "the staged {$target}", $uid, $gid);
             }
             : null;
         [$temporary, $inode] = $this->stageExclusive($source, $target, is_array($existing) ? (int)$existing['mode'] & 0777 : null, $handOver);
