@@ -35,12 +35,17 @@ function cli_drop_root(string $root): void
     if ($uid !== 0) {
         $user = posix_getpwuid($uid);
         $name = is_array($user) ? (string)$user['name'] : (string)$uid;
+        // R28 (low): a tree of group root (www-data:root) handed the step gid 0 (it read /etc/sudoers): take the owner's
+        // primary group instead, and refuse when that is root's too.
+        if ($gid === 0) $gid = is_array($user) ? (int)$user['gid'] : 0;
+        if ($gid === 0) $refuse("the application root and its owner ({$name}) have group root, which the step would keep; chgrp the application root");
         // initgroups first: root's supplementary groups (0 among them) must not stay with the step.
         if (!@posix_initgroups($name, $gid) || !@posix_setgid($gid) || !@posix_setuid($uid)) {
             $refuse("it cannot switch to the owner of the application root ({$name}, uid {$uid}, gid {$gid})");
         }
         $groups = posix_getgroups();
-        if (posix_getuid() !== $uid || posix_geteuid() !== $uid || @posix_seteuid(0) || ($gid !== 0 && in_array(0, is_array($groups) ? $groups : [0], true))) {
+        if (posix_getuid() !== $uid || posix_geteuid() !== $uid || @posix_seteuid(0) || posix_getgid() === 0 || posix_getegid() === 0
+            || in_array(0, is_array($groups) ? $groups : [0], true)) {
             $refuse('root rights could not be given up for good');
         }
         if (is_array($user)) putenv('HOME=' . $user['dir']); // mysqldump & co. read the owner's ~/.my.cnf, not root's
@@ -56,12 +61,14 @@ function cli_drop_root(string $root): void
  * root, src/ and cli/ left config.php (the web installer writes it), adapters/, vendor/, lang/ and every file in them to
  * whoever owned them, and root ran them. Root keeps its rights only when no other account can change anything it may
  * load: every directory above the app root, and every entry in it (lstat, links not followed), belongs to root and only
- * root (or root's group) can write it; a link must stay inside the tree, whose walk checks its target.
+ * root can write it (no group or other write bit); a link must stay inside the tree, whose walk checks its target.
+ * Used for the update state directory too (Updater, R28 finding 5): root installs its snapshots' files.
  */
 function cli_not_root_only(string $root): ?string
 {
-    $foreign = static fn(array $s): bool => (int)$s['uid'] !== 0 || ((int)$s['mode'] & 0002) !== 0
-        || (((int)$s['mode'] & 0020) !== 0 && (int)$s['gid'] !== 0);
+    // R28 (low): group write counts even for group root. A POSIX ACL (setfacl u:www-data:rwx) shows only as the group
+    // bits (its mask) of a root:root entry, and passed as "root's group"; root's group may have other members anyway.
+    $foreign = static fn(array $s): bool => (int)$s['uid'] !== 0 || ((int)$s['mode'] & 0022) !== 0;
     $describe = static fn(string $path, array $s): string => sprintf('%s (owner %d, group %d, mode %04o) is writable by another account',
         $path, $s['uid'], $s['gid'], (int)$s['mode'] & 07777);
     $real = realpath($root);

@@ -46,6 +46,9 @@ try {
             throw new InvalidArgumentException('--installed must be the root of an installed shop (with config.php and src/)');
         }
         $root = $installed;
+        // R28 (finding 4): whether root may stay root was decided by this release tree's owner; the shop's config.php,
+        // database and files then ran and changed as root. Decide it for the shop before reading anything of it.
+        if (PHP_OS_FAMILY !== 'Windows' && !defined('BBE_CLI_KEEP_ROOT')) cli_drop_root($root);
         Db::useConfig($root . '/config.php');
     }
     $config = require AppConfig::path($root);

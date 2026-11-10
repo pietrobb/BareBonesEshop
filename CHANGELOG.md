@@ -111,6 +111,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Root: the shop decides, the update directory counts, no group root, ACLs count** (review round 28, findings 4 and
+  5, lows). `cli/update.php --installed=<shop>` run as root decided by the owner of the release tree (root) that it may
+  stay root, then ran the shop's `config.php` and changed its files as root; it now switches to the owner of the shop
+  (or refuses) before it reads anything of it, so the release tree must be readable for that owner. Root kept root in
+  a root-owned tree without a look at the update directory, which in the private directory the web user writes held
+  snapshots it could change: a rollback installed their files root:root and the next step ran them as root. Root now
+  needs `update_storage_dir` to be root's alone as well, else the step is refused. A tree of group root (`www-data:root`)
+  no longer leaves the step group 0 (it takes the owner's primary group, or refuses), and in a root-owned tree any group
+  write counts as another account's (a POSIX ACL such as `setfacl -m u:www-data:rwx src/` shows only as these bits).
 - **New: "Buy later" in the cart** (save for later, as Amazon's "Saved for later"). Each cart line has a "Buy later"
   button that moves it, with its variant and quantity, to a "Buy later (N)" list under the cart; each saved line shows
   its quantity and today's unit price and has "Move to cart" and remove, and the list has "Clear saved". Saved lines
