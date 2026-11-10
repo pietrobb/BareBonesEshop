@@ -100,6 +100,20 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Security: the maintenance step lock no longer lets the web user take over root's files** (review round 26). Run as
+  root, `cli/restore.php`, `cli/update.php` and `cli/migrate.php` opened `.maintenance.lock` following a symbolic link,
+  then gave the file it pointed at to the owner of the application root (0660) and emptied it. The web user can write
+  the application root, so `ln -s /etc/shadow .maintenance.lock` handed it `/etc/shadow` at the next update. The lock
+  is now created exclusively, by root as the owner and group of the application root; an existing one is used only
+  when it is a regular file with a single name, and a symbolic or hard link there refuses every step with a message to
+  check and remove it. No step changes the owner or mode of a file it did not create: a lock the application root's
+  owner and group cannot use, or that other accounts can open (0644 from before 2.1.3, one a deploy account made for
+  itself), is replaced by a new 0660 one once it is held, by whichever account runs the next step; an account that
+  cannot share a new lock with the application root's owner or group is refused with what to run instead. Root steps
+  no longer need `/proc` (FreeBSD, macOS, containers with a masked `/proc` failed every root step with an uncaught
+  exception). On a file system without file locks the steps exclude each other again, by a claim file
+  `.maintenance.lock.held` (one left by a killed step on this host is taken over; one from another host is honoured for
+  a day). A refused step prints the lock holder's record as plain text only.
 - **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
   shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
   database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out
