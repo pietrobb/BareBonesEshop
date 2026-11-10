@@ -84,7 +84,8 @@ class BackInStock {
             'valid_hours' => (string)self::CONFIRM_HOURS,
             'shop_name' => (string)Template::branding()['name'],
         ]);
-        return ($mail['status'] ?? '') === 'sent' ? 'confirm_sent' : 'failed';
+        // R26: a confirmation only written to the log reached nobody: the page does not say it was sent.
+        return ($mail['status'] ?? '') === 'sent' && !MailService::logged($mail) ? 'confirm_sent' : 'failed';
     }
 
     /** The unconfirmed request of the current store behind an e-mailed link that is still valid, with the product name; else null. */
@@ -196,6 +197,9 @@ class BackInStock {
                     $failed = true;
                     continue;
                 }
+                // R26: only written to the log, it reached nobody: the request stays for a mail that goes out (was: deleted
+                // and counted as notified).
+                if (MailService::logged($result)) continue;
                 $db->prepare('DELETE FROM back_in_stock_requests WHERE id = ?')->execute([(int)$request['id']]);
                 $sent++;
             }

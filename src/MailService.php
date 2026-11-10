@@ -58,8 +58,25 @@ class MailService {
     public static function adapter(?string $providerCode = null): MailAdapter {
         if (self::$adapterOverride) return self::$adapterOverride;
 
-        $id = $providerCode ?? strtolower((string)(getenv('MAIL_ADAPTER') ?: Adapters::defaultProviderCode('mail')));
-        return Adapters::mail($id);
+        return Adapters::mail($providerCode ?? self::providerCode());
+    }
+
+    /**
+     * The mail provider configured now (Adapters::defaultProviderCode()). R25: one MAIL_ADAPTER names that is not installed
+     * writes the mail to the log (it reaches nobody) and raises an incident, instead of failing it. R26: so does one of an
+     * invalid format ("smtp.") — it threw past that fallback — and every mail, not only an order's: a password reset, an
+     * e-mail verification failed with an exception. $fellBack tells the caller the mail was not sent as configured.
+     */
+    public static function providerCode(?array $order = null, ?bool &$fellBack = null): string {
+        $fellBack = false;
+        try {
+            return Adapters::defaultProviderCode('mail');
+        } catch (\RuntimeException|\InvalidArgumentException $e) {
+            $fellBack = true;
+            Logger::error('mail provider misconfigured; mail written to the log', ['error' => $e->getMessage()]);
+            IncidentMonitor::report('mail.provider_invalid', 'mail', 'critical', $order ? ['order_id' => (int)$order['id']] : []);
+            return 'log';
+        }
     }
 
     /**

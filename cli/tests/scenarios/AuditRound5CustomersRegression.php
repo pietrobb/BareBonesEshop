@@ -78,7 +78,7 @@ $r5cSavedStores = $r5cStoresProp->getValue();
 $r5cDomainStores = Bootstrap::stores();
 $r5cDomainStores['stores']['pl']['domains'] = ['r5c-pl.example'];
 $r5cDomainStores['stores']['pl']['url_prefix'] = '';
-MailService::useAdapter(new LogMail(['log_file' => $r5cDir . '/emails.log']));
+MailService::useAdapter(capture_mail(['log_file' => $r5cDir . '/emails.log']));
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));
 try {
     $r5cStoresProp->setValue(null, $r5cDomainStores);

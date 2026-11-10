@@ -350,11 +350,15 @@ class StockAlerts {
         ];
 
         $sent = 0;
+        $logged = 0;
         $errors = [];
         foreach ($recipients as $recipient) {
             try {
                 $mail = MailService::send('merchant_stock_low', $recipient, (string)$cfg['locale'], $vars);
-                if (($mail['status'] ?? '') === 'sent') $sent++;
+                // R26: only written to the log (the provider configured), it reached nobody: not counted as delivered,
+                // nor retried as a failure.
+                if (MailService::logged($mail)) $logged++;
+                elseif (($mail['status'] ?? '') === 'sent') $sent++;
                 else $errors[] = $recipient . ': ' . ($mail['error'] ?? 'not sent');
             } catch (Throwable $e) {
                 $errors[] = $recipient . ': ' . $e->getMessage();
@@ -362,7 +366,8 @@ class StockAlerts {
         }
         // A partial delivery keeps the state (no duplicate to the inboxes that got it); none = retry.
         if ($errors) Logger::warning('stock_alert.delivery_failed', ['errors' => $errors, 'sent' => $sent]);
-        if ($sent === 0) throw new RuntimeException('Stock alert e-mail not delivered: ' . implode('; ', $errors));
+        if ($logged > 0) Logger::warning('stock_alert.logged_only', ['logged' => $logged, 'sent' => $sent]);
+        if ($sent === 0 && $errors !== []) throw new RuntimeException('Stock alert e-mail not delivered: ' . implode('; ', $errors));
         return $sent;
     }
 

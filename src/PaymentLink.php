@@ -147,11 +147,13 @@ final class PaymentLink {
             return ['status' => 'no_app_url'];
         }
         $locale = (string)($order['locale'] ?? '');
-        return MailService::send('order_payment_link', (string)$order['customer_email'], $locale, [
+        $result = MailService::send('order_payment_link', (string)$order['customer_email'], $locale, [
             'customer_name' => (string)($order['customer_name'] ?? ''), 'order_number' => (string)$order['order_number'],
             'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),
             'pay_url' => $payUrl, 'valid_days' => (string)intdiv(self::LINK_TTL, 86400),
         ], (int)$order['id']);
+        // R26: a link only written to the log reached nobody, so it is 'logged', never 'sent'.
+        return MailService::logged($result) ? ['status' => 'logged'] + $result : $result;
     }
 
     /**

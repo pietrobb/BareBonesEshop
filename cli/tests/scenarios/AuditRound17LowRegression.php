@@ -67,7 +67,8 @@ $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, 'sqlite');
 Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate-' . md5($email) . '.sqlite'));
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example']);
-MailService::useAdapter(new LogMail(['log_file' => $dir . '/emails.log']));
+// R26: a provider that delivers (the log provider's mail reads as not sent); captured like LogMail.
+MailService::useAdapter(new class(['log_file' => $dir . '/emails.log']) extends LogMail { public function adapterId(): string { return 'capture'; } });
 ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');
 session_start();
