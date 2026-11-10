@@ -1070,6 +1070,11 @@ function apiWebhookStripe(): array {
     } catch (PaymentWebhookUnresolved $e) {
         Idempotency::unmark($eventKey);
         return paymentWebhookParkedResponse(PaymentWebhookRouting::park('stripe', (string)$event['id'], (string)$event['type'], $e));
+    } catch (PaymentWebhookDeferred $e) {
+        Idempotency::unmark($eventKey);
+        IncidentMonitor::report('payment.webhook_deferred', 'webhook', 'warning', ['event' => (string)$event['id'], 'type' => (string)$event['type'], 'reason' => $e->getMessage()]);
+        http_response_code(503);
+        return ['error' => 'Event deferred', 'retry' => true];
     } catch (\Throwable $e) {
         // Unmark so Stripe can retry the webhook
         Idempotency::unmark($eventKey);
@@ -1171,25 +1176,25 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
 
     $refundedAmount = (int)($charge['amount_refunded'] ?? 0);
     $orderTotal = (int)$order['total'];
+    $chargeId = (string)($charge['id'] ?? $paymentIntent);
+    // R27: without the refund ids nothing is booked — the event is deferred and Stripe redelivers it (with backoff, for
+    // three days); refund.updated and the refund worker book each refund by its id meanwhile. Was: the summed amount was
+    // booked provisionally against the shop's refunds in flight and corrected later, which left the ledger off Stripe.
+    $refunds = stripeChargeRefunds($charge);
+    if ($refunds === null) throw new PaymentWebhookDeferred("Refunds of Stripe charge {$chargeId} cannot be listed");
 
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
         'Stripe refund: ' . AuditLogLabels::amount($refundedAmount, $order['currency'] ?? 'eur') . ' of ' . AuditLogLabels::amount($orderTotal, $order['currency'] ?? 'eur'));
 
     $fullRefund = $refundedAmount >= $orderTotal;
-    $chargeId = (string)($charge['id'] ?? $paymentIntent);
     $eventPayload = ['charge_id' => $chargeId, 'cumulative_amount' => $refundedAmount];
-    $refunds = stripeChargeRefunds($charge);
-    if ($refunds !== null) {
-        // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
-        foreach ($refunds as $refund) {
-            $refundId = (string)($refund['id'] ?? '');
-            // Only money Stripe has returned: a pending refund (SEPA, bank transfers) may still fail; refund.updated books it.
-            if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || (string)($refund['status'] ?? '') !== 'succeeded') continue;
-            PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId,
-                $eventPayload + stripeRefundKey($refund));
-        }
-    } else {
-        PaymentService::bookCumulativeRefund($orderId, 'stripe', $refundedAmount, 'charge.refunded', 'stripe_refund_' . $chargeId . '_' . $refundedAmount, $eventPayload);
+    // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
+    foreach ($refunds as $refund) {
+        $refundId = (string)($refund['id'] ?? '');
+        // Only money Stripe has returned: a pending refund (SEPA, bank transfers) may still fail; refund.updated books it.
+        if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || (string)($refund['status'] ?? '') !== 'succeeded') continue;
+        PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId,
+            $eventPayload + stripeRefundKey($refund));
     }
 
     // amount_refunded counts pending refunds too: the order closes only once the ledger holds all of it.
@@ -1205,7 +1210,7 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
 
 /**
  * The refunds of a refunded charge: embedded in the event (older API versions), else listed through
- * the Stripe API. Null when neither is available; the cumulative amount is booked instead.
+ * the Stripe API. Null when neither is available; the event is then deferred (R27).
  *
  * @return list<array<string, mixed>>|null
  */
@@ -1219,7 +1224,13 @@ function stripeChargeRefunds(array $charge): ?array {
     } catch (\RuntimeException $e) {
         return null;
     }
-    return $gateway instanceof StripePayment ? $gateway->chargeRefunds((string)($charge['id'] ?? '')) : null;
+    if (!$gateway instanceof StripePayment) return null;
+    try {
+        return $gateway->chargeRefunds((string)($charge['id'] ?? ''));
+    } catch (\RuntimeException $e) {
+        Logger::exception('payment.stripe_refund_list_unavailable', $e, ['charge_id' => (string)($charge['id'] ?? '')]);
+        return null; // R27: Stripe unreachable or the list incomplete: deferred like a list that is not available
+    }
 }
 
 /** R25: the shop's refund key a Stripe refund carries in its metadata (StripePayment::performRefund()), as the booking payload expects it. */

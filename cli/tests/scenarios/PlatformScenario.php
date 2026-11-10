@@ -322,13 +322,16 @@ assert_true($merchantClaim->invoke(null, $digitalOrderId, 'stale_test', 'merchan
 assert_true(!$merchantClaim->invoke(null, $digitalOrderId, 'stale_test', 'merchant@example.com'), 'Merchant notification: fresh processing claim is not duplicated');
 
 Orders::setPaymentId($digitalOrderId, 'pi_refund_progression');
-onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 400]);
+// R27: charge.refunded books its refunds by id (the embedded list); the cumulative amount alone books nothing.
+$refundProgression = static fn(int $refunded, array $amounts): ?string => onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => $refunded,
+    'refunds' => ['has_more' => false, 'data' => array_map(static fn(int $i, int $amount): array => ['id' => 're_refund_progression_' . $i, 'amount' => $amount, 'status' => 'succeeded'], array_keys($amounts), $amounts)]]);
+$refundProgression(400, [400]);
 assert_equals('partially_refunded', (string)Orders::byId($digitalOrderId)['payment_status'], 'Stripe refund: first cumulative amount records partial refund');
 assert_equals(400, PaymentService::refundedAmount($digitalOrderId), 'Stripe refund: first cumulative event records its delta');
-onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 700]);
+$refundProgression(700, [400, 300]);
 assert_equals('partially_refunded', (string)Orders::byId($digitalOrderId)['payment_status'], 'Stripe refund: increasing partial cumulative amount preserves partial status');
 assert_equals(700, PaymentService::refundedAmount($digitalOrderId), 'Stripe refund: repeated partial event records only the cumulative delta');
-onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 999]);
+$refundProgression(999, [400, 300, 299]);
 assert_equals(999, PaymentService::refundedAmount($digitalOrderId), 'Stripe refund: final cumulative event totals exactly the order refund');
 $fullyRefundedOrder = Orders::byId($digitalOrderId);
 assert_equals('refunded', (string)$fullyRefundedOrder['payment_status'], 'Stripe refund: later full amount uses a distinct idempotency key');
