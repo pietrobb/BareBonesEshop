@@ -126,6 +126,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   update rollback of the SQLite database that cannot give the replacement the owner and group of what it replaces is
   now refused before anything changes, naming the file, its owner and how to run it (see the operations runbook).
 
+- **A refund made at the provider while an admin refund is in flight no longer frees the money that refund promised**
+  (review round 28). A Stripe dashboard refund (or another provider refund event) booked during an admin refund or a
+  cancellation refund moved the payment from refund_pending to partially refunded: the request counted as settled, so a
+  credit note or another refund could promise its money again, and the request's own result, no longer finding a pending
+  payment, left a payment whose money was all returned "partially refunded". Such a refund is now booked while the
+  payment stays refund_pending until the request settles; one leaving less than the request in flight raises the critical
+  incident `payment.refund_overcommitted`.
+
 - **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
   fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached
   nobody and were never sent again (the download links were even marked delivered). They are now tried again like order
