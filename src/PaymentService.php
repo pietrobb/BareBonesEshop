@@ -341,13 +341,6 @@ class PaymentService {
         ?string $currency = null
     ): array {
         if ($idempotencyKey !== null && $idempotencyKey !== '' && $gateway instanceof IdempotentRefundAdapter) {
-            // R25: from here on the provider may report this refund before its result is booked (inFlightCandidatesWithin()).
-            $dispatchKey = 'refund_dispatched_' . $idempotencyKey;
-            if (!self::transactionExists($dispatchKey)) {
-                self::logTransaction(orderId: $orderId, provider: self::providerName($gateway), providerRef: $paymentId, status: 'refund_dispatched', amount: 0,
-                    currency: strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')), idempotencyKey: $dispatchKey,
-                    rawResponse: ['payment_id' => $paymentId, 'amount' => $amount], failClosed: true);
-            }
             $result = $gateway->refundWithIdempotency($paymentId, $amount, $idempotencyKey);
         } elseif ($idempotencyKey !== null && $idempotencyKey !== '') {
             // Without provider idempotency a retry after an unknown outcome could refund twice:
@@ -387,7 +380,8 @@ class PaymentService {
                 || ($refundId === '' && self::refundRequestSettled($orderId, (string)$idempotencyKey, $amount)))) {
                 $status = 'confirmed';
             } elseif ($refundId !== '' && in_array($status, ['succeeded', 'pending'], true) && self::refundSettledByEvent($orderId, (string)$idempotencyKey)) {
-                // R24: a Stripe charge.refunded without its refund list booked this very refund already (bookCumulativeRefund()).
+                // R24: a refund event without refund ids booked this very refund already (applyRefundEvent(); a Stripe
+                // charge.refunded without its refund list did up to 2.1.2).
                 $status = 'confirmed';
                 self::noteRefundIdWithin($orderId, (string)$idempotencyKey, $refundId);
             }
@@ -401,22 +395,14 @@ class PaymentService {
                 idempotencyKey: $idempotencyKey ?: ('refund_' . $orderId . '_' . ($refundId !== '' ? $refundId : uniqid())),
                 rawResponse:    $result,
             );
-            // R26: a refund still pending at the provider is not completed by the money a summary event booked for it: it may
-            // fail yet (providerRefundFailed() then takes that booking back); its refund.succeeded completes it.
+            // R26: a refund still pending at the provider is not completed by money booked for it without its id: it may
+            // fail yet; its refund.succeeded completes it.
             self::linkItemRefundWithin($orderId, (string)$idempotencyKey, $refundId, $outcome === 'pending' ? 'pending' : $status);
-            // R26: the call's result is recorded, so the marker that it may be at the provider goes (it stayed for good).
-            if ((string)$idempotencyKey !== '') {
-                Db::get()->prepare("DELETE FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key AND status = 'refund_dispatched'")
-                    ->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => 'refund_dispatched_' . $idempotencyKey]);
+            // R27: the provider failed this refund before its pending result was recorded (its refund.failed found nothing to
+            // release then): released now, as the event would have. Was: the refund request or item refund stayed pending.
+            if ($outcome === 'pending' && ($failedBy = self::refundFailureRecorded($orderId, $refundId)) !== null) {
+                self::providerRefundFailed($orderId, self::providerName($gateway), $refundId, $amount, $failedBy . '#result', ['after_result' => true]);
             }
-            // R25: money an event booked provisionally as this refund was another refund. R26: the refund of that sum still in
-            // flight, one booked on its own (taken back), or else other money with a credit note of its own.
-            foreach (self::provisionalRefundsWithin($orderId) as $part) {
-                if ($part['execute'] === (string)$idempotencyKey && $part['state'] === 'failed') {
-                    self::failProvisionalWithin(Orders::byId($orderId) ?: ['id' => $orderId], $part, self::providerName($gateway), $part['ledger'] . '@' . $part['execute'], false);
-                }
-            }
-            self::rebookReclaimedWithin($orderId, self::providerName($gateway), 'refund_' . $status);
             if ($ownTransaction) {
                 $db->commit();
                 self::flushRefundMails();
@@ -441,7 +427,7 @@ class PaymentService {
     }
 
     public static function refundedAmount(int $orderId): int {
-        $stmt = Db::get()->prepare("\n            SELECT COALESCE(SUM(amount), 0)\n            FROM payment_transactions\n            WHERE order_id = :order_id AND store_id = :store\n              AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_reversed')\n        ");
+        $stmt = Db::get()->prepare("\n            SELECT COALESCE(SUM(amount), 0)\n            FROM payment_transactions\n            WHERE order_id = :order_id AND store_id = :store\n              AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')\n        ");
         $stmt->execute([':order_id' => $orderId, ':store' => StoreContext::current()->id()]);
         return max(0, (int)$stmt->fetchColumn());
     }
@@ -1287,39 +1273,16 @@ class PaymentService {
     /**
      * A provider refund named by its id. R25: one that is the shop's own refund in flight ($payload['refund_key'], the
      * refund key Stripe carries in the refund's metadata) is booked as that refund (its credit note, its request). One whose
-     * money an event without refund ids booked already is only identified — a refund_confirmed row under its id, no money:
-     * the shop's own refund that bookCumulativeRefund() settled, or a refund of no shop key that fits the money such an
-     * event booked as a refund of its own and no refund id claimed yet (unidentifiedRefunded()). Was: a refund.updated or a
-     * later charge.refunded between that event and the refund job's result booked it again (42.00 on the ledger for 21.00
-     * returned) and issued a second credit note.
+     * money a refund event without refund ids booked already as that refund (a Stripe charge.refunded without its refund
+     * list up to 2.1.2) is only identified: a refund_confirmed row under its id, no money.
+     * R27: nothing else is booked without its refund id any more (a charge.refunded whose refunds cannot be listed waits
+     * for Stripe to redeliver it), so a refund of no shop key is booked as it is.
      */
     private static function bookProviderRefundWithin(array $order, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload): bool {
         $orderId = (int)$order['id'];
         $key = (string)($payload['refund_key'] ?? '');
-        $fresh = $amount > 0 && !self::transactionExists($eventKey) && !self::refundAlreadyRecorded($orderId, $refundId);
-        // R25 (review run 379): a refund of no shop key larger than the unidentified money may be money an event without
-        // refund ids booked provisionally as a shop refund the provider has not named yet: that booking is reclaimed (its
-        // refund books its own money once its result names it), oldest first. Was: a 25.00 dashboard refund matched
-        // with a 21.00 item refund still at Stripe left 4.00 unidentified, and its own event booked 25.00 again.
-        // R25 (review run 380): also one its own refund id confirmed already (the job's result or an event with its key came
-        // first): that refund happened, so its money is booked once under its own id now. Was: only an 'open' one, and the
-        // dashboard refund's event after the item's result booked 25.00 again.
-        // R26: only what it needs — of a 21.00 booking a 5.00 dashboard refund reclaims 5.00 (was: all 21.00, and the item's
-        // own id then booked 21.00 again: 42.00 on the ledger for 26.00 refunded, credit notes -21.00 twice).
-        $reclaims = [];
-        if ($fresh && $key === '' && ($unidentified = self::unidentifiedRefunded($orderId)) < $amount) {
-            $need = $amount - $unidentified;
-            foreach (self::provisionalRefundsWithin($orderId) as $part) {
-                if (!in_array($part['state'], ['open', 'confirmed'], true)) continue;
-                $take = min($need, $part['amount'] - $part['reclaimed']);
-                if ($take <= 0) continue;
-                $reclaims[$part['ledger']] = $take;
-                $need -= $take;
-                if ($need <= 0) break;
-            }
-            if ($need > 0) $reclaims = [];
-        }
-        if ($fresh && ($key !== '' ? self::refundSettledByEvent($orderId, $key) : ($reclaims !== [] || $amount <= self::unidentifiedRefunded($orderId)))) {
+        if ($key !== '' && $amount > 0 && !self::transactionExists($eventKey) && !self::refundAlreadyRecorded($orderId, $refundId)
+            && self::refundSettledByEvent($orderId, $key)) {
             self::logTransaction(
                 orderId: $orderId,
                 provider: $provider,
@@ -1328,20 +1291,12 @@ class PaymentService {
                 amount: $amount,
                 currency: strtolower((string)($order['currency'] ?? 'eur')),
                 idempotencyKey: $eventKey,
-                rawResponse: ['event_type' => $eventType, 'provider' => $provider, 'refund_id' => $refundId,
-                    ($key !== '' ? 'identifies_booked_refund' : 'identifies_unidentified_refund') => true]
-                    + ($reclaims !== [] ? ['reclaims' => $reclaims] : []) + $payload,
+                rawResponse: ['event_type' => $eventType, 'provider' => $provider, 'refund_id' => $refundId, 'identifies_booked_refund' => true] + $payload,
                 failClosed: true,
             );
-            if ($key !== '') {
-                self::noteRefundIdWithin($orderId, $key, $refundId);
-                // A provisionally booked item refund is completed once its own refund id confirms it.
-                self::linkItemRefundWithin($orderId, $key, $refundId, 'confirmed');
-            }
-            // The reclaimed money was this refund: it corrects the invoice by a credit note of its own, of what it reclaimed.
-            if ($reclaims !== []) JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $eventKey], 5);
-            // R25 (review run 380): money reclaimed from a refund its own id confirmed (now or before) is booked as that refund.
-            return self::rebookReclaimedWithin($orderId, $provider, $eventType);
+            self::noteRefundIdWithin($orderId, $key, $refundId);
+            self::linkItemRefundWithin($orderId, $key, $refundId, 'confirmed');
+            return false;
         }
         if ($key === '') return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload);
         // The shop's own refund, before its job's result: booked as the refund it executes, so the item refund's credit
@@ -1354,7 +1309,7 @@ class PaymentService {
     }
 
     /**
-     * R25: the provider refund id of a refund in flight that an event without refund ids settled (bookCumulativeRefund()):
+     * R25: the provider refund id of a refund in flight that an event without refund ids settled (refundSettledByEvent()):
      * the item refund (credit note) noted the event's ledger key as its payment reference, and reconciliation lost the
      * provider's refund id. Noted once the refund job's result or an event names it.
      */
@@ -1378,152 +1333,7 @@ class PaymentService {
     }
 
     /**
-     * R25: money an event without refund ids booked as a refund of its own (bookCumulativeRefund(): what no refund of the
-     * shop in flight explains, e.g. a refund made in the Stripe dashboard) that no event naming a refund id has claimed yet.
-     */
-    private static function unidentifiedRefunded(int $orderId): int {
-        $stmt = Db::get()->prepare("SELECT status, amount, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
-        $pool = 0;
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $raw = json_decode((string)$row['raw_response'], true);
-            if (!is_array($raw)) continue;
-            if ($row['status'] !== 'refund_confirmed' && !empty($raw['unidentified_refund'])) $pool += (int)$row['amount'];
-            if ($row['status'] === 'refund_confirmed' && !empty($raw['identifies_unidentified_refund'])) $pool -= (int)$row['amount'];
-        }
-        // R25: a provisional booking that turned out to be other money is such money too. R26: of one reclaimed in part only
-        // what was reclaimed (the refund that claimed it subtracts its amount above), of a failed one the rest too.
-        foreach (self::provisionalRefundsWithin($orderId) as $part) {
-            $pool += $part['reclaimed'] + ($part['state'] === 'failed' ? $part['amount'] - $part['reclaimed'] : 0);
-        }
-        return max(0, $pool);
-    }
-
-    /**
-     * Book the part of a provider's cumulative refunded amount the ledger does not hold yet, for
-     * events that name no refund ids. Read and written under the order row lock, so two concurrent
-     * events cannot both book the same difference.
-     */
-    public static function bookCumulativeRefund(int $orderId, string $provider, int $cumulativeAmount, string $eventType, string $eventKey, array $payload = []): bool {
-        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $cumulativeAmount, $eventType, $eventKey, $payload): bool {
-            // R25: never more than the order still holds (the per-rate credit cap stopped the credit note, its job failed).
-            $delta = min($cumulativeAmount - self::refundedAmount($orderId), (int)$order['total'] - self::refundedAmount($orderId));
-            if ($delta <= 0) return false;
-            // R24: the shop's own refunds in flight (admin request, cancellation, item refunds) the reported amount holds are
-            // booked as those refunds, so an item refund's credit note is the only one (creditBookedRefund()) and the refund
-            // job's result only confirms it (refundSettledByEvent()). R25: matched as the set of them whose sum fits the
-            // amount, not one of exactly the amount: two item refunds of 21.00 reported as 42.00 were booked as a refund of
-            // their own and then each again by its job (84.00 on a 42.00 order); 21.00 of an item refund and 5.00 from the
-            // dashboard in one event left the payment refunded. What no refund in flight explains is a refund of its own.
-            $booked = false;
-            $part = 0;
-            $candidates = self::inFlightCandidatesWithin($order);
-            $chosen = self::pickInFlight($candidates, $delta);
-            // R26: the refunds in flight it was not matched to, which it may have been instead (failProvisionalWithin()).
-            $alternatives = array_values(array_map(static fn(array $c): array => ['execute' => $c['execute'], 'settles' => $c['key'], 'amount' => $c['amount']],
-                array_filter($candidates, static fn(array $c): bool => !in_array($c, $chosen, true))));
-            foreach ($chosen as $settles) {
-                $ledgerKey = $part++ === 0 ? $eventKey : $eventKey . '#' . $part;
-                // R25 (review run 379): a refund the provider has not named yet may not have happened (its call still in
-                // flight, or failing): the money may be a dashboard refund. Booked provisionally — its item refund stays
-                // pending until its own refund id confirms it (refund(), bookProviderRefundWithin()); an event naming
-                // another refund id may reclaim it (provisionalRefundsWithin()). Was: completed here, and a dashboard
-                // refund larger than it was booked a second time.
-                $provisional = $settles['refund_id'] === '';
-                $booked = self::bookRefundWithin(Orders::byId($orderId) ?: $order, $provider, $settles['refund_id'], $settles['amount'], $eventType,
-                    $ledgerKey, $payload + ['settles_refund_request' => $settles['key']] + ($provisional ? ['provisional_refund' => $settles['execute'], 'alternatives' => $alternatives] : []),
-                    $provisional ? 0 : $settles['item_refund_id'], $settles['refund_id']) || $booked;
-                $delta -= $settles['amount'];
-            }
-            if ($delta > 0) {
-                $booked = self::bookRefundWithin(Orders::byId($orderId) ?: $order, $provider, '', $delta, $eventType,
-                    $part === 0 ? $eventKey : $eventKey . '#rest', $payload + ['unidentified_refund' => true]) || $booked;
-            }
-            return $booked;
-        });
-    }
-
-    /**
-     * R25: the shop's refunds in flight a provider-reported refund may hold: the refund request of a refund_pending payment
-     * and the item refunds (credit notes) whose money is not booked, each with its provider refund id when the refund job
-     * noted one already. R26: pickInFlight() then picks the set it settles.
-     * @return list<array{key:string, execute:string, refund_id:string, item_refund_id:int, amount:int}>
-     */
-    private static function inFlightCandidatesWithin(array $order): array {
-        $db = Db::get();
-        $candidates = [];
-        $request = self::latestRefundRequestRow($order);
-        if ($request !== null && (int)$request['amount'] > 0) {
-            $key = (string)$request['idempotency_key'];
-            $executed = $db->prepare("SELECT provider_ref FROM payment_transactions WHERE order_id = :order AND store_id = :store
-                AND idempotency_key = :execute AND status = 'refund_pending' AND provider_ref IS NOT NULL AND provider_ref <> '' LIMIT 1");
-            $executed->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':execute' => self::refundExecuteKey($key)]);
-            $candidates[] = ['key' => $key, 'refund_id' => (string)($executed->fetchColumn() ?: ''), 'item_refund_id' => 0, 'amount' => (int)$request['amount']];
-        }
-        $items = $db->prepare("SELECT r.id, r.idempotency_key, r.payment_reference, r.amount FROM order_refunds r
-            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND r.amount > 0 AND NOT EXISTS (
-                SELECT 1 FROM payment_transactions t WHERE t.order_id = r.order_id AND t.store_id = r.store_id
-                  AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded')
-                  AND (t.idempotency_key = r.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))
-            ORDER BY r.id");
-        $items->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
-        foreach ($items->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $candidates[] = ['key' => (string)$row['idempotency_key'], 'refund_id' => (string)($row['payment_reference'] ?? ''),
-                'item_refund_id' => (int)$row['id'], 'amount' => (int)$row['amount']];
-        }
-        // R25: only a refund whose job has called the provider can be in what the provider reports (refund()). Was: a
-        // dashboard refund of the same sum completed an item refund still queued, whose job then refunded the money again
-        // and only confirmed it.
-        // A refund an earlier such event booked provisionally (bookCumulativeRefund()) is not in flight a second time.
-        $orderId = (int)$order['id'];
-        return array_values(array_filter(array_map(static fn(array $c): array =>
-            $c + ['execute' => $c['item_refund_id'] > 0 ? $c['key'] : self::refundExecuteKey($c['key'])], $candidates),
-            static function (array $c) use ($orderId): bool {
-                if (self::refundSettledByEvent($orderId, $c['execute'])) return false;
-                if ($c['refund_id'] !== '') return true;
-                return self::transactionExists('refund_dispatched_' . $c['execute']) || self::transactionExists('refund_attempt_' . $c['execute']);
-            }));
-    }
-
-    /**
-     * @param list<array{key:string, execute:string, refund_id:string, item_refund_id:int, amount:int}> $candidates
-     * @return list<array{key:string, execute:string, refund_id:string, item_refund_id:int, amount:int}>
-     */
-    private static function pickInFlight(array $candidates, int $amount): array {
-        // A handful at most in practice; beyond 12 the oldest first that fit.
-        $count = count($candidates);
-        if ($count > 12) {
-            $chosen = [];
-            foreach ($candidates as $candidate) {
-                if ($candidate['amount'] <= $amount) {
-                    $chosen[] = $candidate;
-                    $amount -= $candidate['amount'];
-                }
-            }
-            return $chosen;
-        }
-        $best = 0;
-        $bestSum = 0;
-        for ($mask = 1; $mask < (1 << $count); $mask++) {
-            $sum = 0;
-            for ($i = 0; $i < $count; $i++) {
-                if ($mask & (1 << $i)) $sum += $candidates[$i]['amount'];
-            }
-            // Masks run oldest-first in the low bits: the first of equal sum and size is the one with the oldest refunds.
-            if ($sum <= $amount && ($sum > $bestSum || ($sum === $bestSum && $best !== 0 && substr_count(decbin($mask), '1') < substr_count(decbin($best), '1')))) {
-                [$best, $bestSum] = [$mask, $sum];
-            }
-        }
-        $chosen = [];
-        for ($i = 0; $i < $count; $i++) {
-            if ($best & (1 << $i)) $chosen[] = $candidates[$i];
-        }
-        return $chosen;
-    }
-
-    /**
-     * Whether a provider-reported refund without its refund id (bookCumulativeRefund(), refund.reported) was booked as the
+     * Whether a provider-reported refund without its refund id (refund.reported; a Stripe charge.refunded up to 2.1.2) was booked as the
      * refund this payment_refund job executes ($executeKey: the item refund's key, or the request's execute key).
      */
     private static function refundSettledByEvent(int $orderId, string $executeKey): bool {
@@ -1534,195 +1344,9 @@ class PaymentService {
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $settled = json_decode((string)$row['raw_response'], true);
-            if (is_array($settled) && empty($settled['provisional_refund']) && in_array($settled['settles_refund_request'] ?? null, $keys, true)) return true;
-        }
-        // R25: a provisional booking another refund id reclaimed, or whose refund failed, settled nothing. R26: matched on what
-        // it stands for now (moved to the refund it really was: failProvisionalWithin()); one reclaimed in part still settles.
-        foreach (self::provisionalRefundsWithin($orderId) as $part) {
-            if (in_array($part['state'], ['open', 'confirmed'], true) && ($part['execute'] === $executeKey || in_array($part['settles'], $keys, true))) return true;
+            if (is_array($settled) && in_array($settled['settles_refund_request'] ?? null, $keys, true)) return true;
         }
         return false;
-    }
-
-    /**
-     * R25 (review run 379): the refunds an event without refund ids booked before the provider named them
-     * (bookCumulativeRefund()), oldest first. Each is 'open' until its own refund id confirms it ('confirmed': the refund
-     * job's result, or an event carrying its refund key), 'failed' when its refund call failed (the money was another
-     * refund), 'reclaimed' when events naming other refund ids claimed all of its money (bookProviderRefundWithin()). A
-     * confirmed one carries the refund id that confirmed it.
-     * R26: an event naming another refund id claims only what it needs ('reclaimed': that much of 'amount'; was: all of
-     * it, and the refund's own id booked it again); a failed one may be moved to the refund of the same sum it really was
-     * ('refund_reassigned', failProvisionalWithin()), or taken back ('reversed') when it duplicated a refund booked on its own
-     * or Stripe failed it later. 'alternatives' are the other refunds in flight it could have been; 'rebooked' what was
-     * booked under its own refund for the money reclaimed after it was confirmed (rebookReclaimedWithin()).
-     *
-     * @return list<array{ledger:string, execute:string, settles:string, amount:int, reclaimed:int, legacy_reclaimed:int, rebooked:int,
-     *     confirmed:bool, state:string, refund_id:string, alternatives:list<array{execute:string, settles:string, amount:int}>}>
-     */
-    private static function provisionalRefundsWithin(int $orderId): array {
-        $stmt = Db::get()->prepare("SELECT idempotency_key, status, amount, provider_ref, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed', 'refund_failed', 'refund_canceled', 'refund_cancelled',
-                'refund_reassigned', 'refund_reversed') ORDER BY id");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
-        $parts = [];
-        $confirmed = [];
-        $failed = [];
-        $reclaimed = [];
-        $legacy = [];
-        $reassigned = [];
-        $reversed = [];
-        $rebooked = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $raw = json_decode((string)$row['raw_response'], true);
-            $raw = is_array($raw) ? $raw : [];
-            $key = (string)$row['idempotency_key'];
-            if ($row['status'] === 'refund_confirmed') {
-                $confirmedBy = (string)($row['provider_ref'] ?? '');
-                $confirmed[$key] = $confirmedBy;
-                if (!empty($raw['identifies_booked_refund']) && (string)($raw['refund_key'] ?? '') !== '') $confirmed[(string)$raw['refund_key']] = $confirmedBy;
-                $claims = (array)($raw['reclaims'] ?? []);
-                if (array_is_list($claims)) {
-                    foreach ($claims as $ledger) $legacy[(string)$ledger] = true; // R25 claimed a booking whole
-                } else {
-                    foreach ($claims as $ledger => $amount) $reclaimed[(string)$ledger] = ($reclaimed[(string)$ledger] ?? 0) + (int)$amount;
-                }
-            } elseif (in_array($row['status'], ['refund_failed', 'refund_canceled', 'refund_cancelled'], true)) {
-                $failed[$key] = true;
-            } elseif ($row['status'] === 'refund_reassigned') {
-                $reassigned[(string)($raw['reassigns'] ?? '')] = ['execute' => (string)($raw['provisional_refund'] ?? ''), 'settles' => (string)($raw['settles_refund_request'] ?? '')];
-            } elseif ($row['status'] === 'refund_reversed') {
-                $reversed[(string)($raw['reverses_provisional_refund'] ?? '')] = true;
-            } elseif ((string)($raw['provisional_refund'] ?? '') !== '') {
-                $parts[] = ['ledger' => $key, 'execute' => (string)$raw['provisional_refund'], 'settles' => (string)($raw['settles_refund_request'] ?? ''),
-                    'amount' => (int)$row['amount'], 'alternatives' => array_values(array_filter((array)($raw['alternatives'] ?? []), 'is_array'))];
-            } elseif ((string)($raw['rebooks_reclaimed_refund'] ?? '') !== '') {
-                $ledger = (string)$raw['rebooks_reclaimed_refund'];
-                $rebooked[$ledger] = ($rebooked[$ledger] ?? 0) + (int)$row['amount'];
-            }
-        }
-        $list = [];
-        foreach ($parts as $part) {
-            $ledger = $part['ledger'];
-            if (isset($reassigned[$ledger])) {
-                $part['execute'] = $reassigned[$ledger]['execute'];
-                $part['settles'] = $reassigned[$ledger]['settles'];
-            }
-            $legacyAmount = isset($legacy[$ledger]) ? $part['amount'] : 0;
-            $part['legacy_reclaimed'] = $legacyAmount;
-            $part['reclaimed'] = min($part['amount'], $legacyAmount + ($reclaimed[$ledger] ?? 0));
-            $part['rebooked'] = $rebooked[$ledger] ?? 0;
-            $part['confirmed'] = isset($confirmed[$part['execute']]);
-            $part['refund_id'] = $confirmed[$part['execute']] ?? '';
-            $part['state'] = isset($reversed[$ledger]) ? 'reversed' : ($part['reclaimed'] >= $part['amount'] ? 'reclaimed'
-                : ($part['confirmed'] ? 'confirmed' : (isset($failed[$part['execute']]) ? 'failed' : 'open')));
-            $list[] = $part;
-        }
-        return $list;
-    }
-
-    /**
-     * R26: what the credit note of the provisional booking under $ledgerKey corrects (InvoiceService::creditBookedRefund()),
-     * or null when that is no provisional booking: the refund it now stands for ('settles', '' once it is other money) and
-     * the money left to it ('amount'): less what other refunds reclaimed (they credit it under their own key), nothing once
-     * it was taken back; a failed one's rest is other money of its own.
-     * @return array{settles:string, amount:int}|null
-     */
-    public static function provisionalRefundCredit(int $orderId, string $ledgerKey): ?array {
-        foreach (self::provisionalRefundsWithin($orderId) as $part) {
-            if ($part['ledger'] !== $ledgerKey) continue;
-            $rest = $part['amount'] - $part['reclaimed'];
-            return match ($part['state']) {
-                'open', 'confirmed' => ['settles' => $part['settles'], 'amount' => $rest],
-                'failed' => ['settles' => '', 'amount' => $part['legacy_reclaimed'] + $rest],
-                default => ['settles' => '', 'amount' => $part['legacy_reclaimed']],
-            };
-        }
-        return null;
-    }
-
-    /**
-     * R26: the money of reclaimed parts of provisional bookings whose own refund happened after all (confirmed): booked once
-     * as that refund (no refund id on the row: its id is recorded as confirmed), settling its request, so its item refund's
-     * credit note stays the only one. Was (R25): only a part reclaimed whole after its confirmation.
-     */
-    private static function rebookReclaimedWithin(int $orderId, string $provider, string $eventType): bool {
-        $booked = false;
-        foreach (self::provisionalRefundsWithin($orderId) as $part) {
-            $owed = $part['reclaimed'] - $part['rebooked'];
-            if (!$part['confirmed'] || $part['state'] === 'reversed' || $owed <= 0) continue;
-            $booked = self::bookRefundWithin(Orders::byId($orderId) ?: ['id' => $orderId], $provider, '', $owed, $eventType,
-                $part['ledger'] . '#own' . ($part['rebooked'] > 0 ? ':' . $part['rebooked'] : ''),
-                ['refund_id' => $part['refund_id'], 'settles_refund_request' => $part['settles'] !== '' ? $part['settles'] : $part['execute'],
-                    'rebooks_reclaimed_refund' => $part['ledger']]) || $booked;
-        }
-        return $booked;
-    }
-
-    /**
-     * R26: a refund booked provisionally ($part) did not happen: its call failed ($async false) or Stripe failed it later
-     * ($async true). Its money is
-     * - the other refund in flight of exactly that sum it may have been (the summary matched the older of two): moved to it,
-     *   whose result then only confirms it (was: that result booked it again, 42.00 for 21.00 refunded);
-     * - taken back when such a refund was booked on its own meanwhile (the summary's money is in the ledger twice), or when
-     *   Stripe failed this refund after it was reported (its amount was counted while pending);
-     * - else money of no refund of the shop (a dashboard refund, R25), corrected by a credit note of its own.
-     */
-    private static function failProvisionalWithin(array $order, array $part, string $provider, string $eventKey, bool $async): void {
-        $orderId = (int)$order['id'];
-        $rest = $part['amount'] - $part['reclaimed'];
-        if ($rest <= 0 || $part['state'] === 'reversed') return;
-        $currency = strtolower((string)($order['currency'] ?? 'eur'));
-        foreach ($part['alternatives'] as $other) {
-            $execute = (string)($other['execute'] ?? '');
-            if ((int)($other['amount'] ?? 0) !== $rest || $execute === '' || $execute === $part['execute'] || self::refundSettledByEvent($orderId, $execute)) continue;
-            if (self::refundBookedOnItsOwn($orderId, $execute)) {
-                self::reverseProvisionalWithin($order, $part, $rest, $eventKey, 'duplicates refund ' . $execute);
-                return;
-            }
-            if (self::transactionExists('refund_dispatched_' . $execute) || self::refundPendingAtProvider($orderId, $execute)) {
-                self::logTransaction(orderId: $orderId, provider: $provider, providerRef: (string)($order['payment_id'] ?? ''), status: 'refund_reassigned', amount: 0,
-                    currency: $currency, idempotencyKey: $eventKey . '#reassign', failClosed: true,
-                    rawResponse: ['reassigns' => $part['ledger'], 'provisional_refund' => $execute, 'settles_refund_request' => (string)($other['settles'] ?? $execute),
-                        'from' => $part['execute']]);
-                return;
-            }
-        }
-        if ($async) {
-            self::reverseProvisionalWithin($order, $part, $rest, $eventKey, 'failed at the provider');
-            return;
-        }
-        JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $part['ledger']], 5);
-    }
-
-    /** R26: take a provisional booking's money ($amount) back off the ledger: the payment returns to what the rest holds. */
-    private static function reverseProvisionalWithin(array $order, array $part, int $amount, string $eventKey, string $why): void {
-        $orderId = (int)$order['id'];
-        $from = (string)(Orders::byId($orderId)['payment_status'] ?? $order['payment_status'] ?? '');
-        self::logTransaction(orderId: $orderId, provider: self::orderProvider($order), providerRef: (string)($order['payment_id'] ?? ''), status: 'refund_reversed',
-            amount: -$amount, currency: strtolower((string)($order['currency'] ?? 'eur')), idempotencyKey: $eventKey . '#reverse', failClosed: true,
-            rawResponse: ['reverses_provisional_refund' => $part['ledger'], 'refund' => $part['execute'], 'reason' => $why]);
-        // The booking never happened: the payment goes back past the state machine's one-way refund steps, audited.
-        $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
-        if (in_array($from, ['refunded', 'partially_refunded', 'refund_pending'], true) && $from !== $to) {
-            self::updatePaymentStatus($orderId, $to, 'refund.reversed', ['amount' => $amount, 'ledger' => $part['ledger']], $from);
-            AuditLog::log('payment_status', $orderId, $from, $to, 'refund.reversed: provisional booking ' . $part['ledger'] . ' ' . $why);
-        }
-    }
-
-    /** R26: whether the refund $executeKey executes was booked by its own result (not as a provisional booking). */
-    private static function refundBookedOnItsOwn(int $orderId, string $executeKey): bool {
-        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0 LIMIT 1");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $executeKey]);
-        return (bool)$stmt->fetchColumn();
-    }
-
-    /** R26: whether the provider answered the refund $executeKey executes as pending (it may still succeed). */
-    private static function refundPendingAtProvider(int $orderId, string $executeKey): bool {
-        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
-            AND status = 'refund_pending' LIMIT 1");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $executeKey]);
-        return (bool)$stmt->fetchColumn();
     }
 
     /** Whether an order's payment is returned by hand: offline money, or a provider without a refund API. */
@@ -1816,17 +1440,6 @@ class PaymentService {
             $from = (string)($order['payment_status'] ?? 'pending');
             $currency = strtolower((string)($order['currency'] ?? 'eur'));
             $payload = array_merge(['provider' => $provider, 'refund_id' => $refundId], $payload);
-            // R26: a refund Stripe answered pending whose money a summary event booked provisionally (its id confirmed that
-            // booking) failed: the booking is taken back or moved to the refund it was (failProvisionalWithin()) and its item
-            // refund released with its credit note. Was: booked for good, only the incident below.
-            foreach (self::provisionalRefundsWithin($orderId) as $part) {
-                if ($refundId === '' || $part['refund_id'] !== $refundId || $part['state'] !== 'confirmed') continue;
-                self::failProvisionalWithin($order, $part, $provider, $eventKey, true);
-                $itemRefund = self::pendingItemRefundByReference($orderId, $refundId);
-                if ($itemRefund !== null) Rma::failRefund($itemRefund, "{$provider} refund {$refundId} of {$amount} failed");
-                self::recordEvent($orderId, 'refund.failed', 'refund_failed', 0, $currency, $eventKey, $payload + ['amount' => $amount, 'provisional_refund' => $part['ledger']], $provider, $refundId);
-                return true;
-            }
             $booked = self::refundAlreadyRecorded($orderId, $refundId);
             $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
             if (!$booked && $from === 'refund_pending' && self::isRequestedRefundExecution($orderId, $refundId) && self::canPaymentTransition($from, $to)) {
@@ -2006,6 +1619,19 @@ class PaymentService {
     private static function orderProvider(array $order): string {
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         return (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');
+    }
+
+    /** R27: the ledger key of a refund.failed of the provider refund $refundId that released nothing (it came before the refund's result). */
+    private static function refundFailureRecorded(int $orderId, string $refundId): ?string {
+        if ($refundId === '') return null;
+        $stmt = Db::get()->prepare("SELECT idempotency_key, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND provider_ref = :ref AND status = 'ignored' ORDER BY id");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $refundId]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $raw = json_decode((string)$row['raw_response'], true);
+            if (is_array($raw) && ($raw['event_type'] ?? '') === 'refund.failed') return (string)$row['idempotency_key'];
+        }
+        return null;
     }
 
     /** R26: whether the ledger holds money booked under the provider refund id $refundId itself (its own webhook or result). */

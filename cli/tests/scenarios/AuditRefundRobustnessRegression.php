@@ -141,12 +141,18 @@ try {
     applyStripeChargeRefunded(['id' => 'ch_arr_1d', 'payment_intent' => 'pi_arr_1d', 'amount_refunded' => 500], 'pi_arr_1d', $r1d);
     applyStripeChargeRefunded(['id' => 'ch_arr_1d', 'payment_intent' => 'pi_arr_1d', 'amount_refunded' => 300], 'pi_arr_1d', $r1d);
     assert_equals(['delivered', 'partially_refunded', 500], $arrState($r1d), 'ARR 1: listed refunds are booked once per id, failed ones never, a late event changes nothing');
-    // No refund ids at all: the cumulative difference is computed under the order lock, out-of-order events cannot over-book.
+    // R27: no refund ids at all: nothing is booked, the event is deferred (Stripe redelivers it). Was: the cumulative difference.
     $stripe->listed = null;
     $r1e = $arrOrder('delivered', 'paid', 'stripe', 'pi_arr_1e');
-    applyStripeChargeRefunded(['id' => 'ch_arr_1e', 'payment_intent' => 'pi_arr_1e', 'amount_refunded' => 700], 'pi_arr_1e', $r1e);
-    applyStripeChargeRefunded(['id' => 'ch_arr_1e', 'payment_intent' => 'pi_arr_1e', 'amount_refunded' => 400], 'pi_arr_1e', $r1e);
-    assert_equals(['delivered', 'partially_refunded', 700], $arrState($r1e), 'ARR 1: without refund ids only the cumulative difference is booked');
+    $r1eDeferred = 0;
+    foreach ([700, 400] as $r1eAmount) {
+        try {
+            applyStripeChargeRefunded(['id' => 'ch_arr_1e', 'payment_intent' => 'pi_arr_1e', 'amount_refunded' => $r1eAmount], 'pi_arr_1e', $r1e);
+        } catch (PaymentWebhookDeferred $e) {
+            $r1eDeferred++;
+        }
+    }
+    assert_equals([2, ['delivered', 'paid', 0]], [$r1eDeferred, $arrState($r1e)], 'ARR 1: without refund ids nothing is booked and the event is deferred (was: the cumulative difference)');
     assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/PaymentService.php'), 'Orders::lockWithin($orderId)')
         && str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Orders.php'), 'FROM orders WHERE id = :id AND store_id = :store FOR UPDATE'), 'ARR 1: MySQL/MariaDB lock the order row while booking a refund');
 

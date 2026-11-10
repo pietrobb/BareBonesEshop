@@ -12,8 +12,7 @@ final class SalesReport {
     public const PERIODS = [7, 30, 90];
     private const NOT_REVENUE = "('cancelled', 'refunded')";
     public const PAID = "('paid', 'refund_pending', 'partially_refunded', 'disputed')";
-    /** R26: refund_reversed rows take a provisional booking back (negative amounts, PaymentService::reverseProvisionalWithin()). */
-    private const REFUNDED = "('partially_refunded', 'refunded', 'refund_succeeded', 'refund_reversed')";
+    private const REFUNDED = "('partially_refunded', 'refunded', 'refund_succeeded')";
 
     /**
      * FROM clause of revenue orders `o` with `r.refunded` = what was refunded of each, and its parameters (merge them

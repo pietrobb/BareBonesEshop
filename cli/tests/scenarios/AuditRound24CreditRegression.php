@@ -1,11 +1,11 @@
 <?php
 
-// Review round 24 (2026-11-09, "kolo 8"), finding 3 (goal #380): a Stripe charge.refunded whose refund list is not available
-// books the cumulative refunded amount under the payment id (PaymentService::bookCumulativeRefund()). When that money was
-// the shop's own refund in flight (an item refund with its credit note, an admin refund request), the booking got a credit
-// note of its own (InvoiceService::creditBookedRefund(): no provider refund id, credited at once), and the refund job's
-// result booked the same money a second time.
-echo "\n--- R24: a cumulative Stripe refund settles the shop's refund in flight, one credit note ---\n";
+// Review round 24 (2026-11-09, "kolo 8"), finding 3 (goal #380): a Stripe charge.refunded reporting the shop's own refund in
+// flight (an item refund with its credit note, an admin refund request) before the refund job's result got a credit note of
+// its own, and the job's result booked the same money a second time.
+// R27: a charge.refunded is booked only by its refunds' ids (one without its refund list is deferred), so the event books
+// the shop's refund by the refund key Stripe carries in its metadata.
+echo "\n--- R24: a Stripe refund event settles the shop's refund in flight, one credit note ---\n";
 
 Bootstrap::initStoreContext('/', '', 'default');
 $r24cFail = static function (string $what, Throwable $e): void {
@@ -75,20 +75,21 @@ try {
     $before = $r24cLast();
     $r24cDuring = [];
     R24cFakeStripe::$during = static function () use (&$r24cDuring, $r24cItemOrder, $amount, $credit, $before, $r24cCreditJobs, $r24cCredits, $pdo): void {
-        PaymentService::bookCumulativeRefund($r24cItemOrder, 'stripe', $amount, 'charge.refunded', 'stripe_refund_ch_r24c1_' . $amount, ['charge_id' => 'ch_r24c1']);
+        $id = 're_r24c_' . substr(sha1('r24c-item'), 0, 10);
+        PaymentService::bookProviderRefund($r24cItemOrder, 'stripe', $id, $amount, 'charge.refunded', 'stripe_refund_' . $id, ['charge_id' => 'ch_r24c1', 'refund_key' => 'r24c-item']);
         $r24cCreditJobs($r24cItemOrder, $before);
         $r24cDuring = [$r24cCredits($r24cItemOrder), (string)$pdo->query('SELECT status FROM order_refunds WHERE id = ' . (int)$credit['refund_id'])->fetchColumn(),
             (string)Orders::byId($r24cItemOrder)['payment_status']];
     };
     WorkerJobs::handlePaymentRefund(['order_id' => $r24cItemOrder, 'payment_id' => 'pi_r24c-1', 'amount' => $amount,
         'refund_id' => (int)$credit['refund_id'], 'idempotency_key' => 'r24c-item'], []);
-    // R25 (review run 379): the item refund stays pending until its own refund id confirms it (Stripe may not have carried it out yet).
-    assert_equals([[(int)$credit['total_gross']], 'pending', 'partially_refunded'], $r24cDuring,
-        'R24 credit: a cumulative charge.refunded of the item refund in flight books it, and the item credit note stays the only one (was: a second credit note)');
+    // R27: booked by its own refund id, so the item refund is completed with it.
+    assert_equals([[(int)$credit['total_gross']], 'succeeded', 'partially_refunded'], $r24cDuring,
+        'R24 credit: a charge.refunded of the item refund in flight books it, and the item credit note stays the only one (was: a second credit note)');
     $r24cCreditJobs($r24cItemOrder, $before);
     $refundId = 're_r24c_' . substr(sha1('r24c-item'), 0, 10);
-    assert_equals([$amount, 'refund_confirmed', 1, 'succeeded'], [PaymentService::refundedAmount($r24cItemOrder),
-        (string)$pdo->query("SELECT status FROM payment_transactions WHERE order_id = {$r24cItemOrder} AND provider_ref = '{$refundId}'")->fetchColumn(),
+    assert_equals([$amount, ['partially_refunded', 'refund_confirmed'], 1, 'succeeded'], [PaymentService::refundedAmount($r24cItemOrder),
+        $pdo->query("SELECT status FROM payment_transactions WHERE order_id = {$r24cItemOrder} AND provider_ref = '{$refundId}' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN),
         count($r24cCredits($r24cItemOrder)), (string)$pdo->query('SELECT status FROM order_refunds WHERE id = ' . (int)$credit['refund_id'])->fetchColumn()],
         'R24 credit: the refund job\'s result then only confirms the refund (was: booked a second time) and completes the item refund');
     assert_true(!PaymentService::bookProviderRefund($r24cItemOrder, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId),
@@ -100,23 +101,24 @@ try {
     PaymentService::requestRefund($r24cAdminOrder, 500, 'admin_refund_request_r24c');
     $before = $r24cLast();
     R24cFakeStripe::$during = static function () use ($r24cAdminOrder, $before, $r24cCreditJobs): void {
-        PaymentService::bookCumulativeRefund($r24cAdminOrder, 'stripe', 500, 'charge.refunded', 'stripe_refund_ch_r24c2_500', ['charge_id' => 'ch_r24c2']);
+        $id = 're_r24c_' . substr(sha1('admin_refund_request_r24c_execute'), 0, 10);
+        PaymentService::bookProviderRefund($r24cAdminOrder, 'stripe', $id, 500, 'charge.refunded', 'stripe_refund_' . $id, ['charge_id' => 'ch_r24c2', 'refund_key' => 'admin_refund_request_r24c_execute']);
         $r24cCreditJobs($r24cAdminOrder, $before);
     };
     PaymentService::refund($r24cAdminOrder, 'pi_r24c-2', 500, new R24cFakeStripe(), 'admin_refund_request_r24c_execute');
     $r24cCreditJobs($r24cAdminOrder, $before);
     assert_equals([500, [-500], 'partially_refunded'], [PaymentService::refundedAmount($r24cAdminOrder), $r24cCredits($r24cAdminOrder),
         (string)Orders::byId($r24cAdminOrder)['payment_status']],
-        'R24 credit: an admin refund reported by a cumulative charge.refunded is booked and credited once (the job\'s result booked it again)');
+        'R24 credit: an admin refund reported by charge.refunded is booked and credited once (the job\'s result booked it again)');
 
     // 3. A refund made in the Stripe dashboard (nothing of the shop in flight) still gets its credit note.
     $before = $r24cLast();
-    PaymentService::bookCumulativeRefund($r24cAdminOrder, 'stripe', 800, 'charge.refunded', 'stripe_refund_ch_r24c2_800', ['charge_id' => 'ch_r24c2']);
+    PaymentService::bookProviderRefund($r24cAdminOrder, 'stripe', 're_r24c_dashboard', 300, 'charge.refunded', 'stripe_refund_re_r24c_dashboard', ['charge_id' => 'ch_r24c2']);
     $r24cCreditJobs($r24cAdminOrder, $before);
     assert_equals([800, [-500, -300]], [PaymentService::refundedAmount($r24cAdminOrder), $r24cCredits($r24cAdminOrder)],
         'R24 credit: a dashboard refund with no refund of the shop in flight is booked and credited as before');
 } catch (Throwable $e) {
-    $r24cFail('cumulative Stripe refund', $e);
+    $r24cFail('Stripe refund event', $e);
 } finally {
     $r24cAdapters->setValue(null, $r24cSavedAdapters);
     foreach ($r24cOrders as $r24cCleanup) {

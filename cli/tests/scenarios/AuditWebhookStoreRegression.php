@@ -150,7 +150,20 @@ try {
             assert_equals(['cz'], array_values(array_unique($a056Tx->fetchAll(PDO::FETCH_COLUMN))), "{$a056Tag}/stripe: payment transactions recorded in the order's store");
             assert_equals([200, ['status' => 'ok']], $a056PayU('', 'A056-C2', 'COMPLETED'), "{$a056Tag}/payu: default endpoint accepts cz order");
             assert_equals('paid', $a056State('C2'), "{$a056Tag}/payu: cz order paid via shared provider scope");
-            assert_equals([200, ['status' => 'ok']], $a056Stripe('', ['id' => 'evt_a056_c4_refund', 'type' => 'charge.refunded', 'data' => ['object' => ['id' => 'ch_a056_c4', 'payment_intent' => 'pi_a056_c4', 'amount_refunded' => 1000]]]), "{$a056Tag}/stripe: refund for cz order accepted");
+            // R27: a charge.refunded whose refunds cannot be listed (no Stripe API key here) books nothing and asks Stripe to
+            // redeliver it, every time; redelivered with its refund list it is booked by refund id.
+            $a056Refund = ['id' => 'evt_a056_c4_refund', 'type' => 'charge.refunded', 'data' => ['object' => ['id' => 'ch_a056_c4', 'payment_intent' => 'pi_a056_c4', 'amount_refunded' => 1000]]];
+            $a056Ledger = static function() use ($a056Db, &$a056Ids): int {
+                $stmt = $a056Db->prepare("SELECT COUNT(*) FROM payment_transactions WHERE order_id = ? AND status LIKE '%refund%'");
+                $stmt->execute([$a056Ids['C4']]);
+                return (int)$stmt->fetchColumn();
+            };
+            foreach ([1, 2] as $a056I) {
+                assert_equals([[503, ['error' => 'Event deferred', 'retry' => true]], 'paid', 0], [$a056Stripe('', $a056Refund), $a056State('C4'), $a056Ledger()],
+                    "{$a056Tag}/stripe: R27 charge.refunded without its refund list is deferred, nothing booked (delivery {$a056I})");
+            }
+            $a056Refund['data']['object']['refunds'] = ['has_more' => false, 'data' => [['id' => 're_a056_c4', 'amount' => 1000, 'status' => 'succeeded']]];
+            assert_equals([200, ['status' => 'ok']], $a056Stripe('', $a056Refund), "{$a056Tag}/stripe: refund for cz order accepted once redelivered with its refunds");
             assert_equals('refunded', $a056State('C4'), "{$a056Tag}/stripe: cz refund applied in the order's store");
             assert_equals([200, ['status' => 'ok']], $a056Stripe('', ['id' => 'evt_a056_c3_dispute', 'type' => 'charge.dispute.created', 'data' => ['object' => ['id' => 'dp_a056_c3', 'payment_intent' => 'pi_a056_c3', 'amount' => 1000]]], 'webhook_payment'), "{$a056Tag}/stripe: dispute for cz order accepted (generic route)");
             assert_equals('disputed', $a056State('C3'), "{$a056Tag}/stripe: cz dispute applied in the order's store");
