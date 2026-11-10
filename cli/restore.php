@@ -147,9 +147,7 @@ if (!$claimed || MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::acti
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);
 }
-$markerPath = MaintenanceMode::path($root);
 $priorMarker = MaintenanceMode::failed($root) ? MaintenanceMode::marker($root) : null;
-$priorAt = $priorMarker !== null ? (int)@filemtime($markerPath) : 0;
 // R25: the command a failed window names is run again as it was: without --force a killed files restore refused the
 // files it had half-written, without --i-stopped-writers a MySQL restore was refused.
 $restoreCommand = 'php cli/restore.php ' . escapeshellarg($remotePath) . ($filesOnly ? ' --files-only' : ($withFiles ? ' --files' : ''))
@@ -180,7 +178,7 @@ MaintenanceMode::arm($root, "cli/restore.php {$remotePath} was interrupted befor
  * half-replaced. R25: a run that replaced nothing (a corrupt backup, refused files) puts back the window it found, as it
  * was: lifting the earlier restore failure there (same scope) opened the shop on a half-restored database or files.
  */
-$endWindow = static function (?string $done, ?string $halfDone, int $pendingMigrations = 0) use ($root, $remotePath, $prior, $priorMarker, $priorAt, $covers, $earlier, $failAbout): void {
+$endWindow = static function (?string $done, ?string $halfDone, int $pendingMigrations = 0) use ($root, $remotePath, $prior, $priorMarker, $covers, $earlier, $failAbout): void {
     if ($halfDone !== null) {
         MaintenanceMode::fail($root, $halfDone . $earlier, $failAbout);
         fwrite(STDERR, "The shop stays in maintenance (503) until that is resolved.\n");
@@ -192,7 +190,7 @@ $endWindow = static function (?string $done, ?string $halfDone, int $pendingMigr
     }
     if ($done === null) {
         if ($priorMarker !== null) {
-            MaintenanceMode::restore($root, $priorMarker, $priorAt);
+            MaintenanceMode::restore($root, $priorMarker);
             fwrite(STDERR, "Nothing was replaced; the shop stays in maintenance (503) for: " . (string)($priorMarker['reason'] ?? '') . "\n");
         } else {
             MaintenanceMode::leave($root);
