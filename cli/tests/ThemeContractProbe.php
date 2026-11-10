@@ -1,4 +1,13 @@
 <?php
+// R28 (review round 28, finding 6): an updater that keeps root (2.1.2) runs this probe of the new release as root.
+// cli-only.php then refused it, and the updater read the refusal as a theme that would break checkout. Say why instead.
+if (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+    echo json_encode(['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'warnings' => [], 'failures' => [
+        'Not a theme problem: the updater runs as root, and the new release runs no code of the shop as root. Run the'
+        . ' update as the owner of the application root (sudo -u <owner> php cli/update.php apply ...); see the upgrade notes.',
+    ]]), "\n";
+    exit(1);
+}
 require_once dirname(__DIR__) . '/cli-only.php';
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 require_once dirname(__DIR__, 2) . '/src/Entrypoints/Storefront/CheckoutPages.php';
