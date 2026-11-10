@@ -567,11 +567,18 @@ failed) is still installed, and it names the rollback to run first. A rollback p
 the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so one
 that stops half-way is finished by the updater that started it.
 
-**Root.** Any `php cli/….php` started as root runs as the owner and group of the
-application root, switched for good before it loads any code (the web user can often
-write that tree, so code and files root would use there could be its own). In a tree
-root owns it stays root only when no other account can change any file or directory
-in it or above it (`config.php` included); otherwise it refuses to run. Run backups, restores and updates as
+**Root.** Root must never run PHP of a tree another account can write. Run every
+step as the owner of the application root (`sudo -u <owner> php cli/….php`), or
+install `deploy/bbe-step.sh` root-owned outside the tree
+(`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`) and run
+`bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group
+root) before any PHP of the shop runs, and refuses a tree root owns. As a second line
+of defence, any `php cli/….php` started as root switches to the owner and group of the
+application root before it loads code of `src/`, and in a tree root owns stays root
+only when no other account can change any file or directory in it or above it;
+otherwise it refuses to run. That switch is `cli/cli-only.php`, code in the tree: an
+account that can write the tree (often the web user) can change it, and root would
+run its copy, so it is no substitute for the rule above. Run backups and restores as
 the user that owns the files they change.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
