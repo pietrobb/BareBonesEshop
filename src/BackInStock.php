@@ -187,7 +187,8 @@ class BackInStock {
      * them. A request whose mail failed stays and the job throws, so the retry sends only what is left.
      * R27: a request whose notice did not reach the shopper stays with the time it is tried again (next_try_at): held
      * back by the recipient's rate limit (was: deleted as notified), or written to the log because the mail provider is
-     * misconfigured (LOGGED_RETRIES, LOGGED_DELAY apart, then it waits for the next refill). Until then a refill skips
+     * misconfigured or skipped because MAIL_FROM is invalid (LOGGED_RETRIES, LOGGED_DELAY apart, then it waits for the
+     * next refill). Until then a refill skips
      * it, so a request has one series of tries however often the product is restocked (was: one per restock). A shop
      * that writes mail to the log on purpose (MAIL_ADAPTER=log) keeps the request and tries nothing again, as order mail.
      * Lapsed requests and links nobody confirmed in time are deleted first.
@@ -222,8 +223,10 @@ class BackInStock {
                     $deferred['rate_limited']++;
                     continue;
                 }
-                if (MailService::logged($result)) {
-                    if (!$fellBack) continue;
+                // An invalid MAIL_FROM skips every notice ('invalid sender'): misconfigured like a provider that fell back.
+                $badSender = $status === 'skipped' && (string)($result['error'] ?? '') === 'invalid sender';
+                if ($badSender || MailService::logged($result)) {
+                    if (!$badSender && !$fellBack) continue;
                     $tries = (int)$request['mail_tries'] + 1;
                     if ($tries > self::LOGGED_RETRIES) {
                         self::tryAgain((int)$request['id'], 0, null);

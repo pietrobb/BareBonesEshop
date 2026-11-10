@@ -9,6 +9,7 @@
 echo "\n--- R27: back-in-stock — rate_limited is not delivered, log copies do not count, one series per request ---\n";
 $r27bDb = Db::get();
 $r27bEnv = getenv('MAIL_ADAPTER');
+$r27bFrom = getenv('MAIL_FROM');
 $r27bJobs = test_fixture_path('r27b-jobs');
 JobQueue::setDir($r27bJobs);
 if (!class_exists('R27bCaptureMail', false)) {
@@ -110,11 +111,31 @@ try {
     assert_equals([0, [['r27b-intended@r27b.example.test', 0, 0]], []],
         [$r27bSent, array_map(static fn(array $r): array => [$r[0], (int)$r[1], (int)$r[2]], $r27bRows()), $r27bQueued()],
         'R27 back in stock: with MAIL_ADAPTER=log on purpose the notice is not retried (was: 48 tries)');
+    $r27bDb->exec('DELETE FROM back_in_stock_requests WHERE product_id = 92788');
+
+    // 5. An invalid MAIL_FROM ("Shop <noreply@…>"): MailService skips every notice ('invalid sender'), nobody is told.
+    //    The six requests stay with one series of tries (was: deleted and counted as sent); once fixed, each goes out once.
+    for ($i = 1; $i <= 6; $i++) $r27bRequest("r27b-sender{$i}@r27b.example.test");
+    putenv('MAIL_ADAPTER=smtp');
+    putenv('MAIL_FROM=Shop <noreply@r27b.example.test>');
+    $r27bCapture->sent = [];
+    MailService::useAdapter($r27bCapture);
+    $r27bSent = BackInStock::process(['R27B-S']) + BackInStock::process(['R27B-S']);
+    $r27bJob = $r27bQueued();
+    assert_equals([0, [], 6, [1, 1, 1, 1, 1, 1], 1],
+        [$r27bSent, $r27bCapture->sent, count($r27bRows()), array_map(static fn(array $r): int => (int)$r[1], $r27bRows()), count($r27bJob)],
+        'R27 back in stock: an invalid MAIL_FROM keeps all six requests with one series of tries (was: deleted as sent)');
+    putenv('MAIL_FROM=noreply@r27b.example.test');
+    $r27bDb->exec("UPDATE back_in_stock_requests SET next_try_at = '2000-01-01 00:00:00' WHERE product_id = 92788");
+    foreach ($r27bJob as $job) BackInStock::handleJob((array)$job['payload']);
+    MailService::useAdapter(null);
+    assert_equals([6, [], []], [count($r27bCapture->sent), $r27bRows(), $r27bQueued()], 'R27 back in stock: once MAIL_FROM is fixed the due retry tells all six shoppers once');
 } catch (Throwable $e) {
     assert_true(false, 'R27 back in stock (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
     MailService::useAdapter(null);
     putenv($r27bEnv === false ? 'MAIL_ADAPTER' : 'MAIL_ADAPTER=' . $r27bEnv);
+    putenv($r27bFrom === false ? 'MAIL_FROM' : 'MAIL_FROM=' . $r27bFrom);
     $r27bCfgProp->setValue(null, $r27bCfgBefore);
     $r27bDb->exec('DELETE FROM back_in_stock_requests WHERE product_id = 92788');
     $r27bDb->exec("DELETE FROM email_log WHERE recipient LIKE '%@r27b.example.test'");
