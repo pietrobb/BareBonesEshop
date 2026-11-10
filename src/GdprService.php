@@ -54,6 +54,7 @@ class GdprService {
         'cookie_consent'               => ['columns' => ['customer_id', 'session_id', 'ip_hash', 'user_agent'], 'erase' => 'scrub', 'export' => 'consent_history'],
         'product_reviews'              => ['columns' => ['customer_id', 'author_name', 'title', 'body'], 'erase' => 'delete', 'export' => 'reviews'],
         'wishlist_items'               => ['columns' => ['owner_key', 'customer_id'], 'erase' => 'delete', 'export' => 'wishlist'],
+        'saved_for_later_items'        => ['columns' => ['customer_id'], 'erase' => 'delete', 'export' => 'saved_for_later'],
         'abandoned_carts'              => ['columns' => ['customer_email', 'cart_data'], 'erase' => 'delete', 'export' => 'abandoned_carts'],
         'back_in_stock_requests'       => ['columns' => ['email'], 'erase' => 'delete', 'export' => 'stock_notifications'],
         'rma_requests'                 => ['columns' => ['customer_id', 'reason', 'admin_note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
@@ -424,6 +425,14 @@ class GdprService {
         $stmt->execute(array_merge([$customerId], $owners));
         $wishlist = $stmt->fetchAll();
 
+        // "Buy later" lines of the account (a guest's list never leaves the session).
+        $savedForLater = [];
+        if (self::hasTable($db, 'saved_for_later_items')) {
+            $stmt = $db->prepare("SELECT id, store_id, product_id, variant_id, qty, saved_price, saved_currency, created_at FROM saved_for_later_items WHERE customer_id = ? ORDER BY id ASC");
+            $stmt->execute([$customerId]);
+            $savedForLater = $stmt->fetchAll();
+        }
+
         $stmt = $db->prepare("SELECT id, session_id, customer_email, cart_data, cart_value, item_count, currency, locale, order_id,
                 created_at, updated_at, reminded_at, converted_at, reminder_status
             FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS . " ORDER BY id ASC");
@@ -474,6 +483,7 @@ class GdprService {
             'coupon_uses' => $couponUses,
             'reviews' => $reviews,
             'wishlist' => $wishlist,
+            'saved_for_later' => $savedForLater,
             'abandoned_carts' => $carts,
             'stock_notifications' => $stockNotifications,
             'rma_requests' => $rmas,
@@ -792,6 +802,13 @@ class GdprService {
         $stmt = $db->prepare("DELETE FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners));
         $stmt->execute(array_merge([$customerId], $owners));
         $rows['wishlist_items'] = $stmt->rowCount();
+
+        $rows['saved_for_later_items'] = 0;
+        if (self::hasTable($db, 'saved_for_later_items')) {
+            $stmt = $db->prepare("DELETE FROM saved_for_later_items WHERE customer_id = ?");
+            $stmt->execute([$customerId]);
+            $rows['saved_for_later_items'] = $stmt->rowCount();
+        }
 
         $stmt = $db->prepare("DELETE FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
         $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);

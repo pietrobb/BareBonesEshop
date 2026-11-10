@@ -23,6 +23,19 @@ final class StorefrontCartAction
             case 'clear':
                 Cart::clear();
                 break;
+            // "Buy later": a cart line moves to the list under the cart and back.
+            case 'save_for_later':
+                $result = SavedForLater::saveFromCart(self::key($input, $productId, $variantId));
+                break;
+            case 'saved_to_cart':
+                $result = SavedForLater::moveToCart((string)($input['saved_key'] ?? ''));
+                break;
+            case 'saved_remove':
+                $result = SavedForLater::remove((string)($input['saved_key'] ?? ''));
+                break;
+            case 'saved_clear':
+                $result = SavedForLater::clear();
+                break;
             default:
                 return ['ok' => false, 'error' => 'cart_error', 'count' => self::count(), 'cart' => Cart::get()];
         }
@@ -37,9 +50,10 @@ final class StorefrontCartAction
         StorefrontFlash::set(self::notice($result));
     }
 
-    /** Notice of a no-JS add: what was added (or the clamped quantity), else why nothing was. */
+    /** Notice of a no-JS add: what was added (or the clamped quantity), else why nothing was. "Buy later" actions bring their own. */
     public static function notice(array $result): string
     {
+        if (isset($result['notice'])) return (string)$result['notice'];
         if (!$result['ok']) return I18n::t((string)($result['error'] ?? 'cart_error'));
         return !empty($result['clamped'])
             ? I18n::format('cart_quantity_clamped', ['count' => (int)$result['quantity']])

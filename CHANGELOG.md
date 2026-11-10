@@ -74,6 +74,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   last sync refused and why (also for a scheduled sync), not only their count.
 - **Migration** `20261110120000_back_in_stock_retry` adds `back_in_stock_requests.mail_tries` and `next_try_at`: a
   "back in stock" notice not delivered yet keeps its request and one retry series (review round 27).
+- **Migration** `20261110190000_saved_for_later_items` adds `saved_for_later_items`: the "Buy later" list of a
+  signed-in customer (see below). Nothing to configure; GDPR export and erasure include it.
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -109,6 +111,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **New: "Buy later" in the cart** (save for later, as Amazon's "Saved for later"). Each cart line has a "Buy later"
+  button that moves it, with its variant and quantity, to a "Buy later (N)" list under the cart; each saved line shows
+  its quantity and today's unit price and has "Move to cart" and remove, and the list has "Clear saved". Saved lines
+  are not ordered: the cart total, item count, shipping, coupons and stock reservation do not include them. "Move to
+  cart" checks today's price and stock: a changed price is shown (in the list and when moved), a sold-out line stays
+  saved and says so. A guest's list is kept in the session and joins the account on login (a line in both is kept
+  once); a signed-in customer's list is kept per store. The wishlist (favourites from the product page) is unchanged.
+  Themes: `storefront/cart-saved` (included by `cart` and `cart-empty`).
 - **"Back in stock" notices are retried once per request and not refused after a provider fix** (review round 27).
   The recipient limit (10 an hour) counted the copies only written to the log while the mail provider was
   misconfigured, so the real notice was refused once it was fixed; such copies no longer count for a real provider

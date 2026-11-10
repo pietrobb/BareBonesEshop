@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
         exit;
     }
     // No-JS form post: redirect back (a 422 status would drop the redirect) with a one-shot notice.
-    if (($_POST['cart_action'] ?? '') === 'add') StorefrontCartAction::flash($result);
+    if (($_POST['cart_action'] ?? '') === 'add' || isset($result['notice'])) StorefrontCartAction::flash($result);
     $redirect = Security::safeLocalPath($_POST['redirect'] ?? null, Template::storeUrl('/'));
     header('Location: ' . $redirect);
     exit;

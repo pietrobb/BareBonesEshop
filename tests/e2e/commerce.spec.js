@@ -77,6 +77,26 @@ test('guest cart and checkout complete in a real browser', async ({ page }) => {
   await checkout(page, 'guest-g12@example.test');
 });
 
+// #399 "Buy later": the line leaves the cart for the list under it, comes back with one click and is ordered.
+test('buy later: a cart line is saved for later, moved back to the cart and ordered', async ({ page }) => {
+  await addFirstProduct(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/?page=cart');
+  const name = (await page.locator('.cart-table .prod-name').first().textContent()).trim();
+  await page.locator('.cart-table .btn-save-later').first().click();
+  await expect(page).toHaveURL(/page=cart/);
+  const saved = page.locator('.saved-later');
+  await expect(saved.locator('.saved-later-item')).toHaveCount(1);
+  await expect(saved.locator('.saved-later-item .prod-name')).toHaveText(name);
+  await expect(page.locator('.cart-table')).toHaveCount(0);
+  // 390 px: the list fits the screen, nothing scrolls sideways.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await saved.locator('.btn-saved-to-cart').click();
+  await expect(page.locator('.cart-table .prod-name').first()).toHaveText(name);
+  await expect(page.locator('.saved-later')).toHaveCount(0);
+  await checkout(page, 'buy-later-399@example.test');
+});
+
 test('checkout rates show a translated error state, drop stale responses and use integer cents', async ({ page }) => {
   await addFirstProduct(page);
   await fillCheckout(page, 'rates-g12@example.test');
