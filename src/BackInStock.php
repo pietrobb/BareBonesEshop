@@ -19,7 +19,7 @@ class BackInStock {
     private const RESEND_MINUTES = 60;
     /** Confirmation links one address of a store receives per hour, over all products. */
     private const LINKS_PER_HOUR = 3;
-    /** R26: how often a job whose notices were only written to the log is queued again, and how far apart (as order mail). */
+    /** R26: how often a request whose notice was only written to the log is tried again, and how far apart (as order mail). */
     private const LOGGED_RETRIES = 48;
     private const LOGGED_DELAY = 1800;
 
@@ -179,65 +179,86 @@ class BackInStock {
 
     /** The `back_in_stock` job (cli/worker.php). */
     public static function handleJob(array $payload): int {
-        return self::process(array_map('strval', (array)($payload['skus'] ?? [])), (int)($payload['_mail_logged_tries'] ?? 0));
+        return self::process(array_map('strval', (array)($payload['skus'] ?? [])));
     }
 
     /**
      * Worker: mail the confirmed requests of the products behind these SKUs that can be bought again, and delete
-     * them. A request whose mail failed stays and the job throws, so the retry sends only what is left. A request whose
-     * mail was only written to the log stays too, and the job is queued again (LOGGED_RETRIES, LOGGED_DELAY apart).
+     * them. A request whose mail failed stays and the job throws, so the retry sends only what is left.
+     * R27: a request whose notice did not reach the shopper stays with the time it is tried again (next_try_at): held
+     * back by the recipient's rate limit (was: deleted as notified), or written to the log because the mail provider is
+     * misconfigured or skipped because MAIL_FROM is invalid (LOGGED_RETRIES, LOGGED_DELAY apart, then it waits for the
+     * next refill). Until then a refill skips
+     * it, so a request has one series of tries however often the product is restocked (was: one per restock). A shop
+     * that writes mail to the log on purpose (MAIL_ADAPTER=log) keeps the request and tries nothing again, as order mail.
      * Lapsed requests and links nobody confirmed in time are deleted first.
      * @param list<string> $skus
      */
-    public static function process(array $skus, int $loggedTries = 0): int {
+    public static function process(array $skus): int {
         $db = Db::get();
         $store = StoreContext::current()->id();
         self::cleanup(null, $store);
+        $provider = MailService::providerCode(null, $fellBack);
         $sent = 0;
-        $logged = 0;
         $failed = false;
+        $retryIn = null;
+        $deferred = ['rate_limited' => 0, 'logged' => 0, 'gave_up' => 0];
         foreach (self::productIds($skus) as $productId) {
             $product = self::product($productId);
             if ($product === null || self::offered($product)) continue;
-            $stmt = $db->prepare('SELECT * FROM back_in_stock_requests WHERE store_id = ? AND product_id = ? AND confirmed_at IS NOT NULL ORDER BY id LIMIT 500');
-            $stmt->execute([$store, $productId]);
+            $stmt = $db->prepare('SELECT * FROM back_in_stock_requests WHERE store_id = ? AND product_id = ? AND confirmed_at IS NOT NULL
+                AND (next_try_at IS NULL OR next_try_at <= ?) ORDER BY id LIMIT 500');
+            $stmt->execute([$store, $productId, gmdate('Y-m-d H:i:s')]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $request) {
-                $result = self::mail($product, $request);
-                if (($result['status'] ?? '') === 'failed') {
+                $result = self::mail($product, $request, $provider);
+                $status = (string)($result['status'] ?? '');
+                if ($status === 'failed') {
                     $failed = true;
                     continue;
                 }
-                // R26: only written to the log, it reached nobody: the request stays (was: deleted and counted as notified).
-                if (MailService::logged($result)) {
-                    $logged++;
+                if ($status === 'rate_limited') {
+                    $delay = max(60, (int)($result['retry_after'] ?? 3600));
+                    self::tryAgain((int)$request['id'], (int)$request['mail_tries'], $delay);
+                    $retryIn = min($retryIn ?? $delay, $delay);
+                    $deferred['rate_limited']++;
+                    continue;
+                }
+                // An invalid MAIL_FROM skips every notice ('invalid sender'): misconfigured like a provider that fell back.
+                $badSender = $status === 'skipped' && (string)($result['error'] ?? '') === 'invalid sender';
+                if ($badSender || MailService::logged($result)) {
+                    if (!$badSender && !$fellBack) continue;
+                    $tries = (int)$request['mail_tries'] + 1;
+                    if ($tries > self::LOGGED_RETRIES) {
+                        self::tryAgain((int)$request['id'], 0, null);
+                        $deferred['gave_up']++;
+                        continue;
+                    }
+                    self::tryAgain((int)$request['id'], $tries, self::LOGGED_DELAY);
+                    $retryIn = min($retryIn ?? self::LOGGED_DELAY, self::LOGGED_DELAY);
+                    $deferred['logged']++;
                     continue;
                 }
                 $db->prepare('DELETE FROM back_in_stock_requests WHERE id = ?')->execute([(int)$request['id']]);
                 $sent++;
             }
         }
-        if ($logged > 0) self::retryLogged($skus, $store, $logged, $loggedTries);
+        $context = ['store_id' => $store] + $deferred;
+        if ($deferred['gave_up'] > 0) Logger::error('back_in_stock.mail_logged_gave_up', $context);
+        if ($retryIn !== null) {
+            Logger::warning('back_in_stock.mail_deferred', $context);
+            JobQueue::pushDelayed('back_in_stock', ['skus' => $skus, '_store_id' => $store], $retryIn);
+        }
         if ($failed) throw new RuntimeException('back_in_stock.delivery_failed');
         return $sent;
     }
 
-    /**
-     * R26 (review run 388): the requests kept for logged mail are tried again later, so they go out once the mail
-     * configuration is fixed — a new job came only with the next refill, which does not happen while the product
-     * stays in stock. Logged, so the merchant sees what waits.
-     * @param list<string> $skus
-     */
-    private static function retryLogged(array $skus, string $store, int $logged, int $tries): void {
-        $context = ['store_id' => $store, 'requests' => $logged, 'tries' => $tries];
-        if ($tries >= self::LOGGED_RETRIES) {
-            Logger::error('back_in_stock.mail_logged_gave_up', $context);
-            return;
-        }
-        Logger::warning('back_in_stock.mail_logged', $context);
-        JobQueue::pushDelayed('back_in_stock', ['skus' => $skus, '_store_id' => $store, '_mail_logged_tries' => $tries + 1], self::LOGGED_DELAY);
+    /** R27: the request is tried again in $delay seconds (its series' $tries so far), or (null) at the next refill. */
+    private static function tryAgain(int $requestId, int $tries, ?int $delay): void {
+        Db::get()->prepare('UPDATE back_in_stock_requests SET mail_tries = ?, next_try_at = ? WHERE id = ?')
+            ->execute([$tries, $delay === null ? null : gmdate('Y-m-d H:i:s', time() + $delay), $requestId]);
     }
 
-    private static function mail(array $product, array $request): array {
+    private static function mail(array $product, array $request, string $provider): array {
         $locale = (string)$request['locale'];
         $previous = I18n::locale();
         if ($locale !== '') I18n::setLocale($locale);
@@ -247,7 +268,7 @@ class BackInStock {
                 'product_name' => (string)$localized['name'],
                 'product_url' => Template::absoluteUrl(StorefrontViewModel::productUrl((string)$localized['slug'])),
                 'shop_name' => (string)Template::branding()['name'],
-            ]);
+            ], null, [], $provider);
         } finally {
             I18n::setLocale($previous);
         }

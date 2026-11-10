@@ -113,7 +113,8 @@ class MailService {
         if (!preg_match('/^[a-z0-9_-]{1,80}$/i', $template)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid template'];
         }
-        $window = self::recipientWindow($to, $template, $orderId);
+        $adapter = self::adapter($providerCode);
+        $window = self::recipientWindow($to, $template, $orderId, $adapter->adapterId());
         if ($window !== null) {
             // Not 'skipped': the caller can retry once the window has passed (see deferRateLimited()).
             return ['status' => 'rate_limited', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'recipient rate limit', 'retry_after' => $window + 60];
@@ -122,7 +123,6 @@ class MailService {
 
         $rendered = self::render($template, $locale, $vars);
 
-        $adapter = self::adapter($providerCode);
         $from = self::sender();
         if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => $adapter->adapterId(), 'error' => 'invalid sender'];
@@ -328,7 +328,7 @@ class MailService {
      * a B2B buyer with many orders, or someone placing orders with another person's address,
      * cannot exhaust the budget of a different order's transactional mail.
      */
-    private static function recipientWindow(string $recipient, string $template, ?int $orderId): ?int {
+    private static function recipientWindow(string $recipient, string $template, ?int $orderId, string $adapterId): ?int {
         $limits = [
             'account_password_reset' => [3, 3600],
             'account_email_verification' => [3, 3600],
@@ -349,9 +349,13 @@ class MailService {
             $orderScope = ' AND order_id = :order';
             $params[':order'] = $orderId;
         }
+        // R27: for a mail a real provider sends, copies only written to the log reached nobody and do not count (retries
+        // of mail written to the log while the provider was misconfigured used up the budget, and the real mail was
+        // refused once it was fixed). With the log provider configured on purpose they count as before.
+        $logScope = $adapterId !== 'log' ? " AND adapter <> 'log'" : '';
         $stmt = Db::get()->prepare(
             "SELECT COUNT(*) FROM email_log
-             WHERE recipient = :recipient AND template = :template AND created_at >= :since{$orderScope}"
+             WHERE recipient = :recipient AND template = :template AND created_at >= :since{$logScope}{$orderScope}"
         );
         $stmt->execute($params);
         return (int)$stmt->fetchColumn() < $max ? null : $window;

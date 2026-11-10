@@ -150,6 +150,7 @@ try {
         $r26mCfgProp->setValue(null, ['app_url' => 'https://r26m.example.test'] + (is_array($r26mCfgBefore) ? $r26mCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR))));
         (require TEST_CLI_DIR . '/../migrations/20261025120000_back_in_stock_requests.php')->up($r26mDb, Db::isSqlite());
         (require TEST_CLI_DIR . '/../migrations/20261104120000_back_in_stock_double_opt_in.php')->up($r26mDb, Db::isSqlite());
+        (require TEST_CLI_DIR . '/../migrations/20261110120000_back_in_stock_retry.php')->up($r26mDb, Db::isSqlite());
         $r26mWh = (int)$r26mDb->query("SELECT id FROM warehouses WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
         $r26mDb->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
             VALUES (92688, 'default', 1, 'R26MB item', 'r26mb-item', 'R26MB-S', 'simple', 900, 'eur', 'active', 0, 'deny')")->execute();
@@ -185,8 +186,12 @@ try {
             $r26mError = get_class($e) . ': ' . $e->getMessage();
         }
         $r26mAgain = $r26mBisJobs();
-        assert_equals([1, '', 0, 1, [1]], [count($r26mRefill), $r26mError, $r26mNotified, $r26mWaiting(), array_map(static fn(array $p): int => (int)($p['_mail_logged_tries'] ?? 0), $r26mAgain)],
+        // R27: the request carries its tries and when it is tried again.
+        $r26mTries = static fn(): array => array_map('intval', $r26mDb->query('SELECT mail_tries FROM back_in_stock_requests WHERE product_id = 92688 AND next_try_at IS NOT NULL')->fetchAll(PDO::FETCH_COLUMN));
+        assert_equals([1, '', 0, 1, 1, [1]], [count($r26mRefill), $r26mError, $r26mNotified, $r26mWaiting(), count($r26mAgain), $r26mTries()],
             'R26 mail: a back-in-stock notice only logged (MAIL_ADAPTER="smtp.") keeps the request and queues the job again (was: nothing would send it)');
+        // The queued job runs once its delay has passed.
+        $r26mDb->exec("UPDATE back_in_stock_requests SET next_try_at = '2000-01-01 00:00:00' WHERE product_id = 92688");
         // The configuration fixed, stock unchanged: the queued job sends the notice once and the request is gone.
         putenv('MAIL_ADAPTER=smtp');
         $r26mCapture = new R26mCaptureMail();
@@ -198,10 +203,10 @@ try {
         MailService::useAdapter(null);
         // ... and the retries stop after their budget.
         putenv('MAIL_ADAPTER=smtp.');
-        $r26mDb->prepare('INSERT INTO back_in_stock_requests (store_id, product_id, email, locale, created_at, confirmed_at) VALUES (?, 92688, ?, ?, ' . Db::now() . ', ' . Db::now() . ')')
+        $r26mDb->prepare('INSERT INTO back_in_stock_requests (store_id, product_id, email, locale, created_at, confirmed_at, mail_tries) VALUES (?, 92688, ?, ?, ' . Db::now() . ', ' . Db::now() . ', 48)')
             ->execute(['default', 'r26mb-late@r26m.example.test', 'en']);
-        BackInStock::handleJob(['skus' => ['R26MB-S'], '_mail_logged_tries' => 48]);
-        assert_equals([[], 1], [$r26mBisJobs(), $r26mWaiting()], 'R26 mail: a logged back-in-stock notice is tried again at most 48 times');
+        BackInStock::handleJob(['skus' => ['R26MB-S']]);
+        assert_equals([[], 1, []], [$r26mBisJobs(), $r26mWaiting(), $r26mTries()], 'R26 mail: a logged back-in-stock notice is tried again at most 48 times (then it waits for the next refill)');
     } finally {
         MailService::useAdapter(null);
         putenv('MAIL_ADAPTER');

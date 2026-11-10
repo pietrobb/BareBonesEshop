@@ -187,6 +187,7 @@ try {
 //    nothing: mail scanners follow links); only confirmed requests are mailed, unconfirmed ones lapse after 48 hours.
 if (!function_exists('renderStockNotify')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/GuestPages.php';
 (require dirname(TEST_CLI_DIR) . '/migrations/20261104120000_back_in_stock_double_opt_in.php')->up($pdo, Db::isSqlite());
+(require dirname(TEST_CLI_DIR) . '/migrations/20261110120000_back_in_stock_retry.php')->up($pdo, Db::isSqlite());
 $r15bLocale = I18n::locale();
 I18n::setLocale('en');
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));

@@ -5,7 +5,7 @@ echo "\n--- Audit round 16: back in stock, logs, transfer reminders, shipped e-m
 
 // 1. "Notify me" mailed a fresh confirmation link on every repeat of the form: one address could be flooded with
 //    links. A waiting request gets a new link at most once an hour, and one address at most three links an hour.
-foreach (['20261025120000_back_in_stock_requests', '20261104120000_back_in_stock_double_opt_in'] as $r16mMigration) {
+foreach (['20261025120000_back_in_stock_requests', '20261104120000_back_in_stock_double_opt_in', '20261110120000_back_in_stock_retry'] as $r16mMigration) {
     (require dirname(TEST_CLI_DIR) . "/migrations/{$r16mMigration}.php")->up($pdo, Db::isSqlite());
 }
 $r16mLocale = I18n::locale();
