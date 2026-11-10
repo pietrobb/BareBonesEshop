@@ -96,11 +96,6 @@ parameters:
 			count: 1
 			path: cli/TestSuite.php
 
-		-
-			message: '#^Variable \$testDbPath might not be defined\.$#'
-			identifier: variable.undefined
-			count: 3
-			path: cli/TestSuite.php
 
 		-
 			message: '#^Variable \$tests might not be defined\.$#'

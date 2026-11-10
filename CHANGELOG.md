@@ -135,7 +135,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   no longer need `/proc` (FreeBSD, macOS, containers with a masked `/proc` failed every root step with an uncaught
   exception). On a file system without file locks the steps exclude each other again, by a claim file
   `.maintenance.lock.held` (one left by a killed step on this host is taken over; one from another host is honoured for
-  a day). A refused step prints the lock holder's record as plain text only.
+  a day). A refused step prints the lock holder's record as plain text only. CI now also runs the step lock test as root
+  with `/proc` hidden (`cli/test.php --only=<scenario>`; `BAREBONES_REQUIRE_ROOT_TEST=1` fails instead of skipping when
+  it is not root), so the root path is executed and not only checked in the source.
 - **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
   shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
   database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out
