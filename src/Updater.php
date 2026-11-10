@@ -253,7 +253,7 @@ final class Updater
             // a mix of old and new files against a half-migrated database (T20).
             MaintenanceMode::enter($this->root, 'update ' . $package->version());
             $entered = true;
-            $snapshot = $this->createSnapshot($package, $report, 'pre-update');
+            $snapshot = $this->createSnapshot($package, $report, 'pre-update', self::schemaFailures($prior));
             $report = $this->check($package);
             $this->assertApplicable($report);
 
@@ -540,6 +540,10 @@ final class Updater
             // R20: as for an update of code only, a rollback that restored no database left a schema a migration stopped
             // half-way on as it was, so the shop stays closed for what the marker says (it was opened).
             $stillClosed = self::windowKept($prior, $snapshotId, $databaseAt !== null);
+            // R26: a database snapshot taken over a migration stopped half-way puts that migration back as it was.
+            foreach ($databaseAt !== null ? self::restoredSchemaFailures($metadata) : [] as $failure) {
+                if (!in_array($failure['reason'], array_column($stillClosed, 'reason'), true)) $stillClosed[] = $failure;
+            }
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice,
                 'still_closed' => $stillClosed[0]['reason'] ?? null];
         } finally {
@@ -797,7 +801,37 @@ final class Updater
         return $candidate === $root || str_starts_with($candidate, $root . '/');
     }
 
-    private function createSnapshot(UpdatePackage $package, array $report, string $reason): array
+    /**
+     * R26: the migrations stopped half-way the window before an update carries (failures of neither a restore nor a
+     * rollback): its database snapshot holds that half-migrated schema.
+     * @return list<array{reason: string, before_snapshots?: list<string>}>
+     */
+    private static function schemaFailures(?array $prior): array
+    {
+        $failures = $prior !== null ? MaintenanceMode::failures($prior['marker']) : [];
+        return array_values(array_filter($failures, static fn(array $f): bool => !isset($f['restore_scope']) && !isset($f['rollback_snapshot'])));
+    }
+
+    /**
+     * R26: the failures a rollback of $metadata's snapshot puts back with its database: the migrations stopped half-way
+     * when it was taken (schemaFailures()). Was: an update that completed them lifted the window, and the later rollback
+     * of its snapshot reopened the shop over the half-migrated database it restored.
+     * @return list<array{reason: string, before_snapshots: list<string>}>
+     */
+    private static function restoredSchemaFailures(array $metadata): array
+    {
+        $id = (string)($metadata['id'] ?? '');
+        $marker = ['failed' => true, 'reason' => 'schema', 'pending_other' => is_array($metadata['database']['schema_failures'] ?? null) ? $metadata['database']['schema_failures'] : []];
+        $restored = [];
+        foreach (array_slice(MaintenanceMode::failures($marker), 1) as $f) {
+            if (isset($f['restore_scope']) || isset($f['rollback_snapshot'])) continue;
+            $f['before_snapshots'] = array_values(array_unique(array_merge($f['before_snapshots'] ?? [], [$id])));
+            $restored[] = $f;
+        }
+        return $restored;
+    }
+
+    private function createSnapshot(UpdatePackage $package, array $report, string $reason, array $schemaFailures = []): array
     {
         $id = gmdate('YmdHis') . '-' . bin2hex(random_bytes(6));
         $snapshotDirectory = $this->snapshotDirectory($id);
@@ -856,6 +890,7 @@ final class Updater
                 }
                 $metadata['database']['high_water'] = $highWater;
                 $metadata['database']['high_water_tables'] = self::HIGH_WATER_TABLES;
+                if ($schemaFailures !== []) $metadata['database']['schema_failures'] = $schemaFailures;
             }
             $this->writeJsonAtomic($snapshotDirectory . DIRECTORY_SEPARATOR . 'snapshot.json', $metadata);
             return $metadata;

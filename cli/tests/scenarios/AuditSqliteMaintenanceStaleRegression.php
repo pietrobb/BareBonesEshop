@@ -40,7 +40,8 @@ try {
     SqliteMaintenance::exclusive($smDb, 'next restore', static fn() => null, 1.0);
     assert_true(!SqliteMaintenance::isActive($smDb), 'CR-M11: the next restore can run and lifts its gate');
 
-    // 3. Crash between moving the live file aside and moving the replacement in: keep the shop closed.
+    // 3. Crash between moving the live file aside and moving the replacement in. R26: the copy moved aside goes back and the
+    //    stale gate clears (was: kept up until the operator moved it back by hand); without a copy it stays up.
     [$smProc, $smPipes] = $smChild('die');
     stream_get_contents($smPipes[1]);
     fclose($smPipes[0]);
@@ -49,8 +50,18 @@ try {
     proc_close($smProc);
     rename($smDb, $smDb . '.pre-restore-test.rollback');
     $smAge();
-    assert_true(SqliteMaintenance::isActive($smDb), 'CR-M11: with the live database missing the gate stays up (no empty database is created)');
-    rename($smDb . '.pre-restore-test.rollback', $smDb);
+    assert_true(!SqliteMaintenance::isActive($smDb) && is_file($smDb) && !is_file($smDb . '.pre-restore-test.rollback'),
+        'CR-M11: with the live database moved aside by a dead swap, the copy goes back and the stale gate clears');
+    [$smProc, $smPipes] = $smChild('die');
+    stream_get_contents($smPipes[1]);
+    fclose($smPipes[0]);
+    fclose($smPipes[1]);
+    fclose($smPipes[2]);
+    proc_close($smProc);
+    rename($smDb, $smDb . '.r26-away');
+    $smAge();
+    assert_true(SqliteMaintenance::isActive($smDb), 'CR-M11: with the live database missing and no copy moved aside the gate stays up (no empty database is created)');
+    rename($smDb . '.r26-away', $smDb);
     assert_true(!SqliteMaintenance::isActive($smDb), 'CR-M11: once the database is back, the stale gate clears');
 
     // 4. A fresh marker is never treated as stale (enter() creates it, then locks it).
