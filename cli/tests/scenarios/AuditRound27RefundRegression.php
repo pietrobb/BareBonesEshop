@@ -213,6 +213,8 @@ try {
     foreach ($r27rOrders as $r27rCleanup) {
         foreach (['credit_note_items' => 'credit_note_id IN (SELECT id FROM invoices WHERE order_id = ?)', 'order_refunds' => 'order_id = ?', 'payment_transactions' => 'order_id = ?',
             'invoice_sellers' => 'invoice_id IN (SELECT id FROM invoices WHERE order_id = ?)', 'invoices' => 'order_id = ?',
+            // R7 stock: SQLite reuses the ids of deleted RMA items, and a receipt left behind counted as received for them.
+            'return_receipts' => 'rma_item_id IN (SELECT id FROM rma_items WHERE rma_id IN (SELECT id FROM rma_requests WHERE order_id = ?))',
             'rma_items' => 'rma_id IN (SELECT id FROM rma_requests WHERE order_id = ?)', 'rma_requests' => 'order_id = ?', 'order_items' => 'order_id = ?', 'orders' => 'id = ?'] as $r27rTable => $r27rWhere) {
             try { $pdo->prepare("DELETE FROM {$r27rTable} WHERE {$r27rWhere}")->execute([$r27rCleanup]); } catch (Throwable $e) {}
         }
