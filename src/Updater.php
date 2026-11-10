@@ -387,7 +387,7 @@ final class Updater
     /**
      * The window that keeps the shop closed before this step: a failed one, or the fresh marker of an updater killed
      * half-way (its files may be half-written). Null when the shop is open.
-     * @return array{marker: array, modified_at: int}|null
+     * @return array{marker: array}|null
      */
     private function priorMaintenance(): ?array
     {
@@ -401,8 +401,7 @@ final class Updater
             throw new RuntimeException('Another maintenance window is open (' . (string)(MaintenanceMode::marker($this->root)['reason'] ?? '')
                 . '); wait until that step ends, then retry');
         }
-        $modifiedAt = @filemtime(MaintenanceMode::path($this->root));
-        return ['marker' => MaintenanceMode::marker($this->root), 'modified_at' => $modifiedAt === false ? time() : $modifiedAt];
+        return ['marker' => MaintenanceMode::marker($this->root)];
     }
 
     /**
@@ -449,7 +448,7 @@ final class Updater
     private function restoreMaintenance(?array $prior): void
     {
         if ($prior !== null) {
-            MaintenanceMode::restore($this->root, $prior['marker'], $prior['modified_at']);
+            MaintenanceMode::restore($this->root, $prior['marker']);
         } else {
             MaintenanceMode::leave($this->root);
         }

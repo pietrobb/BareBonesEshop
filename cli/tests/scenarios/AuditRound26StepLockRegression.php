@@ -106,18 +106,19 @@ echo $m->invoke(null, $argv[1]) ? "claimed" : "refused";
     }
 
     if ($r26lAsRoot) {
-        // 7. As root: the lock is created as the app root's owner and group (seteuid: no chown, no /proc), a symbolic link
-        //    to a root-only file is refused and that file stays root's, 0600, with its content.
-        $r26lApp = sys_get_temp_dir() . '/r26-steplock-app-' . getmypid(); // a parent the app root's owner can enter
-        @mkdir($r26lApp, 0775, true);
-        chown($r26lApp, 65534);
+        // 7. As root: the lock is created in the app root's group (setegid: no chown, no /proc), a symbolic link to a
+        //    root-only file is refused and that file stays root's, 0600, with its content. R27: root opens the lock only in
+        //    an app root it owns that no other account can write (AuditRound27RootRegression: another owner is refused).
+        $r26lApp = sys_get_temp_dir() . '/r26-steplock-app-' . getmypid();
+        @mkdir($r26lApp, 0755, true);
+        chmod($r26lApp, 0755);
         chgrp($r26lApp, 65534);
         $r26lAppLock = $r26lApp . '/' . MaintenanceMode::LOCK_FILE;
         @unlink($r26lAppLock);
-        assert_equals('claimed', $r26lRefused($r26lApp), 'R26 step lock (root): claimed in an app root owned by another account');
+        assert_equals('claimed', $r26lRefused($r26lApp), 'R26 step lock (root): claimed in a root-owned app root of another group');
         clearstatcache();
-        assert_equals([65534, 65534, 0660, 0, 0], [fileowner($r26lAppLock), filegroup($r26lAppLock), fileperms($r26lAppLock) & 0777, posix_geteuid(), posix_getegid()],
-            'R26 step lock (root): created as the app root\'s owner and group, 0660, and root again afterwards');
+        assert_equals([0, 65534, 0660, 0, 0], [fileowner($r26lAppLock), filegroup($r26lAppLock), fileperms($r26lAppLock) & 0777, posix_geteuid(), posix_getegid()],
+            'R26 step lock (root): created in the app root\'s group, 0660, and root\'s group again afterwards');
         unlink($r26lAppLock);
 
         $r26lShadow = test_fixture_path('r26-steplock-shadow');
@@ -148,7 +149,7 @@ echo $m->invoke(null, $argv[1]) ? "claimed" : "refused";
             $r26lOldIno = fileinode($r26lAppLock);
             assert_equals('claimed', $r26lRefused($r26lApp), "R26 step lock (root): a {$r26lUid}:{$r26lGid} lock is usable");
             clearstatcache();
-            assert_equals([65534, 0660, true], [fileowner($r26lAppLock), fileperms($r26lAppLock) & 0777, fileinode($r26lAppLock) !== $r26lOldIno],
+            assert_equals([65534, 0660, true], [filegroup($r26lAppLock), fileperms($r26lAppLock) & 0777, fileinode($r26lAppLock) !== $r26lOldIno],
                 "R26 step lock (root): a {$r26lUid}:{$r26lGid} " . sprintf('%04o', $r26lMode) . ' lock is replaced by one the web user can use');
             unlink($r26lAppLock);
         }

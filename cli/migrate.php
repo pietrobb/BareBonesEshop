@@ -102,9 +102,8 @@ try {
             $isMigration = static fn(array $f): bool => !isset($f['restore_scope']) && !isset($f['rollback_snapshot'])
                 && str_starts_with($f['reason'], 'cli/migrate.php');
             $priorMarker = null;
-            $priorAt = 0;
             $carried = [];
-            $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, &$schemaTouched, &$priorMarker, &$priorAt, &$carried, $isMigration, $preApplyHook, $root): void {
+            $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, &$schemaTouched, &$priorMarker, &$carried, $isMigration, $preApplyHook, $root): void {
                 // R23: an update, rollback or other migration that is running holds its window; migrating under it and
                 // lifting it at the end opened the shop in the middle of that step. Held is held, failed-marked or not:
                 // a running step marks its window failed (arm()) before its first change.
@@ -117,7 +116,6 @@ try {
                 if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {
                     if (MaintenanceMode::failed($root)) {
                         $priorMarker = MaintenanceMode::marker($root);
-                        $priorAt = (int)@filemtime(MaintenanceMode::path($root));
                         $carried = array_values(array_filter(MaintenanceMode::failures($priorMarker), static fn(array $f): bool => !$isMigration($f)));
                     }
                     MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
@@ -145,7 +143,7 @@ try {
                     // R23: another step took the window over meanwhile; it is that step's to lift.
                 } elseif ($ownMaintenance && !$schemaTouched) {
                     if ($priorMarker !== null) {
-                        MaintenanceMode::restore($root, $priorMarker, $priorAt);
+                        MaintenanceMode::restore($root, $priorMarker);
                         fwrite(STDERR, "No migration ran; the shop stays in maintenance (503) from the earlier failed run until php cli/migrate.php apply succeeds.\n");
                     } else {
                         MaintenanceMode::leave($root);
