@@ -228,7 +228,8 @@ final class Updater
         try {
             $report = $this->check($package);
             $this->assertApplicable($report);
-            return $this->createSnapshot($package, $report, 'manual-backup');
+            // R27: a manual backup taken during a failed window holds what that failure left half-done, like an update's.
+            return $this->createSnapshot($package, $report, 'manual-backup', MaintenanceMode::failures(MaintenanceMode::marker($this->root)));
         } finally {
             $this->unlock();
         }
@@ -253,7 +254,7 @@ final class Updater
             // a mix of old and new files against a half-migrated database (T20).
             MaintenanceMode::enter($this->root, 'update ' . $package->version());
             $entered = true;
-            $snapshot = $this->createSnapshot($package, $report, 'pre-update', self::schemaFailures($prior));
+            $snapshot = $this->createSnapshot($package, $report, 'pre-update', self::openFailures($prior));
             $report = $this->check($package);
             $this->assertApplicable($report);
 
@@ -539,8 +540,9 @@ final class Updater
             // R20: as for an update of code only, a rollback that restored no database left a schema a migration stopped
             // half-way on as it was, so the shop stays closed for what the marker says (it was opened).
             $stillClosed = self::windowKept($prior, $snapshotId, $databaseAt !== null);
-            // R26: a database snapshot taken over a migration stopped half-way puts that migration back as it was.
-            foreach ($databaseAt !== null ? self::restoredSchemaFailures($metadata) : [] as $failure) {
+            // R26: a database snapshot taken over a migration stopped half-way puts that migration back as it was. R27: and a
+            // snapshot taken over a restore or a rollback left half-done puts those back (restoredFailures()).
+            foreach (self::restoredFailures($metadata, $databaseAt !== null) as $failure) {
                 if (!in_array($failure['reason'], array_column($stillClosed, 'reason'), true)) $stillClosed[] = $failure;
             }
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded, 'notice' => $notice,
@@ -801,36 +803,46 @@ final class Updater
     }
 
     /**
-     * R26: the migrations stopped half-way the window before an update carries (failures of neither a restore nor a
-     * rollback): its database snapshot holds that half-migrated schema.
-     * @return list<array{reason: string, before_snapshots?: list<string>}>
+     * R26: the failures of the window before an update, recorded with its snapshot: the snapshot holds what they left
+     * half-done. R27: all of them, not only a migration stopped half-way: also a restore or a rollback left half-done.
+     * @return list<array{reason: string, restore_scope?: string, rollback_snapshot?: string, before_snapshots?: list<string>}>
      */
-    private static function schemaFailures(?array $prior): array
+    private static function openFailures(?array $prior): array
     {
-        $failures = $prior !== null ? MaintenanceMode::failures($prior['marker']) : [];
-        return array_values(array_filter($failures, static fn(array $f): bool => !isset($f['restore_scope']) && !isset($f['rollback_snapshot'])));
+        return $prior !== null ? MaintenanceMode::failures($prior['marker']) : [];
     }
 
     /**
-     * R26: the failures a rollback of $metadata's snapshot puts back with its database: the migrations stopped half-way
-     * when it was taken (schemaFailures()). Was: an update that completed them lifted the window, and the later rollback
-     * of its snapshot reopened the shop over the half-migrated database it restored.
-     * @return list<array{reason: string, before_snapshots: list<string>}>
+     * R26: the failures a rollback of $metadata's snapshot puts back: what was half-done when it was taken (openFailures()).
+     * Was: a step that completed them lifted the window, and the later rollback of that snapshot reopened the shop over the
+     * half-done state it restored. A migration stopped half-way and a restore half-done of the database come back with its
+     * database ($databaseRestored); a rollback half-done (its files, its database) comes back with either. A restore of
+     * uploads only (scope files) does not: the snapshot holds no uploads.
+     * @return list<array{reason: string, restore_scope?: string, rollback_snapshot?: string, before_snapshots?: list<string>}>
      */
-    private static function restoredSchemaFailures(array $metadata): array
+    private static function restoredFailures(array $metadata, bool $databaseRestored): array
     {
         $id = (string)($metadata['id'] ?? '');
-        $marker = ['failed' => true, 'reason' => 'schema', 'pending_other' => is_array($metadata['database']['schema_failures'] ?? null) ? $metadata['database']['schema_failures'] : []];
+        $recorded = $metadata['open_failures'] ?? $metadata['database']['schema_failures'] ?? []; // R26 wrote the latter
+        $marker = ['failed' => true, 'reason' => 'snapshot', 'pending_other' => is_array($recorded) ? $recorded : []];
         $restored = [];
         foreach (array_slice(MaintenanceMode::failures($marker), 1) as $f) {
-            if (isset($f['restore_scope']) || isset($f['rollback_snapshot'])) continue;
-            $f['before_snapshots'] = array_values(array_unique(array_merge($f['before_snapshots'] ?? [], [$id])));
-            $restored[] = $f;
+            if (isset($f['rollback_snapshot'])) {
+                $restored[] = $f;
+            } elseif (!$databaseRestored) {
+                continue;
+            } elseif (isset($f['restore_scope'])) {
+                if ($f['restore_scope'] === 'files') continue;
+                $restored[] = ['restore_scope' => 'db'] + $f;
+            } else {
+                $f['before_snapshots'] = array_values(array_unique(array_merge($f['before_snapshots'] ?? [], [$id])));
+                $restored[] = $f;
+            }
         }
         return $restored;
     }
 
-    private function createSnapshot(UpdatePackage $package, array $report, string $reason, array $schemaFailures = []): array
+    private function createSnapshot(UpdatePackage $package, array $report, string $reason, array $openFailures = []): array
     {
         $id = gmdate('YmdHis') . '-' . bin2hex(random_bytes(6));
         $snapshotDirectory = $this->snapshotDirectory($id);
@@ -848,7 +860,7 @@ final class Updater
             'files' => [],
             'database' => null,
             'state_existed' => is_file($this->statePath()),
-        ];
+        ] + ($openFailures !== [] ? ['open_failures' => $openFailures] : []);
 
         try {
             foreach ($package->entries() as $entry) {
@@ -889,7 +901,6 @@ final class Updater
                 }
                 $metadata['database']['high_water'] = $highWater;
                 $metadata['database']['high_water_tables'] = self::HIGH_WATER_TABLES;
-                if ($schemaFailures !== []) $metadata['database']['schema_failures'] = $schemaFailures;
             }
             $this->writeJsonAtomic($snapshotDirectory . DIRECTORY_SEPARATOR . 'snapshot.json', $metadata);
             return $metadata;
