@@ -72,6 +72,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   only for a change they show (price, content, going in or out of stock).
 - **Migration** `20261107120000_feed_last_errors` adds `feeds.last_errors`: the feed detail lists which items the
   last sync refused and why (also for a scheduled sync), not only their count.
+- **Migration** `20261110120000_back_in_stock_retry` adds `back_in_stock_requests.mail_tries` and `next_try_at`: a
+  "back in stock" notice not delivered yet keeps its request and one retry series (review round 27).
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -112,6 +114,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   nobody and were never sent again (the download links were even marked delivered). They are now tried again like order
   mail: every 30 minutes, at most 48 times; logged download links are revoked and new ones mailed. With `MAIL_ADAPTER=log`
   on purpose nothing is tried again.
+- **"Back in stock" notices are retried once per request and not refused after a provider fix** (review round 27).
+  The recipient limit (10 an hour) counted the copies only written to the log while the mail provider was
+  misconfigured, so the real notice was refused once it was fixed; such copies no longer count for a real provider
+  (with `MAIL_ADAPTER=log` on purpose they do). A notice held back by that limit (`rate_limited`) was taken as
+  delivered and its request closed; it now stays and is tried again after the window. A restock while a notice waited
+  started a second retry series; the series now lives on the request (`mail_tries`, `next_try_at`). With
+  `MAIL_ADAPTER=log` on purpose the notice is not retried (was: 48 tries), as order mail.
 - **Security: a step run as root no longer gives the web user root** (review round 27). The web user can write the
   application root, and steps run as root worked in it: `DataOverrides::atomicWrite()` (the maintenance marker, the
   data directory's `stores.json`, the update key) chmodded its temporary file by name to the mode of the file it
