@@ -542,9 +542,12 @@ names the rollback to run. `php cli/migrate.php apply` and `php cli/restore.php`
 the same window (and refuse while an update or migration holds it). These four steps
 take one lock, `.maintenance.lock`, before they look at the window, so only one of
 them runs at a time and none enters or lifts the window of another (the file is
-created 0660; run as root, a step hands it to the owner and group of the application
-root, so the web user can take it after root; on a file system without file locks the
-steps run with a warning and must not be started together); a migration that
+created 0660 by the owner and group of the application root, also when root runs the
+step, so the web user can take it after root; a symbolic or hard link at that name
+refuses every step until you check and remove it; a lock other accounts could use is
+replaced, never chmodded; on a file system without file locks the steps exclude each
+other by `.maintenance.lock.held` instead, which a step killed on another host leaves
+for a day: remove it once no step runs); a migration that
 fails or is killed, an update whose automatic rollback fails, or a rollback that stops
 after it began restoring marks the window failed: it never expires and the file says
 what to run. A worker run checks the window before every job and stops when it opens. A failed migration is lifted only by a

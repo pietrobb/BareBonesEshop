@@ -134,7 +134,15 @@ if (!$yes && !$quiet) {
 // before its first change, so only a failed window that no process holds was left by a dead one.
 $root = dirname(__DIR__);
 // R24: the step lock first (MaintenanceMode::claim()): checked and entered apart, an update or migration could start in between.
-if (!MaintenanceMode::claim($root) || MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
+// R26: a step lock that cannot be opened safely (a link, no usable permissions) refuses the restore with its reason; it
+// ended in an uncaught exception (exit 255).
+try {
+    $claimed = MaintenanceMode::claim($root);
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+if (!$claimed || MaintenanceMode::heldElsewhere($root) || (MaintenanceMode::active($root) && !MaintenanceMode::failed($root))) {
     fwrite(STDERR, 'REFUSED: another maintenance window is open (' . MaintenanceMode::busy($root)
         . "); wait until that update or migration ends, then retry.\n");
     exit(1);
