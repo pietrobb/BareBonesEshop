@@ -19,6 +19,9 @@ class BackInStock {
     private const RESEND_MINUTES = 60;
     /** Confirmation links one address of a store receives per hour, over all products. */
     private const LINKS_PER_HOUR = 3;
+    /** R26: how often a job whose notices were only written to the log is queued again, and how far apart (as order mail). */
+    private const LOGGED_RETRIES = 48;
+    private const LOGGED_DELAY = 1800;
 
     private static array $pending = [];
     private static bool $shutdownRegistered = false;
@@ -174,17 +177,24 @@ class BackInStock {
         return array_values(array_unique($ids));
     }
 
+    /** The `back_in_stock` job (cli/worker.php). */
+    public static function handleJob(array $payload): int {
+        return self::process(array_map('strval', (array)($payload['skus'] ?? [])), (int)($payload['_mail_logged_tries'] ?? 0));
+    }
+
     /**
      * Worker: mail the confirmed requests of the products behind these SKUs that can be bought again, and delete
-     * them. A request whose mail failed stays and the job throws, so the retry sends only what is left. Lapsed
-     * requests and links nobody confirmed in time are deleted first.
+     * them. A request whose mail failed stays and the job throws, so the retry sends only what is left. A request whose
+     * mail was only written to the log stays too, and the job is queued again (LOGGED_RETRIES, LOGGED_DELAY apart).
+     * Lapsed requests and links nobody confirmed in time are deleted first.
      * @param list<string> $skus
      */
-    public static function process(array $skus): int {
+    public static function process(array $skus, int $loggedTries = 0): int {
         $db = Db::get();
         $store = StoreContext::current()->id();
         self::cleanup(null, $store);
         $sent = 0;
+        $logged = 0;
         $failed = false;
         foreach (self::productIds($skus) as $productId) {
             $product = self::product($productId);
@@ -197,15 +207,34 @@ class BackInStock {
                     $failed = true;
                     continue;
                 }
-                // R26: only written to the log, it reached nobody: the request stays for a mail that goes out (was: deleted
-                // and counted as notified).
-                if (MailService::logged($result)) continue;
+                // R26: only written to the log, it reached nobody: the request stays (was: deleted and counted as notified).
+                if (MailService::logged($result)) {
+                    $logged++;
+                    continue;
+                }
                 $db->prepare('DELETE FROM back_in_stock_requests WHERE id = ?')->execute([(int)$request['id']]);
                 $sent++;
             }
         }
+        if ($logged > 0) self::retryLogged($skus, $store, $logged, $loggedTries);
         if ($failed) throw new RuntimeException('back_in_stock.delivery_failed');
         return $sent;
+    }
+
+    /**
+     * R26 (review run 388): the requests kept for logged mail are tried again later, so they go out once the mail
+     * configuration is fixed — a new job came only with the next refill, which does not happen while the product
+     * stays in stock. Logged, so the merchant sees what waits.
+     * @param list<string> $skus
+     */
+    private static function retryLogged(array $skus, string $store, int $logged, int $tries): void {
+        $context = ['store_id' => $store, 'requests' => $logged, 'tries' => $tries];
+        if ($tries >= self::LOGGED_RETRIES) {
+            Logger::error('back_in_stock.mail_logged_gave_up', $context);
+            return;
+        }
+        Logger::warning('back_in_stock.mail_logged', $context);
+        JobQueue::pushDelayed('back_in_stock', ['skus' => $skus, '_store_id' => $store, '_mail_logged_tries' => $tries + 1], self::LOGGED_DELAY);
     }
 
     private static function mail(array $product, array $request): array {
