@@ -88,8 +88,8 @@ try {
         'R24 credit: a charge.refunded of the item refund in flight books it, and the item credit note stays the only one (was: a second credit note)');
     $r24cCreditJobs($r24cItemOrder, $before);
     $refundId = 're_r24c_' . substr(sha1('r24c-item'), 0, 10);
-    assert_equals([$amount, 'refund_confirmed', 1, 'succeeded'], [PaymentService::refundedAmount($r24cItemOrder),
-        (string)$pdo->query("SELECT status FROM payment_transactions WHERE order_id = {$r24cItemOrder} AND provider_ref = '{$refundId}'")->fetchColumn(),
+    assert_equals([$amount, ['partially_refunded', 'refund_confirmed'], 1, 'succeeded'], [PaymentService::refundedAmount($r24cItemOrder),
+        $pdo->query("SELECT status FROM payment_transactions WHERE order_id = {$r24cItemOrder} AND provider_ref = '{$refundId}' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN),
         count($r24cCredits($r24cItemOrder)), (string)$pdo->query('SELECT status FROM order_refunds WHERE id = ' . (int)$credit['refund_id'])->fetchColumn()],
         'R24 credit: the refund job\'s result then only confirms the refund (was: booked a second time) and completes the item refund');
     assert_true(!PaymentService::bookProviderRefund($r24cItemOrder, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId),
