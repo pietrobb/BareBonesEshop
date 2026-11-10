@@ -36,7 +36,7 @@ final class SqliteMaintenance
      * process dies (fatal error, OOM, kill), where `finally` never runs. An unlocked marker past the
      * grace period is therefore stale and cleared — but only while the live database file exists:
      * a crash between the two renames of a swap leaves no live file, and reopening would create an
-     * empty database, so the shop stays closed until the operator restores the .rollback copy.
+     * empty database: the .rollback copy is moved back first (R26), and without one the shop stays closed.
      */
     public static function isActive(string $dbPath): bool
     {
@@ -44,12 +44,20 @@ final class SqliteMaintenance
         if (!is_file($marker)) return false;
         if (isset(self::$held[$marker])) return true;
         $mtime = @filemtime($marker);
-        if ($mtime === false || $mtime > time() - self::STALE_GRACE_SECONDS || !is_file($dbPath)) return true;
+        if ($mtime === false || $mtime > time() - self::STALE_GRACE_SECONDS) return true;
         $handle = @fopen($marker, 'r');
         if ($handle === false) return is_file($marker);
         if (!flock($handle, LOCK_EX | LOCK_NB)) {
             fclose($handle);
             return true; // the owning process is still running
+        }
+        // R26: a swap killed between its two renames left no live file, only the copy moved aside. Its owner is dead (the
+        // lock is ours), so that copy — the database as it was before the swap — goes back. Was: the shop and every later
+        // restore stayed refused until the operator moved it back by hand.
+        if (!is_file($dbPath) && !self::recoverMovedAside($dbPath)) {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+            return true;
         }
         // The lock was taken on the inode opened above. Another process may have cleared that stale
         // marker and a new owner created a fresh one at the same path meanwhile: unlinking by path
@@ -72,6 +80,23 @@ final class SqliteMaintenance
         if (is_file($marker)) return true;
         if (class_exists('Logger')) Logger::warning('sqlite.maintenance_stale_cleared', ['marker' => basename($marker)]);
         return false;
+    }
+
+    /**
+     * R26: put back the live database a dead swap moved aside (<db>.pre-restore-*.rollback, BackupService::restore()); the
+     * newest one, which is the last live file. False when there is none or it cannot be moved.
+     */
+    private static function recoverMovedAside(string $dbPath): bool
+    {
+        $copies = glob($dbPath . '.pre-restore-*.rollback') ?: [];
+        $copies = array_values(array_filter($copies, static fn(string $copy): bool => is_file($copy) && !is_link($copy)));
+        if ($copies === []) return false;
+        usort($copies, static fn(string $a, string $b): int => (int)@filemtime($b) <=> (int)@filemtime($a));
+        @unlink($dbPath . '-wal');
+        @unlink($dbPath . '-shm');
+        if (!@rename($copies[0], $dbPath)) return false;
+        if (class_exists('Logger')) Logger::warning('sqlite.maintenance_swap_recovered', ['restored' => basename($copies[0])]);
+        return true;
     }
 
     public static function assertOpen(string $dbPath): void

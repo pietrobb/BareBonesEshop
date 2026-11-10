@@ -100,6 +100,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A rollback no longer reopens the shop over a half-migrated database, and a killed SQLite restore recovers**
+  (review round 26).
+  - An update that completed a migration stopped half-way reopened the shop, but its snapshot held that half-migrated
+    database; a later `cli/update.php rollback --snapshot=...` of it restored that database and reopened the shop. The
+    snapshot now records the failed migration, and its rollback keeps the shop closed until `php cli/migrate.php apply`
+    (or an update that migrates) completes it.
+  - A restore killed between moving the live SQLite database aside and moving the restored copy in left no database:
+    the shop and every later restore stayed refused until the copy was moved back by hand. The next request or step
+    now moves the copy (`<db>.pre-restore-*.rollback`) back once the killed process is gone. The shop stays closed for
+    the interrupted restore, which can be run again.
 - **Security: the maintenance step lock no longer lets the web user take over root's files** (review round 26). Run as
   root, `cli/restore.php`, `cli/update.php` and `cli/migrate.php` opened `.maintenance.lock` following a symbolic link,
   then gave the file it pointed at to the owner of the application root (0660) and emptied it. The web user can write
