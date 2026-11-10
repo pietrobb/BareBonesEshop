@@ -163,6 +163,7 @@ if (!function_exists('renderOrderStatus')) require_once dirname(TEST_CLI_DIR) . 
 if (!function_exists('renderProduct')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/CatalogPages.php';
 (require TEST_CLI_DIR . '/../migrations/20261025120000_back_in_stock_requests.php')->up($pdo, Db::isSqlite());
 (require TEST_CLI_DIR . '/../migrations/20261104120000_back_in_stock_double_opt_in.php')->up($pdo, Db::isSqlite());
+(require TEST_CLI_DIR . '/../migrations/20261110120000_back_in_stock_retry.php')->up($pdo, Db::isSqlite());
 $r10xGuestOrder = Orders::byId((int)($r10xCheckout['order_id'] ?? 0)) ?? [];
 $r10xLookup = static function (string $number, string $email, ?string $csrf = null): string {
     $_SERVER['REQUEST_METHOD'] = 'POST';
