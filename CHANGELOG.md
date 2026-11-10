@@ -100,6 +100,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
+  fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached
+  nobody and were never sent again (the download links were even marked delivered). They are now tried again like order
+  mail: every 30 minutes, at most 48 times; logged download links are revoked and new ones mailed. With `MAIL_ADAPTER=log`
+  on purpose nothing is tried again.
 - **A rollback no longer reopens the shop over a half-migrated database, and a killed SQLite restore recovers**
   (review round 26).
   - An update that completed a migration stopped half-way reopened the shop, but its snapshot held that half-migrated
