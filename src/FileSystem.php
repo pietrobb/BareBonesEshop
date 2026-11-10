@@ -26,4 +26,31 @@ final class FileSystem
         }
         @rmdir($path);
     }
+
+    /**
+     * R28 (review round 28, low): a non-blocking flock() that tells a lock another process holds (false) from a file
+     * system without file locks (throws). Without locks in the private directory every step failed as if another one
+     * ran ("Another update process is already running", "lock acquisition timed out"). $wouldBlock is not set on Windows.
+     * @param resource $handle
+     */
+    public static function tryLock($handle, string $path, int $operation = LOCK_EX): bool
+    {
+        return flock($handle, $operation | LOCK_NB, $wouldBlock) || self::lockRefused($path, (int)$wouldBlock);
+    }
+
+    /** After a failed non-blocking flock(): false when another process holds the lock, else throws. */
+    public static function lockRefused(string $path, int $wouldBlock): bool
+    {
+        if ($wouldBlock !== 1 && PHP_OS_FAMILY !== 'Windows') {
+            throw new RuntimeException(self::noFileLocks($path));
+        }
+        return false;
+    }
+
+    public static function noFileLocks(string $path): string
+    {
+        return "{$path} cannot be locked: its file system has no file locks (flock), so this step cannot tell whether"
+            . ' another one runs. Keep the private directory (update_storage_dir, backups, the SQLite database) on a local'
+            . ' file system or on a share with working locks.';
+    }
 }

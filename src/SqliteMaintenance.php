@@ -38,6 +38,13 @@ final class SqliteMaintenance
      * a crash between the two renames of a swap leaves no live file, and reopening would create an
      * empty database: the .rollback copy is moved back first (R26), and without one the shop stays closed.
      */
+    /** R28: a failed flock() that no other process causes (self-contained: tests load this file alone; see FileSystem). */
+    private static function noFileLocks(string $path): string
+    {
+        return "{$path} cannot be locked: its file system has no file locks (flock), so this step cannot tell whether"
+            . ' another one runs. Keep the SQLite database on a local file system or on a share with working locks.';
+    }
+
     public static function isActive(string $dbPath): bool
     {
         $marker = self::markerPath($dbPath);
@@ -47,8 +54,9 @@ final class SqliteMaintenance
         if ($mtime === false || $mtime > time() - self::STALE_GRACE_SECONDS) return true;
         $handle = @fopen($marker, 'r');
         if ($handle === false) return is_file($marker);
-        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+        if (!flock($handle, LOCK_EX | LOCK_NB, $wouldBlock)) {
             fclose($handle);
+            if ((int)$wouldBlock !== 1 && PHP_OS_FAMILY !== 'Windows') throw new RuntimeException(self::noFileLocks($marker));
             return true; // the owning process is still running
         }
         // R26: a swap killed between its two renames left no live file, only the copy moved aside. Its owner is dead (the
@@ -113,10 +121,11 @@ final class SqliteMaintenance
         if ($handle === false) {
             throw new RuntimeException('Database maintenance is already in progress: ' . $marker);
         }
-        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+        if (!flock($handle, LOCK_EX | LOCK_NB, $wouldBlock)) {
             fclose($handle);
             @unlink($marker);
-            throw new RuntimeException('Database maintenance marker cannot be locked: ' . $marker);
+            throw new RuntimeException((int)$wouldBlock !== 1 && PHP_OS_FAMILY !== 'Windows'
+                ? self::noFileLocks($marker) : 'Database maintenance marker cannot be locked: ' . $marker);
         }
         fwrite($handle, (string)json_encode(['reason' => $reason, 'pid' => getmypid(), 'since' => gmdate('c')]));
         fflush($handle);
