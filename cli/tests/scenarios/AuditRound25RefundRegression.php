@@ -49,6 +49,8 @@ $r25rOrder = static function (string $number, int $lines = 2) use ($pdo, $r25rPr
         ->execute([$number, 2100 * $lines, (int)$snapshot['totals']['gross'], 'pi_' . strtolower($number), json_encode(['provider' => 'stripe', 'service_type' => 'online_card']),
             json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
     $id = $r25rOrders[] = (int)$pdo->lastInsertId();
+    // SQLite reuses the id of an order an earlier scenario deleted; rows it left under that id are not this order's.
+    foreach (['payment_transactions', 'order_refunds'] as $r25rStale) $pdo->prepare("DELETE FROM {$r25rStale} WHERE order_id = ?")->execute([$id]);
     foreach ($skus as $sku) {
         $pdo->prepare('INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, 1, 2100, 2100)')
             ->execute([$id, $r25rProduct, $sku, "R25R {$sku}"]);
@@ -72,10 +74,11 @@ $r25rJob = static function (int $orderId, array $item): void {
 };
 $r25rCredits = static fn(int $orderId): array => array_map('intval',
     $pdo->query("SELECT total_gross FROM invoices WHERE order_id = {$orderId} AND type = 'credit_note' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
-// What the refund_credit_note job does for every refund booked.
+// What the refund_credit_note job does for every refund booked (R26: and for a refund that reclaimed a provisional booking,
+// queued under its own key).
 $r25rCreditJobs = static function (int $orderId) use ($pdo): void {
     foreach ($pdo->query("SELECT idempotency_key FROM payment_transactions WHERE order_id = {$orderId}
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0")->fetchAll(PDO::FETCH_COLUMN) as $key) {
+            AND ((status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0) OR status = 'refund_confirmed')")->fetchAll(PDO::FETCH_COLUMN) as $key) {
         InvoiceService::creditBookedRefund($orderId, (string)$key);
     }
 };

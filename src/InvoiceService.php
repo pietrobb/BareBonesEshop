@@ -855,13 +855,30 @@ final class InvoiceService
             AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$row) return null;
+        if (!$row) {
+            // R26: a refund named by its id that reclaimed money a summary event had booked provisionally for a refund in
+            // flight (PaymentService::bookProviderRefundWithin()): credited for what it reclaimed, under its own key.
+            $claim = $db->prepare("SELECT raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
+                AND status = 'refund_confirmed'");
+            $claim->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
+            $raw = json_decode((string)$claim->fetchColumn(), true);
+            $reclaims = is_array($raw) ? (array)($raw['reclaims'] ?? []) : [];
+            $reclaimed = $reclaims !== [] && !array_is_list($reclaims) ? array_sum(array_map('intval', $reclaims)) : 0;
+            return $reclaimed > 0 ? self::creditRefund($orderId, $reclaimed, $ledgerKey) : null;
+        }
         // R24: a Stripe charge.refunded without its refund list books the item refund it settles under the event's key; that
         // item refund is named in the row (PaymentService::bookCumulativeRefund()).
         $settles = json_decode((string)($row['raw_response'] ?? ''), true);
         $settlesKey = is_array($settles) ? (string)($settles['settles_refund_request'] ?? '') : '';
-        // R25: unless that booking was provisional and turned out to be other money (a dashboard refund).
-        if ($settlesKey !== '' && PaymentService::provisionalRefundVoid($orderId, $ledgerKey)) $settlesKey = '';
+        // R25: unless that booking was provisional and turned out to be other money (a dashboard refund). R26: a provisional
+        // booking corrects what is left to it — the refund it was moved to, less what other refunds reclaimed, nothing once
+        // it was taken back.
+        $provisional = PaymentService::provisionalRefundCredit($orderId, $ledgerKey);
+        if ($provisional !== null) {
+            if ($provisional['amount'] <= 0) return null;
+            $settlesKey = $provisional['settles'];
+            $row['amount'] = $provisional['amount'];
+        }
         // An item refund (RMA credit note) already corrects the invoice: its refund is booked under its key or its provider refund id.
         $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store
             AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
