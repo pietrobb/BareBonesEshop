@@ -9,7 +9,8 @@
 #   install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step
 # and use it instead of `sudo php cli/<step>.php`:
 #   bbe-step /var/www/shop update.php apply --package=/srv/releases/update-2.1.3
-# Linux (util-linux `setpriv`). Elsewhere run the step as the owner yourself: sudo -u <owner> php cli/<step>.php ...
+# Linux (util-linux `setpriv`, `setsid`). Elsewhere run the step as the owner yourself: sudo -u <owner> php cli/<step>.php ...
+# with sudo's `Defaults use_pty` (the default from sudo 1.9.14), or the step can type into root's terminal.
 set -eu
 
 if [ "$#" -lt 2 ]; then
@@ -71,4 +72,11 @@ if [ -n "$home" ]; then
 else
     groups=--clear-groups
 fi
-exec setpriv --reuid="$uid" --regid="$gid" "$groups" --inh-caps=-all -- php "$root/cli/$step" "$@"
+if ! command -v setsid >/dev/null 2>&1; then
+    echo "bbe-step: REFUSED: setsid (util-linux) is not installed." >&2
+    exit 1
+fi
+# The step runs in a session of its own, without root's terminal as its controlling terminal: code the owner can change
+# must not push input into root's shell (TIOCSTI) once the step ends. Ctrl-C or a dropped ssh connection does not stop
+# it; stop it with kill. The step keeps the terminal as stdin/stdout/stderr, so its prompts and output still work.
+exec setsid -w setpriv --reuid="$uid" --regid="$gid" "$groups" --inh-caps=-all -- php "$root/cli/$step" "$@"

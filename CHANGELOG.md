@@ -106,10 +106,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   it loads code of `src/` (a notice says so); in a tree root owns, root stays only when no other account can change
   anything in the tree or above it, else the step is refused. That switch is code in the tree itself (`cli/cli-only.php`):
   an account that can write the tree, often the web user, can change or replace it, and root then runs its copy. It is a
-  second line of defence, not a fix: run steps as the owner (`sudo -u <owner> php cli/….php`), or install the wrapper
+  second line of defence, not a fix: run steps as the owner (`sudo -u <owner> php cli/….php`, with `Defaults use_pty`
+  in sudoers, the default from sudo 1.9.14, or the step can type commands into root's terminal), or install the wrapper
   `deploy/bbe-step.sh` outside the tree (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`)
   and run `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group root) before any PHP of the
-  shop runs and refuses a root-owned tree. A step now changes only what that owner can write: run backups and restores
+  shop runs, in a session of its own without root's terminal as controlling terminal, and refuses a root-owned tree.
+  Ctrl-C or a dropped ssh connection no longer stops a step started through `bbe-step`; stop it with `kill`. A step now changes only what that owner can write: run backups and restores
   as the user that owns the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook says). The
   Docker `setup` service hands the directories it fills to the checkout's owner for the command and to `www-data`
   afterwards.
@@ -130,7 +132,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (review round 28, findings 1 and 6). Round 27 called the root hole fixed by `cli/cli-only.php`, but that file is in
   the tree the web user may write, so a changed copy ran as root. New `deploy/bbe-step.sh`, installed root-owned outside
   the shop, switches a step to the owner of the application root (never group root) before any PHP of the shop runs and
-  refuses a root-owned tree. The theme check of a new release started as root (by the 2.1.2 updater) now says "Not a
+  refuses a root-owned tree. It starts the step in a new session (`setsid`), so the step has no controlling terminal: a
+  changed step can no longer push commands into root's shell with `TIOCSTI` for root to run after it ends (capability
+  review of round 28; reproduced as uid 33 → `uid=0(root)` with `dev.tty.legacy_tiocsti=1`). The theme check of a new release started as root (by the 2.1.2 updater) now says "Not a
   theme problem: the updater runs as root" instead of failing as a theme that breaks checkout, and an update directory,
   `installed.json` or snapshot left by an update run as root is refused with the `chown` to run (was: "version unknown"
   and "no snapshots").

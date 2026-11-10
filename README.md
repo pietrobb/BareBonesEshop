@@ -568,11 +568,13 @@ the updater's own files (`cli/update.php`, `src/Updater.php`, ...) back last, so
 that stops half-way is finished by the updater that started it.
 
 **Root.** Root must never run PHP of a tree another account can write. Run every
-step as the owner of the application root (`sudo -u <owner> php cli/….php`), or
-install `deploy/bbe-step.sh` root-owned outside the tree
+step as the owner of the application root (`sudo -u <owner> php cli/….php`, with
+`Defaults use_pty` in sudoers, the default from sudo 1.9.14, or the step can type
+commands into root's terminal), or install `deploy/bbe-step.sh` root-owned outside the tree
 (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`) and run
 `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group
-root) before any PHP of the shop runs, and refuses a tree root owns. As a second line
+root) before any PHP of the shop runs, in a session of its own without root's terminal
+as controlling terminal (Ctrl-C does not stop it; use `kill`), and refuses a tree root owns. As a second line
 of defence, any `php cli/….php` started as root switches to the owner and group of the
 application root before it loads code of `src/`, and in a tree root owns stays root
 only when no other account can change any file or directory in it or above it;
