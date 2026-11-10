@@ -680,7 +680,11 @@ $result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [], 4000, 5
 assert_equals(1, $result['total'], 'Price range 4000-5000 → 1 product');
 assert_equals('BD-002', $result['products'][0]['sku'], 'Price filtered product is BD-002');
 
-// Spec filter values — dynamic facets
+// Spec filter values — dynamic facets. The unfiltered facets are cached; whether a later call hits that cache
+// depends on whether a second boundary passed since the last catalog change (a hit also runs the scheduled-price
+// check), so the facet cache file is removed before each unfiltered call to measure the aggregate query itself.
+$g4FacetCacheFile = Cache::path(Cache::localePath('sk', 'facets/' . hash('sha256', (string)(int)$specCatId) . '.json'));
+@unlink($g4FacetCacheFile);
 $filterValues = Products::specFilterValues($specCatId, 'sk');
 assert_true(isset($filterValues['Strana montáže']), 'Filter has Strana montáže');
 assert_true(isset($filterValues['Typ']), 'Filter has Typ');
@@ -702,6 +706,7 @@ $g4FacetCounter = new QueryCountingPDO('sqlite:' . $testDbPath, null, null, [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 Db::init($g4FacetCounter, 'sqlite');
+@unlink($g4FacetCacheFile);
 $g4FacetCounter->resetQueryCount();
 $g4UnfilteredFacets = Products::specFilterValues($specCatId, 'sk');
 assert_equals($filterValues, $g4UnfilteredFacets, 'G4 facets: batched unfiltered payload preserves behavior');

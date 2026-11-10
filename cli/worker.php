@@ -69,6 +69,7 @@ $handlers = [
     'invoice_issue'     => [WorkerJobs::class, 'handleInvoiceIssue'],
     'digital_fulfill'   => [WorkerJobs::class, 'handleDigitalFulfill'],
     'digital_revoke'    => [WorkerJobs::class, 'handleDigitalRevoke'],
+    'payment_link_send' => [WorkerJobs::class, 'handlePaymentLinkSend'],
     'merchant_notify'   => [WorkerJobs::class, 'handleMerchantNotify'],
     'incident_notify'   => static fn(array $payload): int => IncidentMonitor::notify((string)($payload['fingerprint'] ?? '')),
 ];

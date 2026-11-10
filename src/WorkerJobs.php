@@ -132,9 +132,18 @@ final class WorkerJobs
         if (($result['status'] ?? '') === 'rate_limited') MailService::deferRateLimited($payload, $result);
         // R26: written to the log only because the provider is misconfigured, it reached nobody: tried again once the
         // configuration may be fixed (was: never sent after the fix). Each try logs a copy until it goes out.
+        if ($fellBack && ($result['status'] ?? '') !== 'rate_limited') self::requeueLoggedMail('email_send', $payload);
+    }
+
+    /**
+     * R26/R27: queue job $type again whose mail was written to the log only because the mail provider is misconfigured
+     * (it reached nobody), MAIL_FALLBACK_RETRIES times MAIL_FALLBACK_DELAY apart, so it goes out once the provider is fixed.
+     * Order mail, download links, the invoice and a manual order's payment link alike.
+     */
+    public static function requeueLoggedMail(string $type, array $payload): void {
         $tries = (int)($payload['_mail_fallback_tries'] ?? 0);
-        if ($fellBack && ($result['status'] ?? '') !== 'rate_limited' && $tries < self::MAIL_FALLBACK_RETRIES) {
-            JobQueue::pushDelayed('email_send', ['_mail_fallback_tries' => $tries + 1] + $payload, self::MAIL_FALLBACK_DELAY);
+        if ($tries < self::MAIL_FALLBACK_RETRIES) {
+            JobQueue::pushDelayed($type, ['_mail_fallback_tries' => $tries + 1] + $payload, self::MAIL_FALLBACK_DELAY);
         }
     }
 
@@ -157,16 +166,21 @@ final class WorkerJobs
         // delivered and grant() has nothing left (a crashed holder's claim lapses after its lease).
         if ($claim === null) throw new RuntimeException("Digital fulfilment of order #{$orderId} is already in progress");
         try {
-            self::fulfilDigitalOrder($orderId, $claim);
+            $logged = self::fulfilDigitalOrder($orderId, $claim);
         } finally {
             DigitalDelivery::releaseFulfilment($claim);
         }
+        if ($logged) self::requeueLoggedMail('digital_fulfill', $payload);
     }
 
-    /** $claim (the fulfilment claim, renewed in place) is renewed right before the mail, so its lease covers the delivery. */
-    public static function fulfilDigitalOrder(int $orderId, ?string &$claim = null): void {
+    /**
+     * $claim (the fulfilment claim, renewed in place) is renewed right before the mail, so its lease covers the delivery.
+     * R27: true when the links were only written to the log for a misconfigured mail provider: they reached nobody and are
+     * revoked (they stand in the log), and the caller tries again with new ones (was: marked delivered, never sent).
+     */
+    public static function fulfilDigitalOrder(int $orderId, ?string &$claim = null): bool {
         $links = DigitalDelivery::grant($orderId);
-        if (!$links) return;
+        if (!$links) return false;
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} not found");
 
@@ -190,13 +204,18 @@ final class WorkerJobs
             'order_number' => $order['order_number'],
             'customer_name' => $order['customer_name'],
             'download_links' => $formatted,
-        ], $orderId, [], self::orderMailProvider($order));
+        ], $orderId, [], self::orderMailProvider($order, $fellBack));
         $ids = array_column($links, 'id');
         if (($result['status'] ?? '') !== 'sent') {
             DigitalDelivery::revokeIssued($ids, 'delivery_email_failed');
             throw new RuntimeException('Digital delivery email failed: ' . ($result['error'] ?? 'unknown error'));
         }
+        if ($fellBack) {
+            DigitalDelivery::revokeIssued($ids, 'delivery_email_logged');
+            return true;
+        }
         DigitalDelivery::markDelivered($ids);
+        return false;
     }
 
     public static function handleDigitalRevoke(array $payload, array $job): void {
@@ -452,10 +471,24 @@ final class WorkerJobs
             $vars,
             $orderId,
             $attachments,
-            self::orderMailProvider($order)
+            self::orderMailProvider($order, $fellBack)
         );
         // Fail the job so the queue retries delivery; issuing the invoice again is idempotent.
         if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
+        // R27: written to the log only (misconfigured provider): mailed again once it may be fixed, as order mail.
+        if ($fellBack && ($result['status'] ?? '') === 'sent') self::requeueLoggedMail('invoice_issue', $payload);
+    }
+
+    /**
+     * R27: the payment link of an order created by hand, once more after it was only written to the log for a misconfigured
+     * mail provider (ManualOrder::notify()). While the provider is still misconfigured no new link is issued nor logged.
+     */
+    public static function handlePaymentLinkSend(array $payload, array $job): void {
+        $order = Orders::byId((int)($payload['order_id'] ?? 0));
+        if ($order === null || !PaymentLink::payable($order)) return;
+        MailService::providerCode($order, $fellBack);
+        $result = $fellBack ? ['fell_back' => true] : PaymentLink::send($order);
+        if (!empty($result['fell_back'])) self::requeueLoggedMail('payment_link_send', $payload);
     }
 
     public static function handleImportProcess(array $payload, array $job): void {

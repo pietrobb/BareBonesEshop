@@ -119,6 +119,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   saved and says so. A guest's list is kept in the session and joins the account on login (a line in both is kept
   once); a signed-in customer's list is kept per store. The wishlist (favourites from the product page) is unchanged.
   Themes: `storefront/cart-saved` (included by `cart` and `cart-empty`).
+- **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
+  fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached
+  nobody and were never sent again (the download links were even marked delivered). They are now tried again like order
+  mail: every 30 minutes, at most 48 times; logged download links are revoked and new ones mailed. With `MAIL_ADAPTER=log`
+  on purpose nothing is tried again.
 - **"Back in stock" notices are retried once per request and not refused after a provider fix** (review round 27).
   The recipient limit (10 an hour) counted the copies only written to the log while the mail provider was
   misconfigured, so the real notice was refused once it was fixed; such copies no longer count for a real provider
@@ -140,6 +145,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   lock that holds anything but a holder record (a `.env` renamed to that name was emptied), and the claim file without
   file locks belongs to the application root's group. CI runs these root paths as root with `/proc` hidden.
 
+- **A rollback no longer reopens the shop over a half-done restore or rollback either** (review round 27). Only a
+  migration stopped half-way was recorded with an update's snapshot: one taken over a restore of the database or a
+  rollback left half-done held that state too, and once that step was run again and opened the shop, the rollback of
+  the snapshot put the half-done state back and reopened the shop over it. A snapshot now records every failure of the
+  window it was taken in, a manual `cli/update.php backup` too, and its rollback keeps the shop closed until the
+  restore or the named rollback is run again (a restore of uploads only does not come back: snapshots hold no uploads).
 - **A rollback no longer reopens the shop over a half-migrated database, and a killed SQLite restore recovers**
   (review round 26).
   - An update that completed a migration stopped half-way reopened the shop, but its snapshot held that half-migrated
