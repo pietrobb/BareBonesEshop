@@ -100,6 +100,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Stripe refunds booked ahead of their result are corrected, not booked twice** (review round 26). When a Stripe
+  `charge.refunded` without its refund list was booked as an item refund still at Stripe:
+  - a smaller refund from the Stripe dashboard took the whole booking, and the item's own refund then booked it again
+    (a 42.00 order showed 42.00 refunded for 26.00 returned, was "refunded" with nothing left to refund, and had credit
+    notes of -21.00 twice). The dashboard refund now takes only its own amount; the credit notes are -21.00 and -5.00.
+  - with two item refunds of the same amount in flight it was matched to the older one; when that one failed its money
+    was booked again by the other's result (42.00 for 21.00 returned). The booking now moves to the other refund, or is
+    taken back when that refund was already booked on its own.
+  - a refund Stripe answered "pending" and failed later stayed booked for good (only a critical incident). It is now
+    taken back, and its item refund and credit note are released; one that succeeds later is completed once. The item
+    stays pending until then.
+  - the internal "refund dispatched" marker is removed once the refund call's result is recorded.
 - **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
   shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
   database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out
