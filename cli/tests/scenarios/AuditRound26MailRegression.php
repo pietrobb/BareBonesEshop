@@ -105,11 +105,39 @@ try {
     assert_equals([], $r26mRetries(), 'R26 mail: an order mail is tried again at most 48 times');
     putenv('MAIL_ADAPTER');
 
-    // 5. "Logged" is no "sent" in the six places the review named.
+    // 5. The admin payment link written to the log comes back 'logged' (the admin page reads only 'sent' as e-mailed and
+    //    audited); through a real provider it is 'sent'.
+    $r26mCfgProp = new ReflectionProperty(Security::class, 'cfg');
+    $r26mCfgBefore = $r26mCfgProp->getValue();
+    $r26mInstances = new ReflectionProperty(Adapters::class, 'instances');
+    $r26mInstancesBefore = $r26mInstances->getValue();
+    try {
+        $r26mCfgProp->setValue(null, ['app_url' => 'https://r26m.example.test'] + (is_array($r26mCfgBefore) ? $r26mCfgBefore : require AppConfig::path(dirname(TEST_CLI_DIR))));
+        Adapters::set('payment.r26m-gateway', new class {});
+        $r26mUnpaid = static function () use ($r26mDb): array {
+            $r26mDb->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_status, payment_method, payment_id, payment_method_snapshot, store_id, created_at)
+                VALUES (?, 'R26M', 'r26m-link@r26m.example.test', '', '{}', 1000, 0, 0, 0, 1000, 'eur', 'pending', 'failed', 'r26m-gateway', '', ?, ?, " . Db::now() . ")")
+                ->execute(['R26ML-' . bin2hex(random_bytes(4)), json_encode(['provider' => 'r26m-gateway', 'service_type' => 'online_card', 'requires_online' => true]), StoreContext::current()->id()]);
+            return Orders::byId((int)$r26mDb->lastInsertId());
+        };
+        putenv('MAIL_ADAPTER=log');
+        $r26mLogged = PaymentLink::send($r26mUnpaid());
+        $r26mCapture = new R26mCaptureMail();
+        MailService::useAdapter($r26mCapture);
+        $r26mReal = PaymentLink::send($r26mUnpaid());
+        assert_equals(['logged', 'sent', 1], [$r26mLogged['status'] ?? null, $r26mReal['status'] ?? null, count($r26mCapture->sent)],
+            'R26 mail: an admin payment link only written to the log is "logged", not "sent"; through a real provider it is "sent" (was: "sent" for both)');
+    } finally {
+        MailService::useAdapter(null);
+        putenv('MAIL_ADAPTER');
+        $r26mInstances->setValue(null, $r26mInstancesBefore);
+        $r26mCfgProp->setValue(null, $r26mCfgBefore);
+    }
+
+    // 6. "Logged" is no "sent" in the other five places the review named.
     $r26mRoot = dirname(TEST_CLI_DIR);
     $r26mSource = static fn(string $file): string => (string)file_get_contents($r26mRoot . '/' . $file);
-    assert_true(str_contains($r26mSource('src/Entrypoints/Admin/OrderOperations.php'), "\$sent = (\$result['status'] ?? '') === 'sent' && !\$logged;")
-        && substr_count($r26mSource('src/Customers.php'), "return MailService::logged(\$mail) ? 'logged' : 'sent';") === 2
+    assert_true(substr_count($r26mSource('src/Customers.php'), "return MailService::logged(\$mail) ? 'logged' : 'sent';") === 2
         && str_contains($r26mSource('src/BackInStock.php'), "=== 'sent' && !MailService::logged(\$mail) ? 'confirm_sent' : 'failed';")
         && str_contains($r26mSource('src/BackInStock.php'), 'if (MailService::logged($result)) continue;')
         && str_contains($r26mSource('src/GuestCheckoutAccount.php'), "=== 'sent' && !MailService::logged(\$mail) ? 'sent' : 'failed';")
