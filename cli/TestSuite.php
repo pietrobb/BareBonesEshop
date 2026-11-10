@@ -52,16 +52,21 @@ $scenarioFiles = [
     'CheckoutArchitectureScenario.php',
     'PlatformScenario.php',
 ];
+// --only=A.php,B.php runs just these scenario files (CI runs the step lock scenario as root without /proc this way).
+$suiteOnly = getopt('', ['only:'])['only'] ?? null;
+if (is_string($suiteOnly)) $scenarioFiles = array_map('basename', explode(',', $suiteOnly));
 // Scenarios may install their own exception handler (cli/worker.php does), so catch here as well.
 try {
 foreach ($scenarioFiles as $scenarioFile) {
     require __DIR__ . '/tests/scenarios/' . $scenarioFile;
 }
-// Every *Regression.php, historical order first, then auto-discovered (tests/RegressionSuite.php).
-require __DIR__ . '/tests/RegressionSuite.php';
-require __DIR__ . '/test-update.php';
-require __DIR__ . '/test-theme-contract.php';
-require __DIR__ . '/test-theme-upgrade-gate.php';
+if (!is_string($suiteOnly)) {
+    // Every *Regression.php, historical order first, then auto-discovered (tests/RegressionSuite.php).
+    require __DIR__ . '/tests/RegressionSuite.php';
+    require __DIR__ . '/test-update.php';
+    require __DIR__ . '/test-theme-contract.php';
+    require __DIR__ . '/test-theme-upgrade-gate.php';
+}
 } catch (Throwable $suiteAbort) {
     while (ob_get_level() > 0) ob_end_flush();
     fwrite(STDERR, "\nTEST SUITE ABORTED by an uncaught " . get_class($suiteAbort) . ': ' . $suiteAbort->getMessage()
@@ -84,9 +89,7 @@ if ($failed > 0) {
 $pdo = null;
 Db::reset();
 usleep(100000);
-@unlink($testDbPath);
-@unlink($testDbPath . '-wal');
-@unlink($testDbPath . '-shm');
+if (isset($testDbPath)) foreach (['', '-wal', '-shm'] as $suffix) @unlink($testDbPath . $suffix);
 
 restore_error_handler();
 echo "========================================\n";

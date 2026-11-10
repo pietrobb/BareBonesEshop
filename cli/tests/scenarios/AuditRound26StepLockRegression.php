@@ -27,6 +27,12 @@ $r26lState = static function (string $file): array {
     return [(string)@file_get_contents($file), @fileperms($file) & 0777, @fileowner($file)];
 };
 $r26lAsRoot = function_exists('posix_geteuid') && posix_geteuid() === 0;
+// The suite runs as a normal account, where 7 and 8 below are skipped. CI runs this file once more as root with /proc
+// hidden (ci.yml, "Step lock as root without /proc"); there the flag makes a skip a failure.
+if (getenv('BAREBONES_REQUIRE_ROOT_TEST') === '1') {
+    assert_equals([true, false], [$r26lAsRoot, is_dir('/proc/self')],
+        'R26 step lock: BAREBONES_REQUIRE_ROOT_TEST=1 runs as root with /proc hidden');
+}
 try {
     if (PHP_OS_FAMILY !== 'Windows') {
         // 1. A symbolic link at the lock's name is refused; the file it points at keeps its content, mode and owner.
@@ -89,7 +95,8 @@ echo $m->invoke(null, $argv[1]) ? "claimed" : "refused";
             'R26 step lock: without file locks a second step is refused while the first holds the claim file, and a dead step\'s claim is taken over');
         @unlink($r26lHeld);
 
-        // 6. MaintenanceMode no longer hands a file over (by name or /proc): nothing to fail without /proc.
+        // 6. MaintenanceMode no longer hands a file over (by name or /proc): nothing to fail without /proc. This source check
+        //    only guards against the hand-over coming back; 7 and 8 run the root path, in CI without /proc.
         $r26lSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/MaintenanceMode.php');
         assert_true(!str_contains($r26lSource, 'FileOwnership::handOver') && str_contains($r26lSource, "@fopen(\$path, 'x+')"),
             'R26 step lock: no hand-over and no link-following open of the lock');
@@ -123,6 +130,11 @@ echo $m->invoke(null, $argv[1]) ? "claimed" : "refused";
         assert_true(str_contains($r26lAnswer, 'is a symbolic link'), 'R26 step lock (root): a symbolic link to a root file is refused — ' . $r26lAnswer);
         assert_equals([[(string)file_get_contents($r26lShadow), 0600, 0], [(string)file_get_contents($r26lShadow), 0600, 0]], [$r26lBefore, $r26lState($r26lShadow)],
             'R26 step lock (root): the root-only file keeps owner root, 0600 and its content (R25: nobody:nogroup 0660, 0 bytes)');
+        unlink($r26lAppLock);
+        link($r26lShadow, $r26lAppLock); // root may hard-link any file, whatever fs.protected_hardlinks says
+        $r26lAnswer = $r26lRefused($r26lApp);
+        assert_true(str_contains($r26lAnswer, 'is a hard link'), 'R26 step lock (root): a hard link to a root file is refused — ' . $r26lAnswer);
+        assert_equals($r26lBefore, $r26lState($r26lShadow), 'R26 step lock (root): the hard-linked root file keeps owner root, 0600 and its content');
         unlink($r26lAppLock);
         unlink($r26lShadow);
 

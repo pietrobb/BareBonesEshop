@@ -144,6 +144,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   goes out once the setting is fixed. Mail only written to the log is no longer counted or shown as sent (password
   reset, e-mail verification, guest account link, back-in-stock confirmation and notification, stock alerts, the
   admin's payment link).
+  a day). A refused step prints the lock holder's record as plain text only. CI now also runs the step lock test as root
+  with `/proc` hidden (`cli/test.php --only=<scenario>`; `BAREBONES_REQUIRE_ROOT_TEST=1` fails instead of skipping when
+  it is not root), so the root path is executed and not only checked in the source.
 - **Order e-mails always go through the mail provider configured now** (review round 25). An order placed while the
   shop used SMTP still mailed real customers after the shop was switched to the log provider (a staging copy of the
   database), and one placed under SES failed every attempt once the shop moved to SMTP. Every order e-mail now goes out
