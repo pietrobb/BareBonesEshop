@@ -137,6 +137,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Ctrl-C in `bbe-step` stops a step that runs as the tree's owner (review round 30).** When the tree belongs to
+  another account (the usual case, the wrapper switches with `setpriv`), Ctrl-C or a dropped connection brought the
+  prompt back while the step ran on in the background and kept changing files and the database: the wrapper killed
+  only `unshare` and relied on the parent-death signal, which the kernel clears when the user changes. It now kills
+  the step's pid namespace and process group itself, also without pid namespaces. The step runs in the application
+  root instead of root's working directory, so a relative path in an argument is taken from there. Pruning after an
+  update or rollback removes the private copies of the updater that a step killed at the wrong moment left in
+  `finishers/`; only the one `.maintenance` names stays.
 - **Translations and admin details from review round 29.** The PL/HU/DE/ES order confirmation no longer says
   "variable symbol" in English. The audit log shows the notes of pages, warehouses, feeds, store settings, credit
   notes, e-mail delivery and admin accounts in the admin's language, and the refund notes give amounts in the order's
