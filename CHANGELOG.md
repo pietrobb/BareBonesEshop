@@ -128,6 +128,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **An interrupted update or rollback is finished by the updater that started it** (review round 29). A 2.1.3
+  rollback restored `src/` before `src/Updater.php`: killed in that stretch, the command in `.maintenance` ran the new
+  updater on the old `FileSystem` and failed on `FileSystem::tryLock()` every time (the shop stayed on 503); killed a
+  little later, the old updater ran it and reopened the shop with files of both releases. Before its first change an
+  update or rollback now copies the updater it runs (`src/`, `cli/update.php`, `cli/cli-only.php`) into
+  `<update_storage_dir>/finishers/`, and `.maintenance` names that copy:
+  `php '<update_storage_dir>/finishers/<snapshot>-…/cli/update.php' rollback --installed='<shop>' --snapshot=… --force`.
+  Run exactly that command (as the same account as the step). The copy goes when the step completes; copies of a
+  snapshot that no longer exists are removed with old snapshots.
 - **The e-mail delivery settings are in the backup; an empty `SMTP_*` variable no longer blanks the server; the invoice
   prints the BIC** (review round 28). `mail.json` (Admin → E-mail delivery) is a backup file source and a restore brings
   it back readable by the owner only (0600): a restored shop logged its mail instead of sending it. An empty `SMTP_HOST=`,
