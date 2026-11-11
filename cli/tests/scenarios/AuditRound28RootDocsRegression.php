@@ -22,9 +22,10 @@ assert_true(str_contains($r28dChangelog, 'chown -R') && str_contains($r28dChange
     'R28 upgrade notes: install 2.1.3 as the owner, chown what an update run as root left, the probe refusal is not the theme');
 
 $r28dWrapper = (string)file_get_contents($r28dRoot . '/deploy/bbe-step.sh');
-assert_true(str_starts_with($r28dWrapper, "#!/bin/sh\n") && !str_contains($r28dWrapper, "\r") && str_contains($r28dWrapper, 'setpriv --reuid=')
-    && !preg_match('/\bphp\b[^\n]*cli\/cli-only/', $r28dWrapper),
-    'R28 wrapper: POSIX sh, LF, switches with setpriv before PHP runs and loads nothing of the tree itself');
+// R29 (finding 3): bash (closing every descriptor and a pipefail), re-executed when started as `sh bbe-step`.
+assert_true(str_starts_with($r28dWrapper, "#!/bin/bash\n") && str_contains($r28dWrapper, 'exec bash "$0" "$@"') && !str_contains($r28dWrapper, "\r")
+    && str_contains($r28dWrapper, 'setpriv --reuid=') && !preg_match('/\bphp\b[^\n]*cli\/cli-only/', $r28dWrapper),
+    'R28 wrapper: LF, switches with setpriv before PHP runs and loads nothing of the tree itself');
 
 if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid')) {
     echo "  [SKIP] R28 root steps: POSIX owners (Windows)\n";
@@ -113,7 +114,8 @@ try {
     if (trim((string)shell_exec('command -v script 2>/dev/null')) !== '') {
         $r28dCmd = '/bin/sh ' . escapeshellarg($r28dRoot . '/deploy/bbe-step.sh') . ' ' . escapeshellarg($r28dDir . '/app') . ' tty.php';
         [, $r28dOut, $r28dErr] = $r28dRun(['script', '-qec', $r28dCmd, '/dev/null']);
-        assert_true(str_contains($r28dOut, 'TTY0=yes CTTY=none SID=own'),
+        // R29 (finding 3): not even as stdin (TTY0=no); AuditRound29StepEnvRegression checks every descriptor.
+        assert_true(str_contains($r28dOut, 'TTY0=no CTTY=none SID=own'),
             'R28 wrapper: on root\'s terminal the step runs in its own session without a controlling terminal, so it cannot type into root\'s shell (' . trim($r28dErr . $r28dOut) . ')');
     } else {
         echo "  [SKIP] R28 wrapper on a terminal: no script(1)\n";

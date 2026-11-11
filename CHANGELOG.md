@@ -108,11 +108,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   an account that can write the tree, often the web user, can change or replace it, and root then runs its copy. It is a
   second line of defence, not a fix: run steps as the owner (`sudo -u <owner> php cli/….php`, with `Defaults use_pty`
   in sudoers, the default from sudo 1.9.14, or the step can type commands into root's terminal), or install the wrapper
-  `deploy/bbe-step.sh` outside the tree (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`)
+  `deploy/bbe-step.sh` outside the tree (`install -o root -g root -m 0755 <verified release>/deploy/bbe-step.sh /usr/local/sbin/bbe-step`)
   and run `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group root) before any PHP of the
   shop runs, in a session of its own without root's terminal as controlling terminal; a tree root owns it runs as root
   only after checking that no other account can change it (see "A tree root owns" in the README).
-  Ctrl-C or a dropped ssh connection no longer stops a step started through `bbe-step`; stop it with `kill`. A step now changes only what that owner can write: run backups and restores
+  Install `bbe-step` from a release you verified, not from the shop's copy. The step gets no terminal (pass `--yes` to
+  `restore.php`), only the `BBE_*`, `BAREBONES_*`, `SMTP_*`, `MAIL_*`, `PAY_*`, `LANG`, `LC_*` and `TZ` variables of
+  root's environment, and nothing it starts outlives it; Ctrl-C stops it at once. A step now changes only what that owner can write: run backups and restores
   as the user that owns the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook says). The
   Docker `setup` service hands the directories it fills to the checkout's owner for the command and to `www-data`
   afterwards.
@@ -176,6 +178,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   newer version, so the same package cannot be applied over a mix of both releases. If such a command still fails
   with `Class "…" not found` (a rollback stopped by an older updater), copy the named file from the package's
   `payload/` into the shop and run the command again.
+- **`bbe-step` gives the step nothing of root's: no terminal, environment or open file, and nothing outlives it**
+  (review round 29, finding 3). The step kept root's terminal as stdin/stdout/stderr: a process it left running read
+  what root typed after the prompt came back (`mysql -pHunter2` in the reproduction); Ctrl-C ended only the wrapper,
+  and the step got root's environment and open files. Now stdin is `/dev/null`, stdout and stderr are pipes root's
+  `cat` copies to the terminal, every other descriptor is closed, the environment is rebuilt (`PATH`, the owner's
+  `HOME`, `BBE_*`, `BAREBONES_*`, `SMTP_*`, `MAIL_*`, `PAY_*`, `LANG`, `LC_*`, `TZ`), and the step is pid 1 of a pid
+  namespace of its own (`unshare`), which the kernel empties when it ends; Ctrl-C, `kill` or a dropped connection stop
+  it. The step keeps the tree's group only if its owner is a member (it took e.g. `disk`), and an owner without an
+  account is refused. `bbe-step` needs bash; started as `sh bbe-step` it re-executes itself in bash.
 - **Without file locks a step says so** (review round 28). On a private directory without file locks (some NFS/SMB
   mounts) the update, backup, migration and SQLite maintenance locks failed as "Another update process is already
   running", "lock acquisition timed out" or a maintenance "already in progress"; they now name the file system. A MySQL
