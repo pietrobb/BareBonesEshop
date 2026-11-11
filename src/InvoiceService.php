@@ -2243,7 +2243,9 @@ final class InvoiceService
         $iban = BankTransferInstructions::storeIban(['iban' => (string)($sellerSnap['iban'] ?? '')]);
         if ($iban === '') return null;
         $due = preg_replace('/\D/', '', substr((string)($invoice['due_date'] ?? ''), 0, 10)) ?? '';
-        $qr = PaymentQr::for(['iban' => $iban, 'bic' => (string)($sellerSnap['bic'] ?? ''),
+        // R30: a malformed BIC went into the QR (the e-mail's QR left it out, BankTransferInstructions::forOrder()).
+        $bic = strtoupper(trim((string)($sellerSnap['bic'] ?? '')));
+        $qr = PaymentQr::for(['iban' => $iban, 'bic' => BankTransferInstructions::validBic($bic) ? $bic : '',
             'amount' => (int)$invoice['total_gross'], 'currency' => (string)$invoice['currency'],
             'variable_symbol' => self::variableSymbol($invoice), 'due_date' => $due, 'note' => (string)$invoice['number'],
             'beneficiary' => (string)($sellerSnap['name'] ?? '')], (string)($customerSnap['country'] ?? '') ?: (string)($sellerSnap['country'] ?? ''));
@@ -2392,7 +2394,7 @@ final class InvoiceService
                 'total_net' => 'Netto gesamt', 'total_vat' => 'MwSt. gesamt', 'total_gross' => 'Gesamtbetrag', 'total_paid' => 'Gesamtbetrag (bezahlt)', 'paid_note' => 'Bezahlt – bitte nicht überweisen.',
                 'vat_recap' => 'MwSt.-Aufschlüsselung', 'col_net' => 'Netto', 'reverse_charge_note' => 'Steuerfreie innergemeinschaftliche Lieferung (§ 4 Nr. 1b i.V.m. § 6a UStG, Art. 138 MwStSystRL)',
                 'export_note' => 'Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG, Art. 146 MwStSystRL)', 'non_vat_payer_note' => 'Der Verkäufer ist nicht umsatzsteuerpflichtig',
-                'payment_method' => 'Zahlungsart', 'iban' => 'IBAN', 'variable_symbol' => 'Verwendungszweck',
+                'payment_method' => 'Zahlungsart', 'iban' => 'IBAN', 'variable_symbol' => 'Zahlungsreferenz',
                 'ico' => 'HR-Nr.', 'dic' => 'Steuernr.', 'ic_dph' => 'USt-IdNr.',
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',

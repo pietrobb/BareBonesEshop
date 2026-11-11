@@ -137,6 +137,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Invoice, texts and log details from review round 30.** A malformed BIC no longer goes into the invoice's payment
+  QR (the e-mail's QR already left it out). A seller with only a VAT id shows it in the CS/HU/PL order e-mail instead of
+  an empty line. The audit log translates the provider refund booked during an admin refund, two-factor setup and store
+  permission changes; the import page shows row errors in the admin's language. Spanish e-mails address the customer
+  as "usted", the German invoice calls the payment reference "Zahlungsreferenz" like the e-mail, and the unpriced-products
+  warning uses the plural form of its count. The log also masks secrets written as a PHP array (`'pass' => 'x'`).
 - **A declined admin refund stays released (review round 30).** After Stripe declined an admin refund, a later credit
   note made the payment `refund_pending` again and the declined request counted as in flight: the payment stayed
   `refund_pending` for good, the refund form was hidden and "retry" re-queued the declined refund (which Stripe could

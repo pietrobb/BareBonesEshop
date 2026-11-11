@@ -107,7 +107,7 @@ class Logger
      * (the quote between key and colon used to hide it), also as part of a longer key (`stripe_secret_key`,
      * `access_token`). The value stops at a quote, `&`, `,`, `;` or `}`; a value already masked by SECRET_PATTERNS stays.
      */
-    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|pwd|(?<![a-z])pass(?![a-z])|private[_-]?key|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)(?!\[REDACTED)[^\s"\'&,;}]+/i';
+    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|pwd|(?<![a-z])pass(?![a-z])|private[_-]?key|api[_-]?key)[\w-]*["\'\]]?\s*(?:=>|[=:](?!>))\s*["\']?)(?!\[REDACTED)[^\s"\'&,;}]+/i';
 
     /**
      * Secrets recognisable without a key: HTTP Basic credentials (maskSecrets), the password in a URL (`scheme://user:pass@host`),
@@ -131,10 +131,11 @@ class Logger
         // Cookie headers and session ids: the whole cookie string up to the line end or the closing quote.
         '/(\b(?:Set-)?Cookie(?:\\\\*["\'])?\s*[=:]\s*(?:\\\\*["\'])?)(?!\[REDACTED)[^\r\n"\'\\\\]+/i' => '$1[REDACTED]',
         '/\b((?:PHPSESSID|bbe_install)=)(?!\[REDACTED)[^\s;"\'&,\\\\]+/i' => '$1[REDACTED]',
-        // A quoted value is masked up to its closing quote, spaces included ("password": "correct horse battery").
-        '/((?:secret|token|password|passwd|pwd|(?<![a-z])pass(?![a-z])|passphrase|private[_-]?key|api[_-]?key)[\w-]*["\']?\s*[=:]\s*)(["\'])(?!\[REDACTED)(?:(?!\2)[^\\\\]|\\\\.)*\2/i' => '$1$2[REDACTED]$2',
+        // A quoted value is masked up to its closing quote, spaces included ("password": "correct horse battery"); R30: also
+        // after a PHP array arrow ('pass' => 'x', as var_export() and print_r() of a config write it).
+        '/((?:secret|token|password|passwd|pwd|(?<![a-z])pass(?![a-z])|passphrase|private[_-]?key|api[_-]?key)[\w-]*["\'\]]?\s*(?:=>|[=:](?!>))\s*)(["\'])(?!\[REDACTED)(?:(?!\2)[^\\\\]|\\\\.)*\2/i' => '$1$2[REDACTED]$2',
         // An unquoted password may contain spaces: it runs on until the next "key=" / "key:" or a separator.
-        '/((?:password|passwd|pwd|(?<![a-z])pass(?![a-z])|passphrase)[\w-]*\s*[=:]\s*)(?![\["\'])[^\s"\'&,;}]+(?:[ \t]+(?![\w.-]+["\']?\s*[=:])(?!\[REDACTED)[^\s"\'&,;}]+)*/i' => '$1[REDACTED]',
+        '/((?:password|passwd|pwd|(?<![a-z])pass(?![a-z])|passphrase)[\w-]*["\'\]]?\s*(?:=>|[=:](?!>))\s*)(?![\["\'])[^\s"\'&,;}]+(?:[ \t]+(?![\w.-]+["\']?\s*[=:])(?!\[REDACTED)[^\s"\'&,;}]+)*/i' => '$1[REDACTED]',
         self::SECRET_VALUE => '$1$2[REDACTED]',
     ];
 

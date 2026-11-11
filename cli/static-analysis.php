@@ -213,7 +213,8 @@ $architectureBudgets = [
     // coupling +1 R20: the audit log shows its values through AuditLogLabels.
     // +4 lines R21: the feed page lists the items its last sync refused.
     // +7 lines R23 UX: checklist checks titled in the admin's language, the doctor's text in a details element.
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 816, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 23],
+    // +1 line, +1 coupling R30: CSV import row errors in the admin's language (ImportErrorLabels).
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 817, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 24],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
