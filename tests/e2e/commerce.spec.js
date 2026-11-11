@@ -200,6 +200,30 @@ function orderFacts(arg) {
   return JSON.parse(execFileSync('php', ['tests/e2e/order-facts.php', arg], { cwd: process.cwd(), encoding: 'utf8' }));
 }
 
+// R31: the invoice can go to another address than the parcel; the fields appear only when the box is ticked.
+test('checkout with a billing address other than the delivery address', async ({ page }) => {
+  await addFirstProduct(page);
+  await fillCheckout(page, 'billing-r31@example.test');
+  const fields = page.locator('.checkout-billing-fields');
+  await expect(fields).toBeHidden();
+  await page.locator('input[name="billing_different"]').check();
+  await expect(fields).toBeVisible();
+  await page.locator('input[name="billing_name"]').fill('R31 Firma s.r.o.');
+  await page.locator('input[name="billing_street"]').fill('Fakturačná 9');
+  await page.locator('input[name="billing_city"]').fill('Praha');
+  await page.locator('input[name="billing_zip"]').fill('11000');
+  await page.locator('select[name="billing_country"]').selectOption('CZ');
+  await page.locator('form.checkout-form button.btn-checkout').click();
+  await page.waitForURL(url => url.origin === GATEWAY || url.searchParams.get('page') === 'order-done');
+  if (new URL(page.url()).origin === GATEWAY) await page.locator('#gateway-pay').click();
+  await expect(page).toHaveURL(/page=order-done/);
+  await expect(page.locator('[data-order-summary]')).toContainText('Fakturačná 9');
+  const orderNumber = (await page.locator('.order-done > p strong').textContent()).trim();
+  const facts = orderFacts(orderNumber);
+  expect(facts.billing_addr).toMatchObject({ name: 'R31 Firma s.r.o.', street: 'Fakturačná 9', city: 'Praha', zip: '11000', country: 'CZ' });
+  expect(facts.shipping_addr).toMatchObject({ street: 'Qualification 12', city: 'Bratislava', country: 'SK' });
+});
+
 // Round 9: the JS total left out the carrier's COD surcharge (shown 24,09 €, charged 25,09 €).
 test('cash on delivery: the total the checkout shows is the total the order charges', async ({ page }) => {
   await addFirstProduct(page);
