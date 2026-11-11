@@ -15,7 +15,8 @@ if (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_get
         . ' BBE_INSTALLED_ROOT=<application root> in the environment, for a shop root owns alone)'
         : (($installed !== '' ? cli_not_root_only($installed) : null) ?? cli_not_root_only(dirname(__DIR__, 2)));
     if ($why !== null) {
-        echo json_encode(['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'warnings' => [], 'failures' => [
+        // R29: 'verdict' => false — no theme was checked, so the updater does not add "would break checkout" to this.
+        echo json_encode(['status' => 'NO-GO', 'verdict' => false, 'checks' => 0, 'targets' => [], 'warnings' => [], 'failures' => [
             "Not a theme problem: the updater runs as root, and root runs the new release's checkout probe only when no other"
             . " account can change the shop or the copy, but {$why}. Run the update as the owner of the application root"
             . ' (sudo -u <owner> php cli/update.php apply …), or, for a shop root owns, make it and the update directory root\'s alone.',

@@ -72,8 +72,11 @@ class SmtpMail implements MailAdapter {
         // Connect
         $scheme = $this->encryption === 'ssl' ? 'ssl://' : '';
         $ctx = stream_context_create(['ssl' => ['verify_peer' => $this->verifyPeer, 'verify_peer_name' => $this->verifyPeer]]);
+        // R29: an IPv6 address needs brackets in the socket address (`::1:587` connected nowhere); one given as `[::1]` is kept.
+        $host = trim($this->host, '[]');
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) $host = '[' . $host . ']';
         $fp = @stream_socket_client(
-            $scheme . $this->host . ':' . $this->port,
+            $scheme . $host . ':' . $this->port,
             $errno, $errstr, $this->timeout, STREAM_CLIENT_CONNECT, $ctx
         );
         if (!$fp) return ['status' => 'failed', 'message' => "connect failed: {$errstr} ({$errno})", 'raw' => null];

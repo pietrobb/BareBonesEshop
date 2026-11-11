@@ -142,6 +142,9 @@ $themeUpgradeGateExit = (static function(): int {
         $assert([$treeHash($root), hash_file('sha256', $database)] === $before, 'breaking package leaves files and database unchanged');
         $report = $gate->check(new UpdatePackage($withoutProbe, null, true));
         $assert(!$report['can_apply'] && str_contains(implode("\n", $report['blockers']), 'would not contain ' . ThemeUpgradeGate::PROBE), 'a package that drops the probe fails closed');
+        // R29: no theme was checked, so the updater does not claim the installed theme would break checkout.
+        $assert(str_contains(implode("\n", $report['blockers']), 'Theme checkout contract not verified')
+            && !str_contains(implode("\n", $report['blockers']), 'would break checkout'), 'a probe that could not check does not blame the theme (R29)');
         $report = $gate->check(new UpdatePackage($compatible, null, true));
         $assert($report['can_apply'] && ($report['theme_contract']['status'] ?? '') === 'GO' && ($report['theme_contract']['checks'] ?? 0) >= 100
             && in_array('aeon / store default', $report['theme_contract']['targets'] ?? [], true), 'compatible candidate passes for the installed theme and store');

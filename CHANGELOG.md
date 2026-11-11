@@ -137,6 +137,23 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Updater, mail and invoice fixes** (review round 29, lows).
+  - Logs mask a bare `pass` key (`SMTP_PASS`, `smtp_pass`, `pass=`), which they used to write in clear.
+  - `SMTP_HOST` can be an IPv6 address (`::1` or `[::1]`). It used to connect nowhere.
+  - The order confirmation prints only the seller IDs the shop has, with no more empty "IČO: , DIČ:". New template
+    variables: `seller_ids`, `seller_dic_sep` and `seller_ic_dph_sep`. The German and Spanish confirmations now also
+    print the tax number (Steuernummer, NIF) when the shop has one. Admin-edited copies of the template keep the old line
+    until they are re-edited.
+  - The order confirmation and the payment reminder say that the payment QR code is attached and how to scan it
+    (`{{bank_qr_note}}`).
+  - Merchant order e-mails are written in `merchant_notifications.locale`, else the store's `default_locale`. They used
+    to use the customer's language.
+  - An invoice prints a payment QR only when the IBAN's check digits are valid.
+  - Wrapping a very long word in an invoice line takes milliseconds instead of minutes.
+  - A backup on a file system without file locks reports why it failed instead of ending with a fatal error, because its
+    log is appended without the lock there. The operational log does the same.
+  - A probe that could not check the themes (not started, refused to run as root, gave no verdict) is reported as
+    "Theme checkout contract not verified … not a theme problem" instead of "would break checkout".
 - **An interrupted update or rollback is finished by the updater that started it** (review round 29). A 2.1.3
   rollback restored `src/` before `src/Updater.php`: killed in that stretch, the command in `.maintenance` ran the new
   updater on the old `FileSystem` and failed on `FileSystem::tryLock()` every time (the shop stayed on 503); killed a

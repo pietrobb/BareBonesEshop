@@ -1887,6 +1887,7 @@ return [
     'bank_transfer.message' => 'Správa pre príjemcu',
     'bank_transfer.due_date' => 'Splatnosť',
     'bank_transfer.qr_hint' => 'Naskenujte v mobilnom bankovníctve (PAY by square).',
+    'bank_transfer.qr_attached' => 'QR kód na platbu je priložený k tomuto e-mailu.',
     'bank_transfer.qr_label' => 'QR kód PAY by square pre platbu objednávky',
     'bank_transfer.qr_hint_epc' => 'Naskenujte v mobilnom bankovníctve (SEPA QR kód, GiroCode).',
     'bank_transfer.qr_label_epc' => 'SEPA QR kód (GiroCode) pre platbu objednávky',

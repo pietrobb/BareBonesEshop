@@ -66,7 +66,8 @@ if (!$opts['gc_only']) {
         $say('OK ' . $meta['remote_path'] . ' size=' . $meta['size_bytes'] . ' sha256=' . $meta['sha256']);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'Backup FAILED: ' . $e->getMessage() . "\n");
-        BackupService::log('CLI backup FAIL: ' . $e->getMessage());
+        // R29: a log that cannot be written either must not turn the reported failure into an uncaught fatal error.
+        try { BackupService::log('CLI backup FAIL: ' . $e->getMessage()); } catch (\Throwable $logError) { Logger::exception('backup.log_failed', $logError); }
         exit(1);
     }
 }
@@ -78,7 +79,7 @@ if ($opts['gc'] || $opts['gc_only']) {
         foreach ($gc['deleted'] as $p) $say('  -' . $p);
     } catch (\Throwable $e) {
         fwrite(STDERR, 'GC FAILED: ' . $e->getMessage() . "\n");
-        BackupService::log('CLI GC FAIL: ' . $e->getMessage());
+        try { BackupService::log('CLI GC FAIL: ' . $e->getMessage()); } catch (\Throwable $logError) { Logger::exception('backup.log_failed', $logError); }
         exit(2);
     }
 }
