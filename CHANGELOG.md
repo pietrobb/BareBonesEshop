@@ -143,6 +143,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   permission changes; the import page shows row errors in the admin's language. Spanish e-mails address the customer
   as "usted", the German invoice calls the payment reference "Zahlungsreferenz" like the e-mail, and the unpriced-products
   warning uses the plural form of its count. The log also masks secrets written as a PHP array (`'pass' => 'x'`).
+- **"Buy later" details from review round 30.** Changing a variant's SKU in the admin no longer deletes every saved
+  line of it: signed-in customers keep the line, a guest's line asks to choose the variant on the product page. A line
+  of a draft or archived product is listed as unavailable with its own remove button (it counts towards the 100 lines,
+  and was hidden). Signing in with a full list names the guest items that did not fit; signing in before the
+  migration ran keeps the guest list until it has. "Nothing was moved" replaces "0 moved to your cart" when the cart
+  already holds all the stock, and a failed move no longer says the item could not be saved for later.
 - **Ctrl-C in `bbe-step` stops a step that runs as the tree's owner (review round 30).** When the tree belongs to
   another account (the usual case, the wrapper switches with `setpriv`), Ctrl-C or a dropped connection brought the
   prompt back while the step ran on in the background and kept changing files and the database: the wrapper killed

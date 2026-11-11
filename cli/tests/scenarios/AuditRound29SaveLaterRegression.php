@@ -103,7 +103,10 @@ try {
     $r29sGuestLines = count(SavedForLater::lines());
     StorefrontFlash::pull();
     [$r29sIn] = Customers::login('r29s@example.test', 'R29s-pass-1234');
-    assert_equals([true, I18n::format('saved_for_later_merge_full', ['count' => $r29sGuestLines, 'max' => SavedForLater::MAX_LINES])], [$r29sIn, StorefrontFlash::pull()],
+    // R30 names them after this sentence (AuditRound30SaveLaterRegression).
+    $r29sFlash = (string)StorefrontFlash::pull();
+    assert_equals([true, I18n::format('saved_for_later_merge_full', ['count' => $r29sGuestLines, 'max' => SavedForLater::MAX_LINES])],
+        [$r29sIn, substr($r29sFlash, 0, strlen(I18n::format('saved_for_later_merge_full', ['count' => $r29sGuestLines, 'max' => SavedForLater::MAX_LINES])))],
         'R29 buy later: guest lines a full account list cannot take are announced on sign-in (was: dropped silently)');
 
     // 7. Code deployed before its migration: the signed-in cart works (empty list), saving is refused with a notice.

@@ -41,6 +41,8 @@ final class SavedForLater
         }
         // R29: code deployed before its migration showed a signed-in customer's cart as a 500; the list is empty until then.
         if (!self::tableReady()) return [];
+        // R30: a guest list kept at a sign-in before the migration (mergeGuest()) joins the account once the table is there.
+        if (!empty($_SESSION['saved_for_later'][self::store()])) self::mergeGuest($customerId);
         $stmt = Db::get()->prepare("SELECT * FROM saved_for_later_items WHERE customer_id = ? AND store_id = ? ORDER BY id DESC");
         $stmt->execute([$customerId, self::store()]);
         $lines = [];
@@ -94,15 +96,17 @@ final class SavedForLater
     public static function moveToCart(string $key): array
     {
         $line = self::isKey($key) ? (self::lines()[$key] ?? null) : null;
-        if ($line === null) return ['ok' => false, 'error' => 'saved_for_later_error', 'notice' => I18n::t('saved_for_later_error')];
+        // R30: a failed move said the item "could not be saved for later".
+        if ($line === null) return ['ok' => false, 'error' => 'saved_for_later_move_error', 'notice' => I18n::t('saved_for_later_move_error')];
         $check = self::catalogCheck([$key => $line]);
         if ($check['gone'] !== []) {
             self::delete($key);
             return ['ok' => false, 'error' => 'saved_for_later_gone', 'notice' => I18n::t('saved_for_later_gone')];
         }
+        if ($check['rekey'] !== []) self::toProductLine($key, $line);
         // R29: a product saved without a variant that has variants now: Cart::addValidated() refused it ("variant
         // required") and the line could never go back. The shopper picks one on the product page (view() links it).
-        if ($line['variant_id'] === null && !empty($check['has_variants'][$line['product_id']])) {
+        if ($check['rekey'] !== [] || ($line['variant_id'] === null && !empty($check['has_variants'][$line['product_id']]))) {
             return ['ok' => false, 'error' => 'saved_for_later_choose_variant', 'notice' => I18n::t('saved_for_later_choose_variant')];
         }
         $before = (int)(Cart::get()[$key]['qty'] ?? 0);
@@ -115,6 +119,11 @@ final class SavedForLater
             // The cart line holds what it shows, so the part kept here is not in both once the stock is back.
             Cart::update($key, (int)$result['quantity']);
             self::put($key, ['qty' => $left] + $line);
+            // R30: with the cart already holding all there is in stock, nothing moved (was: "0 moved to your cart").
+            if ($moved === 0) {
+                return ['ok' => false, 'error' => 'saved_for_later_not_moved'] + $result
+                    + ['notice' => I18n::format('saved_for_later_not_moved', ['count' => (int)$result['quantity']])];
+            }
             return $result + ['notice' => I18n::format('saved_for_later_partly_moved', ['moved' => $moved, 'left' => $left])];
         }
         self::delete($key);
@@ -163,6 +172,10 @@ final class SavedForLater
             self::delete($key);
             unset($lines[$key]);
         }
+        if ($check['rekey'] !== []) {
+            foreach ($check['rekey'] as $key) self::toProductLine($key, $lines[$key]);
+            return self::priced($vatContext);
+        }
         if ($lines === []) return [];
         $base = Cart::enrichLines($lines);
         $shown = $vatContext !== null ? Cart::applyVat($base, $vatContext) : $base;
@@ -184,8 +197,24 @@ final class SavedForLater
     public static function view(?array $vatContext, string $cartUrl, string $csrfToken): array
     {
         $items = [];
-        foreach (self::priced($vatContext) as $item) {
-            $items[] = [
+        $priced = self::priced($vatContext);
+        $lines = self::lines();
+        $shown = array_column($priced, 'key');
+        // R30: a line of a product hidden for now (a draft, archived) is listed as unavailable and can be removed. It
+        // counts towards MAX_LINES, so the shopper saw 90 lines of a "full" list and could only clear it all.
+        $hidden = self::describe(array_diff_key($lines, array_flip($shown)));
+        foreach ($hidden as $key => $item) {
+            $items[$key] = [
+                'key' => $key, 'url' => '', 'name' => $item['name'], 'variant_name' => $item['variant_name'], 'sku' => $item['sku'],
+                'quantity' => $lines[$key]['qty'], 'price' => '', 'unavailable' => I18n::t('saved_for_later_unavailable'),
+                'can_move' => false, 'choose_variant' => '', 'price_changed' => '',
+                'cart_url' => $cartUrl, 'csrf_token' => $csrfToken,
+                'quantity_label' => I18n::t('quantity'), 'price_label' => I18n::t('saved_for_later_unit_price'),
+                'to_cart_label' => I18n::t('saved_for_later_to_cart'), 'remove_label' => I18n::t('remove'),
+            ];
+        }
+        foreach ($priced as $item) {
+            $items[(string)$item['key']] = [
                 'key' => (string)$item['key'],
                 'url' => Template::storeUrl('/product/' . rawurlencode((string)$item['slug'])),
                 'name' => (string)$item['name'], 'variant_name' => (string)($item['variant_name'] ?? ''), 'sku' => (string)$item['sku'],
@@ -201,6 +230,7 @@ final class SavedForLater
                 'to_cart_label' => I18n::t('saved_for_later_to_cart'), 'remove_label' => I18n::t('remove'),
             ];
         }
+        $items = array_values(array_intersect_key(array_replace($lines, $items), $items));
         return [
             'items' => $items,
             'title' => I18n::format('saved_for_later_title', ['count' => count($items)]),
@@ -214,18 +244,20 @@ final class SavedForLater
     public static function mergeGuest(int $customerId): int
     {
         $store = self::store();
+        // R30: code deployed before its migration dropped the guest list at sign-in; it stays in the session until then (lines()).
+        if ($customerId > 0 && !self::tableReady()) return 0;
         $guest = $_SESSION['saved_for_later'][$store] ?? [];
         unset($_SESSION['saved_for_later'][$store]);
         if ($customerId <= 0 || !is_array($guest) || $guest === []) return 0;
         $account = self::accountLines($customerId);
         $merged = 0;
-        $left = 0;
+        $left = [];
         foreach ($guest as $key => $line) {
             if (!is_string($key) || !self::isKey($key) || !is_array($line)) continue;
             $line = self::line($line);
             $existing = $account[$key] ?? null;
             if ($existing === null && count($account) >= self::MAX_LINES) {
-                $left++;
+                $left[$key] = $line;
                 continue;
             }
             if ($existing !== null) {
@@ -237,8 +269,77 @@ final class SavedForLater
             $merged++;
         }
         // R29: the guest lines a full account list cannot take were dropped without a word.
-        if ($left > 0) StorefrontFlash::set(I18n::format('saved_for_later_merge_full', ['count' => $left, 'max' => self::MAX_LINES]));
+        // R30: ... and which ones they are.
+        if ($left !== []) {
+            $names = array_map(static fn(array $item): string => $item['name'] . ($item['variant_name'] !== '' ? ' (' . $item['variant_name'] . ')' : ''),
+                self::describe($left));
+            StorefrontFlash::set(I18n::format('saved_for_later_merge_full', ['count' => count($left), 'max' => self::MAX_LINES])
+                . ($names !== [] ? ' ' . I18n::format('saved_for_later_merge_left', ['items' => implode(', ', $names)]) : ''));
+        }
         return $merged;
+    }
+
+    /**
+     * R30: an admin changed a variant's SKU: the saved lines of the variant keep it (catalogCheck() compares the SKU,
+     * the line was deleted from every account's list). A guest's line in a session becomes its product's (toProductLine()).
+     */
+    public static function variantSkuChanged(int $variantId, string $oldSku, string $newSku): void
+    {
+        if ($oldSku === $newSku || !self::tableReady() || !self::skuColumn()) return;
+        Db::get()->prepare("UPDATE saved_for_later_items SET variant_sku = ? WHERE variant_id = ? AND variant_sku = ?")
+            ->execute([$newSku, $variantId, $oldSku]);
+    }
+
+    /**
+     * Name, variant name and SKU of lines by key, whatever the product's status (a draft is not in Cart::enrichLines()).
+     * @param array<string, array> $lines
+     * @return array<string, array{name:string, variant_name:string, sku:string}>
+     */
+    private static function describe(array $lines): array
+    {
+        if ($lines === []) return [];
+        $db = Db::get();
+        $productIds = array_values(array_unique(array_column($lines, 'product_id')));
+        $stmt = $db->prepare('SELECT id, name, slug, sku, translations FROM products WHERE store_id = ? AND id IN ('
+            . implode(',', array_fill(0, count($productIds), '?')) . ')');
+        $stmt->execute([StoreContext::current()->catalogId(), ...$productIds]);
+        $products = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $products[(int)$row['id']] = I18n::product($row);
+        $variantIds = array_values(array_filter(array_column($lines, 'variant_id')));
+        $variants = [];
+        if ($variantIds !== []) {
+            $stmt = $db->prepare('SELECT id, name, sku FROM variants WHERE id IN (' . implode(',', array_fill(0, count($variantIds), '?')) . ')');
+            $stmt->execute($variantIds);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $variants[(int)$row['id']] = $row;
+        }
+        $described = [];
+        foreach ($lines as $key => $line) {
+            $product = $products[$line['product_id']] ?? null;
+            if ($product === null) continue;
+            $variant = $line['variant_id'] !== null ? ($variants[$line['variant_id']] ?? null) : null;
+            $described[(string)$key] = [
+                'name' => (string)$product['name'],
+                'variant_name' => (string)($variant['name'] ?? ''),
+                'sku' => (string)($variant['sku'] ?? $product['sku'] ?? ''),
+            ];
+        }
+        return $described;
+    }
+
+    /**
+     * R30: a variant line whose variant now has another SKU (an admin renamed it, or SQLite gave a deleted variant's id to
+     * a new one) becomes a line of its product: the shopper picks the variant on the product page. Was: deleted for good.
+     */
+    private static function toProductLine(string $key, array $line): void
+    {
+        $productKey = 'p_' . $line['product_id'];
+        $existing = self::lines()[$productKey] ?? null;
+        self::delete($key);
+        self::put($productKey, [
+            'product_id' => $line['product_id'], 'variant_id' => null,
+            'qty' => max($line['qty'], (int)($existing['qty'] ?? 0)),
+            'saved_price' => null, 'saved_currency' => null, 'variant_sku' => null,
+        ]);
     }
 
     private static function customerId(): int
@@ -282,7 +383,7 @@ final class SavedForLater
      * reuses the id of the last deleted row) an id now naming another variant than the one saved: was mapped onto it.
      * A product only hidden for now (a draft, inactive) is not gone: the line was deleted from every list for good.
      * @param array<string, array> $lines
-     * @return array{gone: list<string>, has_variants: array<int, bool>}
+     * @return array{gone: list<string>, rekey: list<string>, has_variants: array<int, bool>}
      */
     private static function catalogCheck(array $lines): array
     {
@@ -302,15 +403,17 @@ final class SavedForLater
             $hasVariants[(int)$row['product_id']] = true;
         }
         $gone = [];
+        $rekey = [];
         foreach ($lines as $key => $line) {
             $variant = $line['variant_id'] !== null ? ($variants[$line['variant_id']] ?? null) : null;
             if (!isset($products[$line['product_id']])
-                || ($line['variant_id'] !== null && ($variant === null || (int)$variant['product_id'] !== $line['product_id']
-                    || ($line['variant_sku'] !== null && (string)$variant['sku'] !== $line['variant_sku'])))) {
+                || ($line['variant_id'] !== null && ($variant === null || (int)$variant['product_id'] !== $line['product_id']))) {
                 $gone[] = (string)$key;
+            } elseif ($variant !== null && $line['variant_sku'] !== null && (string)$variant['sku'] !== $line['variant_sku']) {
+                $rekey[] = (string)$key;
             }
         }
-        return ['gone' => $gone, 'has_variants' => $hasVariants];
+        return ['gone' => $gone, 'rekey' => $rekey, 'has_variants' => $hasVariants];
     }
 
     private static function accountLines(int $customerId): array
