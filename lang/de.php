@@ -1866,6 +1866,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'bank_transfer.message' => 'Verwendungszweck',
     'bank_transfer.due_date' => 'Fällig am',
     'bank_transfer.qr_hint' => 'Mit einer Banking-App scannen, die PAY by square unterstützt.',
+    'bank_transfer.qr_attached' => 'Der QR-Code für die Zahlung ist dieser E-Mail angehängt.',
     'bank_transfer.qr_label' => 'PAY-by-square-QR-Code zur Zahlung der Bestellung',
     'bank_transfer.qr_hint_epc' => 'Mit Ihrer Banking-App scannen (SEPA-QR-Code, GiroCode).',
     'bank_transfer.qr_label_epc' => 'SEPA-QR-Code (GiroCode) zur Zahlung der Bestellung',

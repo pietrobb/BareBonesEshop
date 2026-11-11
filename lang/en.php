@@ -1872,6 +1872,7 @@ return [
     'bank_transfer.message' => 'Message for the beneficiary',
     'bank_transfer.due_date' => 'Due date',
     'bank_transfer.qr_hint' => 'Scan it in a banking app that supports PAY by square.',
+    'bank_transfer.qr_attached' => 'The payment QR code is attached to this e-mail.',
     'bank_transfer.qr_label' => 'PAY by square QR code for paying the order',
     'bank_transfer.qr_hint_epc' => 'Scan it in your banking app (SEPA QR code, GiroCode).',
     'bank_transfer.qr_label_epc' => 'SEPA payment QR code (GiroCode) for paying the order',

@@ -131,6 +131,23 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Updater, mail and invoice fixes** (review round 29, lows).
+  - Logs mask a bare `pass` key (`SMTP_PASS`, `smtp_pass`, `pass=`), which they used to write in clear.
+  - `SMTP_HOST` can be an IPv6 address (`::1` or `[::1]`). It used to connect nowhere.
+  - The order confirmation prints only the seller IDs the shop has, with no more empty "IČO: , DIČ:". New template
+    variables: `seller_ids`, `seller_dic_sep` and `seller_ic_dph_sep`. The German and Spanish confirmations now also
+    print the tax number (Steuernummer, NIF) when the shop has one. Admin-edited copies of the template keep the old line
+    until they are re-edited.
+  - The order confirmation and the payment reminder say that the payment QR code is attached and how to scan it
+    (`{{bank_qr_note}}`).
+  - Merchant order e-mails are written in `merchant_notifications.locale`, else the store's `default_locale`. They used
+    to use the customer's language.
+  - An invoice prints a payment QR only when the IBAN's check digits are valid.
+  - Wrapping a very long word in an invoice line takes milliseconds instead of minutes.
+  - A backup on a file system without file locks reports why it failed instead of ending with a fatal error, because its
+    log is appended without the lock there. The operational log does the same.
+  - A probe that could not check the themes (not started, refused to run as root, gave no verdict) is reported as
+    "Theme checkout contract not verified … not a theme problem" instead of "would break checkout".
 - **Root no longer locks itself out of a tree root owns, and such a tree can be updated** (review round 29, finding 1).
   The first step there (install, migration, backup, restore) created `.maintenance.lock` 0660 root:root, and the
   stricter root check of round 28 (group write counts even for group root) then refused every later root step, worker,

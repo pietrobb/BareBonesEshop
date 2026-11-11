@@ -78,6 +78,7 @@ return [
     'merchant_notifications' => [
         'enabled' => true,
         'recipients' => [], // falls back to admin_email
+        'locale' => '',     // language of these e-mails; empty = the store's default_locale (not the customer's)
         // created = every new order incl. unpaid bank transfer; paid = payment confirmed
         'events' => ['created' => true, 'paid' => true],
         'templates' => ['created' => 'merchant_order_created', 'paid' => 'merchant_order_paid'],

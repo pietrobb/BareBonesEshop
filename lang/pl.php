@@ -1866,6 +1866,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'bank_transfer.message' => 'Tytuł przelewu',
     'bank_transfer.due_date' => 'Termin płatności',
     'bank_transfer.qr_hint' => 'Zeskanuj w aplikacji bankowej obsługującej PAY by square.',
+    'bank_transfer.qr_attached' => 'Kod QR do płatności jest załączony do tej wiadomości.',
     'bank_transfer.qr_label' => 'Kod QR PAY by square do opłacenia zamówienia',
     'bank_transfer.qr_hint_epc' => 'Zeskanuj w aplikacji bankowej (kod QR SEPA, GiroCode).',
     'bank_transfer.qr_label_epc' => 'Kod QR SEPA (GiroCode) do opłacenia zamówienia',

@@ -21,7 +21,10 @@ class MerchantNotifier {
             'complaint' => 'merchant_complaint_received',
             default => 'merchant_order_paid',
         });
-        $locale = (string)($order['locale'] ?? '');
+        // R29: written for the merchant: merchant_notifications.locale, else the store's language (the admin's default), not
+        // the language the customer ordered in (a German order told a Slovak shop about it in German).
+        $locale = trim((string)($notificationCfg['locale'] ?? ''));
+        if ($locale === '') $locale = StoreContext::hasCurrent() ? StoreContext::current()->defaultLocale() : '';
         $paymentLabel = PaymentService::orderLabel($order, $locale !== '' ? $locale : null) ?: (string)($order['payment_method'] ?? '');
         // R23 UX: the payment state in the e-mail's language ("Zaplatená"), not the code ("paid", "— pending").
         $paymentStatus = OrderStatusLabels::paymentOf($order, $locale);

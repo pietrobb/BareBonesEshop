@@ -26,7 +26,7 @@ final class ThemeUpgradeGate
         $this->phpBinary = $phpBinary ?? PHP_BINARY;
     }
 
-    /** @return array{status: string, checks: int, targets: array, failures: array} */
+    /** @return array{status: string, checks: int, targets: array, failures: array, verdict: bool} */
     public function evaluate(string $installedRoot, UpdatePackage $package): array
     {
         $root = realpath($installedRoot);
@@ -155,12 +155,14 @@ final class ThemeUpgradeGate
             'checks' => (int)$report['checks'],
             'targets' => array_values((array)($report['targets'] ?? [])),
             'failures' => array_values(array_map('strval', $report['failures'])),
+            // R29: false when the probe refused to check (root without a shop it may run) rather than found a broken theme.
+            'verdict' => ($report['verdict'] ?? true) !== false,
         ];
     }
 
     private static function noGo(string $reason): array
     {
-        return ['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'failures' => [$reason]];
+        return ['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'failures' => [$reason], 'verdict' => false];
     }
 
     private static function removeTree(string $path): void

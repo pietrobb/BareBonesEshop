@@ -277,12 +277,22 @@ final class MinimalPdf
     {
         $lines = [];
         foreach (preg_split('/\s+/u', trim($str)) ?: [] as $word) {
-            // R22: a word wider than the column is split, it never runs into the next column.
-            while (mb_strlen($word, 'UTF-8') > 1 && $this->approxTextWidth($word, $sizePt, $bold) > $width) {
-                $fit = 1;
-                while ($this->approxTextWidth(mb_substr($word, 0, $fit + 1, 'UTF-8'), $sizePt, $bold) <= $width) $fit++;
-                $lines[] = mb_substr($word, 0, $fit, 'UTF-8');
-                $word = mb_substr($word, $fit, null, 'UTF-8');
+            // R22: a word wider than the column is split, it never runs into the next column. R29: in one pass, each
+            // character measured once (re-measuring every prefix took minutes for a 50 000-character word).
+            if ($this->approxTextWidth($word, $sizePt, $bold) > $width) {
+                $limit = $width * self::MM_TO_PT / $sizePt / ($bold ? 1.08 : 1.0) * 1000;
+                $chunk = '';
+                $em = 0;
+                foreach (mb_str_split($word, 1, 'UTF-8') as $c) {
+                    $w = self::charEm($c);
+                    if ($chunk !== '' && $em + $w > $limit) {
+                        $lines[] = $chunk;
+                        [$chunk, $em] = ['', 0];
+                    }
+                    $chunk .= $c;
+                    $em += $w;
+                }
+                $word = $chunk;
             }
             $last = array_key_last($lines);
             if ($last !== null && $this->approxTextWidth($lines[$last] . ' ' . $word, $sizePt, $bold) <= $width) $lines[$last] .= ' ' . $word;
@@ -296,11 +306,13 @@ final class MinimalPdf
         // R22: Helvetica's own advance widths (1/1000 em) — capitals are wider than the old flat 0.5 em, so
         // "STÔL W25 …" overflowed its column. A letter outside ASCII is counted as a capital or a lower-case letter.
         $em = 0;
-        foreach (mb_str_split($s, 1, 'UTF-8') as $c) {
-            $i = strpos(self::HELVETICA_CHARS, $c);
-            $em += $i !== false ? self::HELVETICA_WIDTHS[$i]
-                : (strlen($c) === 1 ? 556 : (mb_strtolower($c, 'UTF-8') !== $c ? 722 : 556));
-        }
+        foreach (mb_str_split($s, 1, 'UTF-8') as $c) $em += self::charEm($c);
         return $em / 1000 * ($bold ? 1.08 : 1.0) * $sizePt / self::MM_TO_PT;
+    }
+
+    private static function charEm(string $c): int
+    {
+        $i = strpos(self::HELVETICA_CHARS, $c);
+        return $i !== false ? self::HELVETICA_WIDTHS[$i] : (strlen($c) === 1 ? 556 : (mb_strtolower($c, 'UTF-8') !== $c ? 722 : 556));
     }
 }

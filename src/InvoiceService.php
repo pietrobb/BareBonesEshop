@@ -2238,8 +2238,12 @@ final class InvoiceService
      */
     private static function drawPaymentQr(MinimalPdf $pdf, array $invoice, array $sellerSnap, array $customerSnap, float $top): ?float
     {
+        // R29: an IBAN with wrong check digits (an old snapshot, config.php edited by hand) printed a QR the bank refuses
+        // or, worse, one paying a mistyped account; the invoice then has the text lines only.
+        $iban = BankTransferInstructions::storeIban(['iban' => (string)($sellerSnap['iban'] ?? '')]);
+        if ($iban === '') return null;
         $due = preg_replace('/\D/', '', substr((string)($invoice['due_date'] ?? ''), 0, 10)) ?? '';
-        $qr = PaymentQr::for(['iban' => (string)$sellerSnap['iban'], 'bic' => (string)($sellerSnap['bic'] ?? ''),
+        $qr = PaymentQr::for(['iban' => $iban, 'bic' => (string)($sellerSnap['bic'] ?? ''),
             'amount' => (int)$invoice['total_gross'], 'currency' => (string)$invoice['currency'],
             'variable_symbol' => self::variableSymbol($invoice), 'due_date' => $due, 'note' => (string)$invoice['number'],
             'beneficiary' => (string)($sellerSnap['name'] ?? '')], (string)($customerSnap['country'] ?? '') ?: (string)($sellerSnap['country'] ?? ''));

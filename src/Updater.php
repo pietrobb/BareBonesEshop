@@ -169,8 +169,12 @@ final class Updater
                 foreach ($themeContract['failures'] as $failure) {
                     $blockers[] = 'Theme checkout contract: ' . $failure;
                 }
-                $blockers[] = 'Theme checkout contract NO-GO: the installed theme/store blocks named above would break checkout with '
-                    . $package->version() . '. Update them in the installation (or ship the fix in the package), then rerun check';
+                // R29: a probe that could not check (not started, refused root, no verdict) is not a theme that breaks checkout.
+                $blockers[] = $themeContract['verdict'] === false
+                    ? 'Theme checkout contract not verified: the probe of ' . $package->version() . ' could not check the themes'
+                        . ' (reason above, not a theme problem). Fix that, then rerun check'
+                    : 'Theme checkout contract NO-GO: the installed theme/store blocks named above would break checkout with '
+                        . $package->version() . '. Update them in the installation (or ship the fix in the package), then rerun check';
             }
         }
 
