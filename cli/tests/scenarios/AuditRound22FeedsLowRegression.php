@@ -99,7 +99,7 @@ try {
         }
     }
     I18n::setLocale('sk');
-    assert_equals(['Čiastočne: 3 chýb (2 cien odmietnutých)', 'Chyba: 404 from supplier',
+    assert_equals(['Čiastočne: 3 chyby (2 cien odmietnutých)', 'Chyba: 404 from supplier',
         'Položka č. 0 (SKU R22F-A): cena odmietnutá, porovnávacia cena ponechaná: Nie je cena: 19.000 (nejednoznačné: napíšte napr. 199.00 alebo 199000, '
         . 'alebo uveďte desatinný oddeľovač feedu: "transform": "price_to_cents", "decimal": "," alebo ".")', 'something unforeseen'],
         [FeedMessages::status('partial: 3 errors (2 prices refused)'), FeedMessages::status('error: 404 from supplier'),

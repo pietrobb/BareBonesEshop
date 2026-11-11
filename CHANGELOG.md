@@ -137,6 +137,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Translations and admin details from review round 29.** The PL/HU/DE/ES order confirmation no longer says
+  "variable symbol" in English. The audit log shows the notes of pages, warehouses, feeds, store settings, credit
+  notes, e-mail delivery and admin accounts in the admin's language, and the refund notes give amounts in the order's
+  currency instead of cents. Slovak error counts use the plural ("2 chyby", not "2 chýb"). The setup checklist's
+  e-mail item has its "Fix" button (Admin → E-mail delivery). A payment or shipping code saved in the admin keeps its
+  underscores (`bank_transfer` stayed `bank-transfer` after saving). A product with no price in a store's currency
+  (e.g. a PLN store) no longer shows its EUR catalog price on the product page, in listings or in the product's
+  structured data.
 - **Updater, mail and invoice fixes** (review round 29, lows).
   - Logs mask a bare `pass` key (`SMTP_PASS`, `smtp_pass`, `pass=`), which they used to write in clear.
   - `SMTP_HOST` can be an IPv6 address (`::1` or `[::1]`). It used to connect nowhere.

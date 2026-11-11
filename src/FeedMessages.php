@@ -57,6 +57,8 @@ final class FeedMessages
             $vars = [];
             foreach ($match as $name => $value) {
                 if (!is_string($name)) continue;
+                // R29: "2 chyby", not "2 chýb": the error count with the noun in its plural form.
+                if ($name === 'count') $vars['{errors}'] = I18n::plural('admin.common.errors_count', (int)$value);
                 $vars['{' . $name . '}'] = $name !== 'reasons' ? $value : implode('; ', array_map(
                     static fn(string $reason): string => self::translate($reason, self::REASONS), explode('; ', $value)));
             }
