@@ -7,6 +7,7 @@
 echo "\n--- Save for later (buy later): cart → saved → cart, totals, price change, sold out, login merge, store, GDPR ---\n";
 $sflDb = Db::get();
 (require TEST_CLI_DIR . '/../migrations/20261110190000_saved_for_later_items.php')->up($sflDb, Db::isSqlite());
+(require TEST_CLI_DIR . '/../migrations/20261111100000_saved_for_later_variant_sku.php')->up($sflDb, Db::isSqlite());
 $sflSession = $_SESSION;
 $sflGlobals = ['t' => $GLOBALS['t'] ?? null, 'storefront_currency' => $GLOBALS['storefront_currency'] ?? null];
 try {
@@ -36,7 +37,7 @@ try {
     $sflCart = Cart::enriched();
     assert_true($sflSaved['ok'] && !isset(Cart::get()['p_93901']), 'Save for later: the saved line leaves the cart');
     assert_equals([700, 1], [(int)$sflCart['subtotal'], (int)$sflCart['count']], 'Save for later: the cart total and item count no longer include the saved line');
-    assert_equals(['p_93901' => ['product_id' => 93901, 'variant_id' => null, 'qty' => 2, 'saved_price' => 1500, 'saved_currency' => 'eur']], SavedForLater::lines(),
+    assert_equals(['p_93901' => ['product_id' => 93901, 'variant_id' => null, 'qty' => 2, 'saved_price' => 1500, 'saved_currency' => 'eur', 'variant_sku' => null]], SavedForLater::lines(),
         'Save for later: the list keeps product, quantity and the unit price seen when saving');
     assert_equals(0, (int)$sflDb->query("SELECT COUNT(*) FROM saved_for_later_items")->fetchColumn(), 'Save for later: a guest list is not written to the database');
 
@@ -51,7 +52,8 @@ try {
     SavedForLater::saveFromCart('p_93901');
     assert_equals(Cart::MAX_QTY, SavedForLater::lines()['p_93901']['qty'], 'Save for later: saving again adds the quantities, capped at Cart::MAX_QTY');
     $_SESSION['saved_for_later']['default']['p_93901']['qty'] = 2;
-    assert_equals('cart_error', $sflAct(['cart_action' => 'save_for_later', 'cart_key' => 'p_404'])['error'], 'Save for later: a key not in the cart is refused');
+    assert_equals(['saved_for_later_error', I18n::t('saved_for_later_error')], array_values(array_intersect_key($sflAct(['cart_action' => 'save_for_later', 'cart_key' => 'p_404']), ['error' => 1, 'notice' => 1])),
+        'Save for later: a key not in the cart is refused and says why');
 
     // Checkout sees only the cart: the saved line is not in the goods it orders.
     $sflGoods = CheckoutService::previewCart('SK', [], '')['goods'];

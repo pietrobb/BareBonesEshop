@@ -76,6 +76,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   "back in stock" notice not delivered yet keeps its request and one retry series (review round 27).
 - **Migration** `20261110190000_saved_for_later_items` adds `saved_for_later_items`: the "Buy later" list of a
   signed-in customer (see below). Nothing to configure; GDPR export and erasure include it.
+- **Migration** `20261111100000_saved_for_later_variant_sku` adds `saved_for_later_items.variant_sku` (review round 29):
+  a saved variant line keeps its variant's SKU, so on SQLite, which gives a deleted variant's id to the next one, the
+  line is not mapped onto another variant. Until it runs, lines are saved without it; until the table exists, a
+  signed-in customer's cart works and shows no list (was: a 500).
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -208,7 +212,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   cart" checks today's price and stock: a changed price is shown (in the list and when moved), a sold-out line stays
   saved and says so. A guest's list is kept in the session and joins the account on login (a line in both is kept
   once); a signed-in customer's list is kept per store. The wishlist (favourites from the product page) is unchanged.
-  Themes: `storefront/cart-saved` (included by `cart` and `cart-empty`).
+  Themes: `storefront/cart-saved` (included by `cart` and `cart-empty`). Review round 29: a product switched to draft
+  for a while is hidden from the list, not deleted from it; only a product or variant that is gone is. Saving into a
+  full list or a failed save says why; signing in with a full account list (100 lines) tells how many guest lines did
+  not fit. With less in stock than saved, what fits moves to the cart and the rest stays saved. A sold-out line's "Move
+  to cart" is disabled, and a product that has variants now links "Choose a variant" to its page.
 - **`sudo php cli/restore.php` no longer leaves the shop a database it cannot open** (review round 27, capability review).
   A step started as root runs as the owner of the application root, and a restore gave the restored database, uploads
   and files their live owner and group only as root: in a deploy user's checkout the restored database of `www-data`
