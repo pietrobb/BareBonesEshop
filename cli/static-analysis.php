@@ -229,8 +229,8 @@ $architectureBudgets = [
     // +2 lines R15: the status select starts on an empty "choose" option (it preselected Cancelled for some orders).
     // +2 lines R16: a payment returned by hand offers no "Request refund" (nothing executes it) and its manual refund form names a request left in flight.
     // +9 lines R19: "Paid" with the amount 0 is refused, an amount above the order total is recorded with a warning.
-    // +1 coupling R31: the order detail shows the billing address when it differs from the delivery one (OrderAddress).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 950, 'functions' => 16, 'max_function_lines' => 316, 'coupling' => 24],
+    // +2 lines, +1 coupling R31: the order detail shows the billing address when it differs from the delivery one (OrderAddress).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 952, 'functions' => 16, 'max_function_lines' => 318, 'coupling' => 24],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 102, 'functions' => 5, 'max_function_lines' => 34, 'coupling' => 5],
