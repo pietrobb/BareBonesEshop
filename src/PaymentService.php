@@ -579,7 +579,13 @@ class PaymentService {
         $later = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
             AND idempotency_key IN (:execute, :attempt) LIMIT 1");
         $later->execute($params + [':execute' => $executeKey, ':attempt' => 'refund_attempt_' . $executeKey]);
-        return $later->fetchColumn() ? null : ['amount' => (int)$request['amount'], 'idempotency_key' => $executeKey];
+        if ($later->fetchColumn()) return null;
+        // R32 (low): "retry" was offered while the request's job still waited in the queue (the worker had not run yet), and
+        // the second job it queued ran after the first. The file and database queues are checked; Redis cannot list its jobs.
+        foreach (JobQueue::openJobs('payment_refund') ?? [] as $job) {
+            if ((int)($job['order_id'] ?? 0) === (int)$order['id'] && (string)($job['idempotency_key'] ?? '') === $executeKey) return null;
+        }
+        return ['amount' => (int)$request['amount'], 'idempotency_key' => $executeKey];
     }
 
     /**
@@ -633,7 +639,12 @@ class PaymentService {
                 // Still read as in flight once a later credit note made the payment refund_pending again, it kept it there
                 // for good, hid the refund form and offered to retry the declined refund.
                 if (is_array($bookedRaw) && ($bookedRaw['event_type'] ?? null) === 'refund.failed' && (int)$booked['amount'] === 0) return null;
-                if ((string)$booked['status'] === 'paid') continue; // only a release returns a refund_pending payment to paid
+                if ((string)$booked['status'] === 'paid') {
+                    // R32 (low): "paid" set by hand on the refund_pending payment released the request as a declined refund
+                    // does; it counted as in flight again once a later credit note made the payment refund_pending.
+                    if (self::releasesRefundRequest('paid', is_array($bookedRaw) ? $bookedRaw : [])) return null;
+                    continue; // otherwise only a release returns a refund_pending payment to paid
+                }
                 if ((string)$booked['idempotency_key'] === $executeKey
                     || self::settlesRefundRequest($order, $row, is_array($bookedRaw) ? $bookedRaw : [], (string)($booked['provider_ref'] ?? ''), (int)$booked['amount'])) {
                     return null;
@@ -642,6 +653,39 @@ class PaymentService {
             return $row;
         }
         return null;
+    }
+
+    /** R32: a ledger row (status, payload) that released the refund request before it: "paid" set by hand on the order. */
+    private static function releasesRefundRequest(string $status, array $payload): bool {
+        return $status === 'paid' && ($payload['event_type'] ?? null) === 'admin.paid';
+    }
+
+    /**
+     * R32 (low): whether the request a whole-order payment_refund job executes ($executeKey) is over: a later request was
+     * made (possible only once this one settled or was released) or "paid" was set by hand after it. Such a job, queued
+     * twice by "retry" while the first was still waiting, moved the payment of the later request out of refund_pending
+     * (as if that one had been paid out), and a day later, when Stripe no longer knew the key, could refund again.
+     */
+    public static function refundJobSuperseded(int $orderId, string $executeKey): bool {
+        $requestKey = self::refundRequestKey($executeKey);
+        if ($requestKey === null) return false;
+        $params = [':order' => $orderId, ':store' => StoreContext::current()->id()];
+        $own = Db::get()->prepare("SELECT id FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key AND status = 'refund_pending'");
+        $own->execute($params + [':key' => $requestKey]);
+        $ownId = $own->fetchColumn();
+        if ($ownId === false) return false;
+        $later = Db::get()->prepare("SELECT status, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id
+            AND status IN ('refund_pending', 'paid')");
+        $later->execute($params + [':id' => (int)$ownId]);
+        foreach ($later->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $raw = json_decode((string)($row['raw_response'] ?? ''), true);
+            $raw = is_array($raw) ? $raw : [];
+            if (((string)$row['status'] === 'refund_pending' && ($raw['event_type'] ?? null) === 'refund.requested')
+                || self::releasesRefundRequest((string)$row['status'], $raw)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

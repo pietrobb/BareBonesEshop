@@ -296,6 +296,10 @@ final class WorkerJobs
             if ($request === null) return; // unpaid or nothing left to refund
             [$amount, $idempotencyKey] = [$request['amount'], $request['idempotency_key']];
         }
+        if ($itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundJobSuperseded($orderId, $idempotencyKey)) {
+            Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => ['status' => 'superseded']]);
+            return;
+        }
         // A redelivered whole-order job after the provider confirmed the refund only finishes the bookkeeping.
         $alreadyRefunded = $itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey);
 
@@ -337,6 +341,7 @@ final class WorkerJobs
             return;
         }
         if ($status !== 'succeeded') {
+            if ($status === 'error' && self::requeueRefundAfterError($payload, $job, $order)) return;
             throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");
         }
 
@@ -349,6 +354,28 @@ final class WorkerJobs
         if ($itemRefundId === 0 && $paymentStatus === 'refunded' && OrderWorkflow::canTransition($orderStatus, 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
         }
+    }
+
+    /** Re-queues after the last attempt failed, at most this many times (5, 10, 20, 40 minutes, then hourly: about 9 hours). */
+    private const REFUND_ERROR_REQUEUES = 12;
+
+    /**
+     * R32 (low): three network errors in a row (about a minute and a half) killed a refund job for good, and nothing
+     * offered to send the credit note's refund again: it stayed pending. A provider refund with an idempotency key may be
+     * asked again safely, so the last failed attempt is queued again with a growing delay, for less than the day Stripe
+     * keeps the key; only then does the job fail and raise its incident. A provider without idempotent refunds is never
+     * asked twice (PaymentService::refund()).
+     */
+    private static function requeueRefundAfterError(array $payload, array $job, ?array $order): bool {
+        if ((int)($job['attempts'] ?? 0) + 1 < (int)($job['max_attempts'] ?? 3)) return false; // the queue's own backoff first
+        $requeued = (int)($payload['error_requeues'] ?? 0);
+        if ($requeued >= self::REFUND_ERROR_REQUEUES || (string)($payload['idempotency_key'] ?? '') === '' || $order === null
+            || !self::orderPaymentGateway($payload, $order) instanceof IdempotentRefundAdapter) {
+            return false;
+        }
+        JobQueue::pushDelayed('payment_refund', ['error_requeues' => $requeued + 1] + $payload, min(3600, 300 * 2 ** $requeued), 1);
+        Logger::warning('refund.requeued_after_error', ['order_id' => (int)($payload['order_id'] ?? 0), 'requeues' => $requeued + 1]);
+        return true;
     }
 
     /** Void the provider session of a cancelled, unpaid order so it can no longer be paid. */

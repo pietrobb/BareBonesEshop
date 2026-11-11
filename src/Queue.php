@@ -162,6 +162,18 @@ class DatabaseQueue implements DelayedQueueBackend {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** @return list<array<string, mixed>> the payloads of a store's jobs of $type still waiting or running */
+    public function openPayloads(string $type, string $store): array {
+        $stmt = $this->db->prepare("SELECT payload FROM queue_jobs WHERE type = :type AND store_id = :store AND state IN ('pending', 'retry', 'processing')");
+        $stmt->execute([':type' => $type, ':store' => $store]);
+        $payloads = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $payload) {
+            $decoded = json_decode((string)$payload, true);
+            if (is_array($decoded)) $payloads[] = $decoded;
+        }
+        return $payloads;
+    }
+
     private function hydrate(array $row): array {
         $payload = json_decode((string)$row['payload'], true, 512, JSON_THROW_ON_ERROR);
         return [
