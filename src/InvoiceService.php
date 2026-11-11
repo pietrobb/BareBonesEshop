@@ -1494,9 +1494,10 @@ final class InvoiceService
 
     private static function customerSnapshot(array $order): array
     {
-        $addr = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
+        // R31: issued to the billing address; an order without one is billed to its delivery address as before.
+        $addr = OrderAddress::billing($order);
         return [
-            'name'    => (string)($order['customer_name']  ?? ''),
+            'name'    => (string)($addr['name'] ?? $order['customer_name'] ?? ''),
             'email'   => (string)($order['customer_email'] ?? ''),
             'phone'   => (string)($order['customer_phone'] ?? ''),
             'company' => (string)($addr['company']  ?? ''),

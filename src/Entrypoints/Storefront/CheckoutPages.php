@@ -139,6 +139,13 @@ function renderCheckout(): string {
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),
         'values' => $state['values'], 'checkout_error' => $checkoutError, 'saved_addresses' => $state['addresses'],
         'saved_address_label' => $t('checkout_saved_address'), 'saved_address_use_label' => $t('checkout_saved_address_use'),
+        // R31: billing address other than the delivery one.
+        'delivery_address_label' => $t('checkout_delivery_heading'), 'billing_heading' => $t('checkout_billing_heading'),
+        'billing_different_label' => $t('checkout_billing_different'), 'billing_different' => $state['billing_different'],
+        'billing_name_label' => $t('checkout_billing_name'), 'saved_billing_addresses' => $state['billing_addresses'],
+        'saved_billing_address_label' => $t('checkout_saved_billing_address'),
+        'billing_country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $state['billing_country']],
+            array_keys($state['billing_countries']), $state['billing_countries']),
         'country_label' => $t('country'), 'country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $country],
             array_keys($state['countries']), $state['countries']),
         'coupon_label' => $t('coupon_code'), 'coupon_apply_label' => $t('coupon_apply'), 'coupon_remove_label' => $t('coupon_remove'),
