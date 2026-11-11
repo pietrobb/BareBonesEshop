@@ -565,9 +565,11 @@ class PaymentService {
         $db = Db::get();
         $params = [':order' => (int)$order['id'], ':store' => StoreContext::current()->id()];
         $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);
+        // R29: a refund that settles the request already made latestRefundRequestRow() return null. Any other refund booked
+        // meanwhile (one from the provider's dashboard) hid the retry of a request no job executed: it stayed refund_pending.
         $later = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
-            AND ((id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')) OR idempotency_key IN (:execute, :attempt)) LIMIT 1");
-        $later->execute($params + [':id' => (int)$request['id'], ':execute' => $executeKey, ':attempt' => 'refund_attempt_' . $executeKey]);
+            AND idempotency_key IN (:execute, :attempt) LIMIT 1");
+        $later->execute($params + [':execute' => $executeKey, ':attempt' => 'refund_attempt_' . $executeKey]);
         return $later->fetchColumn() ? null : ['amount' => (int)$request['amount'], 'idempotency_key' => $executeKey];
     }
 
@@ -947,6 +949,19 @@ class PaymentService {
             $from = (string)($order['payment_status'] ?? 'pending');
             $status = $from;
             $to = self::refundedAmount($orderId) >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+            // R29 (review round 29, finding 4): an item refund job that ended while an admin or cancellation refund is in
+            // flight moved the payment out of refund_pending, so the request's money counted as free again and the admin
+            // could request it a second time (the customer got 22.00 instead of 40.99, no warning). Its money is booked;
+            // the payment stays refund_pending until the request settles, as for a refund event (bookRefundWithin()).
+            if ($itemRefund && $from === 'refund_pending' && ($request = self::latestRefundRequestRow($order, true)) !== null) {
+                $currency = (string)($order['currency'] ?? 'eur');
+                AuditLog::log('order_refund', $orderId, $from, $from, 'Item refund ' . ($refundId !== '' ? $refundId . ' ' : '') . 'of '
+                    . AuditLogLabels::amount($amount, $currency) . ' booked while the refund of ' . AuditLogLabels::amount((int)$request['amount'], $currency) . ' is in flight');
+                if (self::refundedAmount($orderId) + (int)$request['amount'] > (int)$order['total']) {
+                    IncidentMonitor::report('payment.refund_overcommitted', 'payment', 'critical', ['order_id' => $orderId]);
+                }
+                return false;
+            }
             if ($from === $to || (!$itemRefund && $from !== 'refund_pending') || !self::canPaymentTransition($from, $to)) return false;
             self::updatePaymentStatus($orderId, $to, 'refund.succeeded', [
                 'refund_id' => $itemRefundId > 0 ? $itemRefundId : null,
@@ -1525,6 +1540,29 @@ class PaymentService {
             // No money moves: amount 0, so the status row is never read as a capture or a refund.
             return self::applyTransition($order, $to, 'refund.failed', 0, 'item-refund-failed:' . $itemRefundId, ['item_refund_id' => $itemRefundId]);
         });
+    }
+
+    /**
+     * R29 (finding 5): the provider declined the refund of this order's refund request for good (PaymentRefundDeclined).
+     * Was: the job retried the same declined request until it died, the payment stayed refund_pending, and once a refund
+     * from the provider's dashboard was booked the admin could neither retry it nor request a new one. No money moved:
+     * the request is released, the payment returns to paid / partially_refunded and the merchant is told.
+     */
+    public static function declinedRefundRequest(int $orderId, string $executeKey, string $reason): bool {
+        $released = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $executeKey, $reason): bool {
+            $request = self::latestRefundRequestRow($order, true);
+            if ($request === null || self::refundExecuteKey((string)$request['idempotency_key']) !== $executeKey) return false;
+            $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
+            if (!self::canPaymentTransition('refund_pending', $to)) return false;
+            $amount = (int)$request['amount'];
+            // No money moves: amount 0, so the status row is never read as a capture or a refund.
+            if (!self::applyTransition($order, $to, 'refund.failed', 0, 'refund-declined:' . $executeKey, ['amount' => $amount, 'reason' => $reason])) return false;
+            AuditLog::log('order_refund', $orderId, 'refund_pending', $to, 'Refund of '
+                . AuditLogLabels::amount($amount, (string)($order['currency'] ?? 'eur')) . ' declined by the provider: ' . $reason);
+            return true;
+        });
+        IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'declined' => true, 'released' => $released]);
+        return $released;
     }
 
     /** Whether the provider answered this order's refund request (not a credit note's item refund) as pending under $refundId. */

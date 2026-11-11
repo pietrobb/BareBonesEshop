@@ -189,6 +189,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   payment, left a payment whose money was all returned "partially refunded". Such a refund is now booked while the
   payment stays refund_pending until the request settles; one leaving less than the request in flight raises the critical
   incident `payment.refund_overcommitted`.
+- **An item refund (return, credit note) during an admin refund no longer frees the admin refund's money either**
+  (review round 29). The item refund's job moved the payment out of refund_pending, so the admin could request the same
+  money again and the customer was refunded twice, with no warning. Its money is now booked while the payment stays
+  refund_pending until the admin refund settles.
+- **A refund Stripe declines is released at once** (review round 29). A definitive decline (HTTP 4xx other than
+  401/403/409/429: already refunded, amount above what is left, …) was retried until the job died, and the order stayed
+  refund_pending; after a dashboard refund the admin could neither retry it nor request a new one. The request is now
+  released (the payment returns to paid or partially refunded, critical incident `payment.refund_failed`) and a declined
+  item refund is marked failed with its credit note reversed. A refund no job executed keeps its "retry" button after a
+  dashboard refund.
 
 - **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
   fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached

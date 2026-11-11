@@ -305,6 +305,16 @@ final class WorkerJobs
             JobQueue::heartbeat(true);
             try {
                 $result = PaymentService::refund($orderId, $paymentId, $amount, self::orderPaymentGateway($payload, $order), $idempotencyKey, (string)($order['currency'] ?? 'eur'));
+            } catch (\PaymentRefundDeclined $e) {
+                // R29: declined for good (a retry gets the same answer): released, not retried until the job dies.
+                Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => ['status' => 'declined', 'message' => $e->getMessage()]]);
+                if ($itemRefundId > 0) {
+                    Rma::failRefund($itemRefundId, 'Refund declined by the provider: ' . $e->getMessage());
+                    IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'declined' => true]);
+                } else {
+                    PaymentService::declinedRefundRequest($orderId, $idempotencyKey, $e->getMessage());
+                }
+                return;
             } catch (\Throwable $e) {
                 $result = ['status' => 'error', 'message' => $e->getMessage()];
             }
