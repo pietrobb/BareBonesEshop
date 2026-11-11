@@ -166,8 +166,10 @@ final class ProductVariants {
             foreach ($validated['rows'] as &$row) {
                 $values = array_diff_key($row, ['id' => 1, 'stock' => 1, 'stock_loaded' => 1] + ($hasDigital ? [] : ['digital' => 1]));
                 $params = [':product' => $productId] + array_combine(array_map(static fn(string $k): string => ":{$k}", array_keys($values)), $values);
-                if ($row['id'] > 0) $update->execute($params + [':id' => $row['id']]);
-                else {
+                if ($row['id'] > 0) {
+                    $update->execute($params + [':id' => $row['id']]);
+                    if (isset($before[$row['id']])) SavedForLater::variantSkuChanged($row['id'], (string)$before[$row['id']]['sku'], $row['sku']);
+                } else {
                     $insert->execute($params);
                     $row['id'] = (int)$db->lastInsertId();
                 }
