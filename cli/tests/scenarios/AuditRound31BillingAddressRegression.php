@@ -218,8 +218,11 @@ try {
         assert_true(($r31bBilled['name'] ?? '') === 'R31B Firma s.r.o. účtáreň' && ($r31bBilled['street'] ?? '') === 'Fakturačná 9' && ($r31bBilled['country'] ?? '') === 'CZ'
             && ($r31bBilled['company'] ?? '') === 'R31B Firma s.r.o.' && ($r31bBilled['ico'] ?? '') === '27082440' && ($r31bBilled['email'] ?? '') === 'r31b-guest-billed@example.test',
             "{$l}: the invoice is issued to the billing address and company (" . json_encode($r31bBilled) . ')');
+        assert_equals(['name' => 'R31B Billed', 'street' => 'Doručovacia 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'], $r31bBilled['delivery'] ?? null,
+            "{$l}: the invoice also names the delivery address the goods went to");
         $r31bSame = $r31bInvoice['same'] ?? [];
-        assert_true(($r31bSame['name'] ?? '') === 'R31B Same' && ($r31bSame['street'] ?? '') === 'Doručovacia 1' && ($r31bSame['company'] ?? '') === 'R31B Firma s.r.o.',
+        assert_true(($r31bSame['name'] ?? '') === 'R31B Same' && ($r31bSame['street'] ?? '') === 'Doručovacia 1' && ($r31bSame['company'] ?? '') === 'R31B Firma s.r.o.'
+            && !array_key_exists('delivery', $r31bSame),
             "{$l}: an order without a billing address is invoiced to the delivery address as before (" . json_encode($r31bSame) . ')');
     }
 } finally {

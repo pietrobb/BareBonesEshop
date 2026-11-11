@@ -143,9 +143,14 @@ try {
             "{$l}: a signed-in customer's form starts from the profile and the default shipping address (country " . $a133Selected($form) . ')');
         assert_true(preg_match('~<select id="checkout-saved-address" name="saved_address">.*?</select>~s', $form, $a133Select) === 1
             && substr_count($a133Select[0], '<option') === 2 && str_contains($a133Select[0], 'A133 Second Street 2')
-            && !str_contains($html, 'A133 Foreign') && !str_contains($html, 'A133 Billing Street')
+            && !str_contains($html, 'A133 Foreign') && !str_contains($a133Select[0], 'A133 Billing Street')
             && str_contains($form, '<button type="submit" name="address_action" value="use" formnovalidate>'),
             "{$l}: only the customer's own shipping addresses are offered, with a no-JS button; no other customer's address leaks");
+        // R31: the customer's billing address is offered (and prefilled) in the billing part, never as a delivery address.
+        assert_true(preg_match('~<select id="checkout-saved-billing-address" name="saved_billing_address">.*?</select>~s', $form, $a133Billing) === 1
+            && substr_count($a133Billing[0], '<option') === 1 && str_contains($a133Billing[0], 'A133 Billing Street 3')
+            && str_contains($form, 'name="billing_street" autocomplete="billing street-address" maxlength="200" value="A133 Billing Street 3"'),
+            "{$l}: the saved billing address is offered and prefilled in the billing part only");
 
         $a133Extra = json_encode(['shipping_method' => $a133Ship[1] ?? '', 'payment' => $a133Pay[1] ?? '']);
         [$l, $r, $html, $form] = $a133Do('member_use_second');

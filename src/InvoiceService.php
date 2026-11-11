@@ -1496,7 +1496,7 @@ final class InvoiceService
     {
         // R31: issued to the billing address; an order without one is billed to its delivery address as before.
         $addr = OrderAddress::billing($order);
-        return [
+        $snapshot = [
             'name'    => (string)($addr['name'] ?? $order['customer_name'] ?? ''),
             'email'   => (string)($order['customer_email'] ?? ''),
             'phone'   => (string)($order['customer_phone'] ?? ''),
@@ -1509,6 +1509,13 @@ final class InvoiceService
             'dic'     => (string)($addr['dic']      ?? ''),
             'ic_dph'  => (string)($addr['ic_dph']   ?? ''),
         ];
+        // The goods went elsewhere: the document also names the delivery address (not for a digital-only order).
+        $delivery = OrderAddress::delivery($order);
+        if (OrderAddress::billingDiffers($order) && trim((string)($delivery['street'] ?? '')) !== '') {
+            $snapshot['delivery'] = ['name' => (string)$delivery['name'], 'street' => (string)$delivery['street'], 'city' => (string)($delivery['city'] ?? ''),
+                'zip' => (string)($delivery['zip'] ?? ''), 'country' => strtoupper((string)($delivery['country'] ?? ''))];
+        }
+        return $snapshot;
     }
 
     private static function financialSnapshot(array $order): ?array
@@ -2101,6 +2108,13 @@ final class InvoiceService
         $sy = $y; $cy = $y;
         foreach (self::partyLines($sellerSnap, $L) as $line) { $pdf->text(20, $sy, $line, ['size' => 9]); $sy += 4.5; }
         foreach (self::partyLines($customerSnap, $L) as $line) { $pdf->text(110, $cy, $line, ['size' => 9]); $cy += 4.5; }
+        // R31: billed to one address, delivered to another — the delivery address under the customer.
+        if (is_array($customerSnap['delivery'] ?? null)) {
+            $cy += 2;
+            $pdf->text(110, $cy, $L['delivery_address'], ['size' => 9, 'bold' => true]);
+            $cy += 4.5;
+            foreach (self::partyLines($customerSnap['delivery'], $L) as $line) { $pdf->text(110, $cy, $line, ['size' => 9]); $cy += 4.5; }
+        }
         $y = max($sy, $cy) + 4;
 
         $pdf->line(20, $y, 190, $y);
@@ -2300,7 +2314,7 @@ final class InvoiceService
             'sk' => [
                 'title' => 'Faktúra č.', 'issued_at' => 'Dátum vystavenia',
                 'delivery_date' => 'Dátum dodania', 'due_date' => 'Splatnosť',
-                'seller' => 'Predávajúci', 'customer' => 'Odberateľ',
+                'seller' => 'Predávajúci', 'customer' => 'Odberateľ', 'delivery_address' => 'Adresa dodania',
                 'col_item' => 'Položka', 'col_qty' => 'Množ.', 'col_unit_price' => 'J. cena',
                 'col_vat' => 'DPH', 'col_total' => 'Spolu',
                 'shipping' => 'Doprava',
@@ -2322,7 +2336,7 @@ final class InvoiceService
             'cs' => [
                 'title' => 'Faktura č.', 'issued_at' => 'Datum vystavení',
                 'delivery_date' => 'Datum dodání', 'due_date' => 'Splatnost',
-                'seller' => 'Prodávající', 'customer' => 'Odběratel',
+                'seller' => 'Prodávající', 'customer' => 'Odběratel', 'delivery_address' => 'Adresa dodání',
                 'col_item' => 'Položka', 'col_qty' => 'Množ.', 'col_unit_price' => 'J. cena',
                 'col_vat' => 'DPH', 'col_total' => 'Celkem',
                 'shipping' => 'Doprava',
@@ -2344,7 +2358,7 @@ final class InvoiceService
             'pl' => [
                 'title' => 'Faktura nr', 'issued_at' => 'Data wystawienia',
                 'delivery_date' => 'Data dostawy', 'due_date' => 'Termin płatności',
-                'seller' => 'Sprzedawca', 'customer' => 'Nabywca',
+                'seller' => 'Sprzedawca', 'customer' => 'Nabywca', 'delivery_address' => 'Adres dostawy',
                 'col_item' => 'Pozycja', 'col_qty' => 'Ilość', 'col_unit_price' => 'Cena j.',
                 'col_vat' => 'VAT', 'col_total' => 'Razem',
                 'shipping' => 'Wysyłka',
@@ -2366,7 +2380,7 @@ final class InvoiceService
             'hu' => [
                 'title' => 'Számla sz.', 'issued_at' => 'Kiállítás dátuma',
                 'delivery_date' => 'Teljesítés dátuma', 'due_date' => 'Fizetési határidő',
-                'seller' => 'Eladó', 'customer' => 'Vevő',
+                'seller' => 'Eladó', 'customer' => 'Vevő', 'delivery_address' => 'Szállítási cím',
                 'col_item' => 'Tétel', 'col_qty' => 'Menny.', 'col_unit_price' => 'Egys. ár',
                 'col_vat' => 'ÁFA', 'col_total' => 'Összesen',
                 'shipping' => 'Szállítás',
@@ -2388,7 +2402,7 @@ final class InvoiceService
             'de' => [
                 'title' => 'Rechnung Nr.', 'issued_at' => 'Rechnungsdatum',
                 'delivery_date' => 'Leistungsdatum', 'due_date' => 'Fällig am',
-                'seller' => 'Verkäufer', 'customer' => 'Kunde',
+                'seller' => 'Verkäufer', 'customer' => 'Kunde', 'delivery_address' => 'Lieferadresse',
                 'col_item' => 'Position', 'col_qty' => 'Menge', 'col_unit_price' => 'Einzelpreis',
                 'col_vat' => 'MwSt.', 'col_total' => 'Gesamt',
                 'shipping' => 'Versand',
@@ -2410,7 +2424,7 @@ final class InvoiceService
             'es' => [
                 'title' => 'Factura n.º', 'issued_at' => 'Fecha de emisión',
                 'delivery_date' => 'Fecha de entrega', 'due_date' => 'Vencimiento',
-                'seller' => 'Vendedor', 'customer' => 'Cliente',
+                'seller' => 'Vendedor', 'customer' => 'Cliente', 'delivery_address' => 'Dirección de entrega',
                 'col_item' => 'Artículo', 'col_qty' => 'Cant.', 'col_unit_price' => 'Precio unit.',
                 'col_vat' => 'IVA', 'col_total' => 'Total',
                 'shipping' => 'Envío',
@@ -2427,7 +2441,7 @@ final class InvoiceService
             'en' => [
                 'title' => 'Invoice No.', 'issued_at' => 'Issue date',
                 'delivery_date' => 'Delivery date', 'due_date' => 'Due date',
-                'seller' => 'Seller', 'customer' => 'Customer',
+                'seller' => 'Seller', 'customer' => 'Customer', 'delivery_address' => 'Delivery address',
                 'col_item' => 'Item', 'col_qty' => 'Qty', 'col_unit_price' => 'Unit price',
                 'col_vat' => 'VAT', 'col_total' => 'Total',
                 'shipping' => 'Shipping',
