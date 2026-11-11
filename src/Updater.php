@@ -514,10 +514,14 @@ final class Updater
             }
             $deleted = array_keys(array_filter($prunable));
             foreach ($deleted as $id) $this->removeTree($this->snapshotDirectory($id));
-            // R29: copies of the updater left by a step killed while making one, or of a snapshot that is gone.
+            // R29: copies of the updater left by a step killed while making one, or of a snapshot that is gone. R30 (low): a
+            // step killed after making its copy but before .maintenance named it, or after it completed but before it
+            // dropped it, left one for good. Every step makes its copy under this lock, so only the copies .maintenance
+            // names (the command that finishes a half-done step) are still needed.
+            $marker = (string)@file_get_contents(MaintenanceMode::path($this->root));
             foreach (glob($this->finishersDirectory() . DIRECTORY_SEPARATOR . '*', GLOB_ONLYDIR) ?: [] as $copy) {
                 $id = substr(basename($copy), 0, 27);
-                $stale = str_ends_with($copy, '.partial') ? (int)@filemtime($copy) < time() - 86400 : !is_dir($this->snapshotDirectory($id));
+                $stale = str_ends_with($copy, '.partial') || !is_dir($this->snapshotDirectory($id)) || !str_contains($marker, basename($copy));
                 if ($stale && !$this->isInside((string)realpath(dirname(__DIR__)), $copy)) $this->removeTree($copy);
             }
             return $deleted;
