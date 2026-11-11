@@ -139,7 +139,16 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
         // recognised as the shop's own (PaymentService::bookProviderRefund()), also before this call's result is booked.
         if ($idempotencyKey !== null) $params['metadata'] = [self::REFUND_KEY_METADATA => $idempotencyKey];
         $headers = $idempotencyKey === null ? [] : ['Idempotency-Key: ' . hash('sha256', $idempotencyKey)];
-        $response = $this->apiCall('POST', '/v1/refunds', $params, $headers);
+        try {
+            $response = $this->apiCall('POST', '/v1/refunds', $params, $headers);
+        } catch (\RuntimeException $e) {
+            // R29: a 4xx is Stripe's answer to this request (idempotent: a retry gets it again), not a transient failure;
+            // 401/403 (a wrong key, fixed in the config), 409 (idempotency conflict) and 429 (rate limit) are worth retrying.
+            if ($e->getCode() >= 400 && $e->getCode() < 500 && !in_array($e->getCode(), [401, 403, 409, 429], true)) {
+                throw new \PaymentRefundDeclined($e->getMessage(), $e->getCode(), $e);
+            }
+            throw $e;
+        }
         return [
             'refund_id' => $response['id'] ?? '',
             // requires_action (some bank refunds) is not returned yet either: the refund webhook settles it.
@@ -260,7 +269,7 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
 
         if ($httpCode >= 400) {
             $msg = $data['error']['message'] ?? "HTTP {$httpCode}";
-            throw new \RuntimeException("Stripe API: {$msg}");
+            throw new \RuntimeException("Stripe API: {$msg}", (int)$httpCode);
         }
 
         return $data;

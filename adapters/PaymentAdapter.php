@@ -59,6 +59,12 @@ interface PaymentStatusEventAdapter extends PaymentAdapter {
 class PaymentNotificationUnverified extends RuntimeException {}
 
 /**
+ * R29: the provider refused the refund for good (Stripe 4xx other than 401/403/409/429: the charge is already refunded, the amount
+ * exceeds what is left, …). Retrying sends the same request and gets the same answer: the refund request is released.
+ */
+class PaymentRefundDeclined extends RuntimeException {}
+
+/**
  * Providers that can void an unpaid checkout/payment, so a cancelled order can no longer be paid.
  * Payments captured anyway (provider without this capability, race) are refunded by
  * PaymentService::settleCapture().
