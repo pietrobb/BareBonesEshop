@@ -82,10 +82,13 @@ try {
     // Finding 6a: the theme probe of the new release started as root (by the 2.1.2 updater) says why, as a verdict.
     [$r28dExit, $r28dOut, $r28dErr] = $r28dRun([PHP_BINARY, $r28dRoot . '/' . ThemeUpgradeGate::PROBE], $r28dRoot);
     $r28dVerdict = json_decode($r28dOut, true);
-    assert_true($r28dExit === 1 && is_array($r28dVerdict) && ($r28dVerdict['status'] ?? '') === 'NO-GO'
-        && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'Not a theme problem')
-        && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'as the owner of the application root'),
-        'R28 probe: started as root it returns a NO-GO verdict that names root, not the theme (' . trim($r28dErr . $r28dOut) . ')');
+    // R29 (finding 1): in a tree root owns alone (this checkout copied by root) it runs; else the NO-GO names root.
+    $r28dRootOnly = cli_not_root_only($r28dRoot) === null;
+    assert_true(is_array($r28dVerdict) && ($r28dRootOnly ? $r28dExit === 0 && ($r28dVerdict['status'] ?? '') === 'GO'
+        : $r28dExit === 1 && ($r28dVerdict['status'] ?? '') === 'NO-GO'
+            && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'Not a theme problem')
+            && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'as the owner of the application root')),
+        'R28 probe: started as root it runs in a root-only tree, else returns a NO-GO verdict that names root, not the theme (' . substr(trim($r28dErr . $r28dOut), 0, 300) . ')');
 
     // Finding 1: the wrapper switches before PHP runs; a root-owned tree or a path as step is refused.
     if (!is_executable('/bin/sh') || trim((string)shell_exec('command -v setpriv 2>/dev/null')) === '') {
