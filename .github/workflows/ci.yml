@@ -81,7 +81,7 @@ jobs:
         run: |
           status=0
           sudo BAREBONES_REQUIRE_ROOT_TEST=1 unshare --mount --propagation private sh -c \
-            'mount -t tmpfs none /proc && exec "$0" cli/test.php --only=AuditRound26StepLockRegression.php,AuditRound27RootRegression.php,AuditRound27RestoreOwnerRegression.php,AuditRound28RootDocsRegression.php,AuditRound28RootChecksRegression.php' "$(command -v php)" || status=$?
+            'mount -t tmpfs none /proc && exec "$0" cli/test.php --only=AuditRound26StepLockRegression.php,AuditRound27RootRegression.php,AuditRound27RestoreOwnerRegression.php,AuditRound28RootDocsRegression.php,AuditRound28RootChecksRegression.php,AuditRound29RootLockRegression.php' "$(command -v php)" || status=$?
           sudo chown -R "$(id -u):$(id -g)" .
           exit $status
 
@@ -90,6 +90,40 @@ jobs:
           php cli/static-analysis.php
           php cli/i18n-parity.php
           php cli/quality-gates.php
+
+  # Review round 29, finding 1: the reviewer runs everything as root in a tree root owns, and a regression only root met
+  # (a 0660 step lock refusing every later root step) failed 127 tests and three gates there while CI ran as the runner.
+  root-suite:
+    name: Test suite and gates as root in a root-owned tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          submodules: true
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium, gd
+          coverage: none
+          tools: none
+
+      - name: Root-owned copy of the checkout (no group or other write)
+        run: |
+          set -e
+          sudo mkdir -m 0755 /srv/shop
+          { git ls-files -z; git -C vendor/bbf ls-files -z | sed -z 's#^#vendor/bbf/#'; } | tar --null -T - -cf - | sudo tar -xf - -C /srv/shop
+          sudo cp config.example.php /srv/shop/config.php
+          sudo mkdir -p /srv/shop/db /srv/shop/cache /srv/shop/logs /srv/shop/jobs
+          sudo chown -R 0:0 /srv/shop
+          sudo chmod -R go-w /srv/shop
+
+      - name: Test suite and gates as root
+        run: |
+          sudo HOME=/root sh -c 'cd /srv/shop && "$0" cli/test.php && "$0" cli/static-analysis.php && "$0" cli/i18n-parity.php && "$0" cli/quality-gates.php' "$(command -v php)"
 
   phpstan:
     name: PHPStan level 5 (baseline)

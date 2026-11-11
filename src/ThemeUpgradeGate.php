@@ -44,7 +44,7 @@ final class ThemeUpgradeGate
                 return self::noGo('The updated core would not contain ' . self::PROBE
                     . '; without the new core\'s checkout probe no theme verdict is possible. Use a package built from a release that ships the theme gate.');
             }
-            return $this->runProbe($candidate);
+            return $this->runProbe($candidate, $root);
         } catch (Throwable $e) {
             return self::noGo('Theme candidate could not be assembled: ' . $e->getMessage());
         } finally {
@@ -121,13 +121,16 @@ final class ThemeUpgradeGate
         if (!copy($source, $target)) {
             throw new RuntimeException("Cannot copy {$relative} into the theme candidate");
         }
+        // R29: the probe of a root-only shop runs as root only in a candidate no other account can change (umask 0002 gave 0664).
+        @chmod($target, 0600);
     }
 
-    private function runProbe(string $candidate): array
+    private function runProbe(string $candidate, string $installedRoot): array
     {
         $pipes = [];
+        // R29: a probe run as root checks that no other account could change the shop it copied (--installed-root) either.
         $process = proc_open(
-            [$this->phpBinary, $candidate . DIRECTORY_SEPARATOR . self::PROBE],
+            [$this->phpBinary, $candidate . DIRECTORY_SEPARATOR . self::PROBE, '--installed-root=' . $installedRoot],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $candidate
