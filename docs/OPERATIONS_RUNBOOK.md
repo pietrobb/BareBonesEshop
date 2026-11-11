@@ -70,6 +70,22 @@ The script adds the product to a cart, opens the checkout page, submits the HTML
 The request carries `X-BareBones-Synthetic` with `monitoring.synthetic_token`. The shop then flags the order `is_synthetic`, sends no customer or merchant mail, emits no ERP/webhook events, refuses offline payment methods, and cancels the order with its stock reservation released as soon as the gateway session exists. Without a configured token (≥ 32 characters) every checkout is a normal order, so never run the smoke against production without it.
 
 
+## Stripe webhook
+
+In the Stripe Dashboard (Developers → Webhooks) add the endpoint `<app_url>/api/v1/webhooks/payment/stripe` and put its signing secret (`whsec_…`) into `stripe_webhook_secret`. Without a secret of at least 16 characters the endpoint answers `503` and books nothing. `charge.refunded` also needs `stripe_secret_key`: when the event does not embed the charge's refunds, the shop lists them through the Stripe API. Select these events; the shop answers any other event `200` and ignores it:
+
+| Event | What the shop does |
+| --- | --- |
+| `checkout.session.completed` | marks the order paid when the session's amount and currency match the order (a mismatch is refused with `500` and an incident) |
+| `checkout.session.async_payment_succeeded` | the same for a delayed payment method (SEPA Direct Debit) |
+| `checkout.session.async_payment_failed` | marks the payment failed; the unpaid order expires and releases its stock |
+| `charge.refunded` | books each succeeded refund of the charge once, by its Stripe refund id (a refund the shop requested carries `bbe_refund_key` in its metadata and is booked as that refund) |
+| `refund.updated` | books a refund once it succeeds; a refund that fails or is canceled releases the shop's refund in flight and raises a critical `payment.refund_failed` incident |
+| `charge.refund.updated` | the same as `refund.updated` (older API versions send this name) |
+| `charge.dispute.created` | marks the payment disputed and logs the dispute in the order's audit log |
+
+Without `refund.updated` a refund Stripe answers `pending` (SEPA, bank transfers) is booked only when the next `charge.refunded` lists it as succeeded, and a refund that fails later is never released. Answers Stripe retries (with backoff, for up to three days): `503` when the order is not known yet (the event is parked, `202` once it gives up) and when a `charge.refunded` lists no refunds and the Stripe API cannot list them either (`payment.webhook_deferred` warning). A redelivered event is answered `already_processed`.
+
 ## Backup and restore
 
 ### Daily backup

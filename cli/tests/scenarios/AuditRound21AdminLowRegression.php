@@ -34,7 +34,7 @@ try {
     ], 'R21 audit log: refund notes show the amount in the order\'s currency ("16 470 Ft"), not in cents; other notes stay as written');
     $r21aPayments = (string)file_get_contents($r21aRoot . '/src/PaymentService.php') . (string)file_get_contents($r21aRoot . '/src/Http/ApiHandlers.php');
     assert_true(!str_contains($r21aPayments, 'refund of {$') && !str_contains($r21aPayments, ' cents"') && !str_contains($r21aPayments, ' cents")')
-        && substr_count($r21aPayments, 'AuditLogLabels::amount(') === 12, 'R21 audit log: refund notes are written with the formatted amount'); // R22: +2 (re-queued, failed); R28: +2 (booked while a refund is in flight); R29: +3 (item refund during a refund, declined)
+        && substr_count($r21aPayments, 'AuditLogLabels::amount(') === 13, 'R21 audit log: refund notes are written with the formatted amount'); // R22: +2 (re-queued, failed); R28: +2 (booked while a refund is in flight); R29: +3 (item refund during a refund, declined), +1 (booked up to 2.1.2, not again)
     // The amount a Stripe refund webhook records as the new value reads in the order's currency too (the order row decides).
     $r21aDb = Db::get();
     $r21aDb->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, payment_id, subtotal, total, currency, store_id)

@@ -1345,7 +1345,10 @@ class PaymentService {
             self::linkItemRefundWithin($orderId, $key, $refundId, 'confirmed');
             return false;
         }
-        if ($key === '') return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload);
+        if ($key === '') {
+            if (self::identifiesLegacyRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload)) return false;
+            return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload);
+        }
         // The shop's own refund, before its job's result: booked as the refund it executes, so the item refund's credit
         // note is the only one and an admin refund gets one (creditBookedRefund()).
         $item = Db::get()->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND idempotency_key = :key AND status = 'pending' LIMIT 1");
@@ -1353,6 +1356,57 @@ class PaymentService {
         $itemRefundId = (int)($item->fetchColumn() ?: 0);
         return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
             $payload + ['settles_refund_request' => self::refundRequestKey($key) ?? $key], $itemRefundId, $refundId);
+    }
+
+    /**
+     * R29: a refund booked before refunds were booked by their id. Up to 2.1.2 a Stripe charge.refunded booked the change
+     * of the charge's refunded total under the payment id, without refund ids. A later event that names that refund (each
+     * charge.refunded lists all of the charge's refunds, so the next dashboard refund does) booked its money again. A refund
+     * without a shop key that Stripe created before the last such booking is identified against that unattributed money,
+     * oldest first (applyStripeChargeRefunded() sorts them): a refund_confirmed row under its id, no money.
+     */
+    private static function identifiesLegacyRefundWithin(array $order, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload): bool {
+        $orderId = (int)$order['id'];
+        $paymentId = trim((string)($order['payment_id'] ?? ''));
+        $created = (int)($payload['refund_created'] ?? 0);
+        if ($paymentId === '' || $amount <= 0 || $created <= 0 || self::transactionExists($eventKey) || self::refundAlreadyRecorded($orderId, $refundId)) return false;
+        $stmt = Db::get()->prepare("SELECT status, amount, raw_response, created_at FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND (provider_ref = :ref OR status = 'refund_confirmed') AND amount > 0
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $paymentId]);
+        $unattributed = 0;
+        $latest = null;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $raw = json_decode((string)$row['raw_response'], true);
+            $raw = is_array($raw) ? $raw : [];
+            if ($row['status'] === 'refund_confirmed') {
+                if (!empty($raw['identifies_legacy_refund'])) $unattributed -= (int)$row['amount'];
+                continue;
+            }
+            // The shop's own refunds and the ones booked by id name what they settled.
+            if (isset($raw['refund_id']) || isset($raw['settles_refund_request'])) continue;
+            $unattributed += (int)$row['amount'];
+            $at = strtotime((string)$row['created_at'] . ' UTC');
+            if ($at !== false) $latest = max($latest ?? $at, $at);
+        }
+        // A refund created after the last such booking is one the old code never saw (five minutes for a shop clock behind Stripe's).
+        if ($latest === null || $amount > $unattributed || $created > $latest + 300) return false;
+        $currency = strtolower((string)($order['currency'] ?? 'eur'));
+        self::logTransaction(
+            orderId: $orderId,
+            provider: $provider,
+            providerRef: $refundId,
+            status: 'refund_confirmed',
+            amount: $amount,
+            currency: $currency,
+            idempotencyKey: $eventKey,
+            rawResponse: ['event_type' => $eventType, 'provider' => $provider, 'refund_id' => $refundId, 'identifies_legacy_refund' => true] + $payload,
+            failClosed: true,
+        );
+        $status = (string)($order['payment_status'] ?? '');
+        AuditLog::log('order_refund', $orderId, $status, $status, "{$provider} refund {$refundId} of " . AuditLogLabels::amount($amount, $currency)
+            . ' was booked before refunds were booked by their id; not booked again');
+        return true;
     }
 
     /**
