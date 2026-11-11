@@ -17,8 +17,8 @@ foreach ($r23cCents as $r23cLang => $r23cWord) {
     $r23cHint = I18n::tIn('admin.promo.hint', $r23cLang);
     assert_true($r23cHint !== 'admin.promo.hint' && !preg_match($r23cWord, $r23cHint) && preg_match('/4[.,]90/', $r23cHint) === 1,
         "R23 docs: admin.promo.hint ({$r23cLang}) asks for amounts in the currency, not in cents: {$r23cHint}");
-    $r23cUnpriced = I18n::tIn('admin.stores.unpriced', $r23cLang);
-    assert_true($r23cUnpriced !== 'admin.stores.unpriced' && str_contains($r23cUnpriced, '{currency}') && str_contains($r23cUnpriced, '{count}')
+    $r23cUnpriced = I18n::tIn('admin.stores.unpriced_many', $r23cLang); // R30: in plural forms
+    assert_true($r23cUnpriced !== 'admin.stores.unpriced_many' && str_contains($r23cUnpriced, '{currency}') && str_contains($r23cUnpriced, '{count}')
         && str_contains($r23cUnpriced, I18n::tIn('admin.nav.price_lists', $r23cLang)), "R23 UX: the publish warning is translated ({$r23cLang}) and names the Price lists menu");
 }
 

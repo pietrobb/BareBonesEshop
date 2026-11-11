@@ -49,8 +49,9 @@ final class StoreSettings {
         if (!$result['ok']) return $result;
         $store = (array)(self::load()['stores'][$storeId] ?? []);
         $gap = StoreContext::isPublicConfig($store) ? StoreCurrencyCoverage::unpriced(Db::get(), $storeId, $store) : ['count' => 0, 'skus' => []];
-        return $result + ['warning' => $gap['count'] === 0 ? '' : I18n::format('admin.stores.unpriced', [
-            'currency' => strtoupper((string)($store['currency'] ?? '')), 'count' => (string)$gap['count'], 'skus' => implode(', ', $gap['skus']),
+        // R30: in the plural form of the count ("1 aktívnych produktov" was the only form).
+        return $result + ['warning' => $gap['count'] === 0 ? '' : strtr(I18n::plural('admin.stores.unpriced', (int)$gap['count']), [
+            '{currency}' => strtoupper((string)($store['currency'] ?? '')), '{skus}' => implode(', ', $gap['skus']),
         ])];
     }
 

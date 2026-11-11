@@ -193,7 +193,7 @@ try {
     $r9oRun('owner', ['p' => 'stores', 'action' => 'save', 'store' => 'cz'], $r9oForm($r9oReal, ['public' => '1', 'country' => 'CZ', 'ic_dph' => 'CZ12345678', 'iban' => 'CZ65 0800 0000 1920 0014 5399']));
     assert_true(StoreContext::isPublicConfig($r9oStores()['stores']['cz']) && $r9oCzGap['count'] > 0, 'R23 UX: the cz store is published (unpriced: ' . $r9oCzGap['count'] . ')');
     $r9oCheck('R23 UX: saving a public store warns which products have no price in its currency and where to price them',
-        $r9oRun('owner', ['p' => 'stores', 'lang' => 'en']), ['class="flash flash-warn"', 'Store cz saved.', "{$r9oCzGap['count']} active product(s)/variant(s) have no CZK price", 'Admin → Price lists', $r9oCzGap['skus'][0] ?? '?']);
+        $r9oRun('owner', ['p' => 'stores', 'lang' => 'en']), ['class="flash flash-warn"', 'Store cz saved.', $r9oCzGap['count'] === 1 ? '1 active product or variant has no CZK price' : "{$r9oCzGap['count']} active products or variants have no CZK price", 'Admin → Price lists', $r9oCzGap['skus'][0] ?? '?']);
 
     $r9oDenied = $r9oRun('manager', ['p' => 'stores']);
     assert_true($r9oDenied['code'] === 403 && !str_contains($r9oDenied['out'], 'data-store-settings'), 'R9 store settings: without stores.manage (manager) the page answers 403 (code=' . var_export($r9oDenied['code'], true) . ')');

@@ -137,6 +137,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Invoice, texts and log details from review round 30.** A malformed BIC no longer goes into the invoice's payment
+  QR (the e-mail's QR already left it out). A seller with only a VAT id shows it in the CS/HU/PL order e-mail instead of
+  an empty line. The audit log translates the provider refund booked during an admin refund, two-factor setup and store
+  permission changes; the import page shows row errors in the admin's language. Spanish e-mails address the customer
+  as "usted", the German invoice calls the payment reference "Zahlungsreferenz" like the e-mail, and the unpriced-products
+  warning uses the plural form of its count. The log also masks secrets written as a PHP array (`'pass' => 'x'`).
 - **Translations and admin details from review round 29.** The PL/HU/DE/ES order confirmation no longer says
   "variable symbol" in English. The audit log shows the notes of pages, warehouses, feeds, store settings, credit
   notes, e-mail delivery and admin accounts in the admin's language, and the refund notes give amounts in the order's

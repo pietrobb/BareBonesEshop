@@ -116,6 +116,10 @@ final class AuditLogLabels {
             return (string)preg_replace('/ {2,}/', ' ', I18n::format('admin.audit.note.item_refund_in_flight',
                 ['id' => $m[1], 'amount' => $money($m[2]), 'pending' => $money($m[3])]));
         }
+        // R30: the provider's refund booked while the admin's is in flight (applyRefundEvent()) stayed in English.
+        if (preg_match('/^(\S+) refund (\S+) of (.+?) booked while the refund of (.+) is in flight$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.refund_in_flight', ['provider' => $m[1], 'id' => $m[2], 'amount' => $money($m[3]), 'pending' => $money($m[4])]);
+        }
         if (preg_match('/^(\S+) refund (\S+) of (.+) was booked before refunds were booked by their id; not booked again$/', $note, $m) === 1) {
             return I18n::format('admin.audit.note.refund_legacy_identified', ['provider' => $m[1], 'id' => $m[2], 'amount' => $money($m[3])]);
         }
@@ -152,6 +156,8 @@ final class AuditLogLabels {
         'Refund credit issued' => 'refund_credit', 'E-mail delivery settings changed' => 'mail_settings',
         'Admin account created' => 'created', 'Admin lifecycle changed' => 'status', 'Admin login succeeded' => 'login',
         'Admin password rotated and sessions revoked' => 'password_rotated', 'Admin device revoked' => 'device_revoked',
+        // R30: two-factor sign-in and store permissions of admin accounts.
+        'TOTP enrolled and recovery codes rotated' => 'mfa_enrolled', 'Store permissions changed' => 'permissions',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';

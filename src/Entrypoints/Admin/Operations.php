@@ -250,7 +250,8 @@ function handleImportUpload(): void {
     if ($result['success'] && $errCount === 0) {
         setFlash('ok', strtr(I18n::t('admin.import.done'), ['{count}' => (string)$result['imported']]) . $encodingNote);
     } else {
-        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => I18n::plural('admin.common.errors_count', $errCount)]) . $encodingNote, $result['errors']);
+        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => I18n::plural('admin.common.errors_count', $errCount)]) . $encodingNote,
+            array_map(static fn(string $error): string => ImportErrorLabels::text($error), $result['errors']));
     }
 
     header("Location: admin.php?p=import");
