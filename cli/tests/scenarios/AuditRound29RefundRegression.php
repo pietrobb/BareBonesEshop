@@ -17,11 +17,13 @@ if (!class_exists('R29fFakeStripe', false)) {
         /** null: the refund succeeds; an int: Stripe answers with that HTTP code. */
         public static ?int $answer = null;
         public static int $calls = 0;
+        /** true: the refund names no id, as GoPay/ThePay refunds do. */
+        public static bool $noId = false;
         public function __construct() { parent::__construct([]); }
         protected function apiCall(string $method, string $endpoint, array $params = [], array $extraHeaders = []): array {
             self::$calls++;
             if (self::$answer !== null) throw new \RuntimeException('Stripe API: Charge has already been refunded', self::$answer);
-            return ['id' => 're_r29f_' . substr(sha1((string)($params['metadata'][self::REFUND_KEY_METADATA] ?? uniqid())), 0, 10), 'status' => 'succeeded'];
+            return ['id' => self::$noId ? '' : 're_r29f_' . substr(sha1((string)($params['metadata'][self::REFUND_KEY_METADATA] ?? uniqid())), 0, 10), 'status' => 'succeeded'];
         }
     }
 }
@@ -124,6 +126,28 @@ try {
     R29fFakeStripe::$answer = null;
     assert_equals(['none', 'failed', 0], [$declined4, (string)(Rma::refundById($item4)['status'] ?? ''), PaymentService::refundedAmount($o4)],
         'R29 refunds: a declined item refund is marked failed at once, nothing booked');
+
+    // 5. Capability review run 408: an item refund of exactly the amount in flight is not the request's refund, with or
+    // without a provider refund id (was: settlesRefundRequest() matched it by amount and released the request).
+    foreach ([false => 'R29F-5', true => 'R29F-6'] as $r29fNoId => $r29fNumber) {
+        $o5 = $r29fOrder($r29fNumber);
+        PaymentService::requestRefundAndQueue($o5, 1000, "r29f-{$o5}", ['reason' => 'R29F']);
+        R29fFakeStripe::$noId = (bool)$r29fNoId;
+        $r29fJob($o5, 1000, "r29f-{$o5}-item", $r29fItemRefund($o5, 1000, "r29f-{$o5}-item"));
+        R29fFakeStripe::$noId = false;
+        $label = $r29fNoId ? 'without a refund id' : 'with a refund id';
+        assert_equals([1000, 'refund_pending', 1000], $r29fState($o5),
+            "R29 refunds: an item refund {$label} equal to the 10.00 in flight keeps the request in flight (was: partially_refunded, in flight 0)");
+        $r29fForCredit = (new ReflectionMethod(InvoiceService::class, 'refundableForCredit'))->invoke(null, Orders::byId($o5));
+        assert_equals(['LogicException', (int)Orders::byId($o5)['total'] - 2000],
+            [$r29fThrows(static fn() => PaymentService::requestRefund($o5, 500, "r29f-{$o5}-second")), $r29fForCredit],
+            "R29 refunds: after an equal item refund {$label} the 10.00 in flight is neither requested again nor promised to a credit note");
+        $audit5 = $pdo->prepare("SELECT COUNT(*) FROM audit_log WHERE entity = 'order_refund' AND entity_id = ? AND note LIKE '%is in flight'");
+        $audit5->execute([$o5]);
+        assert_true((int)$audit5->fetchColumn() === 1, "R29 refunds: the item refund {$label} is audited as booked while the request is in flight");
+        $r29fJob($o5, 1000, "r29f-{$o5}_execute");
+        assert_equals([2000, 'partially_refunded', 0], $r29fState($o5), "R29 refunds: the request's own job then settles it ({$label})");
+    }
 } catch (Throwable $e) {
     assert_true(false, 'R29 refunds (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {

@@ -609,9 +609,13 @@ class PaymentService {
             if (!is_array($raw) || ($raw['event_type'] ?? null) !== 'refund.requested') continue;
             // One request at a time: a refund booked after the latest one that settles it means a later item refund is in
             // flight. R28: only one that settles it; any refund booked meanwhile (a refund event during an admin refund)
-            // released the request's money for a second refund or credit note.
-            $later = Db::get()->prepare("SELECT idempotency_key, provider_ref, amount, raw_response FROM payment_transactions WHERE order_id = :order
-                AND store_id = :store AND id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')");
+            // released the request's money for a second refund or credit note. R29 (capability review 408): an item refund's own
+            // money (under its order_refunds key or provider refund id) never settles it; matched by amount, an item refund of
+            // the requested amount released the request.
+            $later = Db::get()->prepare("SELECT t.idempotency_key, t.provider_ref, t.amount, t.raw_response FROM payment_transactions t WHERE t.order_id = :order
+                AND t.store_id = :store AND t.id > :id AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')
+                AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id = t.order_id AND r.store_id = t.store_id
+                    AND (r.idempotency_key = t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))");
             $later->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':id' => (int)$row['id']]);
             $executeKey = self::refundExecuteKey((string)$row['idempotency_key']);
             foreach ($later->fetchAll(\PDO::FETCH_ASSOC) as $booked) {
