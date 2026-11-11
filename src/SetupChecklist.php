@@ -14,6 +14,7 @@ final class SetupChecklist
         'payment.' => 'payments',
         'admin.' => 'admin_users',
         'provider.shipping' => 'shipping',
+        'provider.mail' => 'mail', // R29: the SMTP server and the sender are set in Admin → E-mail delivery (provider.mail, provider.mail_from)
         'catalog.digital_files' => 'digital_assets',
     ];
 

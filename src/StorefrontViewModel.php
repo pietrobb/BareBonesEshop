@@ -99,14 +99,17 @@ final class StorefrontViewModel
             'description' => $product['summary'],
             'sku' => $product['sku'],
             'url' => $absoluteUrl,
-            'offers' => [
+        ];
+        // No offer where the store does not sell it (no price in the store's currency).
+        if ($product['price']['sold_in_store']) {
+            $jsonLd['offers'] = [
                 '@type' => 'Offer',
                 'price' => Money::decimal($product['price']['amount_minor'], $currency),
                 'priceCurrency' => $currency,
                 'availability' => $availability['schema'],
                 'url' => $absoluteUrl,
-            ],
-        ];
+            ];
+        }
         if ($images !== []) {
             $jsonLd['image'] = array_map($absolute, array_column($images, 'url'));
         }
@@ -320,13 +323,17 @@ final class StorefrontViewModel
         $compare = isset($product['compare_price']) && (int)$product['compare_price'] > $amount
             ? (int)$product['compare_price']
             : null;
-        $currency = (string)($product['currency'] ?? StoreContext::current()->currency());
+        $currency = (string)($product['currency'] ?? '') ?: StoreContext::current()->currency();
+        // R29: not sold in this store without a price in its currency: no price in another currency (was: "12,90 €"
+        // next to "Not available" in the PLN store). The availability label says why.
+        $sold = Pricing::soldInStore($currency);
         return [
             'amount_minor' => $amount,
-            'formatted' => I18n::price($amount, $currency),
+            'formatted' => $sold ? I18n::price($amount, $currency) : '',
             'compare_amount_minor' => $compare,
-            'compare_formatted' => $compare === null ? '' : I18n::price($compare, $currency),
-            'vat_note' => self::vatNote(),
+            'compare_formatted' => $compare === null || !$sold ? '' : I18n::price($compare, $currency),
+            'vat_note' => $sold ? self::vatNote() : '',
+            'sold_in_store' => $sold,
         ];
     }
 
@@ -396,7 +403,7 @@ final class StorefrontViewModel
             'attributes' => self::customFields(json_decode((string)($variant['attrs'] ?? '{}'), true) ?: []),
             'price_delta_minor' => $delta,
             'price_amount_minor' => max(0, $amount),
-            'price_formatted' => I18n::price(max(0, $amount), $currency),
+            'price_formatted' => Pricing::soldInStore($currency) ? I18n::price(max(0, $amount), $currency) : '',
             'currency' => strtoupper($currency),
             'digital' => $digital,
             'availability' => self::availability($variantProduct, (int)$variant['id']),

@@ -593,6 +593,11 @@ class Security {
         return Str::slug(self::str($input));
     }
 
+    /** R29: a payment or shipping code as the code knows it ("bank_transfer"); a slug turned it into "bank-transfer" on save. */
+    public static function code(mixed $input): string {
+        return trim(implode('_', array_map(static fn(string $part): string => Str::slug($part), explode('_', self::str($input)))), '_');
+    }
+
     public static function int($input, int $default = 0): int {
         return filter_var($input, FILTER_VALIDATE_INT) !== false
             ? (int)$input : $default;

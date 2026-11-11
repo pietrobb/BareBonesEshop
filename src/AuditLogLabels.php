@@ -96,6 +96,10 @@ final class AuditLogLabels {
         }
         if (preg_match('/^Admin [a-z][a-z -]* delete$/', $note) === 1) return I18n::t('admin.audit.note.deleted');
         if (preg_match('/^Admin (?:' . self::SAVED_ENTITIES . ')$/', $note) === 1) return I18n::t('admin.audit.note.saved');
+        if (preg_match('/^Admin [a-z][a-z -]* (edit|create)$/', $note, $m) === 1) return I18n::t('admin.audit.note.' . ($m[1] === 'edit' ? 'saved' : 'created'));
+        if (preg_match('/^Order line (\d+): (\d+) units reserved after restock$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.backorder_reserved', ['line' => $m[1], 'units' => $m[2]]);
+        }
         if (preg_match('/^Admin [a-z_]+: (.+)$/s', $note, $m) === 1) return I18n::format('admin.audit.note.saved_detail', ['detail' => $m[1]]);
         if (preg_match('/^(\S+) capture of an earlier payment attempt$/', $note, $m) === 1) return I18n::format('admin.audit.note.earlier_attempt', ['provider' => $m[1]]);
         if (!in_array($entity, ['order_refund', 'order_status'], true)) return $note;
@@ -104,6 +108,16 @@ final class AuditLogLabels {
         $money = static fn(string $amount): string => ctype_digit($amount) ? self::amount((int)$amount, $orderCurrency($entityId)) : $amount;
         if (preg_match('/^Refund of (.+?) re-queued by (.*)$/s', $note, $m) === 1) {
             return I18n::format('admin.audit.note.refund_requeued', ['amount' => $money($m[1]), 'actor' => $m[2]]);
+        }
+        if (preg_match('/^Refund of (.+?) declined by the provider: (.*)$/s', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.refund_declined', ['amount' => $money($m[1]), 'reason' => $m[2]]);
+        }
+        if (preg_match('/^Item refund (?:(\S+) )?of (.+?) booked while the refund of (.+) is in flight$/', $note, $m) === 1) {
+            return (string)preg_replace('/ {2,}/', ' ', I18n::format('admin.audit.note.item_refund_in_flight',
+                ['id' => $m[1], 'amount' => $money($m[2]), 'pending' => $money($m[3])]));
+        }
+        if (preg_match('/^(\S+) refund (\S+) of (.+) was booked before refunds were booked by their id; not booked again$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.refund_legacy_identified', ['provider' => $m[1], 'id' => $m[2], 'amount' => $money($m[3])]);
         }
         if (preg_match('/^(\S+) refund (\S+) of (.+) failed$/', $note, $m) === 1) {
             return I18n::format('admin.audit.note.refund_failed', ['provider' => $m[1], 'id' => $m[2], 'amount' => $money($m[3])]);
@@ -133,6 +147,11 @@ final class AuditLogLabels {
         'Admin shipment tracking' => 'tracking', 'Admin shipment cancelled' => 'shipment_cancelled', 'Admin feed sync' => 'feed_sync',
         'Admin e-mail template override' => 'template_saved', 'Admin e-mail template reset' => 'template_reset', 'Admin B2B assignment' => 'b2b_assignment',
         'Admin status change' => 'status_change',
+        // R29: notes the R23 list missed (pages, warehouses, feeds, store config, credit notes, mail settings, admin accounts).
+        'Content updated' => 'saved', 'Content created' => 'created', 'Cancellation credit issued' => 'cancellation_credit',
+        'Refund credit issued' => 'refund_credit', 'E-mail delivery settings changed' => 'mail_settings',
+        'Admin account created' => 'created', 'Admin lifecycle changed' => 'status', 'Admin login succeeded' => 'login',
+        'Admin password rotated and sessions revoked' => 'password_rotated', 'Admin device revoked' => 'device_revoked',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';

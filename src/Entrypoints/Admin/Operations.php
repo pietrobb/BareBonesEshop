@@ -250,7 +250,7 @@ function handleImportUpload(): void {
     if ($result['success'] && $errCount === 0) {
         setFlash('ok', strtr(I18n::t('admin.import.done'), ['{count}' => (string)$result['imported']]) . $encodingNote);
     } else {
-        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => (string)$errCount]) . $encodingNote, $result['errors']);
+        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => I18n::plural('admin.common.errors_count', $errCount)]) . $encodingNote, $result['errors']);
     }
 
     header("Location: admin.php?p=import");
@@ -632,8 +632,8 @@ function handleShippingMethodSave(): void {
     Security::adminRequire('shipping.manage');
     $db = Db::get();
     $id = Security::int($_POST['id'] ?? 0);
-    $code = Security::slug($_POST['code'] ?? '');
-    $carrier = Security::slug($_POST['carrier'] ?? '');
+    $code = Security::code($_POST['code'] ?? '');
+    $carrier = Security::code($_POST['carrier'] ?? '');
     $name = trim(Security::str($_POST['name'] ?? ''));
     $serviceType = in_array($_POST['service_type'] ?? '', ['parcel', 'pickup'], true) ? $_POST['service_type'] : 'parcel';
     if (!$code || !$carrier || !$name) { setFlash('err', I18n::t('admin.shipping.method_required')); header('Location: admin.php?p=shipping'); exit; }
@@ -650,7 +650,7 @@ function handleShippingMethodSave(): void {
 function handleShippingMethodDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_methods', I18n::t('admin.shipping.method_deleted')); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingZoneSave(): void {
     Security::adminRequire('shipping.manage');
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::code($_POST['code'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
     if (!$code || !$name) { setFlash('err', I18n::t('admin.common.code_name_required')); header('Location: admin.php?p=shipping'); exit; }
     $data = [':code'=>$code, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
@@ -665,7 +665,7 @@ function handleShippingZoneSave(): void {
 function handleShippingZoneDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_zones', I18n::t('admin.shipping.zone_deleted')); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingCountrySave(): void {
     Security::adminRequire('shipping.manage');
-    $db = Db::get(); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
+    $db = Db::get(); $zoneCode = Security::code($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
     if (!$zoneCode || !preg_match('/^[A-Z]{2}$/', $country) || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null) { setFlash('err', I18n::t('admin.shipping.country_required')); header('Location: admin.php?p=shipping'); exit; }
     $stmt = $db->prepare(Db::insertIgnore() . " INTO shipping_zone_countries (store_id, zone_code, country, postal_min, postal_max) VALUES (:store, :zone, :country, :min, :max)");
     $stmt->execute([':store'=>StoreContext::current()->providerId(), ':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim(Security::str($_POST['postal_min'] ?? '')), ':max'=>trim(Security::str($_POST['postal_max'] ?? ''))]);
@@ -675,7 +675,7 @@ function handleShippingCountrySave(): void {
 function handleShippingCountryDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_zone_countries', I18n::t('admin.common.country_deleted')); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingRateSave(): void {
     Security::adminRequire('shipping.manage');
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $methodCode = Security::slug($_POST['method_code'] ?? ''); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $methodCode = Security::code($_POST['method_code'] ?? ''); $zoneCode = Security::code($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
     $from = max(0, Security::int($_POST['weight_from_g'] ?? 0)); $to = max(0, Security::int($_POST['weight_to_g'] ?? 0));
     $carrier = $methodCode ? StoreConfig::value('shipping_methods', 'code', $methodCode, 'carrier') : null;
     if ($carrier === null || !$zoneCode || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null || ($country !== '' && !preg_match('/^[A-Z]{2}$/', $country)) || $to < $from) { setFlash('err', I18n::t('admin.shipping.rate_invalid')); header('Location: admin.php?p=shipping'); exit; }
@@ -736,7 +736,7 @@ function pagePayments(): void {
 }
 function handlePaymentMethodSave(): void {
     Security::adminRequire('payments.manage');
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $provider = Security::slug($_POST['provider'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::code($_POST['code'] ?? ''); $provider = Security::code($_POST['provider'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
     $postedType = (string)($_POST['service_type'] ?? ''); $serviceType = isset(PaymentService::SERVICE_TYPE_LABELS[$postedType]) ? $postedType : 'offline';
     $min = postedMoney('min_amount', 0, 'admin.php?p=payments'); $max = postedMoney('max_amount', null, 'admin.php?p=payments');
     if (!$code || !$provider || !$name || ($max !== null && $max < $min)) { setFlash('err', I18n::t('admin.payments.required')); header('Location: admin.php?p=payments'); exit; }
@@ -759,7 +759,7 @@ function handlePaymentMethodSave(): void {
 function handlePaymentMethodDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_methods', I18n::t('admin.payments.deleted')); header('Location: admin.php?p=payments'); exit; }
 function handlePaymentCountrySave(): void {
     Security::adminRequire('payments.manage');
-    $methodCode = Security::slug($_POST['method_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
+    $methodCode = Security::code($_POST['method_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
     if (!$methodCode || !preg_match('/^[A-Z]{2}$/', $country) || StoreConfig::value('payment_methods', 'code', $methodCode) === null) { setFlash('err', I18n::t('admin.payments.country_required')); header('Location: admin.php?p=payments'); exit; }
     $stmt = Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_countries (store_id, method_code, country) VALUES (:store, :method, :country)");
     $stmt->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':country'=>$country]);
@@ -769,7 +769,7 @@ function handlePaymentCountrySave(): void {
 function handlePaymentCountryDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_method_countries', I18n::t('admin.common.country_deleted')); header('Location: admin.php?p=payments'); exit; }
 function handlePaymentShippingSave(): void {
     Security::adminRequire('payments.manage');
-    $methodCode = Security::slug($_POST['method_code'] ?? ''); $shippingCode = Security::slug($_POST['shipping_method_code'] ?? '');
+    $methodCode = Security::code($_POST['method_code'] ?? ''); $shippingCode = Security::code($_POST['shipping_method_code'] ?? '');
     if (!$methodCode || !$shippingCode || StoreConfig::value('payment_methods', 'code', $methodCode) === null || StoreConfig::value('shipping_methods', 'code', $shippingCode) === null) { setFlash('err', I18n::t('admin.payments.shipping_required')); header('Location: admin.php?p=payments'); exit; }
     $stmt = Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_shipping (store_id, method_code, shipping_method_code) VALUES (:store, :method, :shipping)");
     $stmt->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':shipping'=>$shippingCode]);
@@ -806,7 +806,7 @@ function handleFeedSync(): void {
     } else {
         $msg = strtr(I18n::t('admin.feed.sync_done'), ['{imported}' => (string)$result['imported'], '{stock}' => (string)$result['stock_updated']]);
         if (!empty($result['errors'])) {
-            $msg .= strtr(I18n::t('admin.feed.sync_errors'), ['{count}' => (string)count($result['errors'])]);
+            $msg .= strtr(I18n::t('admin.feed.sync_errors'), ['{errors}' => I18n::plural('admin.common.errors_count', count($result['errors']))]);
         }
         setFlash(empty($result['errors']) ? 'ok' : 'err', $msg, array_map(FeedMessages::error(...), $result['errors'] ?? [])); // R21: which items, and why (R22: in the admin's language)
     }
