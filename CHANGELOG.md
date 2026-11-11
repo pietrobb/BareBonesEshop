@@ -137,6 +137,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **A declined admin refund stays released (review round 30).** After Stripe declined an admin refund, a later credit
+  note made the payment `refund_pending` again and the declined request counted as in flight: the payment stayed
+  `refund_pending` for good, the refund form was hidden and "retry" re-queued the declined refund (which Stripe could
+  pay once it forgot the idempotency key, a day later). A refund declined or failed on an order a dashboard refund had
+  refunded in full now returns it to `refunded`, not `partially_refunded`. A Stripe refund created within minutes of a
+  refund that 2.0.x booked without its id is told apart by its place in the charge's refunded total; its
+  `refund.updated` alone waits for the `charge.refunded` that lists the charge's refunds, so the old refund is no
+  longer booked a second time.
 - **Translations and admin details from review round 29.** The PL/HU/DE/ES order confirmation no longer says
   "variable symbol" in English. The audit log shows the notes of pages, warehouses, feeds, store settings, credit
   notes, e-mail delivery and admin accounts in the admin's language, and the refund notes give amounts in the order's

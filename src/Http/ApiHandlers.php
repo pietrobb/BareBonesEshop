@@ -1191,12 +1191,16 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
     // Oldest first: a refund booked up to 2.1.2 without its id is identified before newer ones (identifiesLegacyRefundWithin()).
     usort($refunds, static fn(array $a, array $b): int => (int)($a['created'] ?? 0) <=> (int)($b['created'] ?? 0));
     // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
+    // R30: each refund's place in the charge's refunded total (amount_refunded counts pending refunds, not failed or
+    // canceled ones), which tells a refund a 2.0.x booking of that total covered from a later one.
+    $position = 0;
     foreach ($refunds as $refund) {
+        if (!in_array((string)($refund['status'] ?? ''), ['failed', 'canceled'], true)) $position += max(0, (int)($refund['amount'] ?? 0));
         $refundId = (string)($refund['id'] ?? '');
         // Only money Stripe has returned: a pending refund (SEPA, bank transfers) may still fail; refund.updated books it.
         if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || (string)($refund['status'] ?? '') !== 'succeeded') continue;
         PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId,
-            $eventPayload + stripeRefundKey($refund));
+            $eventPayload + ['refund_position' => $position] + stripeRefundKey($refund));
     }
 
     // amount_refunded counts pending refunds too: the order closes only once the ledger holds all of it.

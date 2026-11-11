@@ -441,6 +441,15 @@ class PaymentService {
     }
 
     /**
+     * The status a refund_pending payment returns to when the refund in flight is released (failed, declined): no money
+     * moved, so what was refunded before decides. R30 (low): a fully refunded order went to partially_refunded.
+     */
+    private static function statusAfterRelease(array $order): string {
+        $refunded = self::refundedAmount((int)$order['id']) + self::offLedgerCredits($order);
+        return $refunded <= 0 ? 'paid' : ($refunded >= (int)$order['total'] ? 'refunded' : 'partially_refunded');
+    }
+
+    /**
      * Credit notes settled outside the payment ledger: an order without a payment id has its item refunds
      * paid back by hand (Rma::completeRefund('manual-admin')), which books no payment transaction. That money
      * is returned all the same, so the order must not refund it again (InvoiceService::refundableForCredit()).
@@ -612,14 +621,19 @@ class PaymentService {
             // released the request's money for a second refund or credit note. R29 (capability review 408): an item refund's own
             // money (under its order_refunds key or provider refund id) never settles it; matched by amount, an item refund of
             // the requested amount released the request.
-            $later = Db::get()->prepare("SELECT t.idempotency_key, t.provider_ref, t.amount, t.raw_response FROM payment_transactions t WHERE t.order_id = :order
-                AND t.store_id = :store AND t.id > :id AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')
+            $later = Db::get()->prepare("SELECT t.idempotency_key, t.provider_ref, t.amount, t.status, t.raw_response FROM payment_transactions t WHERE t.order_id = :order
+                AND t.store_id = :store AND t.id > :id AND t.status IN ('paid', 'partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')
                 AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id = t.order_id AND r.store_id = t.store_id
                     AND (r.idempotency_key = t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))");
             $later->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':id' => (int)$row['id']]);
             $executeKey = self::refundExecuteKey((string)$row['idempotency_key']);
             foreach ($later->fetchAll(\PDO::FETCH_ASSOC) as $booked) {
                 $bookedRaw = json_decode((string)($booked['raw_response'] ?? ''), true);
+                // R30 (finding 2): a request the provider declined or failed was released (the payment left refund_pending).
+                // Still read as in flight once a later credit note made the payment refund_pending again, it kept it there
+                // for good, hid the refund form and offered to retry the declined refund.
+                if (is_array($bookedRaw) && ($bookedRaw['event_type'] ?? null) === 'refund.failed' && (int)$booked['amount'] === 0) return null;
+                if ((string)$booked['status'] === 'paid') continue; // only a release returns a refund_pending payment to paid
                 if ((string)$booked['idempotency_key'] === $executeKey
                     || self::settlesRefundRequest($order, $row, is_array($bookedRaw) ? $bookedRaw : [], (string)($booked['provider_ref'] ?? ''), (int)$booked['amount'])) {
                     return null;
@@ -1380,6 +1394,7 @@ class PaymentService {
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $paymentId]);
         $unattributed = 0;
         $latest = null;
+        $covered = null; // the charge's highest refunded total (amount_refunded) such a booking saw
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $raw = json_decode((string)$row['raw_response'], true);
             $raw = is_array($raw) ? $raw : [];
@@ -1392,9 +1407,21 @@ class PaymentService {
             $unattributed += (int)$row['amount'];
             $at = strtotime((string)$row['created_at'] . ' UTC');
             if ($at !== false) $latest = max($latest ?? $at, $at);
+            if (isset($raw['cumulative_amount'])) $covered = max($covered ?? 0, (int)$raw['cumulative_amount']);
         }
-        // A refund created after the last such booking is one the old code never saw (five minutes for a shop clock behind Stripe's).
-        if ($latest === null || $amount > $unattributed || $created > $latest + 300) return false;
+        if ($latest === null || $amount > $unattributed) return false;
+        // R30 (low): five minutes either side of the last such booking (a shop clock behind Stripe's) a new dashboard refund
+        // was taken for one the old code booked, and the old one was booked again when it came by id. A charge.refunded lists
+        // the charge's refunds: one whose running total (oldest first) the old booking's refunded total covers is one it
+        // booked, whatever the clocks say. A refund alone (refund.updated) near that time waits for that list.
+        $position = isset($payload['refund_position']) ? (int)$payload['refund_position'] : null;
+        if ($position !== null && $covered !== null) {
+            if ($position > $covered) return false;
+        } elseif ($created > $latest + 300) {
+            return false;
+        } elseif ($position === null && $created > $latest - 300) {
+            throw new \PaymentWebhookDeferred("Stripe refund {$refundId} was created when a refund was booked without its id; it waits for the charge.refunded that lists the charge's refunds");
+        }
         $currency = strtolower((string)($order['currency'] ?? 'eur'));
         self::logTransaction(
             orderId: $orderId,
@@ -1563,7 +1590,7 @@ class PaymentService {
             $currency = strtolower((string)($order['currency'] ?? 'eur'));
             $payload = array_merge(['provider' => $provider, 'refund_id' => $refundId], $payload);
             $booked = self::refundAlreadyRecorded($orderId, $refundId);
-            $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
+            $to = self::statusAfterRelease($order);
             if (!$booked && $from === 'refund_pending' && self::isRequestedRefundExecution($orderId, $refundId) && self::canPaymentTransition($from, $to)) {
                 // No money moves: amount 0, so the status row is never read as a capture or a refund.
                 self::applyTransition($order, $to, 'refund.failed', 0, $eventKey, $payload + ['amount' => $amount], $refundId);
@@ -1593,7 +1620,7 @@ class PaymentService {
             $pending = Db::get()->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' LIMIT 1");
             $pending->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
             if ($pending->fetchColumn()) return false;
-            $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
+            $to = self::statusAfterRelease($order);
             if (!self::canPaymentTransition('refund_pending', $to)) return false;
             // No money moves: amount 0, so the status row is never read as a capture or a refund.
             return self::applyTransition($order, $to, 'refund.failed', 0, 'item-refund-failed:' . $itemRefundId, ['item_refund_id' => $itemRefundId]);
@@ -1610,7 +1637,7 @@ class PaymentService {
         $released = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $executeKey, $reason): bool {
             $request = self::latestRefundRequestRow($order, true);
             if ($request === null || self::refundExecuteKey((string)$request['idempotency_key']) !== $executeKey) return false;
-            $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
+            $to = self::statusAfterRelease($order);
             if (!self::canPaymentTransition('refund_pending', $to)) return false;
             $amount = (int)$request['amount'];
             // No money moves: amount 0, so the status row is never read as a capture or a refund.
