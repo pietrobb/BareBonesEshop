@@ -281,6 +281,16 @@ class CheckoutService {
             'ico_label' => I18n::t('checkout_ico'), 'dic_label' => I18n::t('checkout_dic'), 'vat_id_label' => I18n::t('checkout_vat_id')];
     }
 
+    /** R31: the billing part of the checkout form (another address than the delivery one), from formState(). */
+    public static function billingView(array $state): array {
+        return ['delivery_address_label' => I18n::t('checkout_delivery_heading'), 'billing_heading' => I18n::t('checkout_billing_heading'),
+            'billing_different_label' => I18n::t('checkout_billing_different'), 'billing_different' => $state['billing_different'],
+            'billing_name_label' => I18n::t('checkout_billing_name'), 'saved_billing_addresses' => $state['billing_addresses'],
+            'saved_billing_address_label' => I18n::t('checkout_saved_billing_address'),
+            'billing_country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $state['billing_country']],
+                array_keys($state['billing_countries']), $state['billing_countries'])];
+    }
+
     /**
      * What the checkout form shows. A posted form keeps the shopper's values (after any refusal);
      * a fresh form starts from the signed-in customer's profile and default shipping address, then what the shopper

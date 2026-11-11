@@ -242,6 +242,14 @@ function pageOrder(): void {
             <p class="muted"><?= esc(($addr['street'] ?? '') . ', ' . ($addr['zip'] ?? '') . ' ' . ($addr['city'] ?? '') . ', ' . ($addr['country'] ?? '')) ?></p>
             <?php foreach (CheckoutService::companyLines($addr) as $companyLine): ?><p class="order-company"><?= esc($companyLine) ?></p><?php endforeach; ?>
             <?php endif; ?>
+            <?php if (OrderAddress::billingDiffers($order)): $billingAddr = OrderAddress::billing($order); // R31: invoiced to another address ?>
+            <h4 style="margin-top:.75rem"><?= esc(I18n::t('checkout_billing_heading')) ?></h4>
+            <div data-order-billing>
+            <p><strong><?= esc((string)($billingAddr['name'] ?? '')) ?></strong></p>
+            <p class="muted"><?= esc(($billingAddr['street'] ?? '') . ', ' . ($billingAddr['zip'] ?? '') . ' ' . ($billingAddr['city'] ?? '') . ', ' . ($billingAddr['country'] ?? '')) ?></p>
+            <?php foreach (CheckoutService::companyLines($billingAddr) as $companyLine): ?><p class="order-company"><?= esc($companyLine) ?></p><?php endforeach; ?>
+            </div>
+            <?php endif; ?>
             <?php if (trim((string)($order['notes'] ?? '')) !== ''): ?>
             <h4 style="margin-top:.75rem"><?= esc(I18n::t('admin.order.note')) ?></h4>
             <p data-order-note style="white-space:pre-wrap"><?= esc((string)$order['notes']) ?></p>

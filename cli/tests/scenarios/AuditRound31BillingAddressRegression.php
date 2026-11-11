@@ -78,6 +78,37 @@ if ($action === 'invoice') {
     $out['credit'] = $credit === null ? null : json_decode((string)InvoiceService::byId((int)$credit['id'])['customer_snapshot'], true);
     $result(['output' => json_encode($out)]);
 }
+if ($action === 'surfaces') {
+    // Where people read the order: account detail, confirmation and merchant e-mails, API v1 and the CSV export.
+    $all = $orders();
+    $byName = static fn(string $name): int => (int)(array_values(array_filter($all, static fn(array $o): bool => $o['customer_name'] === $name))[0]['id'] ?? 0);
+    $out = [];
+    foreach (['billed' => 'R31B Billed', 'same' => 'R31B Same'] as $key => $name) {
+        $order = Orders::byId($byName($name));
+        $vars = OrderAddress::mailVars($order, 'sk');
+        $summary = AccountViewModel::orderSummary($order, []);
+        $api = (new ReflectionMethod(ApiV1::class, 'orderResource'))->invoke(null, $order, [], true);
+        $out[$key] = ['address' => $summary['address'], 'billing' => $summary['billing_address'], 'vars' => $vars,
+            'mail' => MailService::render('order_confirmation', 'sk', $vars + ['items' => [], 'totals' => []])['html'],
+            'merchant' => MailService::render('merchant_order_created', 'sk', $vars + ['items' => []])['text'],
+            'api_address' => $api['address'] ?? null, 'api_billing' => array_key_exists('billing_address', $api) ? $api['billing_address'] : 'absent'];
+    }
+    $csv = fopen('php://memory', 'w+');
+    OrderExport::writeCsv($csv, []);
+    rewind($csv);
+    $out['csv'] = stream_get_contents($csv);
+    $result(['output' => json_encode($out)]);
+}
+if ($action === 'manual' || $action === 'manual_missing') {
+    $picked = json_decode($extra, true) ?: [];
+    $buyer = ['name' => 'R31B Manual', 'email' => 'r31b-manual@example.test', 'country' => 'SK', 'street' => 'Doručovacia 1', 'city' => 'Bratislava', 'zip' => '81101',
+        'shipping_method' => (string)($picked['shipping_method'] ?? ''), 'payment_method' => (string)($picked['payment'] ?? ''), 'locale' => 'sk',
+        'company' => 'R31B Firma s.r.o.', 'ico' => '27082440', 'dic' => 'CZ27082440',
+        'billing_different' => '1', 'billing_name' => 'R31B Manual Billing', 'billing_street' => $action === 'manual' ? 'Fakturačná 9' : '', 'billing_city' => 'Praha', 'billing_zip' => '11000', 'billing_country' => ''];
+    $before = count($orders());
+    $create = ManualOrder::create(ManualOrder::parseLines('R31B-SKU 1')['lines'], $buyer, false);
+    $result(['output' => json_encode($create), 'new_orders' => array_slice($orders(), $before)]);
+}
 if ($action === 'addresses') {
     $result(['output' => json_encode($db->query("SELECT type, name, company, vat_id, street, city, zip, country FROM customer_addresses ORDER BY id")->fetchAll())]);
 }
@@ -132,6 +163,10 @@ $r31bDrivers = ['sqlite' => $r31bRoot . '/checkout.sqlite'];
 if (getenv('TEST_MYSQL_DSN')) $r31bDrivers['mysql'] = 'bbe_r31b_billing_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '_test';
 else print "  [SKIP] Audit R31 native billing address (set TEST_MYSQL_DSN)\n";
 $r31bApp = dirname(TEST_CLI_DIR);
+$r31bRetention = json_decode((string)file_get_contents($r31bApp . '/config/data-retention.json'), true) ?: [];
+$r31bScrubbed = array_merge(...array_map(static fn(array $p): array => ($p['table'] ?? '') === 'orders' ? (array)($p['scrub_fields'] ?? []) : [], array_values(array_filter((array)($r31bRetention['policies'] ?? $r31bRetention), 'is_array'))));
+assert_true(in_array('billing_addr', GdprService::PII_REGISTRY['orders']['columns'], true) && in_array('billing_addr', $r31bScrubbed, true),
+    'R31 billing GDPR: orders.billing_addr is registered personal data (export, retention scrub)');
 try {
     foreach ($r31bDrivers as $r31bDriver => $r31bTarget) {
         [$r31bExit, , $r31bNoise] = $r31bRun([$r31bDriver, 'setup', 'none', $r31bApp, $r31bTarget, $r31bRoot, '{}']);
@@ -229,6 +264,45 @@ try {
         assert_true(($r31bSame['name'] ?? '') === 'R31B Same' && ($r31bSame['street'] ?? '') === 'Doručovacia 1' && ($r31bSame['company'] ?? '') === 'R31B Firma s.r.o.'
             && !array_key_exists('delivery', $r31bSame),
             "{$l}: an order without a billing address is invoiced to the delivery address as before (" . json_encode($r31bSame) . ')');
+
+        [$l, $r] = $r31bDo('surfaces');
+        $r31bSurf = json_decode((string)$r['output'], true) ?: [];
+        $r31bB = $r31bSurf['billed'] ?? [];
+        $r31bS = $r31bSurf['same'] ?? [];
+        $r31bHas = static fn(array $lines, string ...$parts): bool => array_diff($parts, $lines) === [];
+        assert_true($r31bHas($r31bB['address'] ?? [], 'R31B Billed', 'Doručovacia 1', '81101 Bratislava') && $r31bHas($r31bB['billing'] ?? [], 'R31B Firma s.r.o. účtáreň', 'Fakturačná 9', '11000 Praha')
+            && ($r31bS['billing'] ?? null) === [], "{$l}: the account order detail shows the billing address only when it differs (" . json_encode([$r31bB['billing'] ?? null, $r31bS['billing'] ?? null]) . ')');
+        assert_true(str_contains((string)($r31bB['mail'] ?? ''), '<h3>Doručovacia adresa</h3>') && str_contains((string)($r31bB['mail'] ?? ''), '<h3>Fakturačná adresa</h3>')
+            && str_contains((string)($r31bB['mail'] ?? ''), 'Fakturačná 9<br>') && str_contains((string)($r31bS['mail'] ?? ''), 'Doručovacia 1<br>')
+            && !str_contains((string)($r31bS['mail'] ?? ''), 'Fakturačná adresa'), "{$l}: the confirmation e-mail names the delivery address, and the billing address when it differs");
+        assert_true(str_contains((string)($r31bB['merchant'] ?? ''), "Fakturačná adresa:\nR31B Firma s.r.o. účtáreň") && str_contains((string)($r31bB['merchant'] ?? ''), "Doručovacia adresa:\nR31B Billed")
+            && !str_contains((string)($r31bS['merchant'] ?? ''), 'Fakturačná adresa'), "{$l}: the merchant notification names both addresses (" . json_encode($r31bB['merchant'] ?? null) . ')');
+        assert_true(($r31bB['api_billing']['street'] ?? '') === 'Fakturačná 9' && ($r31bB['api_billing']['country'] ?? '') === 'CZ' && ($r31bB['api_billing']['ico'] ?? '') === '27082440'
+            && ($r31bB['api_address']['street'] ?? '') === 'Doručovacia 1' && array_key_exists('company', (array)($r31bB['api_address'] ?? [])) && $r31bB['api_address']['company'] === null
+            && array_key_exists('api_billing', $r31bS) && $r31bS['api_billing'] === null,
+            "{$l}: API v1 orders carry billing_address (null when billed to the delivery address) (" . json_encode([$r31bB['api_billing'] ?? null, $r31bS['api_billing'] ?? null]) . ')');
+        $r31bCsv = array_map(static fn(string $line): array => str_getcsv($line, str_contains((string)($r31bSurf['csv'] ?? ''), ';') && !str_contains(strtok((string)$r31bSurf['csv'], "\n"), ',') ? ';' : ',', '"', ''),
+            array_values(array_filter(preg_split('/\R/', (string)preg_replace('/^\xEF\xBB\xBF/', '', (string)($r31bSurf['csv'] ?? ''))) ?: [])));
+        $r31bCsvHead = $r31bCsv[0] ?? [];
+        $r31bCsvRow = static function (string $name) use ($r31bCsv, $r31bCsvHead): array {
+            foreach (array_slice($r31bCsv, 1) as $row) if (in_array($name, $row, true)) return array_combine(array_slice($r31bCsvHead, 0, count($row)), array_slice($row, 0, count($r31bCsvHead))) ?: [];
+            return [];
+        };
+        assert_true(($r31bCsvRow('R31B Billed')['billing_street'] ?? '') === 'Fakturačná 9' && ($r31bCsvRow('R31B Billed')['street'] ?? '') === 'Doručovacia 1'
+            && ($r31bCsvRow('R31B Same')['billing_street'] ?? '') === 'Doručovacia 1' && ($r31bCsvRow('R31B Same')['billing_company'] ?? '') === 'R31B Firma s.r.o.',
+            "{$l}: the orders CSV export has the billing address columns (the delivery address when the same) (" . json_encode([$r31bCsvHead, $r31bCsvRow('R31B Billed')]) . ')');
+
+        [$l, $r] = $r31bDo('manual_missing');
+        $r31bManual = json_decode((string)$r['output'], true) ?: [];
+        assert_true($r['new_orders'] === [] && ($r31bManual['error'] ?? '') === 'checkout.error.billing_address_required',
+            "{$l}: an admin order with an incomplete billing address is refused (" . json_encode($r31bManual) . ')');
+        [$l, $r] = $r31bDo('manual');
+        $r31bManual = json_decode((string)$r['output'], true) ?: [];
+        $r31bBilling = json_decode((string)($r['new_orders'][0]['billing_addr'] ?? ''), true) ?: [];
+        $r31bShipping = json_decode((string)($r['new_orders'][0]['shipping_addr'] ?? ''), true) ?: [];
+        assert_true(!empty($r31bManual['ok']) && ($r31bBilling['street'] ?? '') === 'Fakturačná 9' && ($r31bBilling['country'] ?? '') === 'SK'
+            && ($r31bBilling['ico'] ?? '') === '27082440' && !isset($r31bShipping['company']) && ($r31bShipping['street'] ?? '') === 'Doručovacia 1',
+            "{$l}: an admin order can be billed elsewhere: the company goes with the billing address, an empty billing country is the delivery one (" . json_encode([$r31bManual, $r31bBilling, $r31bShipping]) . ')');
     }
 } finally {
     if (isset($r31bDrivers['mysql'])) $r31bRun(['mysql', 'teardown', 'none', $r31bApp, $r31bDrivers['mysql'], $r31bRoot, '{}']);

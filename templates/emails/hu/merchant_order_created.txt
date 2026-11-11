@@ -5,6 +5,12 @@ Fizetés: {{#if payment_method}}{{payment_method}} — {{/if}}{{payment_status}}
 {{#if awaiting_payment}}A rendelés még nincs kifizetve.
 {{/if}}
 {{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
-{{/each}}{{#if admin_url}}
+{{/each}}{{#if delivery_address}}
+Szállítási cím:
+{{#each delivery_address}}{{this}}
+{{/each}}{{/if}}{{#if billing_address}}
+Számlázási cím:
+{{#each billing_address}}{{this}}
+{{/each}}{{/if}}{{#if admin_url}}
 Részletek: {{admin_url}}
 {{/if}}

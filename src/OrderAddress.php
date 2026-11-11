@@ -50,6 +50,21 @@ final class OrderAddress
     }
 
     /**
+     * E-mail variables: delivery_address (lines; empty for an order with nothing to deliver) and billing_address
+     * (lines, only when the order is billed to another address).
+     * @return array{delivery_address: list<string>, billing_address: list<string>}
+     */
+    public static function mailVars(array $order, string $locale = ''): array
+    {
+        $delivery = self::delivery($order);
+        $loc = $locale !== '' ? $locale : null;
+        return [
+            'delivery_address' => trim((string)($delivery['street'] ?? '')) !== '' ? self::lines($delivery, $loc) : [],
+            'billing_address' => self::billingDiffers($order) ? self::lines(self::billing($order), $loc) : [],
+        ];
+    }
+
+    /**
      * The billing address a checkout submit asks for. The HTML form posts billing_different=1 with billing_name,
      * billing_street, billing_city, billing_zip and billing_country; the JSON body may send the same keys or a
      * billing_address object {name, street, city, zip, country}. Not asked for → address null (billed to delivery).

@@ -13,6 +13,10 @@
 {{/each}}
 </table>
 <p><strong>Razem: {{order_total}}</strong></p>
+{{#if delivery_address}}<h3>Adres dostawy</h3>
+<p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
+{{#if billing_address}}<h3>Adres rozliczeniowy</h3>
+<p>{{#each billing_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if bank_transfer}}<h3>Płatność przelewem bankowym</h3>
 <p>Zamówienie zrealizujemy po zaksięgowaniu płatności. Podaj dokładnie tę kwotę i numer referencyjny.</p>
 <table style="border-collapse:collapse">

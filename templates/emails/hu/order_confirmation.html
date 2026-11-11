@@ -13,6 +13,10 @@
 {{/each}}
 </table>
 <p><strong>Összesen: {{order_total}}</strong></p>
+{{#if delivery_address}}<h3>Szállítási cím</h3>
+<p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
+{{#if billing_address}}<h3>Számlázási cím</h3>
+<p>{{#each billing_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if bank_transfer}}<h3>Fizetés banki átutalással</h3>
 <p>A rendelést a fizetés beérkezése után teljesítjük. Pontosan ezt az összeget és hivatkozási számot adja meg.</p>
 <table style="border-collapse:collapse">

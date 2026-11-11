@@ -607,7 +607,17 @@ components:
             email: { type: string, format: email }
             phone: { type: [string, 'null'], description: 'Only in API responses to a key granted customers:read (personal data); never in webhook events.' }
         locale: { type: [string, 'null'] }
-        address: { $ref: '#/components/schemas/Address', description: Only for a key granted customers:read. }
+        address: { $ref: '#/components/schemas/Address', description: 'The delivery address. Only for a key granted customers:read.' }
+        billing_address:
+          description: 'Who the order is invoiced to, when the shopper gave another address than the delivery one (the buyer company and its IDs are then here, not in address); null = invoiced to the delivery address. Only for a key granted customers:read.'
+          oneOf:
+            - type: 'null'
+            - allOf:
+                - $ref: '#/components/schemas/Address'
+                - type: object
+                  required: [name]
+                  properties:
+                    name: { type: [string, 'null'] }
         shipping:
           type: object
           required: [method, pickup_point]
