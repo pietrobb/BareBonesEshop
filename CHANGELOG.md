@@ -143,6 +143,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   permission changes; the import page shows row errors in the admin's language. Spanish e-mails address the customer
   as "usted", the German invoice calls the payment reference "Zahlungsreferenz" like the e-mail, and the unpriced-products
   warning uses the plural form of its count. The log also masks secrets written as a PHP array (`'pass' => 'x'`).
+- **A declined admin refund stays released (review round 30).** After Stripe declined an admin refund, a later credit
+  note made the payment `refund_pending` again and the declined request counted as in flight: the payment stayed
+  `refund_pending` for good, the refund form was hidden and "retry" re-queued the declined refund (which Stripe could
+  pay once it forgot the idempotency key, a day later). A refund declined or failed on an order a dashboard refund had
+  refunded in full now returns it to `refunded`, not `partially_refunded`. A Stripe refund created within minutes of a
+  refund that 2.0.x booked without its id is told apart by its place in the charge's refunded total; its
+  `refund.updated` alone waits for the `charge.refunded` that lists the charge's refunds, so the old refund is no
+  longer booked a second time.
 - **"Buy later" details from review round 30.** Changing a variant's SKU in the admin no longer deletes every saved
   line of it: signed-in customers keep the line, a guest's line asks to choose the variant on the product page. A line
   of a draft or archived product is listed as unavailable with its own remove button (it counts towards the 100 lines,
