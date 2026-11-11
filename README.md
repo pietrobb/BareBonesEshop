@@ -719,7 +719,7 @@ external machine API:
 |---|---|---|
 | `/api/v1/storefront/<action>` | storefront JS (cart, checkout, shipping/payment, search, reviews, wishlist, consent) and extension actions `<code>.<name>` | session, CSRF on writes |
 | `/api/v1/options/<name>` | option lists of BBF forms (`options_from`) | public |
-| `/api/v1/webhooks/payment/<provider>` | payment notifications (Stripe, Comgate, GoPay, ThePay, PayU, ...) | provider signature / status API |
+| `/api/v1/webhooks/payment/<provider>` | payment notifications (Stripe, Comgate, GoPay, ThePay, PayU, ...); the Stripe events to select are in [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md#stripe-webhook) | provider signature / status API |
 | `/api/v1/webhooks/shipping/<carrier>` | carrier tracking notifications | carrier signature |
 | `/api/v1/csp-report` | browser CSP violation reports | none (rate limited) |
 | `/api/v1/products`, `/orders`, ... | external machine API ([`docs/openapi.yaml`](docs/openapi.yaml)) | API key, scopes |

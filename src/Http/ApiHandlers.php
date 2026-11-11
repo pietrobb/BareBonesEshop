@@ -1188,6 +1188,8 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
 
     $fullRefund = $refundedAmount >= $orderTotal;
     $eventPayload = ['charge_id' => $chargeId, 'cumulative_amount' => $refundedAmount];
+    // Oldest first: a refund booked up to 2.1.2 without its id is identified before newer ones (identifiesLegacyRefundWithin()).
+    usort($refunds, static fn(array $a, array $b): int => (int)($a['created'] ?? 0) <=> (int)($b['created'] ?? 0));
     // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
     foreach ($refunds as $refund) {
         $refundId = (string)($refund['id'] ?? '');
@@ -1233,10 +1235,14 @@ function stripeChargeRefunds(array $charge): ?array {
     }
 }
 
-/** R25: the shop's refund key a Stripe refund carries in its metadata (StripePayment::performRefund()), as the booking payload expects it. */
+/**
+ * R25: the shop's refund key a Stripe refund carries in its metadata (StripePayment::performRefund()), as the booking payload
+ * expects it. R29: with the refund's creation time, which tells a refund booked up to 2.1.2 without its id from a newer one.
+ */
 function stripeRefundKey(array $refund): array {
     $key = $refund['metadata'][StripePayment::REFUND_KEY_METADATA] ?? null;
-    return is_string($key) && $key !== '' ? ['refund_key' => $key] : [];
+    $created = (int)($refund['created'] ?? 0);
+    return (is_string($key) && $key !== '' ? ['refund_key' => $key] : []) + ($created > 0 ? ['refund_created' => $created] : []);
 }
 
 /** A Stripe refund changed state (refund.updated / charge.refund.updated): book it once it succeeded, release it when it failed. */

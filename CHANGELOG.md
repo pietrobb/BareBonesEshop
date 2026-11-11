@@ -222,6 +222,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   released (the payment returns to paid or partially refunded, critical incident `payment.refund_failed`) and a declined
   item refund is marked failed with its credit note reversed. A refund no job executed keeps its "retry" button after a
   dashboard refund.
+- **A Stripe refund booked by 2.0.x–2.1.2 is not booked again** (review round 29). Those versions booked a
+  `charge.refunded` as the change of the charge's refunded total under the payment id, without refund ids. Since refunds
+  are booked by their Stripe refund id, the next `charge.refunded` of that charge (e.g. after a new dashboard refund; it
+  lists all of the charge's refunds) booked the old refund's money a second time: 10.00 + 5.00 refunded, 25.00 on the
+  ledger. A refund without the shop's `bbe_refund_key` that Stripe created before the last such booking is now
+  identified against that money, oldest first (`refund_confirmed`, no money); refunds created later are booked. Orders
+  already affected show a refunded amount above what left the Stripe account in the admin's payment history.
+- **Stripe webhook events are documented** (review round 29): `docs/OPERATIONS_RUNBOOK.md` → *Stripe webhook* lists the
+  endpoint, the secrets it needs, the seven events to select, what each does and which answers Stripe retries.
 
 - **Download links, the invoice e-mail and a manual order's payment link are sent once a misconfigured mail provider is
   fixed** (review round 27). Written to the log only because `MAIL_ADAPTER` named no usable provider, they reached
