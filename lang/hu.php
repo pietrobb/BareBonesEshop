@@ -1875,6 +1875,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'bank_transfer.message' => 'Közlemény',
     'bank_transfer.due_date' => 'Fizetési határidő',
     'bank_transfer.qr_hint' => 'Olvassa be egy PAY by square-t támogató banki alkalmazással.',
+    'bank_transfer.qr_attached' => 'A fizetéshez szükséges QR-kódot csatoltuk ehhez az e-mailhez.',
     'bank_transfer.qr_label' => 'PAY by square QR-kód a rendelés kifizetéséhez',
     'bank_transfer.qr_hint_epc' => 'Olvassa be a banki alkalmazásával (SEPA QR-kód, GiroCode).',
     'bank_transfer.qr_label_epc' => 'SEPA QR-kód (GiroCode) a rendelés kifizetéséhez',

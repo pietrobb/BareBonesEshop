@@ -24,10 +24,11 @@
 <tr><td style="padding:2px 12px 2px 0;color:#555">Mensaje para el beneficiario</td><td>{{bank_message}}</td></tr>
 <tr><td style="padding:2px 12px 2px 0;color:#555">Fecha de vencimiento</td><td>{{bank_due_date}}</td></tr>
 </table>{{/if}}
+{{#if bank_qr_note}}<p>{{bank_qr_note}}</p>{{/if}}
 {{#if tracking_url}}<p>Seguimiento del envío: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
 <!-- R8 consumer information (Directive 2011/83/EU art. 8(7)); wording for lawyer review. -->
 <h3>Vendedor</h3>
-<p>{{seller_name}}, {{seller_address}}<br>Registro: {{seller_ico}}{{#if seller_ic_dph}}, NIF-IVA: {{seller_ic_dph}}{{/if}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
+<p>{{seller_name}}, {{seller_address}}{{#if seller_ids}}<br>{{/if}}{{#if seller_ico}}Registro: {{seller_ico}}{{/if}}{{seller_dic_sep}}{{#if seller_dic}}NIF: {{seller_dic}}{{/if}}{{seller_ic_dph_sep}}{{#if seller_ic_dph}}NIF-IVA: {{seller_ic_dph}}{{/if}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
 <h3>Derecho de desistimiento</h3>
 <p>Puede desistir del contrato sin indicar el motivo en un plazo de {{withdrawal_days}} días desde la recepción de los productos (si hay varios envíos, desde la recepción del último), también antes de la entrega. Lo más sencillo es usar la <a href="{{withdrawal_url}}">función «Desistir del contrato aquí»</a>; también puede enviarnos un correo electrónico o el modelo de formulario siguiente. Le devolveremos todos los pagos, incluidos los gastos de la entrega original, en un plazo de 14 días desde que recibamos su desistimiento, por el mismo medio de pago; podemos retener el reembolso hasta recibir los productos o hasta que acredite su devolución. Devuelva los productos en un plazo de 14 días; usted asume el coste directo de la devolución.</p>
 <p><strong>Modelo de formulario de desistimiento</strong><br>(solo debe cumplimentar y enviar el presente formulario si desea desistir del contrato)<br>A la atención de: {{seller_name}}, {{seller_address}}, {{seller_email}}<br>Por la presente le comunico/comunicamos (*) que desisto de mi/desistimos de nuestro (*) contrato de venta del siguiente bien (*)/de prestación del siguiente servicio (*): …<br>Pedido el (*)/recibido el (*): …<br>Nombre del consumidor o de los consumidores: …<br>Domicilio del consumidor o de los consumidores: …<br>Firma del consumidor o de los consumidores (solo si el presente formulario se presenta en papel): …<br>Fecha: …<br>(*) Táchese lo que no proceda.</p>

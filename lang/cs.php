@@ -1875,6 +1875,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'bank_transfer.message' => 'Zpráva pro příjemce',
     'bank_transfer.due_date' => 'Splatnost',
     'bank_transfer.qr_hint' => 'Naskenujte v mobilní aplikaci banky, která podporuje PAY by square.',
+    'bank_transfer.qr_attached' => 'QR kód pro platbu je přiložen k tomuto e-mailu.',
     'bank_transfer.qr_label' => 'QR kód PAY by square pro platbu objednávky',
     'bank_transfer.qr_hint_epc' => 'Naskenujte v mobilní aplikaci banky (SEPA QR kód, GiroCode).',
     'bank_transfer.qr_label_epc' => 'SEPA QR kód (GiroCode) pro platbu objednávky',

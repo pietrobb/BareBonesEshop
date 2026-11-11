@@ -276,7 +276,10 @@ class BackupService
         }
         self::rotateLog($abs, (int)($cfg['log_max_bytes'] ?? 10485760), (int)($cfg['log_max_files'] ?? 5));
         $line = '[' . date('c') . '] ' . $message . "\n";
-        if (file_put_contents($abs, $line, FILE_APPEND | LOCK_EX) === false) {
+        // R29: on a file system without file locks LOCK_EX fails every write, and the throw below, raised from the CLI's own
+        // catch of the failed backup ("cannot be locked …"), ended it with an uncaught fatal error instead of that message.
+        // One line appended without the lock (O_APPEND) is not torn by a concurrent writer either.
+        if (@file_put_contents($abs, $line, FILE_APPEND | LOCK_EX) === false && file_put_contents($abs, $line, FILE_APPEND) === false) {
             throw new RuntimeException("BackupService: cannot write log {$abs}");
         }
     }

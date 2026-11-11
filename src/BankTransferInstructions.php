@@ -101,7 +101,13 @@ final class BankTransferInstructions {
             'vs' => 'variable_symbol', 'message' => 'message', 'due_date' => 'due_date'];
         foreach ($fields as $name => $field) $vars['bank_' . $name] = (string)($bank[$field] ?? '');
         // The e-mail is written in the order's language, whichever locale renders the job.
-        if ($bank !== null) $vars['bank_due_date'] = I18n::date((string)$bank['due_date'], (string)($order['locale'] ?? '') ?: null);
+        $locale = (string)($order['locale'] ?? '');
+        if ($bank !== null) $vars['bank_due_date'] = I18n::date((string)$bank['due_date'], $locale ?: null);
+        // R29: the QR goes out as a PNG attachment (qrAttachment()); the e-mail now says so and how to use it.
+        $tr = static fn(string $key): string => $locale !== '' ? I18n::tIn($key, $locale) : I18n::t($key);
+        $vars['bank_qr_note'] = $bank !== null && (string)$bank['qr_payload'] !== '' && function_exists('gzcompress')
+            ? $tr('bank_transfer.qr_attached') . ' ' . $tr('bank_transfer.qr_hint' . PaymentQr::labelSuffix((string)$bank['qr_format']))
+            : '';
         return $vars;
     }
 

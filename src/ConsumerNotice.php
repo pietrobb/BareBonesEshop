@@ -103,12 +103,17 @@ final class ConsumerNotice {
     public static function mailVars(array $order): array {
         $legal = self::sellerLegal($order);
         $adr = self::adr($legal);
+        [$ico, $dic, $icDph] = [trim((string)($legal['ico'] ?? '')), trim((string)($legal['dic'] ?? '')), trim((string)($legal['ic_dph'] ?? ''))];
         $address = trim(implode(', ', array_filter([
             (string)($legal['street'] ?? ''), trim((string)($legal['zip'] ?? '') . ' ' . (string)($legal['city'] ?? '')), (string)($legal['country'] ?? ''),
         ])));
         return [
             'seller_name' => (string)($legal['name'] ?? ''), 'seller_address' => $address,
-            'seller_ico' => (string)($legal['ico'] ?? ''), 'seller_dic' => (string)($legal['dic'] ?? ''), 'seller_ic_dph' => (string)($legal['ic_dph'] ?? ''),
+            'seller_ico' => $ico, 'seller_dic' => $dic, 'seller_ic_dph' => $icDph,
+            // R29: a shop without some of the IDs printed "IČO: , DIČ:"; the templates show only the IDs it has, joined by these.
+            'seller_ids' => $ico !== '' || $dic !== '' || $icDph !== '' ? '1' : '',
+            'seller_dic_sep' => $ico !== '' && $dic !== '' ? ', ' : '',
+            'seller_ic_dph_sep' => $icDph !== '' && ($ico !== '' || $dic !== '') ? ', ' : '',
             'seller_email' => (string)($legal['email'] ?? ''), 'seller_phone' => (string)($legal['phone'] ?? ''),
             'seller_register_note' => (string)($legal['register_note'] ?? ''),
             'adr_name' => $adr['name'], 'adr_url' => $adr['url'],
