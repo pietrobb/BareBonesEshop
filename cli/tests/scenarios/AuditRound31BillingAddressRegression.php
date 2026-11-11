@@ -73,6 +73,9 @@ if ($action === 'invoice') {
         $invoice = InvoiceService::issue($byName($name));
         $out[$key] = json_decode((string)InvoiceService::byId((int)$invoice['id'])['customer_snapshot'], true);
     }
+    // A credit note corrects the invoice: same buyer, billed to the same address.
+    $credit = InvoiceService::creditRefund($byName('R31B Billed'), 500, 'r31b-refund-1', 'R31B partial refund');
+    $out['credit'] = $credit === null ? null : json_decode((string)InvoiceService::byId((int)$credit['id'])['customer_snapshot'], true);
     $result(['output' => json_encode($out)]);
 }
 if ($action === 'addresses') {
@@ -220,6 +223,8 @@ try {
             "{$l}: the invoice is issued to the billing address and company (" . json_encode($r31bBilled) . ')');
         assert_equals(['name' => 'R31B Billed', 'street' => 'Doručovacia 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'], $r31bBilled['delivery'] ?? null,
             "{$l}: the invoice also names the delivery address the goods went to");
+        assert_true(is_array($r31bInvoice['credit'] ?? null) && $r31bInvoice['credit'] === $r31bBilled,
+            "{$l}: a credit note of the invoice is issued to the same billing address (" . json_encode($r31bInvoice['credit'] ?? null) . ')');
         $r31bSame = $r31bInvoice['same'] ?? [];
         assert_true(($r31bSame['name'] ?? '') === 'R31B Same' && ($r31bSame['street'] ?? '') === 'Doručovacia 1' && ($r31bSame['company'] ?? '') === 'R31B Firma s.r.o.'
             && !array_key_exists('delivery', $r31bSame),
