@@ -26,7 +26,7 @@ final class SavedForLater
 
     /**
      * The list of the current shopper in the current store, newest first.
-     * @return array<string, array{product_id:int, variant_id:?int, qty:int, saved_price:?int, saved_currency:?string}>
+     * @return array<string, array{product_id:int, variant_id:?int, qty:int, saved_price:?int, saved_currency:?string, variant_sku:?string}>
      */
     public static function lines(): array
     {
@@ -268,25 +268,13 @@ final class SavedForLater
     /** Whether saved_for_later_items exists (migration 20261110190000 ran); only a yes is remembered. */
     private static function tableReady(): bool
     {
-        if (self::$tableReady) return true;
-        try {
-            Db::get()->query('SELECT 1 FROM saved_for_later_items WHERE 1 = 0');
-            return self::$tableReady = true;
-        } catch (PDOException $e) {
-            return false;
-        }
+        return self::$tableReady = self::$tableReady || Db::tableExists('saved_for_later_items');
     }
 
     /** Whether saved_for_later_items.variant_sku exists (migration 20261111100000 ran); only a yes is remembered. */
     private static function skuColumn(): bool
     {
-        if (self::$skuColumn) return true;
-        try {
-            Db::get()->query('SELECT variant_sku FROM saved_for_later_items WHERE 1 = 0');
-            return self::$skuColumn = true;
-        } catch (PDOException $e) {
-            return false;
-        }
+        return self::$skuColumn = self::$skuColumn || Db::hasColumn('saved_for_later_items', 'variant_sku');
     }
 
     /**

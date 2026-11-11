@@ -108,6 +108,7 @@ try {
 
     // 7. Code deployed before its migration: the signed-in cart works (empty list), saving is refused with a notice.
     $r29sDb->exec('ALTER TABLE saved_for_later_items RENAME TO r29s_saved_moved');
+    Db::forgetSchema();
     if (property_exists(SavedForLater::class, 'tableReady')) (new ReflectionProperty(SavedForLater::class, 'tableReady'))->setValue(null, false);
     try {
         $r29sPage = null;
@@ -122,6 +123,7 @@ try {
             'R29 buy later: before the migration a signed-in cart shows no list and saving is refused (was: a 500)');
     } finally {
         $r29sDb->exec('ALTER TABLE r29s_saved_moved RENAME TO saved_for_later_items');
+        Db::forgetSchema();
     }
 } catch (Throwable $e) {
     assert_true(false, 'R29 buy later (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
