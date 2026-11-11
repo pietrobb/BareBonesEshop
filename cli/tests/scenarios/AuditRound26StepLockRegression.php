@@ -63,8 +63,8 @@ try {
         $r26lOldIno = fileinode($r26lLock);
         assert_equals('claimed', $r26lRefused($r26lRoot), 'R26 step lock: a 0644 lock is still usable');
         clearstatcache();
-        assert_equals([0660, true], [fileperms($r26lLock) & 0777, fileinode($r26lLock) !== $r26lOldIno],
-            'R26 step lock: a 0644 lock is replaced by a new file with 0660 (its mode is not changed in place)');
+        assert_equals([filegroup($r26lRoot) === 0 ? 0600 : 0660, true], [fileperms($r26lLock) & 0777, fileinode($r26lLock) !== $r26lOldIno],
+            'R26 step lock: a 0644 lock is replaced by a new file with 0660 (0600 for group root, R29) (its mode is not changed in place)');
         assert_equals(0, filesize($r26lLock), 'R26 step lock: the new lock is emptied when the step lets go');
 
         // 4. The holder record is shown as printable text (any account of the group can write it).

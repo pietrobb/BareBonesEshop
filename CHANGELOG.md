@@ -110,15 +110,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   in sudoers, the default from sudo 1.9.14, or the step can type commands into root's terminal), or install the wrapper
   `deploy/bbe-step.sh` outside the tree (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`)
   and run `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group root) before any PHP of the
-  shop runs, in a session of its own without root's terminal as controlling terminal, and refuses a root-owned tree.
+  shop runs, in a session of its own without root's terminal as controlling terminal; a tree root owns it runs as root
+  only after checking that no other account can change it (see "A tree root owns" in the README).
   Ctrl-C or a dropped ssh connection no longer stops a step started through `bbe-step`; stop it with `kill`. A step now changes only what that owner can write: run backups and restores
   as the user that owns the files they change (`sudo -u www-data php cli/restore.php …`, as the runbook says). The
   Docker `setup` service hands the directories it fills to the checkout's owner for the command and to `www-data`
   afterwards.
 - **Install 2.1.3 as the owner of the application root, not as root.** The 2.1.2 updater keeps root, and the theme
-  check of 2.1.3 runs no code of the shop as root: `apply` started as root is refused with
-  `Theme checkout contract: Not a theme problem: the updater runs as root …` (2.1.2 adds "would break checkout"; your
-  theme is not the cause). If an
+  check of 2.1.3 runs the new release's checkout probe as root only for a shop root owns alone: otherwise `apply`
+  started as root is refused with `Theme checkout contract: Not a theme problem: the updater runs as root …` (2.1.2
+  adds "would break checkout"; your theme is not the cause). The 2.1.2 updater does not tell the probe which shop it
+  copied: for a shop root owns alone, run it as root with that shop named,
+  `BBE_INSTALLED_ROOT=/var/www/shop php cli/update.php apply --package=…`. If an
   update ever ran as root, it left the update directory, its snapshots and the backups to root, and the next step,
   which runs as the owner, could not read them (it reported "version unknown" and "no snapshots"; 2.1.3 refuses and
   names the path). Before the update, as root: `chown -R <owner>: <update_storage_dir> <backup storage_dir>` (and the
@@ -128,6 +131,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Root no longer locks itself out of a tree root owns, and such a tree can be updated** (review round 29, finding 1).
+  The first step there (install, migration, backup, restore) created `.maintenance.lock` 0660 root:root, and the
+  stricter root check of round 28 (group write counts even for group root) then refused every later root step, worker,
+  backup, migration and update included, blaming code in the empty lock; `setup.php install` as root failed half-way.
+  The lock of a tree of group root is now 0600, one left 0660 by an earlier 2.1.3 build is accepted as the lock (a
+  regular root-owned file with one name, which no step loads) and replaced by a 0600 one. The theme check of an update
+  run as root in a shop root owns alone runs the new release's checkout probe as root on root's private copy (it
+  refused root and told to run as the owner, which is root); `bbe-step` runs a step of such a tree as root after
+  checking it from outside the tree (it refused every root-owned tree). A refusal for a root-owned tree now says how to
+  make it root's alone (`chmod -R go-w`, or `tar --no-same-permissions` when extracting a release as root) instead of
+  telling root to run as the owner. The README describes when a tree root owns is supported.
 - **The e-mail delivery settings are in the backup; an empty `SMTP_*` variable no longer blanks the server; the invoice
   prints the BIC** (review round 28). `mail.json` (Admin → E-mail delivery) is a backup file source and a restore brings
   it back readable by the owner only (0600): a restored shop logged its mail instead of sending it. An empty `SMTP_HOST=`,

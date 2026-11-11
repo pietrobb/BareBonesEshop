@@ -82,10 +82,13 @@ try {
     // Finding 6a: the theme probe of the new release started as root (by the 2.1.2 updater) says why, as a verdict.
     [$r28dExit, $r28dOut, $r28dErr] = $r28dRun([PHP_BINARY, $r28dRoot . '/' . ThemeUpgradeGate::PROBE], $r28dRoot);
     $r28dVerdict = json_decode($r28dOut, true);
-    assert_true($r28dExit === 1 && is_array($r28dVerdict) && ($r28dVerdict['status'] ?? '') === 'NO-GO'
-        && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'Not a theme problem')
-        && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'as the owner of the application root'),
-        'R28 probe: started as root it returns a NO-GO verdict that names root, not the theme (' . trim($r28dErr . $r28dOut) . ')');
+    // R29 (finding 1): in a tree root owns alone (this checkout copied by root) it runs; else the NO-GO names root.
+    $r28dRootOnly = cli_not_root_only($r28dRoot) === null;
+    assert_true(is_array($r28dVerdict) && ($r28dRootOnly ? $r28dExit === 0 && ($r28dVerdict['status'] ?? '') === 'GO'
+        : $r28dExit === 1 && ($r28dVerdict['status'] ?? '') === 'NO-GO'
+            && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'Not a theme problem')
+            && str_contains((string)(($r28dVerdict['failures'] ?? [])[0] ?? ''), 'as the owner of the application root')),
+        'R28 probe: started as root it runs in a root-only tree, else returns a NO-GO verdict that names root, not the theme (' . substr(trim($r28dErr . $r28dOut), 0, 300) . ')');
 
     // Finding 1: the wrapper switches before PHP runs; a root-owned tree or a path as step is refused.
     if (!is_executable('/bin/sh') || trim((string)shell_exec('command -v setpriv 2>/dev/null')) === '') {
@@ -119,10 +122,12 @@ try {
     assert_true($r28dExit === 3 && str_contains($r28dOut, 'CTTY=none'), 'R28 wrapper: the step\'s exit status is the wrapper\'s, and the step has no controlling terminal (' . trim($r28dOut) . ')');
     [$r28dExit, , $r28dErr] = $r28dRun(['/bin/sh', $r28dRoot . '/deploy/bbe-step.sh', $r28dDir . '/app', '../whoami.php']);
     assert_true($r28dExit === 2 && str_contains($r28dErr, 'file name in cli/'), 'R28 wrapper: a path as step is refused');
+    // R29 (finding 1): a tree root owns alone runs as root (AuditRound29RootLockRegression); one another account can change does not.
     chown($r28dDir . '/app', 0);
+    chmod($r28dDir . '/app', 0775);
     [$r28dExit, $r28dOut, $r28dErr] = $r28dRun(['/bin/sh', $r28dRoot . '/deploy/bbe-step.sh', $r28dDir . '/app', 'whoami.php']);
-    assert_true($r28dExit === 1 && $r28dOut === '' && str_contains($r28dErr, 'belongs to root'),
-        'R28 wrapper: a root-owned tree is refused; root never runs PHP of a shop tree');
+    assert_true($r28dExit === 1 && $r28dOut === '' && str_contains($r28dErr, 'belongs to root, but') && str_contains($r28dErr, 'can be changed by another account'),
+        'R28 wrapper: a root-owned tree another account can change is refused before PHP runs (' . trim($r28dErr) . ')');
 } finally {
     if (is_dir($r28dDir)) {
         shell_exec('chmod -R u+rwx ' . escapeshellarg($r28dDir) . ' 2>/dev/null');

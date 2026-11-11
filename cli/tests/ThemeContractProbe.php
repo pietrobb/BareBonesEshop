@@ -1,12 +1,27 @@
 <?php
 // R28 (review round 28, finding 6): an updater that keeps root (2.1.2) runs this probe of the new release as root.
 // cli-only.php then refused it, and the updater read the refusal as a theme that would break checkout. Say why instead.
+// R29 (finding 1): an updater keeps root only in a shop root owns alone, and refusing root here left such a shop with no
+// way to update (its owner is root). The candidate is root's copy of that shop's code plus the package: root runs it when
+// no other account can change the copy or the shop it came from. The 2.1.3 gate names the shop (--installed-root); for
+// the 2.1.2 updater, which does not, root names it in the environment (BBE_INSTALLED_ROOT=/var/www/shop php cli/update.php apply …).
 if (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() === 0) {
-    echo json_encode(['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'warnings' => [], 'failures' => [
-        'Not a theme problem: the updater runs as root, and the new release runs no code of the shop as root. Run the'
-        . ' update as the owner of the application root (sudo -u <owner> php cli/update.php apply ...); see the upgrade notes.',
-    ]]), "\n";
-    exit(1);
+    define('BBE_CLI_KEEP_ROOT', true);
+    require_once dirname(__DIR__) . '/cli-only.php';
+    $installed = (string)(getopt('', ['installed-root:'])['installed-root'] ?? getenv('BBE_INSTALLED_ROOT') ?: '');
+    // Run in a shop tree itself (theme-check, the tests) the tree is the shop; only the gate's candidate is a copy of one.
+    $isCandidate = str_starts_with(basename(dirname(__DIR__, 2)), 'theme-candidate-');
+    $why = $installed === '' && $isCandidate ? 'the updater did not say which shop it copied (the 2.1.2 updater does not: run it with'
+        . ' BBE_INSTALLED_ROOT=<application root> in the environment, for a shop root owns alone)'
+        : (($installed !== '' ? cli_not_root_only($installed) : null) ?? cli_not_root_only(dirname(__DIR__, 2)));
+    if ($why !== null) {
+        echo json_encode(['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'warnings' => [], 'failures' => [
+            "Not a theme problem: the updater runs as root, and root runs the new release's checkout probe only when no other"
+            . " account can change the shop or the copy, but {$why}. Run the update as the owner of the application root"
+            . ' (sudo -u <owner> php cli/update.php apply …), or, for a shop root owns, make it and the update directory root\'s alone.',
+        ]]), "\n";
+        exit(1);
+    }
 }
 require_once dirname(__DIR__) . '/cli-only.php';
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
