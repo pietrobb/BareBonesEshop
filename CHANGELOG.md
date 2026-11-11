@@ -137,6 +137,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **"Buy later" details from review round 30.** Changing a variant's SKU in the admin no longer deletes every saved
+  line of it: signed-in customers keep the line, a guest's line asks to choose the variant on the product page. A line
+  of a draft or archived product is listed as unavailable with its own remove button (it counts towards the 100 lines,
+  and was hidden). Signing in with a full list names the guest items that did not fit; signing in before the
+  migration ran keeps the guest list until it has. "Nothing was moved" replaces "0 moved to your cart" when the cart
+  already holds all the stock, and a failed move no longer says the item could not be saved for later.
 - **Translations and admin details from review round 29.** The PL/HU/DE/ES order confirmation no longer says
   "variable symbol" in English. The audit log shows the notes of pages, warehouses, feeds, store settings, credit
   notes, e-mail delivery and admin accounts in the admin's language, and the refund notes give amounts in the order's
