@@ -13,7 +13,8 @@
 #   bbe-step /var/www/shop update.php apply --package=/srv/releases/update-2.1.3
 # The step gets no terminal (stdin is /dev/null: pass --yes to restore.php), only the variables BBE_*, BAREBONES_*,
 # SMTP_*, MAIL_*, PAY_*, LANG, LC_* and TZ of root's environment, and no other open file of root's; it runs in a pid
-# namespace that ends with it, and Ctrl-C stops it (review round 29, finding 3).
+# namespace that ends with it, and Ctrl-C stops it (review round 29, finding 3), also after setpriv changed the user
+# (review round 30, finding 1). It runs in the application root, so a relative path in an argument is taken from there.
 # Linux (bash, util-linux `setpriv`, `setsid`, `unshare`). Elsewhere run the step as the owner yourself:
 # sudo -u <owner> php cli/<step>.php ... with sudo's `Defaults use_pty` (the default from sudo 1.9.14).
 if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
@@ -84,11 +85,33 @@ run_step() { # run_step <script> <arguments...>
                 fd=${fd##*/}
                 case $fd in 0 | 1 | 2 | 3 | *[!0-9]*) ;; *) eval "exec $fd>&-" 2>/dev/null || true ;; esac
             done
-            "${ns[@]}" setsid -w "${priv[@]}" env -i "${envs[@]}" "$php" "$@" </dev/null 2>&1 1>&3 3>&- &
-            # The step is in a session of its own (no Ctrl-C reaches it) and unshare ignores SIGINT: stop it here. Killing
-            # unshare kills pid 1 of the namespace (--kill-child) and with it every process of the step.
+            # R30 (low): the step kept root's working directory; it runs in the application root, as `php cli/<step>.php`.
+            cd -- "${1%/cli/*}"
+            setsid -w "${ns[@]}" setsid -w "${priv[@]}" env -i "${envs[@]}" "$php" "$@" </dev/null 2>&1 1>&3 3>&- &
+            # unshare and the step are each in a session of their own, so no Ctrl-C reaches them: stop them here.
+            # Review round 30, finding 1: killing unshare alone relied on the parent-death signal of --kill-child, which
+            # the kernel clears when setpriv changes the user, so the owner's step ran on after the prompt came back (and a
+            # SIGHUP to the terminal's group killed unshare before this trap could find pid 1). Kill pid 1 of the namespace
+            # itself (the kernel then kills every process in it) and the session's process group; unshare is stopped first,
+            # so it forks no pid 1 the scan could miss. Without a namespace this kills the step and its group.
             started=$!
-            trap 'kill -KILL "$started" 2>/dev/null || true' INT TERM HUP
+            stop_step() {
+                local stat line fields pid
+                kill -STOP "$started" 2>/dev/null || true
+                for stat in /proc/[0-9]*/stat; do
+                    read -r line 2>/dev/null <"$stat" || continue
+                    read -r -a fields <<<"${line##*) }" # state ppid pgrp …, after the command name
+                    if [ "${fields[1]:-}" = "$started" ]; then
+                        pid=${stat#/proc/}
+                        pid=${pid%/stat}
+                        kill -KILL "$pid" 2>/dev/null || true
+                        kill -KILL -- "-$pid" 2>/dev/null || true
+                    fi
+                done
+                kill -KILL "$started" 2>/dev/null || true
+                kill -KILL -- "-$started" 2>/dev/null || true
+            }
+            trap stop_step INT TERM HUP
             status=0
             wait "$started" || status=$?
             while kill -0 "$started" 2>/dev/null; do wait "$started" || status=$?; done

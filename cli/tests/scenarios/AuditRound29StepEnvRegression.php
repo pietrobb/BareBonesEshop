@@ -86,7 +86,7 @@ touch($argv[1]);
         return;
     }
     // 3. Nothing the step started outlives it.
-    $r29eLate = $r29eDir . '/late';
+    $r29eLate = $r29eDir . '/app/late'; // R30: where the owner can write (in $r29eDir it never could, so this proved nothing)
     $process = proc_open(['/bin/sh', $r29eWrap, $r29eDir . '/app', 'linger.php', $r29eLate], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     $r29eOut = (string)stream_get_contents($pipes[1]);
     fclose($pipes[1]);
@@ -97,7 +97,7 @@ touch($argv[1]);
         'R29 bbe-step: a process the step leaves running ends with it (was: it read root\'s terminal after the prompt came back)');
 
     // 4. Ctrl-C (SIGINT to the wrapper's process group) stops the step, not only the wrapper.
-    $r29eDone = $r29eDir . '/done';
+    $r29eDone = $r29eDir . '/app/done'; // R30: the owner can write here
     $process = proc_open(['setsid', '/bin/sh', $r29eWrap, $r29eDir . '/app', 'slow.php', $r29eDone], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     $r29eFirst = (string)fgets($pipes[1]);
     $r29ePid = (int)proc_get_status($process)['pid'];
