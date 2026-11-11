@@ -573,11 +573,18 @@ says so instead of reporting another step as running.
 **Root.** Root must never run PHP of a tree another account can write. Run every
 step as the owner of the application root (`sudo -u <owner> php cli/….php`, with
 `Defaults use_pty` in sudoers, the default from sudo 1.9.14, or the step can type
-commands into root's terminal), or install `deploy/bbe-step.sh` root-owned outside the tree
-(`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`) and run
+commands into root's terminal), or install `deploy/bbe-step.sh` root-owned outside the tree,
+from a release you verified (the signed package's `payload/deploy/bbe-step.sh` or the release
+tag), not from the shop's copy, which an account that can write the tree may have changed
+(`install -o root -g root -m 0755 <release>/deploy/bbe-step.sh /usr/local/sbin/bbe-step`), and run
 `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group
-root) before any PHP of the shop runs, in a session of its own without root's terminal
-as controlling terminal (Ctrl-C does not stop it; use `kill`). As a second line
+root, and the tree's group only if the owner is in it) before any PHP of the shop runs.
+The step gets no descriptor of root's terminal (stdin is `/dev/null`, so pass `--yes` to
+`restore.php`; its output is copied through pipes), none of root's other open files, and
+of root's environment only `BBE_*`, `BAREBONES_*`, `SMTP_*`, `MAIL_*`, `PAY_*`, `LANG`,
+`LC_*` and `TZ`; it runs in a pid namespace that ends with it, so nothing it starts outlives
+it, and Ctrl-C or a dropped ssh connection stops it at once (an update stopped so keeps the
+shop closed with the command that finishes it in `.maintenance`). As a second line
 of defence, any `php cli/….php` started as root switches to the owner and group of the
 application root before it loads code of `src/`. That switch is `cli/cli-only.php`, code
 in the tree: an account that can write the tree (often the web user) can change it, and

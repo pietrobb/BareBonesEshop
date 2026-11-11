@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # bbe-step: run a BareBonesEshop CLI step that root starts as the owner of the application root, switched
 # before any PHP of the shop runs (review round 28, finding 1). A tree root owns runs as root only when no other
 # account can change it (review round 29, finding 1).
@@ -6,13 +6,18 @@
 # cli/cli-only.php switches a step started as root to that owner too, but it is code inside the tree: an
 # account that can write the tree (often the web user) can change it, and root would run the changed copy.
 # This wrapper lives outside the tree, so nothing in the tree decides whether root runs it. Install it
-# root-owned outside the shop, e.g.:
-#   install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step
+# root-owned outside the shop from a release you verified (the signed package or the release tag), not from the
+# shop's own copy, which an account that can write the tree may have changed, e.g.:
+#   install -o root -g root -m 0755 /srv/releases/update-2.1.3/payload/deploy/bbe-step.sh /usr/local/sbin/bbe-step
 # and use it instead of `sudo php cli/<step>.php`:
 #   bbe-step /var/www/shop update.php apply --package=/srv/releases/update-2.1.3
-# Linux (util-linux `setpriv`, `setsid`). Elsewhere run the step as the owner yourself: sudo -u <owner> php cli/<step>.php ...
-# with sudo's `Defaults use_pty` (the default from sudo 1.9.14), or the step can type into root's terminal.
-set -eu
+# The step gets no terminal (stdin is /dev/null: pass --yes to restore.php), only the variables BBE_*, BAREBONES_*,
+# SMTP_*, MAIL_*, PAY_*, LANG, LC_* and TZ of root's environment, and no other open file of root's; it runs in a pid
+# namespace that ends with it, and Ctrl-C stops it (review round 29, finding 3).
+# Linux (bash, util-linux `setpriv`, `setsid`, `unshare`). Elsewhere run the step as the owner yourself:
+# sudo -u <owner> php cli/<step>.php ... with sudo's `Defaults use_pty` (the default from sudo 1.9.14).
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
     echo "usage: bbe-step <application root> <step>.php [arguments...]" >&2
@@ -41,10 +46,57 @@ if [ "$(id -u)" != 0 ]; then
     exec php "$root/cli/$step" "$@"
 fi
 
-if ! command -v setsid >/dev/null 2>&1; then
-    echo "bbe-step: REFUSED: setsid (util-linux) is not installed." >&2
-    exit 1
-fi
+for tool in setsid setpriv; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "bbe-step: REFUSED: $tool (util-linux) is not installed; run the step as the owner yourself:" \
+            "sudo -u <owner> php $root/cli/$step ... (with sudo's Defaults use_pty)." >&2
+        exit 1
+    fi
+done
+php=$(command -v php) || { echo "bbe-step: php is not in PATH" >&2; exit 1; }
+
+# Review round 29, finding 3: the step kept root's terminal as stdin/stdout/stderr (a process it left running read
+# what root typed after the prompt came back, e.g. mysql -pHunter2), Ctrl-C stopped only the wrapper, and the step got
+# root's environment and open files. Now: stdin is /dev/null and stdout/stderr are pipes that root's own `cat` copies
+# to the terminal, so no process of the step holds a descriptor of root's terminal; only the variables a step reads
+# pass; every other descriptor is closed; and the step is pid 1 of a pid namespace of its own, which the kernel
+# empties when the step ends or the wrapper is stopped (Ctrl-C). Without pid namespaces (a container that
+# forbids unshare) the wrapper waits until nothing of the step holds its output.
+priv=() # setpriv … -- for a tree of another owner; nothing for a tree root owns alone
+run_step() { # run_step <script> <arguments...>
+    local envs=(PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$(dirname -- "$php")" HOME="$step_home")
+    local name
+    for name in $(compgen -e); do
+        case $name in
+            BBE_SUITE_*) ;;
+            BBE_* | BAREBONES_* | SMTP_* | MAIL_* | PAY_* | LANG | LC_* | TZ) envs+=("$name=${!name}") ;;
+        esac
+    done
+    local ns=()
+    if unshare --pid --fork --kill-child=SIGKILL true 2>/dev/null; then
+        ns=(unshare --pid --fork --kill-child=SIGKILL --)
+    else
+        echo "bbe-step: note: no pid namespace here (unshare refused); a process the step leaves running keeps running." >&2
+    fi
+    {
+        (
+            for fd in /proc/$BASHPID/fd/*; do
+                fd=${fd##*/}
+                case $fd in 0 | 1 | 2 | 3 | *[!0-9]*) ;; *) eval "exec $fd>&-" 2>/dev/null || true ;; esac
+            done
+            "${ns[@]}" setsid -w "${priv[@]}" env -i "${envs[@]}" "$php" "$@" </dev/null 2>&1 1>&3 3>&- &
+            # The step is in a session of its own (no Ctrl-C reaches it) and unshare ignores SIGINT: stop it here. Killing
+            # unshare kills pid 1 of the namespace (--kill-child) and with it every process of the step.
+            started=$!
+            trap 'kill -KILL "$started" 2>/dev/null || true' INT TERM HUP
+            status=0
+            wait "$started" || status=$?
+            while kill -0 "$started" 2>/dev/null; do wait "$started" || status=$?; done
+            exit "$status"
+        ) | cat >&2
+    } 3>&1 | cat
+}
+
 uid=$(stat -c %u "$root")
 gid=$(stat -c %g "$root")
 if [ "$uid" = 0 ]; then
@@ -77,34 +129,33 @@ if [ "$uid" = 0 ]; then
             "otherwise chown it to the deploy or web account and run the step as that account." >&2
         exit 1
     fi
-    exec setsid -w php "$real/cli/$step" "$@"
-fi
-if [ "$gid" = 0 ]; then
-    # A tree of group root (www-data:root) must not hand the step group 0: take the owner's primary group.
-    gid=$(id -g "$uid" 2>/dev/null || echo 0)
-    if [ "$gid" = 0 ]; then
-        echo "bbe-step: REFUSED: $root has group root and its owner (uid $uid) has no other primary group;" \
-            "chgrp the application root to the owner's group." >&2
-        exit 1
-    fi
-fi
-if ! command -v setpriv >/dev/null 2>&1; then
-    echo "bbe-step: REFUSED: setpriv (util-linux) is not installed; run the step as the owner yourself:" \
-        "sudo -u \"#$uid\" php $root/cli/$step ..." >&2
-    exit 1
+    step_home=$(getent passwd 0 | cut -d: -f6 || true)
+    step_home=${step_home:-/root}
+    run_step "$real/cli/$step" "$@"
+    exit 0
 fi
 
-home=$(getent passwd "$uid" 2>/dev/null | cut -d: -f6 || true)
-if [ -n "$home" ]; then
-    export HOME="$home" # mysqldump & co. read the owner's ~/.my.cnf, not root's
-    groups=--init-groups
-    case " $(id -G "$uid" 2>/dev/null || echo 0) " in
-        *" 0 "*) echo "bbe-step: REFUSED: the owner of $root (uid $uid) is in group root; the step would keep it." >&2; exit 1 ;;
-    esac
-else
-    groups=--clear-groups
+# The owner needs an account: its home (mysqldump & co. read the owner's ~/.my.cnf, not root's) and its groups.
+account=$(getent passwd "$uid" 2>/dev/null || true)
+if [ -z "$account" ]; then
+    echo "bbe-step: REFUSED: the owner of $root (uid $uid) has no account (getent passwd $uid), so it has no groups the" \
+        "step could keep; create the account or run the step as that uid yourself." >&2
+    exit 1
 fi
-# The step runs in a session of its own, without root's terminal as its controlling terminal: code the owner can change
-# must not push input into root's shell (TIOCSTI) once the step ends. Ctrl-C or a dropped ssh connection does not stop
-# it; stop it with kill. The step keeps the terminal as stdin/stdout/stderr, so its prompts and output still work.
-exec setsid -w setpriv --reuid="$uid" --regid="$gid" "$groups" --inh-caps=-all -- php "$root/cli/$step" "$@"
+step_home=$(printf '%s\n' "$account" | cut -d: -f6)
+owner_groups=" $(id -G "$uid") "
+case $owner_groups in
+    *" 0 "*) echo "bbe-step: REFUSED: the owner of $root (uid $uid) is in group root; the step would keep it." >&2; exit 1 ;;
+esac
+# R29 (low): the step took the tree's group (e.g. disk) even when the owner is not in it. It keeps the tree's group only
+# when the owner is a member; else (and for group root, R28) the owner's primary group.
+case $owner_groups in
+    *" $gid "*) ;;
+    *) gid=$(id -g "$uid") ;;
+esac
+if [ "$gid" = 0 ]; then
+    echo "bbe-step: REFUSED: the primary group of the owner of $root (uid $uid) is root; give it another one." >&2
+    exit 1
+fi
+priv=(setpriv --reuid="$uid" --regid="$gid" --init-groups --inh-caps=-all --)
+run_step "$root/cli/$step" "$@"
