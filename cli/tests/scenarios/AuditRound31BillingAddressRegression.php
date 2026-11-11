@@ -47,7 +47,8 @@ $config = is_file($root . '/config.php') ? require AppConfig::path($root) : requ
 $stores = Bootstrap::stores();
 $stores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';
 (new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $stores);
-Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate.sqlite'));
+// One rate store per database: the SQLite and the MySQL run together send more checkouts than the per-IP limit (10).
+Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate-' . $driver . '.sqlite'));
 ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');
 session_start();
@@ -179,7 +180,7 @@ try {
                 "{$label}: real handler completes (exit {$exit} " . trim($noise) . ')');
             $html = (string)($result['output'] ?? '');
             $form = preg_match('~<form method="post" class="checkout-form".*?</form>~s', $html, $m) ? $m[0] : '';
-            return [$label, $result ?? ['new_orders' => []], $html, $form];
+            return [$label, $result ?? ['new_orders' => [], 'output' => ''], $html, $form];
         };
         $r31bValue = static fn(string $form, string $name): ?string => preg_match('~<input id="[^"]+" name="' . $name . '"[^>]* value="([^"]*)"~', $form, $m) ? html_entity_decode($m[1]) : null;
         $r31bSelected = static fn(string $form, string $name): ?string => preg_match('~<select name="' . $name . '".*?</select>~s', $form, $s) && preg_match('~<option value="([A-Z]{2})" selected~', $s[0], $m) ? $m[1] : null;
