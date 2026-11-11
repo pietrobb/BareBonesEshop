@@ -24,9 +24,9 @@ function cli_drop_root(string $root): void
         $euid = (int)$m[1];
     }
     if ($euid !== 0) return;
-    $refuse = static function (string $why): never {
-        fwrite(STDERR, "REFUSED: this step runs as root, but {$why}. Run it as the owner of the application root"
-            . " (e.g. sudo -u <owner> php " . ($_SERVER['argv'][0] ?? 'cli/<step>.php') . " …).\n");
+    $refuse = static function (string $why, bool $owner = true): never {
+        fwrite(STDERR, "REFUSED: this step runs as root, but {$why}." . ($owner ? ' Run it as the owner of the application root'
+            . ' (e.g. sudo -u <owner> php ' . ($_SERVER['argv'][0] ?? 'cli/<step>.php') . ' …).' : '') . "\n");
         exit(1);
     };
     if (!function_exists('posix_setuid')) $refuse('PHP has no posix extension to switch to the owner of the application root');
@@ -55,7 +55,9 @@ function cli_drop_root(string $root): void
         return;
     }
     $why = cli_not_root_only($root);
-    if ($why !== null) $refuse($why . ', and root would run the code it holds');
+    // R29: say how to make a tree root owns root's alone: a release extracted by root keeps the archive's 0664/0775.
+    if ($why !== null) $refuse($why . ', and root would run code another account can change. For a tree only root may change:'
+        . " chmod -R go-w {$root} (extract a release as root with tar --no-same-permissions); otherwise chown it to the account the step runs as", false);
 }
 
 /**
@@ -75,6 +77,11 @@ function cli_not_root_only(string $root): ?string
         $path, $s['uid'], $s['gid'], (int)$s['mode'] & 07777);
     $real = realpath($root);
     if ($real === false) return "the application root {$root} cannot be resolved";
+    // R29 (review round 29, finding 1): 2.1.3 made the step lock 0660 root:root in a tree of group root (umask 0007), and
+    // its group write refused every later root step. Root never loads the lock (MaintenanceMode only flocks it and refuses
+    // a link, a hard link or foreign content), so a root-owned regular file there with group write is no way into root.
+    $stepLock = static fn(string $path, array $s): bool => ($path === $real . '/.maintenance.lock' || $path === $real . '/.maintenance.lock.held')
+        && (int)$s['uid'] === 0 && ((int)$s['mode'] & 0170002) === 0100000 && (int)$s['nlink'] === 1;
     // Above the app root: a directory another account can write could swap the whole tree, unless its sticky bit keeps
     // others from renaming root's entries.
     for ($dir = dirname($real); ; $dir = dirname($dir)) {
@@ -95,7 +102,7 @@ function cli_not_root_only(string $root): ?string
             }
             continue;
         }
-        if ($foreign($s)) return $describe($path, $s);
+        if ($foreign($s) && !$stepLock($path, $s)) return $describe($path, $s);
         if (is_dir($path)) {
             $entries = @scandir($path);
             if ($entries === false) return "{$path} cannot be listed";

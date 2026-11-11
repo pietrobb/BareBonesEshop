@@ -577,14 +577,24 @@ commands into root's terminal), or install `deploy/bbe-step.sh` root-owned outsi
 (`install -o root -g root -m 0755 deploy/bbe-step.sh /usr/local/sbin/bbe-step`) and run
 `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group
 root) before any PHP of the shop runs, in a session of its own without root's terminal
-as controlling terminal (Ctrl-C does not stop it; use `kill`), and refuses a tree root owns. As a second line
+as controlling terminal (Ctrl-C does not stop it; use `kill`). As a second line
 of defence, any `php cli/….php` started as root switches to the owner and group of the
-application root before it loads code of `src/`, and in a tree root owns stays root
-only when no other account can change any file or directory in it or above it;
-otherwise it refuses to run. That switch is `cli/cli-only.php`, code in the tree: an
-account that can write the tree (often the web user) can change it, and root would
-run its copy, so it is no substitute for the rule above. Run backups and restores as
-the user that owns the files they change.
+application root before it loads code of `src/`. That switch is `cli/cli-only.php`, code
+in the tree: an account that can write the tree (often the web user) can change it, and
+root would run its copy, so it is no substitute for the rule above. Run backups and
+restores as the user that owns the files they change.
+
+**A tree root owns** is supported when root owns it alone: every file and directory in
+it and every directory above it belongs to root without group or other write (a POSIX
+ACL shows as group write and counts too), links stay inside the tree, and the update
+directory and private directory are root's alone as well. Then root runs every step
+there, `update.php apply` included (its theme check runs the new release's checkout
+probe as root on root's copy), and `bbe-step` checks all that before any PHP runs.
+Otherwise every step started as root is refused and names the path. A release
+extracted as root keeps the archive's modes (0664/0775): extract it with
+`tar --no-same-permissions -xf …` or run `chmod -R go-w /var/www/shop` afterwards.
+The web user then writes nothing in the tree, so `uploads/`, the database and the
+other runtime directories must live outside it (`private_runtime_dir`, `uploads_dir`).
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The

@@ -119,10 +119,12 @@ try {
     assert_true($r28dExit === 3 && str_contains($r28dOut, 'CTTY=none'), 'R28 wrapper: the step\'s exit status is the wrapper\'s, and the step has no controlling terminal (' . trim($r28dOut) . ')');
     [$r28dExit, , $r28dErr] = $r28dRun(['/bin/sh', $r28dRoot . '/deploy/bbe-step.sh', $r28dDir . '/app', '../whoami.php']);
     assert_true($r28dExit === 2 && str_contains($r28dErr, 'file name in cli/'), 'R28 wrapper: a path as step is refused');
+    // R29 (finding 1): a tree root owns alone runs as root (AuditRound29RootLockRegression); one another account can change does not.
     chown($r28dDir . '/app', 0);
+    chmod($r28dDir . '/app', 0775);
     [$r28dExit, $r28dOut, $r28dErr] = $r28dRun(['/bin/sh', $r28dRoot . '/deploy/bbe-step.sh', $r28dDir . '/app', 'whoami.php']);
-    assert_true($r28dExit === 1 && $r28dOut === '' && str_contains($r28dErr, 'belongs to root'),
-        'R28 wrapper: a root-owned tree is refused; root never runs PHP of a shop tree');
+    assert_true($r28dExit === 1 && $r28dOut === '' && str_contains($r28dErr, 'belongs to root, but') && str_contains($r28dErr, 'can be changed by another account'),
+        'R28 wrapper: a root-owned tree another account can change is refused before PHP runs (' . trim($r28dErr) . ')');
 } finally {
     if (is_dir($r28dDir)) {
         shell_exec('chmod -R u+rwx ' . escapeshellarg($r28dDir) . ' 2>/dev/null');

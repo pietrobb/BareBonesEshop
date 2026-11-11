@@ -302,7 +302,7 @@ final class MaintenanceMode
      */
     private static function create(string $path, ?array $app)
     {
-        $old = umask(0007);
+        $old = umask(self::lockUmask($app));
         try {
             $handle = self::asAppGroup($app, static fn() => @fopen($path, 'x+'));
         } finally {
@@ -374,12 +374,23 @@ final class MaintenanceMode
         return (int)$stat['uid'] === 0 && ($mode & 0002) === 0 && (($mode & 0020) === 0 || (int)$stat['gid'] === 0);
     }
 
+    /**
+     * R29 (review round 29, finding 1): the lock is shared through the app root's group (0660), except in a tree of group
+     * root. There root made it 0660 root:root, R28's rule for root-owned trees (cli_not_root_only(): group write is another
+     * account's, an ACL mask looks the same) refused that lock, and so every later root step: the first one locked root out.
+     */
+    private static function lockUmask(?array $app): int
+    {
+        return $app !== null && (int)$app['gid'] === 0 ? 0077 : 0007;
+    }
+
     /** R26: whether the app root's owner or group can use a lock with this stat and no other account can (unknown root: yes). */
     private static function fits(array $stat, ?array $app): bool
     {
         if ($app === null) return true;
         $mode = $stat['mode'] & 0777;
         if (($mode & 0007) !== 0) return false;
+        if ((int)$app['gid'] === 0 && ($mode & 0070) !== 0) return false; // R29: 0660 root:root of 2.1.3 is replaced by 0600
         return ($stat['uid'] === $app['uid'] && ($mode & 0600) === 0600) || ($stat['gid'] === $app['gid'] && ($mode & 0060) === 0060);
     }
 
@@ -452,7 +463,7 @@ final class MaintenanceMode
         $claim = $path . self::HELD_SUFFIX;
         $app = @stat(dirname($path));
         for ($attempt = 0; $attempt < 2; $attempt++) {
-            $old = umask(0007);
+            $old = umask(self::lockUmask(is_array($app) ? $app : null));
             try {
                 // R27: in the app root's group (root made it root:root, so its holder could not be read by the group)
                 $handle = self::asAppGroup(is_array($app) ? $app : null, static fn() => @fopen($claim, 'x'));

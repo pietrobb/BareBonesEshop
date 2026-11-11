@@ -18,8 +18,10 @@ try {
         umask($r25lUmask);
     }
     clearstatcache();
-    assert_equals([true, PHP_OS_FAMILY === 'Windows' ? true : 0660], [$r25lClaimed, PHP_OS_FAMILY === 'Windows' ? true : (fileperms($r25lLock) & 0777)],
-        'R25 step lock: created 0660 under umask 022 (was 0644: other accounts could open and flock it, root\'s shut www-data out)');
+    // R29: 0600 in a tree of group root (0660 root:root refused every later root step).
+    $r25lMode = PHP_OS_FAMILY === 'Windows' ? true : (filegroup($r25lRoot) === 0 ? 0600 : 0660);
+    assert_equals([true, $r25lMode], [$r25lClaimed, PHP_OS_FAMILY === 'Windows' ? true : (fileperms($r25lLock) & 0777)],
+        'R25 step lock: created 0660 (0600 for group root) under umask 022 (was 0644: other accounts could open and flock it, root\'s shut www-data out)');
     MaintenanceMode::unclaim($r25lRoot);
     clearstatcache();
     assert_equals(0, filesize($r25lLock), 'R25 step lock: emptied when the step lets go');
