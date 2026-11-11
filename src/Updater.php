@@ -31,6 +31,7 @@ final class Updater
     /** config.php of the installation; check() and apply() refuse what doctor() reports as FAIL in it (R17). */
     private ?array $config;
     private $lockHandle = null;
+    private ?string $finisher = null;
 
     public function __construct(
         string $root,
@@ -261,6 +262,7 @@ final class Updater
         $entered = false;
         $installed = false;
         $keepClosed = null;
+        $finish = '';
         $this->claimStep();
         $prior = $this->priorMaintenance();
         try {
@@ -296,7 +298,8 @@ final class Updater
             // R23: an updater killed from here on (no finally runs) leaves the shop closed with the rollback to run.
             // R25: on top of a failed window (a migration stopped half-way) that failure is carried on under this one: the
             // rollback this marker names restores code only for an update without migrations and must not reopen the shop.
-            MaintenanceMode::arm($this->root, "update {$package->version()} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss",
+            $finish = $this->finisherCommand((string)$snapshot['id'], true);
+            MaintenanceMode::arm($this->root, "update {$package->version()} was interrupted before it finished; run {$finish}",
                 self::carry($prior, $snapshot['id'], true));
             $mutated = true;
             foreach ($ready as $entry) {
@@ -349,10 +352,10 @@ final class Updater
                     $restored = $this->restoreSnapshot($snapshot['id'], true, $numbering);
                     $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage(), $discarded);
                 } catch (Throwable $rollbackError) {
-                    $halfDone = "update {$package->version()} failed and its automatic rollback failed; run php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss";
+                    $halfDone = "update {$package->version()} failed and its automatic rollback failed; run {$finish}";
                     throw new RuntimeException(
                         'Update failed: ' . $e->getMessage() . '; automatic rollback also failed: ' . $rollbackError->getMessage()
-                            . "; once that is resolved run: php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss",
+                            . "; once that is resolved run: {$finish}",
                         0,
                         $e
                     );
@@ -377,6 +380,7 @@ final class Updater
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }
+            if ($halfDone === null) $this->dropFinisher(); // killed, or the rollback failed: .maintenance names it
             MaintenanceMode::unclaim($this->root);
             $this->unlock();
         }
@@ -510,6 +514,12 @@ final class Updater
             }
             $deleted = array_keys(array_filter($prunable));
             foreach ($deleted as $id) $this->removeTree($this->snapshotDirectory($id));
+            // R29: copies of the updater left by a step killed while making one, or of a snapshot that is gone.
+            foreach (glob($this->finishersDirectory() . DIRECTORY_SEPARATOR . '*', GLOB_ONLYDIR) ?: [] as $copy) {
+                $id = substr(basename($copy), 0, 27);
+                $stale = str_ends_with($copy, '.partial') ? (int)@filemtime($copy) < time() - 86400 : !is_dir($this->snapshotDirectory($id));
+                if ($stale && !$this->isInside((string)realpath(dirname(__DIR__)), $copy)) $this->removeTree($copy);
+            }
             return $deleted;
         } finally {
             $this->unlock();
@@ -541,13 +551,12 @@ final class Updater
             MaintenanceMode::enter($this->root, 'rollback ' . $snapshotId);
             $entered = true;
             $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
-            MaintenanceMode::arm($this->root, "rollback {$snapshotId} was interrupted before it finished; run php cli/update.php rollback --snapshot={$snapshotId} --force"
-                . ($databaseAt !== null ? ' --accept-data-loss' : ''), self::carry($prior, $snapshotId));
+            $finish = $this->finisherCommand($snapshotId, $databaseAt !== null);
+            MaintenanceMode::arm($this->root, "rollback {$snapshotId} was interrupted before it finished; run {$finish}", self::carry($prior, $snapshotId));
             try {
                 $result = $this->restoreSnapshot($snapshotId, $force, $databaseAt !== null ? $this->numberingHighWater() : [], $touched);
             } catch (Throwable $e) {
-                $halfDone = "rollback {$snapshotId} failed half-way ({$e->getMessage()}); fix the cause and run php cli/update.php rollback --snapshot={$snapshotId} --force"
-                    . ($databaseAt !== null ? ' --accept-data-loss' : '');
+                $halfDone = "rollback {$snapshotId} failed half-way ({$e->getMessage()}); fix the cause and run {$finish}";
                 throw $e;
             }
             $restored = true;
@@ -578,6 +587,8 @@ final class Updater
             } elseif ($entered) {
                 $this->restoreMaintenance($prior);
             }
+            // A copy this run made goes unless .maintenance names it (a half-done rollback); the one it runs from stays until it completes.
+            if ($restored || (!$touched && !$this->isInside((string)realpath(dirname(__DIR__)), $this->finishersDirectory()))) $this->dropFinisher();
             MaintenanceMode::unclaim($this->root);
             $this->unlock();
         }
@@ -1003,6 +1014,67 @@ final class Updater
             }
         }
         return $paths;
+    }
+
+    /**
+     * R29 (review round 29, finding 2): ordering the restore cannot keep the updater whole. src/ came back before
+     * src/Updater.php, so a rollback of 2.1.3 killed in that stretch left the 2.1.3 updater with the 2.1.2 FileSystem, and
+     * the command .maintenance named failed on FileSystem::tryLock() every time (503 for good); killed a little later, the
+     * 2.1.2 updater ran it and opened the shop with files still of 2.1.3. Before the first change an update or rollback now
+     * copies the updater it runs (src/, cli/update.php, cli/cli-only.php) into the update directory, and .maintenance names
+     * that copy (with --installed=<shop>): the updater that started the step finishes it, whatever the shop's files are.
+     * A step run from such a copy keeps using it. The copy goes once the step completes.
+     */
+    private function finisherCommand(string $snapshotId, bool $acceptDataLoss): string
+    {
+        return 'php ' . escapeshellarg($this->finisher($snapshotId) . '/cli/update.php') . ' rollback --installed=' . escapeshellarg($this->root)
+            . " --snapshot={$snapshotId} --force" . ($acceptDataLoss ? ' --accept-data-loss' : '');
+    }
+
+    private function finishersDirectory(): string
+    {
+        return $this->stateDirectory . DIRECTORY_SEPARATOR . 'finishers';
+    }
+
+    private function finisher(string $snapshotId): string
+    {
+        if ($this->finisher !== null) return $this->finisher;
+        $code = (string)realpath(dirname(__DIR__));
+        if ($this->isInside($code, $this->finishersDirectory())) return $this->finisher = $code;
+        $target = $this->finishersDirectory() . DIRECTORY_SEPARATOR . $snapshotId . '-' . bin2hex(random_bytes(4));
+        $partial = $target . '.partial';
+        $files = ['cli/update.php', 'cli/cli-only.php'];
+        $source = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($code . DIRECTORY_SEPARATOR . 'src', FilesystemIterator::SKIP_DOTS));
+        foreach ($source as $item) {
+            if ($item->isFile() && !$item->isLink()) $files[] = 'src/' . str_replace('\\', '/', substr($item->getPathname(), strlen($code . DIRECTORY_SEPARATOR . 'src') + 1));
+        }
+        try {
+            foreach ($files as $relative) {
+                $to = $partial . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+                if (!is_dir(dirname($to)) && !@mkdir(dirname($to), 0700, true) && !is_dir(dirname($to))) throw new RuntimeException('cannot create ' . dirname($to));
+                if (!@copy($code . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative), $to)) throw new RuntimeException("cannot copy {$relative}");
+                @chmod($to, 0600);
+            }
+            if (!@rename($partial, $target)) throw new RuntimeException("cannot rename {$partial}");
+        } catch (Throwable $e) {
+            $this->removeTree($partial);
+            throw new RuntimeException('Cannot prepare the copy of the updater that finishes an interrupted update or rollback in '
+                . $this->finishersDirectory() . ' (nothing was changed): ' . $e->getMessage(), 0, $e);
+        }
+        return $this->finisher = $target;
+    }
+
+    /** The step completed: its copy of the updater goes (the one this process runs from, once it ends). */
+    private function dropFinisher(): void
+    {
+        if ($this->finisher === null) return;
+        $directory = $this->finisher;
+        $this->finisher = null;
+        if ($this->isInside((string)realpath(dirname(__DIR__)), $directory)) {
+            register_shutdown_function(fn() => $this->removeTree($directory));
+            return;
+        }
+        $this->removeTree($directory);
     }
 
     private function snapshotMetadata(string $snapshotId): array
