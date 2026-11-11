@@ -45,10 +45,13 @@ touch("$app/done");
     mkdir($r30sDir . '/nons', 0755);
     file_put_contents($r30sDir . '/nons/unshare', "#!/bin/sh\nexit 1\n");
     chmod($r30sDir . '/nons/unshare', 0755);
-    foreach (['SIGINT' => [SIGINT, null], 'SIGHUP' => [SIGHUP, null], 'SIGINT without a pid namespace' => [SIGINT, $r30sDir . '/nons']] as $r30sName => [$r30sSignal, $r30sBin]) {
+    // R32: the wrapper sets its own PATH, so a copy of it puts the refusing unshare first.
+    $r30sNonsWrap = $r30sDir . '/nons-bbe-step.sh';
+    file_put_contents($r30sNonsWrap, str_replace("\nPATH=/usr/local/sbin:", "\nPATH=" . $r30sDir . "/nons:/usr/local/sbin:", (string)file_get_contents($r30sWrap), $r30sNonsCount));
+    assert_equals(1, $r30sNonsCount, 'R30 bbe-step: the copy without a pid namespace finds the PATH line of the wrapper');
+    foreach (['SIGINT' => [SIGINT, $r30sWrap], 'SIGHUP' => [SIGHUP, $r30sWrap], 'SIGINT without a pid namespace' => [SIGINT, $r30sNonsWrap]] as $r30sName => [$r30sSignal, $r30sScript]) {
         foreach (['db', 'done', 'helper-ran'] as $r30sFile) @unlink($r30sApp . '/' . $r30sFile);
-        $process = proc_open(['setsid', '/bin/sh', $r30sWrap, $r30sApp, 'slow.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null,
-            $r30sBin === null ? null : ['PATH' => $r30sBin . ':' . (string)getenv('PATH')]);
+        $process = proc_open(['setsid', '/bin/sh', $r30sScript, $r30sApp, 'slow.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         $r30sFirst = (string)fgets($pipes[1]);
         $r30sPid = (int)proc_get_status($process)['pid'];
         posix_kill(-$r30sPid, $r30sSignal); // what Ctrl-C (or a closed terminal) sends: the wrapper's whole process group

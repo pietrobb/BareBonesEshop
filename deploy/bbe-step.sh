@@ -14,9 +14,14 @@
 # The step gets no terminal (stdin is /dev/null: pass --yes to restore.php), only the variables BBE_*, BAREBONES_*,
 # SMTP_*, MAIL_*, PAY_*, LANG, LC_* and TZ of root's environment, and no other open file of root's; it runs in a pid
 # namespace that ends with it, and Ctrl-C stops it (review round 29, finding 3), also after setpriv changed the user
-# (review round 30, finding 1). It runs in the application root, so a relative path in an argument is taken from there.
+# (review round 30, finding 1), as does a SIGTERM to the wrapper alone (review round 32). It runs in the application root, so a relative path in an argument is taken from there.
 # Linux (bash, util-linux `setpriv`, `setsid`, `unshare`). Elsewhere run the step as the owner yourself:
 # sudo -u <owner> php cli/<step>.php ... with sudo's `Defaults use_pty` (the default from sudo 1.9.14).
+# Review round 32, low 1: every tool came from root's PATH, looked up after `cd` into the tree, so an empty entry or `.`
+# in it (PATH=$EXTRA:$PATH with an empty EXTRA) ran the owner's own `setsid` as uid 0. Only the system directories count,
+# so php must be in one of them.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 
@@ -54,7 +59,7 @@ for tool in setsid setpriv; do
         exit 1
     fi
 done
-php=$(command -v php) || { echo "bbe-step: php is not in PATH" >&2; exit 1; }
+php=$(command -v php) || { echo "bbe-step: php is not in $PATH (link it into /usr/local/bin)" >&2; exit 1; }
 
 # Review round 29, finding 3: the step kept root's terminal as stdin/stdout/stderr (a process it left running read
 # what root typed after the prompt came back, e.g. mysql -pHunter2), Ctrl-C stopped only the wrapper, and the step got
@@ -79,14 +84,23 @@ run_step() { # run_step <script> <arguments...>
     else
         echo "bbe-step: note: no pid namespace here (unshare refused); a process the step leaves running keeps running." >&2
     fi
+    # Review round 32, low 2: only the inner shell below trapped signals, so a SIGTERM to this process alone (kill <pid>,
+    # a supervisor, or sudo relaying one) ended the wrapper and left the step running. The pipeline runs in the
+    # background, so `wait` returns on a signal, and this shell passes it on to the inner shell, which stops the step.
+    local pidfile
+    pidfile=$(mktemp)
+    (
     {
         (
+            printf '%s\n' "$BASHPID" >"$pidfile"
             for fd in /proc/$BASHPID/fd/*; do
                 fd=${fd##*/}
                 case $fd in 0 | 1 | 2 | 3 | *[!0-9]*) ;; *) eval "exec $fd>&-" 2>/dev/null || true ;; esac
             done
             # R30 (low): the step kept root's working directory; it runs in the application root, as `php cli/<step>.php`.
             cd -- "${1%/cli/*}"
+            pending=
+            trap 'pending=1' INT TERM HUP # a signal before stop_step can know the step: stop it right after the start
             setsid -w "${ns[@]}" setsid -w "${priv[@]}" env -i "${envs[@]}" "$php" "$@" </dev/null 2>&1 1>&3 3>&- &
             # unshare and the step are each in a session of their own, so no Ctrl-C reaches them: stop them here.
             # Review round 30, finding 1: killing unshare alone relied on the parent-death signal of --kill-child, which
@@ -99,8 +113,11 @@ run_step() { # run_step <script> <arguments...>
                 local stat line fields pid
                 kill -STOP "$started" 2>/dev/null || true
                 for stat in /proc/[0-9]*/stat; do
-                    read -r line 2>/dev/null <"$stat" || continue
-                    read -r -a fields <<<"${line##*) }" # state ppid pgrp …, after the command name
+                    # Review round 32, low 3: the whole file, not its first line: a step can put a newline into its
+                    # command name (/proc/self/comm), and the fields after it then were never read.
+                    line=
+                    IFS= read -r -d '' line 2>/dev/null <"$stat" || [ -n "$line" ] || continue
+                    read -r -a fields <<<"${line##*) }" # state ppid pgrp …, after the last ") " (the name may hold one)
                     if [ "${fields[1]:-}" = "$started" ]; then
                         pid=${stat#/proc/}
                         pid=${pid%/stat}
@@ -112,12 +129,30 @@ run_step() { # run_step <script> <arguments...>
                 kill -KILL -- "-$started" 2>/dev/null || true
             }
             trap stop_step INT TERM HUP
+            [ -z "$pending" ] || stop_step
             status=0
             wait "$started" || status=$?
             while kill -0 "$started" 2>/dev/null; do wait "$started" || status=$?; done
             exit "$status"
         ) | cat >&2
     } 3>&1 | cat
+    ) &
+    local pipeline=$! status=0
+    pass_on() {
+        local inner= try
+        for try in 1 2 3 4 5 6 7 8 9 10; do
+            read -r inner <"$pidfile" 2>/dev/null || true
+            [ -z "$inner" ] || break
+            sleep 0.1
+        done
+        [ -z "$inner" ] || kill -TERM "$inner" 2>/dev/null || true
+    }
+    trap pass_on INT TERM HUP
+    wait "$pipeline" || status=$?
+    while kill -0 "$pipeline" 2>/dev/null; do wait "$pipeline" || status=$?; done
+    trap - INT TERM HUP
+    rm -f -- "$pidfile"
+    return "$status"
 }
 
 uid=$(stat -c %u "$root")

@@ -137,6 +137,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **`bbe-step` ignores root's PATH and stops on any signal to it (review round 32).** The wrapper looked up
+  `setsid` and its other tools in root's PATH after changing into the application root, so an empty entry or `.` in it
+  (`PATH=$EXTRA:$PATH` with an empty `EXTRA`) ran a `setsid` the owner put into the tree, as root. It now uses only
+  `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`: install php there (or link it into
+  `/usr/local/bin`), a php found only elsewhere in root's PATH is refused. A SIGTERM to the wrapper alone
+  (`kill <pid>`, a supervisor, or `sudo` passing one on) now stops the step and everything it started like Ctrl-C does;
+  it used to end only the wrapper. A step that put a newline into its process name no longer escapes Ctrl-C.
 - **Invoice, texts and log details from review round 30.** A malformed BIC no longer goes into the invoice's payment
   QR (the e-mail's QR already left it out). A seller with only a VAT id shows it in the CS/HU/PL order e-mail instead of
   an empty line. The audit log translates the provider refund booked during an admin refund, two-factor setup and store
