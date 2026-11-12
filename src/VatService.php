@@ -193,6 +193,7 @@ class VatService implements TaxProvider
      *   seller_oss_enabled    bool
      *   customer_country      ISO-2 of customer
      *   customer_vat_id_valid bool (VIES result)
+     *   customer_vat_id_domestic bool (valid VAT ID of the seller's own state)
      *   is_b2b                bool (customer claims B2B)
      *   customer_country_verified bool (default true; false = declared only, e.g. digital-only order)
      *
@@ -267,6 +268,18 @@ class VatService implements TaxProvider
                 'applies_vat'  => false,
                 'note_key'     => 'vat.reverse_charge_note',
                 'rate_country' => $cc,
+            ];
+        }
+
+        // R33: a business registered for VAT in the seller's own state (a Slovak VAT ID on a parcel to Czechia) is no
+        // consumer, so the sale is no OSS distance sale; without a VAT ID of another state it is not exempt either.
+        if ($b2b && (bool)($ctx['customer_vat_id_domestic'] ?? false)) {
+            return [
+                'scenario'     => self::SCENARIO_DOMESTIC,
+                'vat_rate'     => null,
+                'applies_vat'  => true,
+                'note_key'     => '',
+                'rate_country' => $sc,
             ];
         }
 

@@ -176,7 +176,7 @@
     const params = {
       country: country.value, currency: config.currency,
       amount: String(checkoutGoods(subtotal) + shippingPrice), shipping: String(shippingPrice),
-      shipping_method: selectedShipping, vat_id: checkoutVatId()
+      shipping_method: selectedShipping, vat_id: checkoutVatId(), billing_country: checkoutBillingCountry()
     };
     let result;
     try {
@@ -217,6 +217,13 @@
     return vatId && (!company || company.value.trim() !== '') ? vatId.value.trim() : '';
   }
 
+  // Billing country the order would use (a download is taxed there): only when billed to another address.
+  function checkoutBillingCountry() {
+    const toggle = document.querySelector('form[data-checkout-form] input[name="billing_different"]');
+    const select = document.getElementById('checkout-billing-country');
+    return toggle && toggle.checked && select ? select.value : '';
+  }
+
   // Another VAT scenario (export, reverse charge) re-prices the whole order: let the server re-render it.
   function repriceCheckout(scenario) {
     const subtotalElement = document.getElementById('checkout-subtotal');
@@ -240,7 +247,7 @@
     // The rendered options stay until new rates arrive: a failed request only adds a notice above them.
     box.querySelectorAll('.shipping-loading, .shipping-error').forEach((node) => node.remove());
     box.insertAdjacentHTML('afterbegin', `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`);
-    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId()};
+    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId(), billing_country: checkoutBillingCountry()};
     let result;
     try {
       result = await fetchCheckoutJson('shipping_rates', params);
@@ -549,6 +556,15 @@
       const field = document.getElementById(id);
       if (field && country) field.addEventListener('change', () => refreshCheckoutShipping(true));
     });
+    // A download is taxed in the billing country (R33): another one may change the rate within one scenario (OSS AT
+    // vs DE), so the server re-prices the form.
+    const subtotalInput = document.getElementById('checkout-subtotal');
+    if (subtotalInput && subtotalInput.dataset.billingReprices === '1') {
+      const refresh = document.querySelector('form[data-checkout-form] [name="checkout_refresh"]');
+      document.querySelectorAll('form[data-checkout-form] input[name="billing_different"], #checkout-billing-country').forEach((field) => {
+        field.addEventListener('change', () => { if (refresh) refresh.form.requestSubmit(refresh); });
+      });
+    }
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
 
     const banner = document.getElementById('cc-banner');

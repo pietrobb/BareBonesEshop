@@ -375,6 +375,7 @@ class Cart {
             'seller_vat_registered' => array_key_exists('seller_vat_registered', $vatContext) ? (bool)$vatContext['seller_vat_registered'] : true,
             'seller_oss_enabled'    => (bool)($vatContext['oss_enabled']           ?? $vatContext['seller_oss_enabled']    ?? false),
             'customer_vat_id_valid' => (bool)($vatContext['customer_vat_validated'] ?? $vatContext['customer_vat_id_valid'] ?? false),
+            'customer_vat_id_domestic' => (bool)($vatContext['customer_vat_id_domestic'] ?? false),
             'is_b2b'                => (bool)($vatContext['customer_is_business']  ?? $vatContext['is_b2b']                ?? false),
             'customer_country_verified' => (bool)($vatContext['customer_country_verified'] ?? true),
             'digital_customer_country' => (string)($vatContext['digital_customer_country'] ?? ''),
