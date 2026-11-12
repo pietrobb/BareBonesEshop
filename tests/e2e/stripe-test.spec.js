@@ -35,7 +35,7 @@ test('HTML card checkout opens a real Stripe test-mode Checkout session', async 
   ]);
   // Every engine, iPhone Safari (WebKit) above all — the client that could not pay in 1.9.0: the browser
   // landed on a real test-mode session and the shop's own CSP blocked nothing on the way.
-  expect(page.url()).toMatch(/^https:\/\/checkout\.stripe\.com\/c\/pay\/cs_test_/);
+  expect(page.url()).toMatch(/^https:\/\/checkout\.stripe\.com\/[a-z]\/pay\/cs_test_/);
   expect(cspViolations, 'Content-Security-Policy violations on shop documents').toEqual([]);
   if (testInfo.project.name === 'webkit-iphone') {
     // Playwright's Linux WebKit build trips over Stripe's own CSP and Stripe shows "Something went wrong";
