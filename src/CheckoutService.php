@@ -157,20 +157,28 @@ class CheckoutService {
         return $quote;
     }
 
-    /** Shipping shown in the summary: cash on delivery adds the carrier's COD surcharge, as checkout charges it. */
-    public static function summaryShipping(array $cart, int $subtotal, string $country, string $method, ?array $payment, int $shipping, ?array $vat = null, string $currency = 'eur'): int {
-        if (($payment['service_type'] ?? '') !== 'cod' || $method === '') return $shipping;
-        $codQuote = self::deliveryQuote($cart, $subtotal, $country, $method, true);
-        if (($codQuote['selected']['method_code'] ?? '') !== $method) return $shipping;
-        return $vat !== null ? self::chargedShipping((int)$codQuote['price'], $vat, $currency) : (int)$codQuote['price'];
-    }
-
     /** What a free-shipping promotion still charges: the carrier's COD surcharge when paying cash on delivery. */
     private static function freeShippingCharge(array $cart, int $subtotal, string $country, string $method, ?array $payment, ?array $vat, string $currency): int {
         if (($payment['service_type'] ?? '') !== 'cod' || $method === '') return 0;
         $rate = self::deliveryQuote($cart, $subtotal, $country, $method, true)['selected'] ?? null;
         $price = is_array($rate) && ($rate['method_code'] ?? '') === $method ? ShippingService::freeShippingPrice($rate) : 0;
         return $vat !== null ? self::chargedShipping($price, $vat, $currency) : $price;
+    }
+
+    /**
+     * The COD surcharge as execute() charges it: a carrier rate's surcharge on its own (chargedShipping), never as the
+     * difference of two rounded prices, which under a zero-rated scenario or a whole-unit currency can be a unit off.
+     * A rate without a separate surcharge (adapter-priced) adds whatever its COD price adds to the carriage.
+     */
+    private static function codSurchargeCharge(array $cart, int $subtotal, string $country, string $method, int $shipping, ?array $vat, string $currency): int {
+        $rate = self::deliveryQuote($cart, $subtotal, $country, $method, true)['selected'] ?? null;
+        if (!is_array($rate) || ($rate['method_code'] ?? '') !== $method) return 0;
+        if (!array_key_exists('base_price', $rate)) {
+            $codPrice = $vat !== null ? self::chargedShipping((int)$rate['price'], $vat, $currency) : (int)$rate['price'];
+            return max(0, $codPrice - $shipping);
+        }
+        $surcharge = self::rateCodSurcharge($rate, true);
+        return $vat !== null ? self::chargedShipping($surcharge, $vat, $currency) : $surcharge;
     }
 
     /**
@@ -194,8 +202,7 @@ class CheckoutService {
         $surcharge = 0;
         if ($method !== '') {
             $cod = ['service_type' => 'cod'];
-            $codShipping = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $cod, $vat, $currency) : self::summaryShipping($cart, $goods, $country, $method, $cod, $shipping, $vat, $currency);
-            $surcharge = max(0, $codShipping - $shipping);
+            $surcharge = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $cod, $vat, $currency) : self::codSurchargeCharge($cart, $goods, $country, $method, $shipping, $vat, $currency);
         }
         $methods = array_map(static function (array $m) use ($surcharge, $country, $currency, $goods, $shipping, $method, $customerId): array {
             if ($surcharge === 0 || ($m['service_type'] ?? '') !== 'cod') return $m;
