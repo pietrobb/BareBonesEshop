@@ -875,7 +875,8 @@ final class InvoiceService
         $settles = json_decode((string)($row['raw_response'] ?? ''), true);
         $settlesKey = is_array($settles) ? (string)($settles['settles_refund_request'] ?? '') : '';
         // An item refund (RMA credit note) already corrects the invoice: its refund is booked under its key or its provider refund id.
-        $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store
+        // R34: not one that failed (released by the admin, declined): its credit note was reversed, the money needs one.
+        $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status <> 'failed'
             AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
         $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
         if ($item->fetchColumn()) return null;

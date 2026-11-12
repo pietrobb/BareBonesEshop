@@ -296,6 +296,12 @@ final class WorkerJobs
             if ($request === null) return; // unpaid or nothing left to refund
             [$amount, $idempotencyKey] = [$request['amount'], $request['idempotency_key']];
         }
+        // R34 (low): an item refund released by the admin (or declined) has its credit note reversed: a job of it queued
+        // again by hand pays nothing out.
+        if ($itemRefundId > 0 && (string)(Rma::refundById($itemRefundId)['status'] ?? '') === 'failed') {
+            Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => ['status' => 'released']]);
+            return;
+        }
         if ($itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundJobSuperseded($orderId, $idempotencyKey)) {
             Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => ['status' => 'superseded']]);
             return;

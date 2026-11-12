@@ -4,7 +4,7 @@
  * Uses Stripe Checkout (hosted flow) via raw HTTP API.
  * Zero external dependencies — curl only.
  */
-class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, CancellablePaymentAdapter, SignedWebhookPaymentAdapter {
+class StripePayment implements IdempotentRefundAdapter, RefundLookupAdapter, HostedCheckoutAdapter, CancellablePaymentAdapter, SignedWebhookPaymentAdapter {
     /** The refund metadata key that carries the shop's refund key (the payment_refund job's idempotency key). */
     public const REFUND_KEY_METADATA = 'bbe_refund_key';
 
@@ -154,6 +154,20 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
             // requires_action (some bank refunds) is not returned yet either: the refund webhook settles it.
             'status' => ($response['status'] ?? 'failed') === 'requires_action' ? 'pending' : ($response['status'] ?? 'failed'),
         ];
+    }
+
+    /** R34: the refund of the PaymentIntent the shop created under $idempotencyKey (its metadata), see RefundLookupAdapter. */
+    public function refundByKey(string $paymentId, string $idempotencyKey): ?array {
+        if ($this->secretKey === '' || $paymentId === '' || $idempotencyKey === '') return null;
+        $response = $this->apiCall('GET', '/v1/refunds', ['payment_intent' => $paymentId, 'limit' => 100]);
+        if (!isset($response['data']) || !is_array($response['data'])) throw new \RuntimeException('Stripe refund list is incomplete');
+        foreach ($response['data'] as $refund) {
+            if (!is_array($refund) || (string)($refund['metadata'][self::REFUND_KEY_METADATA] ?? '') !== $idempotencyKey) continue;
+            $status = (string)($refund['status'] ?? 'failed');
+            return ['refund_id' => (string)($refund['id'] ?? ''), 'status' => $status === 'requires_action' ? 'pending' : $status, 'amount' => (int)($refund['amount'] ?? 0)];
+        }
+        if (!empty($response['has_more'])) throw new \RuntimeException('Stripe refund list is incomplete');
+        return ['status' => 'none'];
     }
 
     /**

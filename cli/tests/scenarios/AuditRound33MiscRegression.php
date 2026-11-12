@@ -75,10 +75,10 @@ try {
     $audit = $pdo->prepare("SELECT note FROM audit_log WHERE entity = 'order_refund' AND entity_id = ? AND new_value = 'failed' ORDER BY id DESC LIMIT 1");
     $audit->execute([$o1]);
     $note = (string)$audit->fetchColumn();
-    assert_equals([true, false, 'failed', 'paid', true, null], [$released, $again, (string)$pdo->query("SELECT status FROM order_refunds WHERE id = {$item1}")->fetchColumn(),
+    assert_equals(['released', '', 'failed', 'paid', true, null], [$released, $again, (string)$pdo->query("SELECT status FROM order_refunds WHERE id = {$item1}")->fetchColumn(),
         (string)Orders::byId($o1)['payment_status'], str_contains($note, 'r33m-admin') && str_contains($note, 'R33M nothing left at Stripe'), PaymentService::stalledItemRefund(Orders::byId($o1))],
         'R33 refunds: the release fails the item refund like a declined one (payment back to paid), audited with the admin and note; it is done once');
-    assert_equals(false, PaymentService::releaseStalledItemRefund($o2, $item2, 'r33m-admin', 'R33M accepted'),
+    assert_equals('', PaymentService::releaseStalledItemRefund($o2, $item2, 'r33m-admin', 'R33M accepted'),
         'R33 refunds: a refund the provider accepted cannot be released by a forged form');
 } catch (Throwable $e) {
     assert_true(false, 'R33 stalled item refund (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');

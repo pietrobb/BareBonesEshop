@@ -78,3 +78,13 @@ interface CancellablePaymentAdapter extends PaymentAdapter {
 interface IdempotentRefundAdapter extends PaymentAdapter {
     public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array;
 }
+
+/**
+ * R34: a provider that can say whether it executed the refund the shop sent under a key (refundWithIdempotency()).
+ * refundByKey() returns ['refund_id' => id, 'status' => succeeded|pending|failed|canceled, 'amount' => minor units] of
+ * that refund, ['status' => 'none'] when the provider has none, null when it cannot be asked (no credentials); it
+ * throws when asking failed.
+ */
+interface RefundLookupAdapter extends PaymentAdapter {
+    public function refundByKey(string $paymentId, string $idempotencyKey): ?array;
+}
