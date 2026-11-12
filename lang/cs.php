@@ -2273,6 +2273,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.invoice.type.invoice' => 'Faktura',
     'admin.invoice.type.credit_note' => 'Dobropis',
     'checkout.error.field_too_long_named' => 'Pole „{field}“ je příliš dlouhé (nejvýše {max} znaků).',
+    'checkout.error.field_invalid' => 'Pole obsahuje neplatné znaky. Přepište ho prosím.',
+    'checkout.error.field_invalid_named' => 'Pole „{field}“ obsahuje neplatné znaky. Přepište ho prosím.',
     'admin.stores.field.timezone' => 'Časové pásmo',
     'admin.stores.timezone_hint' => 'Podle tohoto pásma se určují data faktur, splatnosti a denní přehled tržeb.',
     'admin.stores.err.timezone' => 'Vyberte časové pásmo ze seznamu.',

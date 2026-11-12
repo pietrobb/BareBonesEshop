@@ -112,8 +112,10 @@ class GuestCheckoutAccount {
         $input = OrderAddress::flattenBillingInput($input);
         $field = static fn(string $key, int $max): string => is_string($input[$key] ?? null) ? mb_substr(trim(Security::str($input[$key])), 0, $max) : '';
         $billed = OrderAddress::billingRequested($input);
-        $company = ['company' => $field('company', 255), 'vat_id' => $field('vat_id', 40)];
+        // R33: with its IČO and DIČ, so the saved address prefills the whole company the invoice is issued to.
+        $company = ['company' => $field('company', 255), 'vat_id' => $field('vat_id', 40), 'ico' => $field('ico', 40), 'dic' => $field('dic', 40)];
         $shipping = ['type' => 'shipping', 'name' => $field('name', 255), 'company' => $billed ? '' : $company['company'], 'vat_id' => $billed ? '' : $company['vat_id'],
+            'ico' => $billed ? '' : $company['ico'], 'dic' => $billed ? '' : $company['dic'],
             'street' => $field('street', 255), 'city' => $field('city', 255), 'zip' => $field('zip', 32),
             'country' => strtoupper($field('country', 2)), 'phone' => $field('phone', 64)];
         $saved = self::rememberOne($customerId, $shipping);

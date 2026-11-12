@@ -2293,6 +2293,8 @@ return [
     'admin.invoice.type.invoice' => 'Invoice',
     'admin.invoice.type.credit_note' => 'Credit note',
     'checkout.error.field_too_long_named' => '{field} is too long (at most {max} characters).',
+    'checkout.error.field_invalid' => 'A field contains invalid characters. Please retype it.',
+    'checkout.error.field_invalid_named' => '{field} contains invalid characters. Please retype it.',
     'admin.stores.field.timezone' => 'Time zone',
     'admin.stores.timezone_hint' => 'Invoice dates, payment deadlines and the daily sales report follow this time zone.',
     'admin.stores.err.timezone' => 'Choose a time zone from the list.',

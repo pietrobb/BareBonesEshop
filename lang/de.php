@@ -2273,6 +2273,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.invoice.type.invoice' => 'Rechnung',
     'admin.invoice.type.credit_note' => 'Gutschrift',
     'checkout.error.field_too_long_named' => 'Das Feld „{field}“ ist zu lang (höchstens {max} Zeichen).',
+    'checkout.error.field_invalid' => 'Ein Feld enthält ungültige Zeichen. Bitte geben Sie es neu ein.',
+    'checkout.error.field_invalid_named' => 'Das Feld „{field}“ enthält ungültige Zeichen. Bitte geben Sie es neu ein.',
     'admin.stores.field.timezone' => 'Zeitzone',
     'admin.stores.timezone_hint' => 'Rechnungsdaten, Zahlungsfristen und der tägliche Umsatzbericht richten sich nach dieser Zeitzone.',
     'admin.stores.err.timezone' => 'Wählen Sie eine Zeitzone aus der Liste.',

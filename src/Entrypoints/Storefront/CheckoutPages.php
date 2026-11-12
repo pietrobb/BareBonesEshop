@@ -146,7 +146,7 @@ function renderCheckout(): string {
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : ($preview['coupon_applied'] ? sprintf($t('coupon_applied_free_shipping'), $couponCode) : ''),
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
-        + CheckoutService::billingView($state) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
+        + CheckoutService::billingView($state, $placed) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
 }
 
 /**
@@ -162,7 +162,7 @@ function storefrontCartPrice(array $cartData): Closure {
 /**
  * Places the order and redirects. Returns ['page' => html] when the created order must be paid through a
  * link instead, or ['error' => reason] when no order was created.
- * @return array{page: string}|array{error: string}
+ * @return array{page: string}|array{error: string, error_code?: string, field?: string}
  */
 function processCheckout(): array {
     global $t;
@@ -194,7 +194,7 @@ function processCheckout(): array {
     }
 
     if (!empty($result['consent_errors'])) return ['error' => $t('checkout.consent_required')];
-    return ['error' => (string)($result['error'] ?? '') ?: $t('checkout_failed')];
+    return ['error' => (string)($result['error'] ?? '') ?: $t('checkout_failed'), 'error_code' => (string)($result['error_code'] ?? ''), 'field' => (string)($result['field'] ?? '')]; // R33: code + field → aria-invalid
 }
 
 function renderOrderDone(string $orderNum): string {

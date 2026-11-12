@@ -136,10 +136,8 @@ final class AccountViewModel
         $money = static fn($cents): string => I18n::price((int)$cents, $currency);
         $shipping = json_decode((string)($order['shipping_rate_snapshot'] ?? '{}'), true) ?: [];
         $address = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
-        $lines = static fn(string $name, array $a): array => array_values(array_filter([
-            $name, (string)($a['street'] ?? ''), trim((string)($a['zip'] ?? '') . ' ' . (string)($a['city'] ?? '')), (string)($a['country'] ?? ''),
-            ...CheckoutService::companyLines($a),
-        ], static fn(string $part): bool => trim($part) !== ''));
+        // R33: formatted like the e-mails, documents and admin (OrderAddress::lines: country by name, company after the name).
+        $lines = static fn(string $name, array $a): array => OrderAddress::lines(['name' => $name] + $a, I18n::locale());
         $billing = OrderAddress::billing($order);
         $line = static fn(string $label, $cents): array => ['label' => I18n::t($label), 'amount' => $money($cents)];
         $labels = ['subtotal' => 'subtotal', 'discount' => 'discount', 'shipping' => 'shipping', 'payment_fee' => 'account.payment_fee', 'vat' => 'tax', 'vat_included' => 'tax_included'];
@@ -237,7 +235,9 @@ final class AccountViewModel
         $country = strtoupper((string)($values['country'] ?? ''));
         if ($country === '') $country = strtoupper((string)(StoreContext::current()->legal()['country'] ?? ''));
         $type = (string)($values['type'] ?? 'shipping');
-        $countries = ShippingService::destinationCountries();
+        // R33: a billing address may be in any country checkout bills to (also outside the EU), not only where it delivers;
+        // Customers::addressErrors() still limits a delivery address to the delivery countries.
+        $countries = ShippingService::billingCountries();
         return [
             'addresses' => array_map(static fn(array $address): array => $address + [
                 'type_label' => I18n::t('account.addr_type_' . ($address['type'] === 'billing' ? 'billing' : 'shipping')),
@@ -246,6 +246,8 @@ final class AccountViewModel
             'address_fields' => [
                 $field('name', 'account.addr_name', 'name', true),
                 $field('company', 'account.addr_company', 'organization'),
+                $field('ico', 'checkout_ico', 'off'),
+                $field('dic', 'checkout_dic', 'off'),
                 $field('vat_id', 'account.addr_vat', 'off'),
                 $field('street', 'account.addr_street', 'street-address', true),
                 $field('city', 'account.addr_city', 'address-level2', true),
