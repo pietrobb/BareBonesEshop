@@ -209,6 +209,7 @@ final class ManualOrder {
             if ($company['error'] !== null) return ['error' => 'admin.order.manual.company', 'detail' => (string)$company['error']];
             $vatId = $company['vat_id'];
             $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus);
+            $company['fields'] = CheckoutService::withoutInvalidVatId($company['fields'], $vat['vat_id_status']);
             $cart = Cart::enriched($vat['context']);
             $requested = [];
             foreach ($lines as $line) {

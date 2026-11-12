@@ -246,6 +246,20 @@ final class InvoiceService
     }
 
     /**
+     * R33 (low): the invoice_issued e-mail of this invoice already reached the buyer (sent, not only written to the log).
+     * Each step of a purchase on invoice (accepted, shipped, paid) and a cash on delivery order (shipped, paid) queues an
+     * invoice_issue job; issuing is idempotent, but every job mailed the same invoice again. The admin's "resend" still does.
+     */
+    public static function mailed(array $invoice): bool
+    {
+        $number = substr((string)json_encode(['invoice_number' => (string)$invoice['number']], JSON_UNESCAPED_UNICODE), 1, -1);
+        $stmt = Db::get()->prepare("SELECT 1 FROM email_log WHERE order_id = :order AND store_id = :store AND template = 'invoice_issued'
+            AND status = 'sent' AND adapter <> 'log' AND payload LIKE :number ESCAPE '!' LIMIT 1");
+        $stmt->execute([':order' => (int)$invoice['order_id'], ':store' => StoreContext::current()->id(), ':number' => '%' . Db::likeLiteral($number) . '%']);
+        return (bool)$stmt->fetchColumn();
+    }
+
+    /**
      * Variables of the invoice_issued e-mail: what the templates of every language print (amount, dates, the online
      * link and the seller), whichever path sends it — the worker after payment or the admin's issue / resend.
      * @return array<string, string|bool>

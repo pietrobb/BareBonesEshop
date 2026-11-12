@@ -265,6 +265,15 @@ class CheckoutService {
         return ['fields' => $error === null ? $fields : [], 'vat_id' => $error === null ? $vatId : '', 'error' => $error];
     }
 
+    /**
+     * R33 (low): the company fields of an order address without an IČ DPH VIES answered is invalid: the invoice printed
+     * it as the buyer's VAT registration. An unverified one (VIES unreachable) is kept: the order was charged VAT anyway.
+     */
+    public static function withoutInvalidVatId(array $fields, ?string $vatIdStatus): array {
+        if ($vatIdStatus === 'invalid') unset($fields['ic_dph']);
+        return $fields;
+    }
+
     /** Company name and labelled IDs stored on an order address, for order detail screens. */
     public static function companyLines(array $address): array {
         $lines = [];
