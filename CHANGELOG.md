@@ -98,7 +98,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.10 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.11 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -187,6 +187,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   released refund queued again by hand pays nothing out; a second click on "Release credit note" reports it was
   released instead of an error; an item refund of an order without online payment, marked refunded by the admin, now
   e-mails the customer.
+- **Checkout details (review round 34).** Without JavaScript, a buyer who picked another shipping or payment method and
+  ordered without "Recalculate" was charged a total the form never showed (19.90 EUR shown, 27.89 EUR ordered). The
+  no-JS form now posts the total it showed; an order re-priced since is not placed, and the form shows the new total
+  to confirm ("The order total was recalculated…"). A re-rendered checkout (recalculation, the billing country of an
+  e-book, a refused order) keeps the consents already ticked, including the digital-delivery consent, and with JS the
+  changed field keeps the focus across the reload. Under a free-shipping coupon or promotion every delivery method is
+  listed free, as the summary and the order charge it (express showed 7.99 EUR).
 - **Account addresses: IČO and DIČ (review round 34).** A longer IČO or DIČ than the checkout accepts is refused on
   the field ("Enter a valid company ID or tax ID…") instead of failing the `VARCHAR(40)` column with an error 500 on
   MySQL. An edited address stores them without spaces and in upper case, as a new address and the checkout do. An

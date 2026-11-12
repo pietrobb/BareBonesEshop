@@ -2034,6 +2034,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.field_too_long' => 'Jedno z pól jest za długie. Skróć imię i nazwisko, dane kontaktowe lub adres.',
     'checkout.error.shipping_unavailable' => 'Dostawa do wybranego kraju jest niedostępna.',
     'checkout.error.payment_unavailable' => 'Wybrana metoda płatności jest niedostępna dla tego zamówienia.',
+    'checkout.error.total_changed' => 'Kwota zamówienia została przeliczona po zmianie dostawy, płatności lub kraju. Sprawdź nową kwotę i potwierdź zamówienie ponownie.',
     'checkout.error.synthetic_requires_online' => 'Syntetyczne zamówienie wymaga płatności online.',
     'checkout.error.payment_session_failed' => 'Przetwarzanie płatności jest niedostępne. Spróbuj ponownie.',
     'payment_status.expired' => 'Wygasła',

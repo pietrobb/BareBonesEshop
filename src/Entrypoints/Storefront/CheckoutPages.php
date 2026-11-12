@@ -105,7 +105,7 @@ function renderCheckout(): string {
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
-    $quote = CheckoutService::chargedQuote(CheckoutService::deliveryQuote($goods, $subtotal - $discount, $country, $_POST['shipping_method'] ?? ''), $vat, (string)$cartData['currency']);
+    $quote = CheckoutService::chargedQuote(CheckoutService::waiveCarriage(CheckoutService::deliveryQuote($goods, $subtotal - $discount, $country, $_POST['shipping_method'] ?? ''), $preview['free_shipping']), $vat, (string)$cartData['currency']);
     [$shippingRates, $selectedRate] = [$quote['rates'], $quote['selected']];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
     $payment = CheckoutService::paymentPreview($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null, $vat);
@@ -115,7 +115,7 @@ function renderCheckout(): string {
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
-        'refresh_label' => $t('checkout.refresh'), 'recalculate_label' => $t('checkout.recalculate'), 'consents' => array_values(CheckoutService::consentDefinitions($country, $cart)),
+        'refresh_label' => $t('checkout.refresh'), 'recalculate_label' => $t('checkout.recalculate'), 'consents' => CheckoutService::consentsView($country, $cart, $posted ? ($_POST['consents'] ?? null) : null),
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
@@ -136,7 +136,7 @@ function renderCheckout(): string {
         'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'billing_reprices' => CheckoutService::hasDownload($goods), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
-        'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),
+        'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee), 'total_cents' => $subtotal - $discount + $shipping + $paymentFee,
         'values' => $state['values'], 'checkout_error' => $checkoutError, 'saved_addresses' => $state['addresses'],
         'saved_address_label' => $t('checkout_saved_address'), 'saved_address_use_label' => $t('checkout_saved_address_use'),
         'country_label' => $t('country'), 'country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $country],
