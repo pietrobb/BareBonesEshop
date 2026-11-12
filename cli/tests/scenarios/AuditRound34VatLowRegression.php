@@ -25,20 +25,20 @@ $r34lFail = static function (string $what, Throwable $e): void {
 $r34lScenario = static fn(array $vat): array => [(string)$vat['scenario']['scenario'], (string)$vat['scenario']['rate_country']];
 
 try {
-    $pdo->exec("DELETE FROM products WHERE id IN (99341, 99342)");
-    $pdo->exec("DELETE FROM digital_assets WHERE sku = 'R34L-EBOOK'");
+    $pdo->exec("DELETE FROM products WHERE id IN (99361, 99362)");
+    $pdo->exec("DELETE FROM digital_assets WHERE sku = 'R34V-EBOOK'");
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
-        VALUES (99341, 'default', 1, 'R34L e-book', 'r34l-ebook', 'R34L-EBOOK', 'downloadable', 1230, 'eur', 'active', 0, 'continue')");
+        VALUES (99361, 'default', 1, 'R34L e-book', 'r34v-ebook', 'R34V-EBOOK', 'downloadable', 1230, 'eur', 'active', 0, 'continue')");
     $pdo->exec("INSERT INTO digital_assets (sku, asset_key, label, storage_path, download_name, content_type, download_limit, expiry_seconds, active)
-        VALUES ('R34L-EBOOK', 'pdf', 'PDF', 'r34l.pdf', 'r34l.pdf', 'application/pdf', 2, 3600, 1)");
+        VALUES ('R34V-EBOOK', 'pdf', 'PDF', 'r34l.pdf', 'r34l.pdf', 'application/pdf', 2, 3600, 1)");
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
-        VALUES (99342, 'default', 1, 'R34L book', 'r34l-book', 'R34L-BOOK', 'simple', 1000, 'eur', 'active', 10, 'continue')");
+        VALUES (99362, 'default', 1, 'R34L book', 'r34v-book', 'R34V-BOOK', 'simple', 1000, 'eur', 'active', 10, 'continue')");
     $pdo->prepare("DELETE FROM vat_id_cache WHERE vat_id = 'DE123456789'")->execute();
     $pdo->prepare("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, checked_at, ttl_seconds) VALUES ('DE123456789', 'DE', 'valid', 'R34L GmbH', :at, 86400)")
         ->execute([':at' => gmdate('Y-m-d H:i:s')]);
 
     // 1. Art. 44: a download for a business with a valid German VAT ID is reverse charged in Germany, billed anywhere.
-    $_SESSION['cart'] = ['p_99341' => ['product_id' => 99341, 'variant_id' => null, 'qty' => 1]];
+    $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1]];
     assert_equals([['reverse_charge', 'DE'], ['reverse_charge', 'DE'], ['reverse_charge', 'DE']],
         [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'SK')), $r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'US')),
          $r34lScenario(CheckoutService::vatContext('DE', 'DE123456789', '', true, null, 'DE'))],
@@ -47,13 +47,13 @@ try {
         [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', false, null, 'SK')), $r34lScenario(CheckoutService::vatContext('SK', '', '', false, null, 'AT'))],
         'R34 VAT: an unverified VAT ID is a consumer where it is billed; a consumer billed to Austria stays OSS AT');
     // Mixed cart: goods supplied at home, the download reverse charged in the VAT ID's state and grouped under it.
-    $_SESSION['cart'] = ['p_99341' => ['product_id' => 99341, 'variant_id' => null, 'qty' => 1], 'p_99342' => ['product_id' => 99342, 'variant_id' => null, 'qty' => 1]];
+    $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1], 'p_99362' => ['product_id' => 99362, 'variant_id' => null, 'qty' => 1]];
     $r34lMixed = CheckoutService::vatContext('SK', 'DE123456789', 'packeta', true, null, 'SK');
     assert_equals(['DE', ['country' => 'DE', 'scheme' => 'reverse_charge'], '0 DE RC'],
         [(string)$r34lMixed['context']['digital_customer_country'], VatService::digitalSupply($r34lMixed['context']), VatService::breakdownKey(0, 'DE', 'reverse_charge')],
         'R34 VAT: next to goods, the e-book of a German VAT ID billed to Slovakia is reverse charged under DE, not the billing country');
     // Art. 58 stays as agreed in round 5: a declared non-EU country alone is no evidence, the download keeps Slovak VAT.
-    $_SESSION['cart'] = ['p_99341' => ['product_id' => 99341, 'variant_id' => null, 'qty' => 1]];
+    $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1]];
     assert_equals(['domestic', 'SK'], $r34lScenario(CheckoutService::vatContext('SK', '', '', false, null, 'US')),
         'R34 VAT: a consumer download billed to the USA keeps the seller\'s VAT (R5: a declared country alone does not zero-rate)');
 } catch (Throwable $e) { $r34lFail('art. 44', $e); }
@@ -125,5 +125,5 @@ foreach ($r34lOrders as $r34lOrder) {
     $pdo->prepare('DELETE FROM invoices WHERE order_id = ?')->execute([$r34lOrder]);
     $pdo->prepare('DELETE FROM orders WHERE id = ?')->execute([$r34lOrder]);
 }
-$pdo->exec("DELETE FROM products WHERE id IN (99341, 99342)");
-$pdo->exec("DELETE FROM digital_assets WHERE sku = 'R34L-EBOOK'");
+$pdo->exec("DELETE FROM products WHERE id IN (99361, 99362)");
+$pdo->exec("DELETE FROM digital_assets WHERE sku = 'R34V-EBOOK'");
