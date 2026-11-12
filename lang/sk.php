@@ -1590,6 +1590,7 @@ return [
     'admin.doctor.stores_url_prefix' => 'Obchod {item} používa vyhradenú predponu adresy',
     'admin.doctor.stores_timezone' => 'Obchod {item} nemá platné časové pásmo',
     'admin.doctor.stores_currency_prices' => 'Obchod {item} má produkty bez ceny vo svojej mene',
+    'admin.doctor.stores_oss_threshold' => 'Obchod {item} prekročil limit 10 000 € pre predaj spotrebiteľom v iných štátoch EÚ — zapnite OSS',
     'admin.doctor.admin_accounts' => 'Do administrácie sa nemôže nikto prihlásiť',
     'admin.doctor.admin_mfa_key' => 'Niektorí administrátori sa nemôžu prihlásiť (kľúč dvojfaktorového overenia)',
     'admin.doctor.catalog_digital_files' => 'Niektoré produkty na stiahnutie nemajú súbor a nepredávajú sa',

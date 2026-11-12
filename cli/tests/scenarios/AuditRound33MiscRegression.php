@@ -90,7 +90,8 @@ try {
 try {
     // 2. An IČ DPH VIES answered is invalid is left out of the order address the invoice reads; an unverified one stays.
     $company = ['company' => 'R33M GmbH', 'ico' => 'HRB33', 'ic_dph' => 'DE999999999'];
-    assert_equals([['company' => 'R33M GmbH', 'ico' => 'HRB33'], $company, $company], [
+    // R34 (low): the unverified one is kept but marked, so the invoice does not print it as a checked registration.
+    assert_equals([['company' => 'R33M GmbH', 'ico' => 'HRB33'], $company + ['ic_dph_unverified' => '1'], $company], [
         CheckoutService::withoutInvalidVatId($company, 'invalid'), CheckoutService::withoutInvalidVatId($company, 'unverified'), CheckoutService::withoutInvalidVatId($company, 'valid'),
     ], 'R33 invoice: an IČ DPH VIES answered is invalid is not stored for the invoice (was printed as the buyer\'s VAT registration)');
     $handlers = (string)file_get_contents($r33mRoot . '/src/Http/ApiHandlers.php');

@@ -1523,6 +1523,8 @@ final class InvoiceService
             'dic'     => (string)($addr['dic']      ?? ''),
             'ic_dph'  => (string)($addr['ic_dph']   ?? ''),
         ];
+        // R34 (low): an IČ DPH VIES could not check (CheckoutService::withoutInvalidVatId()) is printed as unverified.
+        if ($snapshot['ic_dph'] !== '' && !empty($addr['ic_dph_unverified'])) $snapshot['ic_dph_unverified'] = true;
         // The goods went elsewhere: the document also names the delivery address (not for a digital-only order).
         // R33: for a pick-up order the pick-up point, not the home address the order also carries; none at the shop.
         $delivery = OrderAddress::deliveryPlace($order);
@@ -2080,6 +2082,24 @@ final class InvoiceService
         return $labels[$noteKey] ?? null;
     }
 
+    /**
+     * R34 (low): every VAT notice of a document. A mixed invoice holds two schemes (exported goods next to an e-book
+     * reverse charged for an EU business): the document's notice, plus the reverse charge one (Art. 196) for its
+     * reverse-charged download group ("0 DE RC") when the document's notice is another. Was: only the first.
+     * @return list<string>
+     */
+    public static function vatNotices(array $invoice, string $locale, array $vatBreakdown, string $sellerCountry): array
+    {
+        $servicesOnly = !empty($vatBreakdown['services_only']);
+        $notices = [];
+        $notice = self::vatNotice($invoice, $locale, $servicesOnly, $sellerCountry);
+        if ($notice !== null) $notices[] = $notice;
+        $rcGroup = array_filter((array)($vatBreakdown['rates'] ?? []), static fn($info): bool => is_array($info) && ($info['supply'] ?? '') === VatService::SCENARIO_REVERSE_CHARGE);
+        $services = self::vatNotice(['reverse_charge_note_key' => 'vat.reverse_charge_services_note'], $locale, true, $sellerCountry);
+        if ($rcGroup !== [] && $services !== null && !in_array($services, $notices, true)) $notices[] = $services;
+        return $notices;
+    }
+
     private static function renderMinimalPdf(
         array $invoice, array $rows,
         array $sellerSnap, array $customerSnap, array $vatBreakdown
@@ -2217,8 +2237,7 @@ final class InvoiceService
 
         // VAT scenario notice: the legal ground of the exemption / reverse charge, wrapped to the page width.
         $noteKey = (string)($invoice['reverse_charge_note_key'] ?? $vatBreakdown['note_key'] ?? '');
-        $notice = self::vatNotice(['reverse_charge_note_key' => $noteKey] + $invoice, $locale, !empty($vatBreakdown['services_only']), (string)($sellerSnap['country'] ?? ''));
-        if ($notice !== null) {
+        foreach (self::vatNotices(['reverse_charge_note_key' => $noteKey] + $invoice, $locale, $vatBreakdown, (string)($sellerSnap['country'] ?? '')) as $notice) {
             foreach (explode("\n", wordwrap($notice, 95, "\n", true)) as $noticeLine) {
                 $ensureSpace(5);
                 $pdf->text(20, $y, $noticeLine, ['size' => 9, 'bold' => true]);
@@ -2316,7 +2335,7 @@ final class InvoiceService
         if (!empty($p['country'])) $out[] = $p['country'];
         if (!empty($p['ico']))     $out[] = $L['ico'] . ': ' . $p['ico'];
         if (!empty($p['dic']))     $out[] = $L['dic'] . ': ' . $p['dic'];
-        if (!empty($p['ic_dph']))  $out[] = $L['ic_dph'] . ': ' . $p['ic_dph'];
+        if (!empty($p['ic_dph']))  $out[] = $L['ic_dph'] . ': ' . $p['ic_dph'] . (!empty($p['ic_dph_unverified']) ? ' (' . $L['ic_dph_unverified'] . ')' : '');
         if (!empty($p['email']))   $out[] = $p['email'];
         if (!empty($p['phone']))   $out[] = $p['phone'];
         return $out;
@@ -2337,7 +2356,7 @@ final class InvoiceService
                 'vat_recap' => 'Rekapitulácia DPH', 'col_net' => 'Základ', 'reverse_charge_note' => 'Dodanie tovaru do iného členského štátu oslobodené od dane podľa § 43 zákona o DPH (čl. 138 smernice 2006/112/ES)',
                 'export_note' => 'Vývoz tovaru oslobodený od dane podľa § 47 zákona o DPH (čl. 146 smernice 2006/112/ES)', 'non_vat_payer_note' => 'Predávajúci nie je platiteľom DPH',
                 'payment_method' => 'Spôsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilný symbol',
-                'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'IČ DPH',
+                'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'IČ DPH', 'ic_dph_unverified' => 'neoverené v systéme VIES',
                 'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
@@ -2359,7 +2378,7 @@ final class InvoiceService
                 'vat_recap' => 'Rekapitulace DPH', 'col_net' => 'Základ', 'reverse_charge_note' => 'Dodání zboží do jiného členského státu osvobozené od daně podle § 64 zákona o DPH (čl. 138 směrnice 2006/112/ES)',
                 'export_note' => 'Vývoz zboží osvobozený od daně podle § 66 zákona o DPH (čl. 146 směrnice 2006/112/ES)', 'non_vat_payer_note' => 'Prodávající není plátcem DPH',
                 'payment_method' => 'Způsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilní symbol',
-                'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'DIČ (pro DPH)',
+                'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'DIČ (pro DPH)', 'ic_dph_unverified' => 'neověřeno v systému VIES',
                 'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
@@ -2381,7 +2400,7 @@ final class InvoiceService
                 'vat_recap' => 'Rekapitulacja VAT', 'col_net' => 'Netto', 'reverse_charge_note' => 'Wewnątrzwspólnotowa dostawa towarów, stawka 0% (art. 42 ustawy o VAT, art. 138 dyrektywy 2006/112/WE)',
                 'export_note' => 'Eksport towarów, stawka 0% (art. 41 ust. 4 ustawy o VAT, art. 146 dyrektywy 2006/112/WE)', 'non_vat_payer_note' => 'Sprzedawca nie jest czynnym podatnikiem VAT',
                 'payment_method' => 'Forma płatności', 'iban' => 'IBAN', 'variable_symbol' => 'Nr referencyjny',
-                'ico' => 'NIP/REGON', 'dic' => 'NIP', 'ic_dph' => 'NIP UE',
+                'ico' => 'NIP/REGON', 'dic' => 'NIP', 'ic_dph' => 'NIP UE', 'ic_dph_unverified' => 'niezweryfikowany w systemie VIES',
                 'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
@@ -2403,7 +2422,7 @@ final class InvoiceService
                 'vat_recap' => 'ÁFA összesítés', 'col_net' => 'Nettó', 'reverse_charge_note' => 'Adómentes Közösségen belüli termékértékesítés (Áfa tv. 89. §, 2006/112/EK irányelv 138. cikk)',
                 'export_note' => 'Adómentes termékexport (Áfa tv. 98. §, 2006/112/EK irányelv 146. cikk)', 'non_vat_payer_note' => 'Az eladó nem ÁFA-alany',
                 'payment_method' => 'Fizetési mód', 'iban' => 'IBAN', 'variable_symbol' => 'Hivatkozási szám',
-                'ico' => 'Cégjegyzékszám', 'dic' => 'Adószám', 'ic_dph' => 'Közösségi adószám',
+                'ico' => 'Cégjegyzékszám', 'dic' => 'Adószám', 'ic_dph' => 'Közösségi adószám', 'ic_dph_unverified' => 'a VIES rendszerben nem ellenőrzött',
                 'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
@@ -2425,7 +2444,7 @@ final class InvoiceService
                 'vat_recap' => 'MwSt.-Aufschlüsselung', 'col_net' => 'Netto', 'reverse_charge_note' => 'Steuerfreie innergemeinschaftliche Lieferung (§ 4 Nr. 1b i.V.m. § 6a UStG, Art. 138 MwStSystRL)',
                 'export_note' => 'Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG, Art. 146 MwStSystRL)', 'non_vat_payer_note' => 'Der Verkäufer ist nicht umsatzsteuerpflichtig',
                 'payment_method' => 'Zahlungsart', 'iban' => 'IBAN', 'variable_symbol' => 'Zahlungsreferenz',
-                'ico' => 'HR-Nr.', 'dic' => 'Steuernr.', 'ic_dph' => 'USt-IdNr.',
+                'ico' => 'HR-Nr.', 'dic' => 'Steuernr.', 'ic_dph' => 'USt-IdNr.', 'ic_dph_unverified' => 'im VIES-System nicht bestätigt',
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Rechnungskorrektur Nr.',
@@ -2447,7 +2466,7 @@ final class InvoiceService
                 'vat_recap' => 'Desglose del IVA', 'col_net' => 'Base', 'reverse_charge_note' => 'Entrega intracomunitaria de bienes exenta (art. 25 Ley 37/1992 del IVA, art. 138 Directiva 2006/112/CE)',
                 'export_note' => 'Exportación de bienes exenta (art. 21 Ley 37/1992 del IVA, art. 146 Directiva 2006/112/CE)', 'non_vat_payer_note' => 'El vendedor no está registrado a efectos del IVA',
                 'payment_method' => 'Forma de pago', 'iban' => 'IBAN', 'variable_symbol' => 'Referencia',
-                'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
+                'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA', 'ic_dph_unverified' => 'no verificado en el sistema VIES',
                 'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
                 'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'refers_to_issued_at' => 'Fecha de la factura', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'cancellation' => 'Anulación de factura', 'credit_reversal' => 'Anulación de la factura rectificativa n.º', 'discount' => 'Descuento',
@@ -2464,7 +2483,7 @@ final class InvoiceService
                 'vat_recap' => 'VAT breakdown', 'col_net' => 'Net', 'reverse_charge_note' => 'Exempt intra-Community supply of goods (Article 138 of Directive 2006/112/EC)',
                 'export_note' => 'Exempt export of goods (Article 146 of Directive 2006/112/EC)', 'non_vat_payer_note' => 'The seller is not registered for VAT',
                 'payment_method' => 'Payment method', 'iban' => 'IBAN', 'variable_symbol' => 'Reference',
-                'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
+                'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID', 'ic_dph_unverified' => 'not verified in VIES',
                 'reverse_charge_services_note' => 'Reverse charge — VAT to be accounted for by the recipient (Article 196 of Directive 2006/112/EC)',
                 'credit_title' => 'Credit note No.',
                 'refers_to' => 'Corrects invoice No.', 'refers_to_issued_at' => 'Invoice date', 'credit_total' => 'Total credited', 'refund' => 'Refund', 'cancellation' => 'Invoice cancellation', 'credit_reversal' => 'Reversal of credit note No.',

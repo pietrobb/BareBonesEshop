@@ -1585,6 +1585,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.stores_url_prefix' => 'A(z) {item} bolt foglalt címelőtagot használ',
     'admin.doctor.stores_timezone' => 'A(z) {item} boltnak nincs érvényes időzónája',
     'admin.doctor.stores_currency_prices' => 'A(z) {item} boltban vannak termékek ár nélkül a saját pénznemében',
+    'admin.doctor.stores_oss_threshold' => 'A(z) {item} bolt túllépte a más EU-tagállamok fogyasztóinak történő értékesítés 10 000 €-s határát — kapcsolja be az OSS-t',
     'admin.doctor.admin_accounts' => 'Senki sem tud belépni az adminisztrációba',
     'admin.doctor.admin_mfa_key' => 'Néhány adminisztrátor nem tud belépni (kétlépcsős kulcs)',
     'admin.doctor.catalog_digital_files' => 'Néhány letölthető terméknek nincs fájlja, és nem vásárolható',

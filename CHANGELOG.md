@@ -164,6 +164,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the zone's own rates, so an order collected in the shop by a buyer with an Austrian address (heavy enough for the
   pickup rate to apply) paid 20 % Austrian VAT through OSS and was listed in the OSS report. The pickup method is now
   recognised by its definition (`shipping_methods` carrier or service type `pickup`, or the pickup adapter).
+- **VAT details (review round 34).** A download for a business with a valid VAT ID of another member state is
+  reverse charged in the VAT ID's state wherever it is billed (art. 44; billed to Slovakia or outside the EU it paid
+  Slovak VAT), and its reverse-charge group is named by that state. With OSS off, the setup doctor and the admin
+  dashboard warn once a store's cross-border sales to EU consumers at its own VAT (issued invoices net of credit notes,
+  EUR, all stores of the seller) pass 10 000 EUR in the current or the previous year (check
+  `stores.oss_threshold.<store>`). An invoice of exported goods next to an e-book reverse charged now cites both
+  grounds (Art. 146 and Art. 196). An IČ DPH VIES could not check (unreachable) is printed on the invoice as "not
+  verified in VIES". Unchanged by design (round 5): a consumer download billed outside the EU keeps the seller's VAT —
+  a declared country alone is no evidence for leaving EU VAT.
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged

@@ -91,7 +91,11 @@ class CheckoutService {
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
         // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
-        $vatIdOfSeller = (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) === $sellerCountry;
+        $vatIdCountry = substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2);
+        $vatIdOfSeller = $vatIdCountry === $sellerCountry;
+        // R34 (low): an e-service to a business is supplied where it is established (art. 44): a valid VAT ID of another
+        // member state puts a download there under reverse charge, wherever it is billed (the seller's state, outside the EU).
+        if ($vatIdValid && !$vatIdOfSeller && VatService::isEuCountry($vatIdCountry)) $residence = $vatIdCountry;
         $context = [
             'seller_country'        => $sellerCountry,
             'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
@@ -293,9 +297,11 @@ class CheckoutService {
     /**
      * R33 (low): the company fields of an order address without an IČ DPH VIES answered is invalid: the invoice printed
      * it as the buyer's VAT registration. An unverified one (VIES unreachable) is kept: the order was charged VAT anyway.
+     * R34 (low): it is marked unverified, so the invoice does not show it as a checked registration.
      */
     public static function withoutInvalidVatId(array $fields, ?string $vatIdStatus): array {
         if ($vatIdStatus === 'invalid') unset($fields['ic_dph']);
+        if ($vatIdStatus === 'unverified' && isset($fields['ic_dph'])) $fields['ic_dph_unverified'] = '1';
         return $fields;
     }
 

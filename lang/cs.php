@@ -1585,6 +1585,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.stores_url_prefix' => 'Obchod {item} používá vyhrazenou předponu adresy',
     'admin.doctor.stores_timezone' => 'Obchod {item} nemá platné časové pásmo',
     'admin.doctor.stores_currency_prices' => 'Obchod {item} má produkty bez ceny ve své měně',
+    'admin.doctor.stores_oss_threshold' => 'Obchod {item} překročil limit 10 000 € pro prodej spotřebitelům v jiných státech EU — zapněte OSS',
     'admin.doctor.admin_accounts' => 'Do administrace se nemůže nikdo přihlásit',
     'admin.doctor.admin_mfa_key' => 'Někteří administrátoři se nemohou přihlásit (klíč dvoufázového ověření)',
     'admin.doctor.catalog_digital_files' => 'Některé produkty ke stažení nemají soubor a neprodávají se',

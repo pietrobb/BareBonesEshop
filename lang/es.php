@@ -1749,6 +1749,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.stores_url_prefix' => 'La tienda {item} usa un prefijo de dirección reservado',
     'admin.doctor.stores_timezone' => 'La tienda {item} no tiene una zona horaria válida',
     'admin.doctor.stores_currency_prices' => 'La tienda {item} tiene productos sin precio en su moneda',
+    'admin.doctor.stores_oss_threshold' => 'La tienda {item} superó el umbral de 10 000 € de ventas a consumidores de otros Estados de la UE: active la OSS',
     'admin.doctor.admin_accounts' => 'Nadie puede iniciar sesión en la administración',
     'admin.doctor.admin_mfa_key' => 'Algunos administradores no pueden iniciar sesión (clave de doble factor)',
     'admin.doctor.catalog_digital_files' => 'Algunas descargas no tienen archivo y no están a la venta',

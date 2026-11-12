@@ -1585,6 +1585,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.stores_url_prefix' => 'Shop {item} verwendet ein reserviertes Adresspräfix',
     'admin.doctor.stores_timezone' => 'Shop {item} hat keine gültige Zeitzone',
     'admin.doctor.stores_currency_prices' => 'Shop {item} hat Produkte ohne Preis in seiner Währung',
+    'admin.doctor.stores_oss_threshold' => 'Shop {item} hat die Schwelle von 10 000 € für Verkäufe an Verbraucher in anderen EU-Staaten überschritten — OSS einschalten',
     'admin.doctor.admin_accounts' => 'Niemand kann sich im Admin anmelden',
     'admin.doctor.admin_mfa_key' => 'Einige Administratoren können sich nicht anmelden (Zwei-Faktor-Schlüssel)',
     'admin.doctor.catalog_digital_files' => 'Einige Downloads haben keine Datei und sind nicht erhältlich',
