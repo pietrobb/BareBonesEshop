@@ -281,9 +281,20 @@ class CheckoutService {
             'ico_label' => I18n::t('checkout_ico'), 'dic_label' => I18n::t('checkout_dic'), 'vat_id_label' => I18n::t('checkout_vat_id')];
     }
 
-    /** R31: the billing part of the checkout form (another address than the delivery one), from formState(). */
-    public static function billingView(array $state): array {
-        return ['delivery_address_label' => I18n::t('checkout_delivery_heading'), 'billing_heading' => I18n::t('checkout_billing_heading'),
+    /**
+     * R31: the billing part of the checkout form (another address than the delivery one), from formState().
+     * R33: its fields are required while it is open, and a refusal ($placed from processCheckout) marks the field
+     * it is about: an empty one for a missing billing address, the named one for a too long or invalid value.
+     */
+    public static function billingView(array $state, array $placed = []): array {
+        $code = (string)($placed['error_code'] ?? '');
+        $invalid = [];
+        foreach (['name', 'street', 'city', 'zip'] as $key) {
+            $invalid[$key] = ($placed['field'] ?? '') === 'billing_' . $key
+                || ($code === 'checkout.error.billing_address_required' && trim((string)($state['values']['billing_' . $key] ?? '')) === '');
+        }
+        return ['billing_invalid' => $invalid, 'billing_country_invalid' => $code === 'checkout.error.billing_country_invalid',
+            'delivery_address_label' => I18n::t('checkout_delivery_heading'), 'billing_heading' => I18n::t('checkout_billing_heading'),
             'billing_different_label' => I18n::t('checkout_billing_different'), 'billing_different' => $state['billing_different'],
             'billing_name_label' => I18n::t('checkout_billing_name'), 'saved_billing_addresses' => $state['billing_addresses'],
             'saved_billing_address_label' => I18n::t('checkout_saved_billing_address'),
@@ -331,23 +342,27 @@ class CheckoutService {
                 'vat_id' => (string)(($profile['vat_id'] ?? '') ?: ($customer['vat_id'] ?? ''))]);
         }
         if ($picked) {
-            foreach (['name', 'phone', 'street', 'city', 'zip', 'company', 'vat_id'] as $key) {
+            foreach (['name', 'phone', 'street', 'city', 'zip', 'company', 'ico', 'dic', 'vat_id'] as $key) {
                 if (trim((string)($picked[$key] ?? '')) !== '') $values[$key] = (string)$picked[$key];
             }
             $country = strtoupper((string)$picked['country']);
         }
         if ($pickedBilling) {
             foreach (['name', 'street', 'city', 'zip'] as $key) $values['billing_' . $key] = (string)($pickedBilling[$key] ?? '');
-            foreach (['company', 'vat_id'] as $key) {
+            foreach (['company', 'ico', 'dic', 'vat_id'] as $key) {
                 if (trim((string)($pickedBilling[$key] ?? '')) !== '') $values[$key] = (string)$pickedBilling[$key];
             }
             $billingCountry = strtoupper((string)$pickedBilling['country']);
             $billingDifferent = true;
         }
         $draft = $_SESSION[self::DRAFT_KEY] ?? null;
+        // R33: a draft belongs to who typed it. A guest's draft on a shared computer must not be mixed into the saved
+        // address of a member who signs in afterwards (the guest's name and city with the member's street).
+        $shopper = $customer ? (int)$customer['id'] : 0;
+        if (is_array($draft) && (int)($draft['customer_id'] ?? 0) !== $shopper) $draft = null;
         if ($posted) {
             // Only a submit that passed CSRF ($remember): a forged one must not prefill every later form in the session.
-            if ($remember) $_SESSION[self::DRAFT_KEY] = ['values' => $values, 'country' => $country, 'billing_country' => $billingCountry, 'billing_different' => $billingDifferent];
+            if ($remember) $_SESSION[self::DRAFT_KEY] = ['values' => $values, 'country' => $country, 'billing_country' => $billingCountry, 'billing_different' => $billingDifferent, 'customer_id' => $shopper];
         } elseif (is_array($draft)) {
             foreach ((array)($draft['values'] ?? []) as $key => $value) {
                 if (array_key_exists($key, $values) && is_string($value) && $value !== '') $values[$key] = $value;
@@ -355,6 +370,11 @@ class CheckoutService {
             if (is_string($draft['country'] ?? null) && $draft['country'] !== '') $country = $draft['country'];
             if (is_string($draft['billing_country'] ?? null) && $draft['billing_country'] !== '') $billingCountry = $draft['billing_country'];
             if (is_bool($draft['billing_different'] ?? null)) $billingDifferent = $draft['billing_different'];
+            // The picker marks a saved address only while the fields still hold it, not over a typed draft.
+            $holds = static fn(?array $a, string $prefix, string $in): bool => $a !== null && strtoupper((string)$a['country']) === $in
+                && array_filter(['street', 'city', 'zip'], static fn(string $k): bool => trim((string)($a[$k] ?? '')) !== trim($values[$prefix . $k])) === [];
+            if (!$holds($picked, '', $country)) $picked = null;
+            if (!$holds($pickedBilling, 'billing_', $billingCountry)) $pickedBilling = null;
         }
         $countries = ShippingService::destinationCountries();
         if (!isset($countries[$country])) {

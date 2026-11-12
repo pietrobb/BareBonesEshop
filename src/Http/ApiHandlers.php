@@ -616,15 +616,24 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     foreach (['name', 'phone', 'street', 'city', 'zip', 'company', 'billing_name', 'billing_street', 'billing_city', 'billing_zip'] as $field) {
         if (is_string($input[$field] ?? null)) $input[$field] = (string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $input[$field]);
     }
+    // R19: a refusal names the field ("Some field is too long" did not say which).
+    $label = static fn(string $field): string => str_starts_with($field, 'billing_')
+        ? I18n::t('checkout_billing_heading') . ': ' . I18n::t(substr($field, 8))
+        : I18n::t($field === 'company' ? 'checkout_company' : $field);
+    // R33: bytes that are not UTF-8 are refused at the field; json_encode() of the address failed on them (the order
+    // then kept no address on SQLite) and the billing fields ended in a generic error.
+    foreach (array_keys(CheckoutService::FIELD_MAX_LENGTH) as $field) {
+        if (str_starts_with($field, 'billing_') && !OrderAddress::billingRequested($input)) continue;
+        if (is_string($input[$field] ?? null) && !mb_check_encoding($input[$field], 'UTF-8')) {
+            return ['error' => I18n::format('checkout.error.field_invalid_named', ['field' => $label($field)])]
+                + checkoutRefusal('checkout.error.field_invalid', 422, ['field' => $field]);
+        }
+    }
     // R18: unbounded lengths reached VARCHAR(191) columns (MySQL refused the order: an incident, not a message).
     foreach (CheckoutService::FIELD_MAX_LENGTH as $field => $max) {
         if (str_starts_with($field, 'billing_') && !OrderAddress::billingRequested($input)) continue;
         if (is_string($input[$field] ?? null) && mb_strlen(trim($input[$field])) > $max) {
-            // R19: the message names the field ("Some field is too long" did not say which).
-            $label = str_starts_with($field, 'billing_')
-                ? I18n::t('checkout_billing_heading') . ': ' . I18n::t(substr($field, 8))
-                : I18n::t($field === 'company' ? 'checkout_company' : $field);
-            return ['error' => I18n::format('checkout.error.field_too_long_named', ['field' => $label, 'max' => $max])]
+            return ['error' => I18n::format('checkout.error.field_too_long_named', ['field' => $label($field), 'max' => $max])]
                 + checkoutRefusal('checkout.error.field_too_long', 422, ['field' => $field, 'max_length' => $max]);
         }
     }

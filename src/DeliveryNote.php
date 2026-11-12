@@ -19,10 +19,10 @@ final class DeliveryNote {
         foreach (array_slice(array_values(array_unique(array_filter(array_map('intval', $orderIds), static fn(int $id): bool => $id > 0))), 0, self::MAX_ORDERS) as $orderId) {
             $order = Orders::byId($orderId);
             if (!$order) continue;
-            $address = json_decode((string)($order['shipping_addr'] ?? ''), true);
             $rate = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
             $rate = is_array($rate) ? $rate : [];
-            $base = ['order' => $order, 'address' => is_array($address) ? $address : [], 'pickup' => is_array($rate['pickup_point'] ?? null) ? $rate['pickup_point'] : null, 'rate' => $rate];
+            // R33: as on the carrier label, with the company of an order billed elsewhere.
+            $base = ['order' => $order, 'address' => OrderAddress::recipientAddress($order), 'pickup' => is_array($rate['pickup_point'] ?? null) ? $rate['pickup_point'] : null, 'rate' => $rate];
             $items = Orders::items($orderId);
             $shipments = array_values(array_filter(Fulfillment::shipments($orderId), static fn(array $s): bool => ($s['status'] ?? '') !== 'cancelled'));
             if ($shipments === []) {
@@ -63,14 +63,10 @@ final class DeliveryNote {
 
     /** @return list<string> recipient block: name, company lines, street, zip city, country, phone */
     public static function recipientLines(array $note): array {
-        $address = $note['address'];
-        $lines = [(string)$note['order']['customer_name']];
-        foreach (CheckoutService::companyLines($address) as $line) $lines[] = $line;
-        $lines[] = (string)($address['street'] ?? $address['address'] ?? '');
-        $lines[] = trim(($address['zip'] ?? '') . ' ' . ($address['city'] ?? ''));
-        $lines[] = ShippingService::countryNameIn((string)($address['country'] ?? ''), I18n::locale());
-        $lines[] = (string)($note['order']['customer_phone'] ?? '');
-        return array_values(array_filter(array_map('trim', $lines), static fn(string $line): bool => $line !== ''));
+        // R33: formatted like every other address (OrderAddress::lines), plus the phone the carrier calls.
+        $lines = OrderAddress::lines(['name' => (string)$note['order']['customer_name']] + $note['address'], I18n::locale());
+        $phone = trim((string)($note['order']['customer_phone'] ?? ''));
+        return $phone !== '' ? [...$lines, $phone] : $lines;
     }
 
     /** The order's day on the store's calendar in the current language's date format (created_at is UTC). */

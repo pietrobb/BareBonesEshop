@@ -197,7 +197,9 @@ try {
             "{$l}: the billing country list is not limited to the delivery countries and starts at the delivery country (" . implode(',', $r31bBillingCountries) . ')');
 
         [$l, $r, , $form] = $r31bDo('guest_refresh');
-        preg_match('~name="shipping_method" value="([^"]+)" checked~', $form, $r31bShip);
+        // A parcel service, not collection at the shop: since R33 a shop pickup has no delivery address on documents.
+        preg_match_all('~name="shipping_method" value="([^"]+)"~', $form, $r31bShips);
+        $r31bShip = [1 => array_values(array_filter($r31bShips[1], static fn(string $code): bool => !str_contains($code, 'pickup')))[0] ?? ($r31bShips[1][0] ?? '')];
         preg_match('~name="payment" value="([^"]+)"(?: checked)?(?: data-online)?>~', $form, $r31bPay);
         assert_true($r['new_orders'] === [] && !empty($r31bShip[1]) && !empty($r31bPay[1]), "{$l}: shipping and payment are offered to SK for the fixture cart");
         $r31bExtra = json_encode(['shipping_method' => $r31bShip[1] ?? '', 'payment' => $r31bPay[1] ?? '']);
