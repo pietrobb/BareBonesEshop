@@ -69,8 +69,17 @@ $r32rCredit = static function (int $orderId, int $amount, string $key) use ($pdo
     $pdo->prepare("UPDATE orders SET payment_status = 'refund_pending' WHERE id = ? AND payment_status IN ('paid', 'partially_refunded', 'disputed')")->execute([$orderId]);
     return $id;
 };
-$r32rQueued = static fn(int $orderId): array => array_values(array_filter(JobQueue::openJobs('payment_refund') ?? [],
-    static fn(array $job): bool => (int)($job['order_id'] ?? 0) === $orderId));
+// The payment_refund payloads of $orderId waiting or running in the file queue.
+$r32rQueued = static function (int $orderId) use ($r32rJobsDir): array {
+    $payloads = [];
+    foreach (['pending', 'processing'] as $sub) foreach (glob($r32rJobsDir . '/' . $sub . '/*.json') ?: [] as $file) {
+        $job = json_decode((string)file_get_contents($file), true);
+        if (($job['type'] ?? null) === 'payment_refund' && (int)($job['payload']['order_id'] ?? 0) === $orderId) $payloads[] = $job['payload'];
+    }
+    return $payloads;
+};
+$r32rFail = static fn(string $section, Throwable $e) => assert_true(false,
+    "R32 refunds, {$section} (" . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 $r32rDropQueue = static function () use ($r32rJobsDir): void {
     foreach (['pending', 'processing'] as $sub) foreach (glob($r32rJobsDir . '/' . $sub . '/*.json') ?: [] as $file) @unlink($file);
 };
@@ -84,7 +93,8 @@ try {
     $r32rDropQueue(); // the job is lost (a queue directory wiped): now nothing will send it
     assert_equals([null, false, 1, 1000], [...$queuedRetry, PaymentService::unexecutedRefundRequest(Orders::byId($o1))['amount'] ?? null],
         'R32 refunds: no "retry" while the request\'s job waits in the queue; once no job is left it is offered (was: offered at once, a second job queued)');
-
+} catch (Throwable $e) { $r32rFail('retry while queued', $e); }
+try {
     // 2. A duplicate job of a settled request after a later request: it neither calls Stripe nor closes the later request.
     $o2 = $r32rOrder('R32R-2');
     PaymentService::requestRefundAndQueue($o2, 1000, 'r32r-2', ['reason' => 'R32R']);
@@ -96,7 +106,8 @@ try {
         'R32 refunds: the duplicate job of the first request leaves the later 5.00 in flight and calls Stripe no more (was: partially_refunded, the 5.00 as paid out)');
     $r32rJob($o2, 500, 'r32r-2b_execute');
     assert_equals([1500, 'partially_refunded', 0], $r32rState($o2), 'R32 refunds: the later request\'s own job then settles it');
-
+} catch (Throwable $e) { $r32rFail('duplicate job', $e); }
+try {
     // 3. "Paid" set by hand on the refund_pending payment releases the request, also after a later credit note.
     $r32rDropQueue();
     $o3 = $r32rOrder('R32R-3');
@@ -109,7 +120,8 @@ try {
     $r32rJob($o3, 300, 'r32r-3-item', $item3);
     assert_equals([[[0, 'refund_pending', 0], null], 1, [300, 'partially_refunded', 0]], [$released, R32rFakeStripe::$calls, $r32rState($o3)],
         'R32 refunds: after "paid" by hand the request is not in flight, no "retry", its job refunds nothing, the credit note settles (was: 10.00 in flight, refund_pending for good)');
-
+} catch (Throwable $e) { $r32rFail('manual paid', $e); }
+try {
     // 4. Network errors: the last attempt of an item refund job is queued again with a delay, up to a limit.
     $r32rDropQueue();
     $o4 = $r32rOrder('R32R-4');
@@ -129,7 +141,8 @@ try {
     $r32rJob($o4, 400, 'r32r-4-item', $item4, [], ['error_requeues' => 1]);
     assert_equals([400, 'succeeded'], [PaymentService::refundedAmount($o4), (string)$pdo->query("SELECT status FROM order_refunds WHERE id = {$item4}")->fetchColumn()],
         'R32 refunds: the re-queued job refunds the credit note once Stripe answers');
-
+} catch (Throwable $e) { R32rFakeStripe::$answer = null; $r32rFail('network errors', $e); }
+try {
     // 5. A refund 2.0.x booked from a charge.refunded while it was pending; its refund.updated (succeeded) comes now.
     $o5 = $r32rOrder('R32R-5', 'partially_refunded');
     $booked = time() - 60;
@@ -153,7 +166,7 @@ try {
     assert_equals(['deferred', 'processed', 1000, 'partially_refunded'], [$unlisted, $listed, PaymentService::refundedAmount($o5), (string)Orders::byId($o5)['payment_status']],
         'R32 legacy refund: the refund.updated of a refund 2.0.x booked while pending lists the charge\'s refunds and is identified, not booked again (was: 503 for three days); without the list it waits');
 } catch (Throwable $e) {
-    assert_true(false, 'R32 refunds (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+    $r32rFail('2.0.x pending booking', $e);
 } finally {
     R32rFakeStripe::$answer = null;
     R32rFakeStripe::$list = null;
