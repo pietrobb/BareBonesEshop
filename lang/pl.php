@@ -1816,6 +1816,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_invalid' => 'Adres nie został zapisany. Sprawdź zaznaczone pola.',
     'account.err_address_required' => 'To pole jest wymagane.',
     'account.err_address_country' => 'Wybierz kraj z listy.',
+    'account.err_address_company_id' => 'Podaj prawidłowy numer firmy lub NIP: litery i cyfry, najwyżej 20 znaków.',
     'account.addr_type_shipping' => 'Adres dostawy',
     'account.addr_type_billing' => 'Adres rozliczeniowy',
     'account.downloads' => 'Do pobrania',

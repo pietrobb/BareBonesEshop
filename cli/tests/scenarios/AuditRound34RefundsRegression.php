@@ -46,12 +46,12 @@ $r34rSavedAdapters = $r34rAdapters->getValue();
 $r34rAdapters->setValue(null, ['payment' => new R34rFakeStripe()] + $r34rSavedAdapters);
 $r34rProduct = (int)$pdo->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn();
 $r34rOrders = [];
-$r34rOrder = static function (string $number, string $paymentId) use ($pdo, $r34rProduct, &$r34rOrders): int {
+$r34rOrder = static function (string $number, string $paymentId, string $secondClass = 'books') use ($pdo, $r34rProduct, &$r34rOrders): int {
     $ctx = ['seller_country' => 'SK', 'customer_country' => 'SK', 'tax_provider' => 'vat'];
     $line = ['product_id' => 1, 'variant_id' => null, 'sku' => "{$number}-PB", 'price' => 2100, 'qty' => 1, 'total' => 2100, 'available' => true,
         'currency_mismatch' => false, 'product_type' => 'simple', 'vat_class' => 'books', 'currency' => 'eur', 'price_formatted' => '', 'total_formatted' => ''];
     $skus = ["{$number}-PB", "{$number}-PB2"];
-    $items = Cart::applyVat(['items' => array_map(static fn(string $sku): array => ['sku' => $sku] + $line, $skus), 'subtotal' => 4200, 'currency' => 'eur'], $ctx)['items'];
+    $items = Cart::applyVat(['items' => [['sku' => $skus[0]] + $line, ['sku' => $skus[1], 'vat_class' => $secondClass] + $line], 'subtotal' => 4200, 'currency' => 'eur'], $ctx)['items'];
     $snapshot = VatService::buildSnapshot($items, $ctx, ['currency' => 'eur', 'effective_date' => ShopTime::date('Y-m-d')]);
     $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount,
             total, currency, status, payment_status, payment_method, payment_id, payment_method_snapshot, shipping_method, vat_scenario, financial_snapshot, store_id, created_at)
@@ -108,6 +108,23 @@ try {
     assert_equals([$i1['amount'], [-$i1['amount'], $i1['amount'], -$i1['amount']], 1],
         [PaymentService::refundedAmount($o1), $r34rCredits($o1), $r34rIncidents() - $incidentsBefore],
         'R34 refunds: Stripe\'s late charge.refunded of a released refund books the money and a credit note for it, with an incident (was: 21.00 returned, credit notes 0, silent)');
+
+    // 1b. Capability review (run 437): an order of a book and a standard-rate item, the book returned. The late refund's credit
+    //     note corrects the book's VAT rate only, the reversed item credit note's breakdown mirrored (was: the amount spread
+    //     over both rates of the invoice, the VAT and OSS reports left off at both rates).
+    $o7 = $r34rOrder('R34R-7', 'pi_r34r_7', 'standard');
+    $i7 = $r34rItemRefund($o7, 'r34r-7-item');
+    R34rFakeStripe::$lookup = ['status' => 'none'];
+    PaymentService::releaseStalledItemRefund($o7, $i7['id'], 'r34r-admin', 'R34R mixed rates');
+    PaymentService::bookProviderRefund($o7, 'stripe', 're_r34r_late_7', $i7['amount'], 'charge.refunded', 'stripe_refund_re_r34r_late_7', ['refund_key' => $i7['key']]);
+    $r34rCreditJobs($o7);
+    $r34rBreakdowns = array_map(static fn($json): array => json_decode((string)$json, true) ?: [],
+        $pdo->query("SELECT vat_breakdown FROM invoices WHERE order_id = {$o7} AND type = 'credit_note' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
+    $r34rRates = array_map(static fn(array $b): array => array_map(static fn(array $r): array => [(int)$r['net'], (int)$r['vat']], $b), $r34rBreakdowns);
+    $r34rInvoiceRates = count(json_decode((string)$pdo->query("SELECT vat_breakdown FROM invoices WHERE order_id = {$o7} AND type = 'invoice'")->fetchColumn(), true) ?: []);
+    assert_equals([2, 3, 1, $r34rRates[0] ?? null],
+        [$r34rInvoiceRates, count($r34rRates), count($r34rRates[2] ?? []), $r34rRates[2] ?? null],
+        'R34 refunds: the late refund of a released book return credits the book\'s VAT rate as its item credit note did, not every rate of the invoice');
 
     // 2. Stripe executed it after all (the answer was lost): the release books it to the credit note instead.
     $o2 = $r34rOrder('R34R-2', 'pi_r34r_2');

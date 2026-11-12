@@ -1892,6 +1892,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_invalid' => 'La dirección no se ha guardado. Revise los campos marcados.',
     'account.err_address_required' => 'Este campo es obligatorio.',
     'account.err_address_country' => 'Elija un país de la lista.',
+    'account.err_address_company_id' => 'Introduzca un número de empresa o fiscal válido: letras y cifras, como máximo 20 caracteres.',
     'account.addr_type_shipping' => 'Dirección de envío',
     'account.addr_type_billing' => 'Dirección de facturación',
     'account.downloads' => 'Descargas',
