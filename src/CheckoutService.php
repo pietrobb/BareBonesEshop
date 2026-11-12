@@ -265,12 +265,15 @@ class CheckoutService {
         return ['fields' => $error === null ? $fields : [], 'vat_id' => $error === null ? $vatId : '', 'error' => $error];
     }
 
-    /** Company name and labelled IDs stored on an order address, for order detail screens. */
-    public static function companyLines(array $address): array {
+    /**
+     * Company name and labelled IDs stored on an order address, for order detail screens. $locale: label them in that
+     * language (an order's e-mail, R33), else in the current one.
+     */
+    public static function companyLines(array $address, ?string $locale = null): array {
         $lines = [];
         foreach (['company' => null, 'ico' => 'checkout_ico', 'dic' => 'checkout_dic', 'ic_dph' => 'checkout_vat_id'] as $key => $label) {
             $value = trim((string)($address[$key] ?? ''));
-            if ($value !== '') $lines[] = $label === null ? $value : I18n::t($label) . ': ' . $value;
+            if ($value !== '') $lines[] = $label === null ? $value : ($locale !== null ? I18n::tIn($label, $locale) : I18n::t($label)) . ': ' . $value;
         }
         return $lines;
     }

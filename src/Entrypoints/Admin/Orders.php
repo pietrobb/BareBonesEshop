@@ -440,7 +440,7 @@ function pageOrder(): void {
                 <td><?= esc(adminCodeLabel('admin.order.history.action.', (string)$log['action'])) ?></td>
                 <td><?= esc(($log['old_value'] ?? '') === '' ? '' : OrderStatusLabels::order((string)$log['old_value'])) ?></td>
                 <td><?= esc(($log['new_value'] ?? '') === '' ? '' : OrderStatusLabels::order((string)$log['new_value'])) ?></td>
-                <td class="muted"><?= esc($log['note'] ?? '') ?></td>
+                <td class="muted"><?= esc(AuditLogLabels::note('order_status', $id, $log['note'] ?? null)) ?></td>
                 <td><?= esc($log['actor']) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>
             </tr>

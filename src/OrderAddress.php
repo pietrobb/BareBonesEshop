@@ -41,7 +41,7 @@ final class OrderAddress
     public static function lines(array $address, ?string $locale = null): array
     {
         $lines = [trim((string)($address['name'] ?? ''))];
-        foreach (CheckoutService::companyLines($address) as $line) $lines[] = $line;
+        foreach (CheckoutService::companyLines($address, $locale) as $line) $lines[] = $line;
         $lines[] = trim((string)($address['street'] ?? $address['address'] ?? ''));
         $lines[] = trim(trim((string)($address['zip'] ?? '')) . ' ' . trim((string)($address['city'] ?? '')));
         $country = strtoupper(trim((string)($address['country'] ?? '')));
