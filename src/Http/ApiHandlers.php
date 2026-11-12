@@ -829,6 +829,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'effective_date' => ShopTime::date('Y-m-d'),
         'providers' => $providerCodes,
     ]);
+    // R34: the no-JS form posts the total it showed. Another shipping, payment or country picked without "Recalculate"
+    // re-prices the order: it is shown again for confirmation instead of being charged at a total the buyer never saw.
+    $quotedTotal = $input['quoted_total'] ?? null;
+    if (is_string($quotedTotal) && ctype_digit($quotedTotal) && (int)$quotedTotal !== (int)$financialSnapshot['totals']['gross']) {
+        return checkoutRefusal('checkout.error.total_changed');
+    }
 
     // Attach logged-in customer_id if a session is active (guest checkout keeps customer_id=null)
     Security::sessionStart();

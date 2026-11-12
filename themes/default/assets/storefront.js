@@ -246,8 +246,35 @@
     if (!rendered || !scenario || rendered === scenario) return false;
     const button = document.querySelector('form[data-checkout-form] [name="checkout_refresh"]');
     if (!button) return false;
-    button.form.requestSubmit(button);
+    submitCheckoutRefresh(button);
     return true;
+  }
+
+  // R34: a server re-price reloads the form; the field the buyer just changed gets the focus back (ticked consents are
+  // kept by the server).
+  const checkoutFocusKey = 'bbe-checkout-focus';
+  function submitCheckoutRefresh(button) {
+    const active = document.activeElement;
+    const name = active && active.form === button.form ? active.getAttribute('name') : '';
+    try {
+      if (name) sessionStorage.setItem(checkoutFocusKey, name);
+    } catch {
+      // storage unavailable: the reload just starts at the top
+    }
+    button.form.requestSubmit(button);
+  }
+
+  function restoreCheckoutFocus() {
+    let name = null;
+    try {
+      name = sessionStorage.getItem(checkoutFocusKey);
+      sessionStorage.removeItem(checkoutFocusKey);
+    } catch {
+      return;
+    }
+    const form = document.querySelector('form[data-checkout-form]');
+    const field = form && name ? Array.from(form.elements).find((element) => element.getAttribute('name') === name) : null;
+    if (field) field.focus();
   }
 
   async function refreshCheckoutShipping(userChange) {
@@ -577,9 +604,10 @@
     if (subtotalInput && subtotalInput.dataset.billingReprices === '1') {
       const refresh = document.querySelector('form[data-checkout-form] [name="checkout_refresh"]');
       document.querySelectorAll('form[data-checkout-form] input[name="billing_different"], #checkout-billing-country').forEach((field) => {
-        field.addEventListener('change', () => { if (refresh) refresh.form.requestSubmit(refresh); });
+        field.addEventListener('change', () => { if (refresh) submitCheckoutRefresh(refresh); });
       });
     }
+    restoreCheckoutFocus();
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
 
     const banner = document.getElementById('cc-banner');

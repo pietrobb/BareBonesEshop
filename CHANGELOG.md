@@ -183,6 +183,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   released refund queued again by hand pays nothing out; a second click on "Release credit note" reports it was
   released instead of an error; an item refund of an order without online payment, marked refunded by the admin, now
   e-mails the customer.
+- **Checkout details (review round 34).** Without JavaScript, a buyer who picked another shipping or payment method and
+  ordered without "Recalculate" was charged a total the form never showed (19.90 EUR shown, 27.89 EUR ordered). The
+  no-JS form now posts the total it showed; an order re-priced since is not placed, and the form shows the new total
+  to confirm ("The order total was recalculated…"). A re-rendered checkout (recalculation, the billing country of an
+  e-book, a refused order) keeps the consents already ticked, including the digital-delivery consent, and with JS the
+  changed field keeps the focus across the reload. Under a free-shipping coupon or promotion every delivery method is
+  listed free, as the summary and the order charge it (express showed 7.99 EUR).
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged

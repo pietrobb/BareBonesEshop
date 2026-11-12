@@ -2062,6 +2062,7 @@ return [
     'checkout.error.field_too_long' => 'Niektoré pole je príliš dlhé. Skráťte prosím meno, kontakt alebo adresu.',
     'checkout.error.shipping_unavailable' => 'Doručenie nie je dostupné do zvolenej krajiny.',
     'checkout.error.payment_unavailable' => 'Zvolený spôsob platby nie je pre túto objednávku dostupný.',
+    'checkout.error.total_changed' => 'Suma objednávky sa po zmene dopravy, platby alebo krajiny prepočítala. Skontrolujte novú sumu a objednávku potvrďte znova.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',
     'checkout.error.payment_session_failed' => 'Spracovanie platby je momentálne nedostupné. Skúste to znova.',
     'payment_status.expired' => 'Vypršala',
