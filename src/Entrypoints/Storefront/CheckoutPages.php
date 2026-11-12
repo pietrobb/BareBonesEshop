@@ -105,10 +105,7 @@ function renderCheckout(): string {
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
-    $delivery = CheckoutService::deliveryQuote($goods, $subtotal - $discount, $country, $_POST['shipping_method'] ?? '');
-    // R34: a free-shipping coupon or promotion waives every method's carriage, as execute() charges it (and the JSON rates list it).
-    if ($preview['free_shipping']) $delivery['rates'] = array_map(static fn(array $rate): array => ['price' => ShippingService::freeShippingPrice($rate)] + $rate, $delivery['rates']);
-    $quote = CheckoutService::chargedQuote($delivery, $vat, (string)$cartData['currency']);
+    $quote = CheckoutService::chargedQuote(CheckoutService::waiveCarriage(CheckoutService::deliveryQuote($goods, $subtotal - $discount, $country, $_POST['shipping_method'] ?? ''), $preview['free_shipping']), $vat, (string)$cartData['currency']);
     [$shippingRates, $selectedRate] = [$quote['rates'], $quote['selected']];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
     $payment = CheckoutService::paymentPreview($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null, $vat);
@@ -118,7 +115,7 @@ function renderCheckout(): string {
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
-        'refresh_label' => $t('checkout.refresh'), 'recalculate_label' => $t('checkout.recalculate'), 'consents' => checkoutConsentsView(CheckoutService::consentDefinitions($country, $cart), $posted),
+        'refresh_label' => $t('checkout.refresh'), 'recalculate_label' => $t('checkout.recalculate'), 'consents' => CheckoutService::consentsView($country, $cart, $posted ? ($_POST['consents'] ?? null) : null),
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
@@ -150,12 +147,6 @@ function renderCheckout(): string {
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
         + CheckoutService::billingView($state, $placed) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
-}
-
-/** R34: a re-rendered form (recalculation, billing country, refusal) keeps the consents the buyer already ticked. */
-function checkoutConsentsView(array $definitions, bool $posted): array {
-    $ticked = $posted && is_array($_POST['consents'] ?? null) ? $_POST['consents'] : [];
-    return array_values(array_map(static fn(array $consent): array => ['checked' => ($ticked[$consent['key'] ?? ''] ?? null) === '1'] + $consent, $definitions));
 }
 
 /**

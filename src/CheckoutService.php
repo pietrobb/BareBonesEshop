@@ -236,6 +236,18 @@ class CheckoutService {
         return ConsentService::definitions(['country' => $country, 'product_types' => array_values(array_unique(array_column($available, 'product_type')))]);
     }
 
+    /** R34: a re-rendered form (recalculation, billing country, refusal) keeps the consents the buyer already ticked. */
+    public static function consentsView(string $country, array $items, mixed $ticked): array {
+        $ticked = is_array($ticked) ? $ticked : [];
+        return array_values(array_map(static fn(array $consent): array => ['checked' => ($ticked[$consent['key'] ?? ''] ?? null) === '1'] + $consent, self::consentDefinitions($country, $items)));
+    }
+
+    /** R34: a free-shipping coupon or promotion waives every method's carriage, as execute() charges it (and the JSON rates list it). */
+    public static function waiveCarriage(array $delivery, bool $free): array {
+        if ($free) $delivery['rates'] = array_map(static fn(array $rate): array => ['price' => ShippingService::freeShippingPrice($rate)] + $rate, $delivery['rates']);
+        return $delivery;
+    }
+
     /**
      * The accepted abandoned-cart reminder consent of a checkout submit: the configured
      * checkout_consents entry AbandonedCarts::CONSENT_KEY, ticked (consents[cart_reminder] === true).
