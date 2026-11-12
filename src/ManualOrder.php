@@ -72,8 +72,19 @@ final class ManualOrder {
         if ($lines === []) return self::refusal('admin.order.manual.no_lines');
         $customerId = self::customerIdFor($email);
         $locale = self::locale((string)($buyer['locale'] ?? ''));
+        // R31: billed to another address than delivered to (billing_different + billing_*); the company goes with it.
+        foreach (OrderAddress::BILLING_FIELDS as $field => $max) {
+            if (isset($buyer[$field]) && (!is_string($buyer[$field]) || mb_strlen(trim($buyer[$field])) > $max)) return self::refusal('admin.order.manual.invalid');
+        }
+        if (trim((string)($buyer['billing_country'] ?? '')) === '') $buyer['billing_country'] = (string)($buyer['country'] ?? '');
+        $billing = OrderAddress::billingFromInput($buyer);
+        if ($billing['error_code'] !== null) return self::refusal((string)$billing['error_code']);
         $priced = self::priced($lines, $buyer, $customerId, null, $locale);
         if (isset($priced['error'])) return self::refusal($priced['error'], (string)($priced['detail'] ?? ''));
+        if ($billing['address'] !== null) {
+            $billing['address'] += array_intersect_key($priced['address'], array_flip(OrderAddress::COMPANY_KEYS));
+            $priced['address'] = array_diff_key($priced['address'], array_flip(OrderAddress::COMPANY_KEYS));
+        }
 
         $customer = [
             'customer_id' => $customerId,
@@ -81,6 +92,7 @@ final class ManualOrder {
             'email' => $email,
             'phone' => mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', Security::str($buyer['phone'] ?? ''))), 0, 64),
             'address' => $priced['address'],
+            'billing_address' => $billing['address'],
             'currency' => $priced['currency'],
             'locale' => $locale,
             'shipping_cost' => $priced['shipping_cost'],

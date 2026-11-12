@@ -484,7 +484,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     status TEXT NOT NULL DEFAULT 'pending', customer_name TEXT NOT NULL,
     customer_email TEXT NOT NULL, customer_phone TEXT DEFAULT '',
     customer_id INTEGER DEFAULT NULL,
-    shipping_addr TEXT DEFAULT '{}', payment_method TEXT NOT NULL,
+    shipping_addr TEXT DEFAULT '{}', billing_addr TEXT DEFAULT NULL, payment_method TEXT NOT NULL,
     payment_id TEXT DEFAULT '', payment_status TEXT NOT NULL DEFAULT 'pending',
     payment_fee INTEGER NOT NULL DEFAULT 0, payment_method_snapshot TEXT DEFAULT NULL,
     subtotal INTEGER NOT NULL,

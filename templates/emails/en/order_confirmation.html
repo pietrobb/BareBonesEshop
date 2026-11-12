@@ -13,6 +13,10 @@
 {{/each}}
 </table>
 <p><strong>Total: {{order_total}}</strong></p>
+{{#if delivery_address}}<h3>Delivery address</h3>
+<p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
+{{#if billing_address}}<h3>Billing address</h3>
+<p>{{#each billing_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if bank_transfer}}<h3>Pay by bank transfer</h3>
 <p>We ship the order once the payment arrives. Use exactly this amount and payment reference.</p>
 <table style="border-collapse:collapse">

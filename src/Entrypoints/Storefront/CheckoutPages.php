@@ -146,7 +146,7 @@ function renderCheckout(): string {
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : ($preview['coupon_applied'] ? sprintf($t('coupon_applied_free_shipping'), $couponCode) : ''),
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
-        + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
+        + CheckoutService::billingView($state) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
 }
 
 /**

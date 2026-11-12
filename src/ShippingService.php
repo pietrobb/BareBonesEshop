@@ -73,6 +73,18 @@ class ShippingService
         return $countries;
     }
 
+    /**
+     * R31: countries a billing address may be in. A buyer is invoiced wherever they are registered, not only where the
+     * store delivers, so this is every named country plus the delivery countries, as code => name sorted by code.
+     * @return array<string,string>
+     */
+    public static function billingCountries(): array
+    {
+        $countries = self::COUNTRY_NAMES + self::destinationCountries();
+        ksort($countries);
+        return $countries;
+    }
+
     /** A country's name in its own language ("Slovensko"); an unlisted code stays the code. */
     public static function countryName(string $code): string
     {

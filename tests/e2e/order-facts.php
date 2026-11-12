@@ -34,4 +34,6 @@ echo json_encode([
     'payment_status' => (string)($order['payment_status'] ?? ''),
     'store_id' => (string)$order['store_id'],
     'currency' => (string)$order['currency'],
+    'shipping_addr' => json_decode((string)($order['shipping_addr'] ?? ''), true),
+    'billing_addr' => json_decode((string)($order['billing_addr'] ?? ''), true),
 ], JSON_THROW_ON_ERROR);

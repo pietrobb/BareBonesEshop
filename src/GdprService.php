@@ -41,7 +41,7 @@ class GdprService {
             'reason' => 'single-use token hashes; the e-mail itself is exported with the customer'],
         'password_reset_tokens'        => ['columns' => ['customer_id', 'token'], 'erase' => 'delete', 'export' => null,
             'reason' => 'credential secrets are never exported'],
-        'orders'                       => ['columns' => ['customer_id', 'customer_name', 'customer_email', 'customer_phone', 'shipping_addr', 'ip_address', 'notes'], 'erase' => 'retain', 'export' => 'orders',
+        'orders'                       => ['columns' => ['customer_id', 'customer_name', 'customer_email', 'customer_phone', 'shipping_addr', 'billing_addr', 'ip_address', 'notes'], 'erase' => 'retain', 'export' => 'orders',
             'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards; ip_address, customer_phone and notes are no accounting data: erased with the customer and scrubbed after 180 days (orders_contact)'],
         'order_items'                  => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
         'invoices'                     => ['columns' => ['customer_snapshot'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
