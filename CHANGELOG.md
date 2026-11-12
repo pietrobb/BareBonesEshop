@@ -80,6 +80,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   a saved variant line keeps its variant's SKU, so on SQLite, which gives a deleted variant's id to the next one, the
   line is not mapped onto another variant. Until it runs, lines are saved without it; until the table exists, a
   signed-in customer's cart works and shows no list (was: a 500).
+- **Migration** `20261111200000_order_billing_address` adds `orders.billing_addr`: the address an order is invoiced to
+  when the shopper gives one other than the delivery address (see "Billing address other than the delivery address" under Changes). Existing orders keep NULL
+  and are invoiced to their delivery address as before. A custom theme offers the billing address once it copies the
+  billing part of `themes/default/blocks/storefront/checkout.html` (without it checkout works as before); an admin
+  override of the `order_confirmation` or `merchant_order_created` e-mail shows the addresses once it adds the
+  `delivery_address` / `billing_address` loops of the default template. The orders CSV export gets nine `billing_*`
+  columns at the end, and API v1 orders a `billing_address` (for keys granted `customers:read`).
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -88,7 +95,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.6 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.7 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -145,6 +152,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   longer finds it in flight for good. A refund job whose three attempts all failed on network errors is queued again
   with a growing delay (5 minutes up to an hour, about 9 hours in total, within the day Stripe keeps the idempotency
   key) before it fails and raises its incident; an item refund's job ended at once and its credit note stayed pending.
+- **Billing address other than the delivery address (round 31).** The checkout (form without JS and JSON) has a box
+  "Billing address differs from the delivery address" with name, street, city, zip and country; the buyer company and
+  its IDs then belong to the billing address. The invoice, its credit notes and the bank-transfer payer use it, and the
+  invoice also names the delivery address; carrier labels, delivery notes, shipping zones, pick-up points and VAT stay
+  with the delivery address. The order e-mail, the merchant notification, the customer's order detail, the admin order,
+  API v1 and the CSV export show both; a manual admin order can be billed elsewhere too. A signed-in customer's billing
+  address is saved as a billing address and offered at the next checkout. GDPR export and retention include it.
 - **`bbe-step` ignores root's PATH and stops on any signal to it (review round 32).** The wrapper looked up
   `setsid` and its other tools in root's PATH after changing into the application root, so an empty entry or `.` in it
   (`PATH=$EXTRA:$PATH` with an empty `EXTRA`) ran a `setsid` the owner put into the tree, as root. It now uses only

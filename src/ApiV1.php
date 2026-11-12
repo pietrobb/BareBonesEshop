@@ -372,7 +372,9 @@ class ApiV1 {
     private static function orderResource(array $row, array $items, bool $personal): array {
         $address = json_decode((string)($row['shipping_addr'] ?? ''), true);
         $address = is_array($address) ? $address : [];
-        $text = static fn(string $key): ?string => is_scalar($address[$key] ?? null) && trim((string)$address[$key]) !== '' ? trim((string)$address[$key]) : null;
+        $text = static fn(string $key, ?array $from = null): ?string => is_scalar(($from ?? $address)[$key] ?? null) && trim((string)($from ?? $address)[$key]) !== '' ? trim((string)($from ?? $address)[$key]) : null;
+        // R31: null when the order is invoiced to its delivery address (every order placed before R31).
+        $billing = OrderAddress::billingDiffers($row) ? OrderAddress::billing($row) : null;
         $shipping = json_decode((string)($row['shipping_rate_snapshot'] ?? ''), true);
         $point = is_array($shipping) && is_array($shipping['pickup_point'] ?? null) ? $shipping['pickup_point'] : null;
         $snapshot = json_decode((string)($row['financial_snapshot'] ?? ''), true);
@@ -391,6 +393,12 @@ class ApiV1 {
                 'ico' => $text('ico'),
                 'dic' => $text('dic'),
                 'ic_dph' => $text('ic_dph'),
+            ],
+            'billing_address' => $billing === null ? null : [
+                'name' => $text('name', $billing), 'company' => $text('company', $billing), 'street' => $text('street', $billing),
+                'city' => $text('city', $billing), 'zip' => $text('zip', $billing),
+                'country' => ($billingCountry = $text('country', $billing)) === null ? null : strtoupper($billingCountry),
+                'ico' => $text('ico', $billing), 'dic' => $text('dic', $billing), 'ic_dph' => $text('ic_dph', $billing),
             ],
             'notes' => trim((string)($row['notes'] ?? '')) === '' ? null : (string)$row['notes'],
         ];

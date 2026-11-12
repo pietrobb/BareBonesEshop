@@ -612,14 +612,19 @@ function checkoutRefusal(string $code, ?int $status = null, array $extra = []): 
 
 function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Name, contact and address fields reach e-mails, invoices and carrier labels: no control characters.
-    foreach (['name', 'phone', 'street', 'city', 'zip', 'company'] as $field) {
+    $input = OrderAddress::flattenBillingInput($input);
+    foreach (['name', 'phone', 'street', 'city', 'zip', 'company', 'billing_name', 'billing_street', 'billing_city', 'billing_zip'] as $field) {
         if (is_string($input[$field] ?? null)) $input[$field] = (string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $input[$field]);
     }
     // R18: unbounded lengths reached VARCHAR(191) columns (MySQL refused the order: an incident, not a message).
     foreach (CheckoutService::FIELD_MAX_LENGTH as $field => $max) {
+        if (str_starts_with($field, 'billing_') && !OrderAddress::billingRequested($input)) continue;
         if (is_string($input[$field] ?? null) && mb_strlen(trim($input[$field])) > $max) {
             // R19: the message names the field ("Some field is too long" did not say which).
-            return ['error' => I18n::format('checkout.error.field_too_long_named', ['field' => I18n::t($field === 'company' ? 'checkout_company' : $field), 'max' => $max])]
+            $label = str_starts_with($field, 'billing_')
+                ? I18n::t('checkout_billing_heading') . ': ' . I18n::t(substr($field, 8))
+                : I18n::t($field === 'company' ? 'checkout_company' : $field);
+            return ['error' => I18n::format('checkout.error.field_too_long_named', ['field' => $label, 'max' => $max])]
                 + checkoutRefusal('checkout.error.field_too_long', 422, ['field' => $field, 'max_length' => $max]);
         }
     }
@@ -662,6 +667,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         http_response_code(422);
         return ['success' => false, 'error' => $buyerCompany['error']];
     }
+    // R31: another billing address than the delivery one. Shipping, pick-up points and VAT keep the delivery country.
+    $billing = OrderAddress::billingFromInput($input);
+    if ($billing['error'] !== null) return checkoutRefusal((string)$billing['error_code'], 422);
     $vatId = $buyerCompany['vat_id'];
     // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges.
     $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod);
@@ -814,12 +822,14 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'name'           => $name,
         'email'          => $email,
         'phone'          => $phone,
+        // The company belongs to whoever is invoiced: the billing address when one is given, else the delivery one.
         'address'        => [
             'street'  => $digitalOnly ? '' : trim(Security::str($input['street'] ?? '')),
             'city'    => $digitalOnly ? '' : trim(Security::str($input['city'] ?? '')),
             'zip'     => $digitalOnly ? '' : trim(Security::str($input['zip'] ?? '')),
             'country' => $country,
-        ] + $buyerCompany['fields'],
+        ] + ($billing['address'] === null ? $buyerCompany['fields'] : []),
+        'billing_address' => $billing['address'] === null ? null : $billing['address'] + $buyerCompany['fields'],
         'currency'       => $currency,
         'locale'         => I18n::locale(),
         'shipping_cost'  => $shippingCost,

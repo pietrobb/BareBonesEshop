@@ -103,16 +103,33 @@ class GuestCheckoutAccount {
         return ['ok' => true, 'error' => null, 'customer_id' => (int)$id];
     }
 
-    /** Save the posted checkout address for the signed-in customer unless the book already holds the same one. */
+    /**
+     * Save the posted checkout addresses for the signed-in customer unless the book already holds the same one:
+     * the delivery address as a shipping address and, when the order is billed elsewhere (R31), the billing address
+     * as a billing address. The company and VAT ID go with whichever address is invoiced.
+     */
     public static function rememberAddress(int $customerId, array $input): bool {
+        $input = OrderAddress::flattenBillingInput($input);
         $field = static fn(string $key, int $max): string => is_string($input[$key] ?? null) ? mb_substr(trim(Security::str($input[$key])), 0, $max) : '';
-        $address = ['type' => 'shipping', 'name' => $field('name', 255), 'company' => $field('company', 255), 'vat_id' => $field('vat_id', 40),
+        $billed = OrderAddress::billingRequested($input);
+        $company = ['company' => $field('company', 255), 'vat_id' => $field('vat_id', 40)];
+        $shipping = ['type' => 'shipping', 'name' => $field('name', 255), 'company' => $billed ? '' : $company['company'], 'vat_id' => $billed ? '' : $company['vat_id'],
             'street' => $field('street', 255), 'city' => $field('city', 255), 'zip' => $field('zip', 32),
             'country' => strtoupper($field('country', 2)), 'phone' => $field('phone', 64)];
+        $saved = self::rememberOne($customerId, $shipping);
+        if ($billed) {
+            $billing = ['type' => 'billing', 'name' => $field('billing_name', 255), 'street' => $field('billing_street', 255), 'city' => $field('billing_city', 255),
+                'zip' => $field('billing_zip', 32), 'country' => strtoupper($field('billing_country', 2)), 'phone' => ''] + $company;
+            $saved = self::rememberOne($customerId, $billing) || $saved;
+        }
+        return $saved;
+    }
+
+    private static function rememberOne(int $customerId, array $address): bool {
         if (Customers::addressErrors($address) !== []) return false;
         $key = static fn(array $a): string => mb_strtolower(implode('|', [trim((string)$a['name']), trim((string)$a['street']), trim((string)$a['city']),
             str_replace(' ', '', (string)$a['zip']), strtoupper((string)$a['country'])]));
-        $existing = Customers::addresses($customerId, 'shipping');
+        $existing = Customers::addresses($customerId, (string)$address['type']);
         foreach ($existing as $saved) {
             if ($key($saved) === $key($address)) return false;
         }

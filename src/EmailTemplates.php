@@ -42,6 +42,8 @@ class EmailTemplates {
         'claim_url' => 'https://shop.example.com/?page=account-claim&token=sample', 'valid_hours' => '24',
         'totals' => [['label' => 'Medzisúčet', 'amount' => '56,00 €'], ['label' => 'Doprava', 'amount' => '3,90 €']],
         'refund_amount' => '19,90 €',
+        'delivery_address' => ['Jana Nováková', 'Hlavná 12', '811 01 Bratislava', 'Slovensko'],
+        'billing_address' => ['BareBones Klient s.r.o.', 'IČO: 12345678', 'Obchodná 5', '811 06 Bratislava', 'Slovensko'],
         'product_name' => 'Tričko Basic', 'product_url' => 'https://shop.example.com/p/tricko-basic',
         'confirm_url' => 'https://shop.example.com/?page=stock-notify&confirm=sample',
     ];

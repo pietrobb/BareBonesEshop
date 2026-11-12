@@ -589,7 +589,7 @@ class Customers {
 
     /**
      * Account address check: field => error message key. Name, street, city and ZIP are required and the
-     * country must be one the shop delivers to (the checkout's country list).
+     * country must be one the shop delivers to (the checkout's country list); a billing address any billing country.
      * @return array<string,string>
      */
     public static function addressErrors(array $address): array {
@@ -597,7 +597,9 @@ class Customers {
         foreach (['name', 'street', 'city', 'zip', 'country'] as $field) {
             if (trim((string)($address[$field] ?? '')) === '') $errors[$field] = 'account.err_address_required';
         }
-        if (!isset($errors['country']) && !isset(ShippingService::destinationCountries()[strtoupper((string)$address['country'])])) {
+        // R31: a billing address may be in any country the buyer is registered in, not only where the shop delivers.
+        $countries = ($address['type'] ?? null) === 'billing' ? ShippingService::billingCountries() : ShippingService::destinationCountries();
+        if (!isset($errors['country']) && !isset($countries[strtoupper((string)$address['country'])])) {
             $errors['country'] = 'account.err_address_country';
         }
         return $errors;

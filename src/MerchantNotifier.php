@@ -35,7 +35,7 @@ class MerchantNotifier {
                 $items = Orders::items($orderId);
                 // A withdrawal notice names only the lines of that statement and their sum, not the whole order.
                 if ($kind === 'withdrawal') $items = self::withdrawnItems($orderId, (int)(explode(':', $event, 2)[1] ?? 0), $items);
-                $result = MailService::send($template, $recipient, $locale, [
+                $result = MailService::send($template, $recipient, $locale, OrderAddress::mailVars($order, $locale) + [
                     'event' => $event,
                     'order_number' => (string)$order['order_number'],
                     'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),

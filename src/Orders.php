@@ -156,6 +156,13 @@ class Orders {
             if (!$financialColumns) {
                 unset($orderParams[':financialsnapshot']);
             }
+            // R31: billed to another address than delivered to; without one billing_addr stays NULL (= delivery address).
+            if (!empty($customer['billing_address']) && is_array($customer['billing_address'])) {
+                if (!self::hasColumn('orders', 'billing_addr')) throw new \RuntimeException('A billing address needs the order billing address migration');
+                $extraColumns .= ', billing_addr';
+                $extraValues .= ', :billingaddr';
+                $orderParams[':billingaddr'] = json_encode($customer['billing_address'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            }
             $synthetic = !empty($customer['is_synthetic']);
             if ($synthetic) {
                 if (!self::hasColumn('orders', 'is_synthetic')) throw new \RuntimeException('Synthetic orders need the payment monitoring migration');

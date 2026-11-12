@@ -5,6 +5,12 @@ Pago: {{#if payment_method}}{{payment_method}} — {{/if}}{{payment_status}}
 {{#if awaiting_payment}}El pedido aún no está pagado.
 {{/if}}
 {{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
-{{/each}}{{#if admin_url}}
+{{/each}}{{#if delivery_address}}
+Dirección de entrega:
+{{#each delivery_address}}{{this}}
+{{/each}}{{/if}}{{#if billing_address}}
+Dirección de facturación:
+{{#each billing_address}}{{this}}
+{{/each}}{{/if}}{{#if admin_url}}
 Detalle: {{admin_url}}
 {{/if}}

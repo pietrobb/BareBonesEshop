@@ -13,6 +13,10 @@
 {{/each}}
 </table>
 <p><strong>Celkem: {{order_total}}</strong></p>
+{{#if delivery_address}}<h3>Doručovací adresa</h3>
+<p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
+{{#if billing_address}}<h3>Fakturační adresa</h3>
+<p>{{#each billing_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if bank_transfer}}<h3>Platba bankovním převodem</h3>
 <p>Objednávku vyřídíme po připsání platby. Zadejte přesně tuto částku a variabilní symbol.</p>
 <table style="border-collapse:collapse">
