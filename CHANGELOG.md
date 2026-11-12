@@ -183,6 +183,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   released refund queued again by hand pays nothing out; a second click on "Release credit note" reports it was
   released instead of an error; an item refund of an order without online payment, marked refunded by the admin, now
   e-mails the customer.
+- **Account addresses: IČO and DIČ (review round 34).** A longer IČO or DIČ than the checkout accepts is refused on
+  the field ("Enter a valid company ID or tax ID…") instead of failing the `VARCHAR(40)` column with an error 500 on
+  MySQL. An edited address stores them without spaces and in upper case, as a new address and the checkout do. An
+  address saved before IČO and DIČ were kept gets them (and the IČ DPH) from the next order that saves the same
+  address for the same company.
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged

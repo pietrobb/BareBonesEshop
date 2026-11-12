@@ -602,6 +602,11 @@ class Customers {
         if (!isset($errors['country']) && !isset($countries[strtoupper((string)$address['country'])])) {
             $errors['country'] = 'account.err_address_country';
         }
+        // R34: IČO and DIČ as the checkout accepts them (a longer value failed the VARCHAR(40) columns with a 500 on MySQL).
+        foreach (self::ADDRESS_COMPANY_IDS as $column) {
+            $id = self::normalizedCompanyId($address[$column] ?? '');
+            if ($id !== '' && !preg_match('/^[A-Z0-9][A-Z0-9\/-]{1,19}$/', $id)) $errors[$column] = 'account.err_address_company_id';
+        }
         return $errors;
     }
 
@@ -631,12 +636,17 @@ class Customers {
             trim(Security::str($data['zip'] ?? '')),
             strtoupper(trim(Security::str($data['country'] ?? ''))),
             trim(Security::str($data['phone'] ?? '')),
-        ], array_map(static fn(string $c): string => strtoupper((string)preg_replace('/\s+/', '', Security::str($data[$c] ?? ''))), $ids)));
+        ], array_map(static fn(string $c): string => self::normalizedCompanyId($data[$c] ?? ''), $ids)));
         return (int)$db->lastInsertId();
     }
 
     /** R33: the buyer company's IDs a saved address keeps besides company and vat_id. */
     private const ADDRESS_COMPANY_IDS = ['ico', 'dic'];
+
+    /** An IČO or DIČ as the checkout stores it: without spaces, upper case. */
+    private static function normalizedCompanyId(mixed $value): string {
+        return strtoupper((string)preg_replace('/\s+/', '', Security::str($value)));
+    }
 
     public static function updateAddress(int $customerId, int $addressId, array $data): bool {
         // Ownership check
@@ -660,9 +670,11 @@ class Customers {
         foreach (['name','company','vat_id','street','city','zip','country','phone', ...$ids] as $k) {
             if (array_key_exists($k, $data)) {
                 $fields[] = "{$k} = ?";
-                $params[] = ($k === 'country')
-                    ? strtoupper(trim(Security::str($data[$k])))
-                    : trim(Security::str($data[$k]));
+                $params[] = match (true) {
+                    $k === 'country' => strtoupper(trim(Security::str($data[$k]))),
+                    in_array($k, self::ADDRESS_COMPANY_IDS, true) => self::normalizedCompanyId($data[$k]), // R34: as a new address
+                    default => trim(Security::str($data[$k])),
+                };
             }
         }
         $fields[] = "type = ?"; $params[] = $type;

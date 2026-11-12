@@ -133,7 +133,14 @@ class GuestCheckoutAccount {
             str_replace(' ', '', (string)$a['zip']), strtoupper((string)$a['country'])]));
         $existing = Customers::addresses($customerId, (string)$address['type']);
         foreach ($existing as $saved) {
-            if ($key($saved) === $key($address)) return false;
+            if ($key($saved) !== $key($address)) continue;
+            // R34: the same address saved before IČO/DIČ were kept (or without a company) gets this order's company IDs;
+            // a saved address of another company is left alone.
+            $savedCompany = mb_strtolower(trim((string)($saved['company'] ?? '')));
+            if ($savedCompany !== '' && $savedCompany !== mb_strtolower(trim((string)($address['company'] ?? '')))) return false;
+            $missing = array_filter(['company', 'vat_id', 'ico', 'dic'], static fn(string $c): bool => trim((string)($saved[$c] ?? '')) === '' && trim((string)($address[$c] ?? '')) !== '');
+            if ($missing === []) return false;
+            return Customers::updateAddress($customerId, (int)$saved['id'], array_intersect_key($address, array_flip($missing)));
         }
         $address['is_default'] = $existing === [];
         Customers::addAddress($customerId, $address);

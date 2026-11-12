@@ -1806,6 +1806,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_invalid' => 'Adresa nebyla uložena. Zkontrolujte označená pole.',
     'account.err_address_required' => 'Toto pole je povinné.',
     'account.err_address_country' => 'Vyberte zemi ze seznamu.',
+    'account.err_address_company_id' => 'Zadejte platné IČO nebo DIČ: písmena a číslice, nejvýše 20 znaků.',
     'account.addr_type_shipping' => 'Doručovací adresa',
     'account.addr_type_billing' => 'Fakturační adresa',
     'account.downloads' => 'Ke stažení',
