@@ -147,6 +147,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Refunds, invoices and checkout details (review round 33).** An item refund (credit note) whose refund job ran out of
+  re-queues after network errors (about 9 hours) stayed pending for good; the order page now offers "Release credit
+  note" with a required note once no job of it is left and the provider never answered for it: it fails like a
+  declined refund (credit note reversed, payment back to paid / partially refunded), audited with the admin. An IČ DPH
+  that VIES answered is invalid is no longer stored on the order address, so the invoice does not print it as the
+  buyer's VAT registration (checkout, API and manual order). Without JavaScript the checkout offers "Recalculate
+  total" after the payment methods, so the summary shows the shipping and payment picked. The invoice e-mail goes once:
+  a later `invoice_issue` job of the same order (shipped, paid) no longer mails the same invoice again.
 - **Billing address details (review round 33).** On a shared computer a guest's unfinished checkout is no longer mixed
   with the saved address of the member who signs in next (the guest's name and city stood next to the member's
   street); the member's own draft is kept on reload. A saved billing address keeps the IČO and DIČ (migration

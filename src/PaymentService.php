@@ -751,6 +751,50 @@ class PaymentService {
         return $row ? ['amount' => (int)$row['amount'], 'request_key' => (string)$row['idempotency_key'], 'refund_id' => (int)$row['id']] : null;
     }
 
+    /**
+     * R33 (low): an item refund (credit note) whose payment_refund job died — its re-queues after network errors ran out
+     * (about 9 hours, WorkerJobs::REFUND_ERROR_REQUEUES) — stayed pending for good, and nothing let the admin release it.
+     * Offered when the provider never answered for it (no refund id, no ledger row under its key; an attempt a provider
+     * without idempotent refunds refused to repeat is for the admin to reconcile too) and no job of it is
+     * waiting or running; a queue backend that cannot list its jobs offers nothing (a job may still be waiting).
+     *
+     * @return array{amount:int, refund_id:int}|null
+     */
+    public static function stalledItemRefund(array $order): ?array {
+        if (self::refundsByHand($order)) return null;
+        $stmt = Db::get()->prepare("SELECT r.id, r.amount FROM order_refunds r
+            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND (r.payment_reference IS NULL OR r.payment_reference = '')
+              AND NOT EXISTS (SELECT 1 FROM payment_transactions t WHERE t.order_id = r.order_id AND t.store_id = r.store_id
+                AND t.idempotency_key = r.idempotency_key)
+            ORDER BY r.id");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($rows === []) return null;
+        $open = JobQueue::openJobs('payment_refund');
+        if ($open === null) return null;
+        $queued = [];
+        foreach ($open as $job) {
+            if ((int)($job['order_id'] ?? 0) === (int)$order['id']) $queued[(int)($job['refund_id'] ?? 0)] = true;
+        }
+        foreach ($rows as $row) {
+            if (!isset($queued[(int)$row['id']])) return ['amount' => (int)$row['amount'], 'refund_id' => (int)$row['id']];
+        }
+        return null;
+    }
+
+    /**
+     * Release the stalled item refund (stalledItemRefund()) the admin checked at the provider: it fails like a declined
+     * one (Rma::failRefund(): the credit note is reversed, the payment leaves refund_pending), audited with the admin and
+     * the note. False when it is no longer stalled (its job came back, or it settled meanwhile).
+     */
+    public static function releaseStalledItemRefund(int $orderId, int $itemRefundId, string $actor, string $note): bool {
+        if (Db::get()->inTransaction()) throw new \LogicException('Release a stalled item refund outside a transaction');
+        $order = Orders::byId($orderId);
+        $stalled = $order ? self::stalledItemRefund($order) : null;
+        if ($stalled === null || $stalled['refund_id'] !== $itemRefundId) return false;
+        return Rma::failRefund($itemRefundId, "Item refund released by {$actor}: {$note}");
+    }
+
     /** Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited. */
     public static function confirmProviderRefund(int $orderId, string $actor, string $note): void {
         if (trim($note) === '') throw new \InvalidArgumentException('A refund confirmation needs a note');

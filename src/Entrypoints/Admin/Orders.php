@@ -324,6 +324,15 @@ function pageOrder(): void {
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.confirm_refund')) ?></button>
             </form>
             <?php endif; ?>
+            <?php if ($canRefund && ($stalledRefund = PaymentService::stalledItemRefund($order)) !== null): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_release" style="margin-top:.5rem" data-refund-release>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input type="hidden" name="refund_id" value="<?= (int)$stalledRefund['refund_id'] ?>">
+                <span class="muted"><?= esc(I18n::format('admin.order.release_refund_hint', ['amount' => I18n::price($stalledRefund['amount'], $order['currency'])])) ?></span>
+                <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.release_refund')) ?></button>
+            </form>
+            <?php endif; ?>
             <?php if ($byHandRefund): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -809,6 +818,21 @@ function handleOrderRefundRetry(): void {
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }
+/** Release an item refund whose job died before the provider answered (PaymentService::stalledItemRefund()), after the admin checked it at the provider. */
+function handleOrderRefundRelease(): void {
+    Security::adminRequire('orders.refund');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $note = trim((string)($_POST['note'] ?? ''));
+    try {
+        $released = $note !== '' && PaymentService::releaseStalledItemRefund($orderId, Security::int($_POST['refund_id'] ?? 0), Security::adminUser(), $note);
+        setFlash($released ? 'ok' : 'err', I18n::t($released ? 'admin.order.msg.refund_released' : 'admin.order.msg.refund_error'));
+    } catch (\Throwable $e) {
+        Logger::phpLog("Refund release error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+    }
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
 /** Book a provider refund the provider accepted but never confirms (GoPay/ThePay partial refunds), after the admin checked it at the provider. */
 function handleOrderRefundConfirm(): void {
     Security::adminRequire('orders.refund');
@@ -894,7 +918,7 @@ function handleOrderInvoiceIssue(): void {
         $inv = InvoiceService::issue($orderId);
         // Re-issue: send invoice email immediately (sync)
         $order = Orders::byId($orderId);
-        if ($order && filter_var($order['customer_email'] ?? '', FILTER_VALIDATE_EMAIL)) {
+        if ($order && filter_var($order['customer_email'] ?? '', FILTER_VALIDATE_EMAIL) && !InvoiceService::mailed($inv)) {
             $abs = InvoiceService::pdfAbsolutePath($inv);
             $vars = InvoiceService::mailVars($inv, $order);
             MailService::send('invoice_issued', $order['customer_email'], (string)($inv['locale'] ?? $order['locale'] ?? ''), $vars, $orderId,
