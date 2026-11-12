@@ -583,9 +583,11 @@ The step gets no descriptor of root's terminal (stdin is `/dev/null`, so pass `-
 `restore.php`; its output is copied through pipes), none of root's other open files, and
 of root's environment only `BBE_*`, `BAREBONES_*`, `SMTP_*`, `MAIL_*`, `PAY_*`, `LANG`,
 `LC_*` and `TZ`; it runs in a pid namespace that ends with it, so nothing it starts outlives
-it, and Ctrl-C or a dropped ssh connection stops it at once (an update stopped so keeps the
-shop closed with the command that finishes it in `.maintenance`). It runs in the application
-root, so a relative path in an argument is taken from there. As a second line
+it, and Ctrl-C, a dropped ssh connection or a SIGTERM to `bbe-step` stops it at once (an
+update stopped so keeps the shop closed with the command that finishes it in `.maintenance`).
+It runs in the application root, so a relative path in an argument is taken from there. It
+ignores root's PATH and takes its tools and php from `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
+only (link a php installed elsewhere into `/usr/local/bin`). As a second line
 of defence, any `php cli/….php` started as root switches to the owner and group of the
 application root before it loads code of `src/`. That switch is `cli/cli-only.php`, code
 in the tree: an account that can write the tree (often the web user) can change it, and
