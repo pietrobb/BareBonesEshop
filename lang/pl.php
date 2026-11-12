@@ -2269,6 +2269,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.invoice.type.invoice' => 'Faktura',
     'admin.invoice.type.credit_note' => 'Faktura korygująca',
     'checkout.error.field_too_long_named' => 'Pole „{field}” jest za długie (maksymalnie {max} znaków).',
+    'checkout.error.field_invalid' => 'Pole zawiera nieprawidłowe znaki. Wpisz je ponownie.',
+    'checkout.error.field_invalid_named' => 'Pole „{field}” zawiera nieprawidłowe znaki. Wpisz je ponownie.',
     'admin.stores.field.timezone' => 'Strefa czasowa',
     'admin.stores.timezone_hint' => 'Daty faktur, terminy płatności i dzienny raport sprzedaży są liczone w tej strefie czasowej.',
     'admin.stores.err.timezone' => 'Wybierz strefę czasową z listy.',

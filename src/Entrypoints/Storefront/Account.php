@@ -228,7 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'address_add' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         $address = ['type' => Security::str($_POST['type'] ?? 'shipping'), 'is_default' => !empty($_POST['is_default'])];
-        foreach (['name', 'company', 'vat_id', 'street', 'city', 'zip', 'country', 'phone'] as $field) {
+        foreach (['name', 'company', 'ico', 'dic', 'vat_id', 'street', 'city', 'zip', 'country', 'phone'] as $field) {
             $address[$field] = trim(Security::str($_POST[$field] ?? ''));
         }
         $address['country'] = strtoupper($address['country']);

@@ -28,6 +28,40 @@ final class OrderAddress
         return $billing;
     }
 
+    /**
+     * R33: the delivery address a parcel is labelled with. Billed elsewhere, the company lives on the billing address;
+     * the parcel still goes to that company, so its name is added when the delivery address has none.
+     * @return array<string,mixed>
+     */
+    public static function recipientAddress(array $order): array
+    {
+        $address = self::decode($order['shipping_addr'] ?? null) ?? [];
+        if (trim((string)($address['company'] ?? '')) === '' && self::billingDiffers($order)) {
+            $company = trim((string)(self::billing($order)['company'] ?? ''));
+            if ($company !== '') $address['company'] = $company;
+        }
+        return $address;
+    }
+
+    /**
+     * R33: where the goods are handed over, for documents and e-mails: the chosen pick-up point (Packeta), none for
+     * collection at the shop, otherwise the delivery address; null also for an order with nothing to deliver. The
+     * shopper's home address that a pick-up order also carries is not where it is delivered.
+     * @return ?array<string,mixed>
+     */
+    public static function deliveryPlace(array $order): ?array
+    {
+        $rate = self::decode($order['shipping_rate_snapshot'] ?? null) ?? [];
+        $delivery = self::delivery($order);
+        $point = $rate['pickup_point'] ?? null;
+        if (is_array($point) && trim((string)($point['name'] ?? '')) !== '') {
+            return ['name' => trim((string)$point['name']), 'street' => trim((string)($point['address'] ?? '')), 'zip' => '', 'city' => '',
+                'country' => strtoupper((string)($delivery['country'] ?? ''))];
+        }
+        if (($rate['carrier'] ?? '') === 'pickup') return null;
+        return trim((string)($delivery['street'] ?? '')) !== '' ? $delivery : null;
+    }
+
     public static function billingDiffers(array $order): bool
     {
         $billing = self::decode($order['billing_addr'] ?? null);
@@ -50,16 +84,16 @@ final class OrderAddress
     }
 
     /**
-     * E-mail variables: delivery_address (lines; empty for an order with nothing to deliver) and billing_address
+     * E-mail variables: delivery_address (lines of deliveryPlace(); empty for an order with nothing to deliver) and billing_address
      * (lines, only when the order is billed to another address).
      * @return array{delivery_address: list<string>, billing_address: list<string>}
      */
     public static function mailVars(array $order, string $locale = ''): array
     {
-        $delivery = self::delivery($order);
+        $delivery = self::deliveryPlace($order);
         $loc = $locale !== '' ? $locale : null;
         return [
-            'delivery_address' => trim((string)($delivery['street'] ?? '')) !== '' ? self::lines($delivery, $loc) : [],
+            'delivery_address' => $delivery !== null ? self::lines($delivery, $loc) : [],
             'billing_address' => self::billingDiffers($order) ? self::lines(self::billing($order), $loc) : [],
         ];
     }
@@ -73,6 +107,12 @@ final class OrderAddress
      */
     public static function billingFromInput(array $input): array
     {
+        // R33: a JSON billing_address that is not an object (a string) was silently ignored and the order billed to
+        // the delivery address; it is refused like a missing billing address.
+        $object = $input['billing_address'] ?? null;
+        if ($object !== null && $object !== '' && !is_array($object)) {
+            return ['address' => null, 'error' => I18n::t('checkout.error.billing_address_required'), 'error_code' => 'checkout.error.billing_address_required'];
+        }
         $input = self::flattenBillingInput($input);
         if (!self::billingRequested($input)) return ['address' => null, 'error' => null, 'error_code' => null];
         $text = static fn(string $key): string => is_string($input[$key] ?? null)

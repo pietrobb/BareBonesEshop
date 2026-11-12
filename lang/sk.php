@@ -2298,6 +2298,8 @@ return [
     'admin.invoice.type.invoice' => 'Faktúra',
     'admin.invoice.type.credit_note' => 'Dobropis',
     'checkout.error.field_too_long_named' => 'Pole „{field}“ je príliš dlhé (najviac {max} znakov).',
+    'checkout.error.field_invalid' => 'Pole obsahuje neplatné znaky. Prepíšte ho prosím.',
+    'checkout.error.field_invalid_named' => 'Pole „{field}“ obsahuje neplatné znaky. Prepíšte ho prosím.',
     'admin.stores.field.timezone' => 'Časové pásmo',
     'admin.stores.timezone_hint' => 'Podľa tohto pásma sa určujú dátumy faktúr, splatnosti a denný prehľad tržieb.',
     'admin.stores.err.timezone' => 'Vyberte časové pásmo zo zoznamu.',
