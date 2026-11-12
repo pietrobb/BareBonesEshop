@@ -104,7 +104,7 @@ function resolveRange(array $opts): array
  * Aggregate per consumption_country × vat_rate × currency.
  *
  * Strategy:
- *   - Invoices issued in [from,to] with vat_scenario 'oss' (all lines, customer_country from customer_snapshot)
+ *   - Invoices issued in [from,to] with vat_scenario 'oss' (all lines, in the country whose rate they charged: ossCountry())
  *     or 'domestic' (only the breakdown groups of lines supplied abroad under OSS, in their own country).
  *   - GROUP BY (consumption country, vat_rate, currency).
  *
@@ -144,11 +144,9 @@ function collect(string $from, string $to, ?string $storeCode): array
 
     $bucket = [];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $customerSnapshot = json_decode((string)$row['customer_snapshot'], true) ?: [];
-        $cc = strtoupper(trim((string)($customerSnapshot['country'] ?? '')));
         $wholeInvoiceOss = (string)$row['vat_scenario'] === 'oss';
-
         $financialJson = trim((string)($row['financial_snapshot'] ?? ''));
+        $cc = ossCountry($row);
         $creditNote = (string)($row['type'] ?? 'invoice') === 'credit_note';
         if ($creditNote) {
             // A credit note carries its source invoice's snapshot for reference; what it credits is its own
@@ -213,6 +211,23 @@ function collect(string $from, string $to, ?string $storeCode): array
            <=> [$b['consumption_country'], $b['vat_rate'], $b['currency']];
     });
     return $rows;
+}
+
+/**
+ * Consumption country of an OSS invoice or credit note: the country whose rate the order charged (the financial
+ * snapshot's rate_country, which a credit note carries from its invoice). R33: never the billing country — since R31
+ * customer_snapshot names the billing party, so goods delivered to DE and billed to SK would land in "SK". Without a
+ * financial snapshot (historical invoices) the delivery address, then the customer's country.
+ */
+function ossCountry(array $row): string
+{
+    $financial = json_decode((string)($row['financial_snapshot'] ?? ''), true);
+    $rateCountry = is_array($financial) ? strtoupper(trim((string)($financial['rate_country'] ?? ''))) : '';
+    if ($rateCountry !== '') return $rateCountry;
+    $customer = json_decode((string)($row['customer_snapshot'] ?? ''), true);
+    $customer = is_array($customer) ? $customer : [];
+    $delivery = is_array($customer['delivery'] ?? null) ? strtoupper(trim((string)($customer['delivery']['country'] ?? ''))) : '';
+    return $delivery !== '' ? $delivery : strtoupper(trim((string)($customer['country'] ?? '')));
 }
 
 function emitCsv(array $rows): void

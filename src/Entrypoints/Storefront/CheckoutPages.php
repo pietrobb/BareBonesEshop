@@ -10,7 +10,7 @@ function renderCart(): string {
     ];
     // Priced like checkout in the buyer's VAT scenario (default country and a signed-in company's VAT ID).
     $state = CheckoutService::formState([], false);
-    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($state['country'], $state['values'], ''); // goods: what checkout orders; unavailable lines stay listed
+    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($state['country'], $state['values'], '', $state['billing_different'] ? $state['billing_country'] : ''); // goods: what checkout orders; unavailable lines stay listed
     // "Buy later" lines under the cart: priced the same way, never part of its totals.
     $saved = SavedForLater::view($vat['context'], Template::storeUrl('/?page=cart'), Security::csrfToken());
     if (!$cartData['items']) {
@@ -89,7 +89,7 @@ function renderCheckout(): string {
     $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
     $country = $state['country'];
     // Priced in the order's VAT scenario: reverse charge and export show (and reach thresholds with) the net amounts charged.
-    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($country, $state['values'], Security::clean($form('shipping_method'))); // goods: what execute() orders
+    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($country, $state['values'], Security::clean($form('shipping_method')), $state['billing_different'] ? $state['billing_country'] : ''); // goods: what execute() orders
     [$price, $cart] = [storefrontCartPrice($cartData), $cartData['items']];
     $subtotal = (int)$cartData['subtotal'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
@@ -133,7 +133,7 @@ function renderCheckout(): string {
         'payment_unavailable' => $paymentMethods ? '' : CheckoutService::paymentUnavailableMessage($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $customerId ?: null), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'] . (($item['variant_name'] ?? '') !== '' ? ' (' . $item['variant_name'] . ')' : ''), 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
-        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
+        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'billing_reprices' => CheckoutService::hasDownload($goods), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),

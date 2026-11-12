@@ -13,6 +13,14 @@ class CheckoutService {
         return cartIsDigitalOnly($items);
     }
 
+    /** R33: whether the lines hold a download — taxed in the billing country, so the form re-prices when it changes. */
+    public static function hasDownload(array $items): bool {
+        foreach ($items as $item) {
+            if (VariantAvailability::isDigitalItem($item)) return true;
+        }
+        return false;
+    }
+
     public static function digitalRate(): array {
         if (!function_exists('digitalDeliveryRate')) require_once __DIR__ . '/Http/ApiHandlers.php';
         return digitalDeliveryRate();
@@ -51,9 +59,11 @@ class CheckoutService {
      * previews (cart, checkout form, shipping/payment API) price by it, so reverse charge and export show the net
      * amounts the order charges. $verifyVatId=false treats a VAT ID as unverified (no VIES call); $knownVatIdStatus is
      * the result of an earlier check (an order being edited keeps the verification it was placed with).
+     * R33: $billingCountry (the billing address, when the order is billed elsewhere) is where a download is supplied:
+     * an e-service is taxed where the consumer lives or the business is established, not where a parcel goes.
      * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
      */
-    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null): array {
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = ''): array {
         $store = StoreContext::current()->config();
         $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
         $vatIdValid = false;
@@ -77,18 +87,23 @@ class CheckoutService {
         // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
         $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0, 0, false, 0, 0, isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
         $taxProviderCode = Adapters::defaultProviderCode('tax');
+        $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
+        // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
+        $vatIdOfSeller = (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) === $sellerCountry;
         $context = [
             'seller_country'        => $sellerCountry,
             'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
             'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false),
-            'customer_country'      => vatSupplyCountry($rate, $country, $sellerCountry),
-            // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
-            'customer_vat_id_valid' => $vatIdValid && (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry,
+            // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).
+            'customer_country'      => $digitalOnly ? $residence : vatSupplyCountry($rate, $country, $sellerCountry),
+            'customer_vat_id_valid' => $vatIdValid && !$vatIdOfSeller,
+            // R33: a business registered for VAT in the seller's own state is no consumer: no OSS distance sale.
+            'customer_vat_id_domestic' => $vatIdValid && $vatIdOfSeller,
             'is_b2b'                => $vatId !== '',
             // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
             'customer_country_verified' => !$digitalOnly,
-            // Downloads next to goods collected in the store are supplied where the buyer lives, not in the store.
-            'digital_customer_country' => $digitalOnly ? '' : strtoupper($country),
+            // Downloads next to goods are supplied where the buyer lives: the billing country, else the delivery one.
+            'digital_customer_country' => $digitalOnly ? '' : $residence,
             'tax_provider'          => $taxProviderCode,
         ];
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
@@ -97,17 +112,18 @@ class CheckoutService {
     }
 
     /** VAT scenario of a preview: a VAT ID is checked in VIES (cached) within a per-client budget, else it counts as unverified. */
-    public static function previewVatContext(string $country, string $vatId, string $shippingMethod): array {
+    public static function previewVatContext(string $country, string $vatId, string $shippingMethod, string $billingCountry = ''): array {
         $verify = $vatId !== '' && Security::rateLimit('checkout_vat_preview', 20, 600);
-        return self::vatContext($country, $vatId, $shippingMethod, $verify);
+        return self::vatContext($country, $vatId, $shippingMethod, $verify, null, $billingCountry);
     }
 
     /**
      * The cart as an HTML preview shows it: priced in the order's VAT scenario, plus the lines checkout orders.
+     * $billingCountry: the billing address's country when the order is billed elsewhere (formState()), else ''.
      * @return array{vat: array, cart: array, goods: list<array>}
      */
-    public static function previewCart(string $country, array $values, string $shippingMethod): array {
-        $vat = self::previewVatContext($country, self::buyerCompany($values)['vat_id'], $shippingMethod);
+    public static function previewCart(string $country, array $values, string $shippingMethod, string $billingCountry = ''): array {
+        $vat = self::previewVatContext($country, self::buyerCompany($values)['vat_id'], $shippingMethod, $billingCountry);
         $cart = Cart::enriched($vat['context']);
         return ['vat' => $vat, 'cart' => $cart, 'goods' => self::availableItems($cart['items'])];
     }
