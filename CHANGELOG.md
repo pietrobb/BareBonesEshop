@@ -173,6 +173,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   grounds (Art. 146 and Art. 196). An IČ DPH VIES could not check (unreachable) is printed on the invoice as "not
   verified in VIES". Unchanged by design (round 5): a consumer download billed outside the EU keeps the seller's VAT —
   a declared country alone is no evidence for leaving EU VAT.
+- **Releasing a stalled item refund asks Stripe first; a refund Stripe executes afterwards gets its credit note
+  (review round 34).** When Stripe executed an item refund but its answer was lost and the job ran out of retries, the
+  admin could release the credit note, and the late `charge.refunded` then booked 21.00 as returned with the credit
+  notes netting to zero and nobody told. The release now looks the refund up at Stripe by its refund key: one Stripe
+  executed is booked to the credit note ("the provider did execute the refund"), one it still processes waits for its
+  webhook, and when Stripe cannot be reached nothing is released. A refund executed after a release is booked with a
+  new credit note and raises the critical incident `payment.released_refund_executed`. Also: a payment_refund job of a
+  released refund queued again by hand pays nothing out; a second click on "Release credit note" reports it was
+  released instead of an error; an item refund of an order without online payment, marked refunded by the admin, now
+  e-mails the customer.
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged

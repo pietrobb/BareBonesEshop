@@ -785,14 +785,36 @@ class PaymentService {
     /**
      * Release the stalled item refund (stalledItemRefund()) the admin checked at the provider: it fails like a declined
      * one (Rma::failRefund(): the credit note is reversed, the payment leaves refund_pending), audited with the admin and
-     * the note. False when it is no longer stalled (its job came back, or it settled meanwhile).
+     * the note. R34: a provider that can tell (RefundLookupAdapter) is asked first. A refund it executed after all (its
+     * answer was lost in the outage) is booked as the credit note's refund instead ('refunded'), one it still processes is
+     * noted for its webhook ('pending'); was: released, the late charge.refunded then booked the money without a credit
+     * note. A provider that cannot be reached refuses the release (throws). Returns 'released', or '' when it is no longer
+     * stalled (its job came back, or it settled meanwhile).
      */
-    public static function releaseStalledItemRefund(int $orderId, int $itemRefundId, string $actor, string $note): bool {
+    public static function releaseStalledItemRefund(int $orderId, int $itemRefundId, string $actor, string $note): string {
         if (Db::get()->inTransaction()) throw new \LogicException('Release a stalled item refund outside a transaction');
         $order = Orders::byId($orderId);
         $stalled = $order ? self::stalledItemRefund($order) : null;
-        if ($stalled === null || $stalled['refund_id'] !== $itemRefundId) return false;
-        return Rma::failRefund($itemRefundId, "Item refund released by {$actor}: {$note}");
+        $refund = Rma::refundById($itemRefundId) ?? [];
+        // R34 (low): a second submit (double click) of a release that went through says so instead of failing.
+        if ($order !== null && $stalled === null && (int)($refund['order_id'] ?? 0) === $orderId && ($refund['status'] ?? '') === 'failed') return 'already_released';
+        if ($order === null || $stalled === null || $stalled['refund_id'] !== $itemRefundId) return '';
+        $key = (string)($refund['idempotency_key'] ?? '');
+        $gateway = WorkerJobs::orderPaymentGateway([], $order);
+        $found = $gateway instanceof RefundLookupAdapter ? $gateway->refundByKey((string)($order['payment_id'] ?? ''), $key) : null;
+        $provider = self::providerName($gateway);
+        $providerRefundId = (string)($found['refund_id'] ?? '');
+        if (($found['status'] ?? '') === 'succeeded' && $providerRefundId !== '') {
+            self::bookProviderRefund($orderId, $provider, $providerRefundId, (int)$found['amount'], 'refund.verified', $provider . '_refund_' . $providerRefundId, ['refund_key' => $key]);
+            AuditLog::log('order_refund', $orderId, 'pending', 'succeeded', "Item refund release by {$actor}: {$provider} refund {$providerRefundId} was executed, booked instead");
+            return 'refunded';
+        }
+        if (($found['status'] ?? '') === 'pending' && $providerRefundId !== '') {
+            Rma::noteProviderRefund($itemRefundId, $providerRefundId);
+            AuditLog::log('order_refund', $orderId, 'pending', 'pending', "Item refund release by {$actor}: {$provider} refund {$providerRefundId} is still processed");
+            return 'pending';
+        }
+        return Rma::failRefund($itemRefundId, "Item refund released by {$actor}: {$note}") ? 'released' : '';
     }
 
     /** Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited. */
@@ -1218,6 +1240,22 @@ class PaymentService {
         }
     }
 
+    /**
+     * R34 (low): tell the customer about an item refund paid back by hand (an order without a payment id, completed as
+     * 'manual-admin'): it books no ledger row, so queueRefundMail() never ran for it. Its credit note exists already.
+     */
+    public static function mailManualItemRefund(int $orderId, int $amount): void {
+        $order = Orders::byId($orderId);
+        if (!$order || $amount <= 0 || trim((string)($order['customer_email'] ?? '')) === '') return;
+        JobQueue::push('email_send', [
+            'template' => 'refund_issued',
+            'to' => (string)$order['customer_email'],
+            'locale' => (string)($order['locale'] ?? ''),
+            'order_id' => $orderId,
+            'refund_amount' => $amount,
+        ], 5);
+    }
+
     /** Whether the ledger holds the refund row a refund mail announces (it was committed). */
     public static function refundBooked(int $orderId, string $ledgerKey): bool {
         $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
@@ -1460,9 +1498,16 @@ class PaymentService {
         }
         // The shop's own refund, before its job's result: booked as the refund it executes, so the item refund's credit
         // note is the only one and an admin refund gets one (creditBookedRefund()).
-        $item = Db::get()->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND idempotency_key = :key AND status = 'pending' LIMIT 1");
+        $item = Db::get()->prepare("SELECT id, status FROM order_refunds WHERE order_id = :order AND store_id = :store AND idempotency_key = :key LIMIT 1");
         $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $key]);
-        $itemRefundId = (int)($item->fetchColumn() ?: 0);
+        $itemRow = $item->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $itemRefundId = ($itemRow['status'] ?? '') === 'pending' ? (int)$itemRow['id'] : 0;
+        // R34: the credit note of this refund was released (or declined) and reversed, yet the provider paid it out: the
+        // money is booked, and a credit note for it follows (InvoiceService::creditBookedRefund()); the merchant is told.
+        if (($itemRow['status'] ?? '') === 'failed' && !self::transactionExists($eventKey) && !self::refundAlreadyRecorded($orderId, $refundId)) {
+            AuditLog::log('order_refund', $orderId, 'failed', 'failed', "{$provider} refund {$refundId} of a released item refund was executed");
+            IncidentMonitor::report('payment.released_refund_executed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => (int)$itemRow['id'], 'refund_id' => $refundId]);
+        }
         return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
             $payload + ['settles_refund_request' => self::refundRequestKey($key) ?? $key], $itemRefundId, $refundId);
     }

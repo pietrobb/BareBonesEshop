@@ -647,9 +647,8 @@ function handleRmaStatus(): void {
             if (!$quantities) throw new LogicException(I18n::t('admin.rma.nothing_to_credit'));
             // One key per attempt: a concurrent double submit shares it, a retry after a failed refund gets a new credit note.
             $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id));
-            $order = Orders::byId((int)$rma['order_id']);
-            if (trim((string)($order['payment_id'] ?? '')) === '') {
-                Rma::completeRefund((int)$credit['refund_id'], 'manual-admin');
+            if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
+                PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0));
             }
         } elseif (!Rma::setStatus($id, $status)) {
             throw new LogicException(I18n::t('admin.rma.transition_refused'));
@@ -824,11 +823,12 @@ function handleOrderRefundRelease(): void {
     $orderId = Security::int($_GET['id'] ?? 0);
     $note = trim((string)($_POST['note'] ?? ''));
     try {
-        $released = $note !== '' && PaymentService::releaseStalledItemRefund($orderId, Security::int($_POST['refund_id'] ?? 0), Security::adminUser(), $note);
-        setFlash($released ? 'ok' : 'err', I18n::t($released ? 'admin.order.msg.refund_released' : 'admin.order.msg.refund_error'));
+        $outcome = $note !== '' ? PaymentService::releaseStalledItemRefund($orderId, Security::int($_POST['refund_id'] ?? 0), Security::adminUser(), $note) : '';
+        setFlash($outcome !== '' ? 'ok' : 'err', I18n::t(['released' => 'admin.order.msg.refund_released', 'already_released' => 'admin.order.msg.refund_released',
+            'refunded' => 'admin.order.msg.refund_release_refunded', 'pending' => 'admin.order.msg.refund_release_pending'][$outcome] ?? 'admin.order.msg.refund_error'));
     } catch (\Throwable $e) {
         Logger::phpLog("Refund release error [{$orderId}]: " . $e->getMessage());
-        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+        setFlash('err', I18n::t('admin.order.msg.refund_release_unverified'));
     }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;

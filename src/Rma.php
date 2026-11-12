@@ -450,15 +450,17 @@ class Rma {
         return (int)$exchange['id'];
     }
 
-    public static function completeRefund(int $refundId, string $paymentReference): void {
+    /** Complete a pending item refund; true when this call completed it (false: it was done already). */
+    public static function completeRefund(int $refundId, string $paymentReference): bool {
         $db = Db::get();
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
-            $stmt = $db->prepare("SELECT * FROM order_refunds WHERE id=:id AND store_id=:store");
+            $stmt = $db->prepare("SELECT * FROM order_refunds WHERE id=:id AND store_id=:store" . (Db::isMysql() ? ' FOR UPDATE' : ''));
             $stmt->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
             $refund = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!$refund || $refund['status'] === 'succeeded') { if ($own) $db->commit(); return; }
+            $stmt->closeCursor();
+            if (!$refund || $refund['status'] === 'succeeded') { if ($own) $db->commit(); return false; }
             if ($refund['status'] !== 'pending') throw new LogicException('Refund is not pending');
             $db->prepare("UPDATE order_refunds SET status='succeeded', payment_reference=:reference, updated_at=" . Db::now() . " WHERE id=:id")
                 ->execute([':reference' => $paymentReference, ':id' => $refundId]);
@@ -476,6 +478,7 @@ class Rma {
                     ->execute([':credit' => (int)$refund['credit_note_id'], ':rma' => (int)$refund['rma_id'], ':store' => StoreContext::current()->id()]);
             }
             if ($own) $db->commit();
+            return true;
         } catch (Throwable $e) {
             if ($own && $db->inTransaction()) $db->rollBack();
             throw $e;
