@@ -111,10 +111,17 @@ class CheckoutService {
             'vat_id_valid' => $vatIdValid, 'vat_id_status' => $vatIdStatus, 'seller_country' => $sellerCountry, 'tax_provider' => $taxProviderCode];
     }
 
-    /** VAT scenario of a preview: a VAT ID is checked in VIES (cached) within a per-client budget, else it counts as unverified. */
+    /**
+     * VAT scenario of a preview: a VAT ID is checked in VIES (cached) within a per-client budget, else it counts as
+     * unverified. R34: the budget counts only lookups VIES has to answer (a cached answer is free) and running out of it
+     * never answers the preview with HTTP 429: the shipping and payment previews of a business behind one office IP
+     * kept failing after ~10 changes, and checkout could not be finished.
+     */
     public static function previewVatContext(string $country, string $vatId, string $shippingMethod, string $billingCountry = ''): array {
-        $verify = $vatId !== '' && Security::rateLimit('checkout_vat_preview', 20, 600);
-        return self::vatContext($country, $vatId, $shippingMethod, $verify, null, $billingCountry);
+        $known = $vatId !== '' ? VatService::cachedVatIdStatus($vatId) : null;
+        $verify = $known === null && $vatId !== '' && Security::rateLimitAllows('checkout_vat_preview', 20, 600);
+        if ($verify) Security::rateLimitRecord('checkout_vat_preview');
+        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry);
     }
 
     /**

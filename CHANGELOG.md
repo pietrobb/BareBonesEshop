@@ -147,6 +147,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Checking a VAT ID no longer fails the checkout previews (review round 34).** The shipping and payment previews
+  check a VAT ID in VIES within a budget of 20 lookups per 10 minutes and client, but running out of it answered the
+  whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
+  the same office IP. Over the budget an unchecked VAT ID now just counts as unverified in the preview (the order
+  itself is still checked), and a VAT ID whose VIES answer is cached no longer uses up the budget.
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged
