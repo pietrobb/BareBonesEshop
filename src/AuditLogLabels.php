@@ -158,12 +158,14 @@ final class AuditLogLabels {
         'Admin password rotated and sessions revoked' => 'password_rotated', 'Admin device revoked' => 'device_revoked',
         // R30: two-factor sign-in and store permissions of admin accounts.
         'TOTP enrolled and recovery codes rotated' => 'mfa_enrolled', 'Store permissions changed' => 'permissions',
+        // R32: payment recorded by hand in the admin (PaymentService::markPaidByAdmin()) stayed in English.
+        'Admin payment' => 'admin_payment',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';
     /** R23 UX: notes "<prefix><detail>" => admin.audit.note.<key> with {detail}. Longer prefixes first. */
     private const NOTE_PREFIXES = [
-        'Admin edit: ' => 'edited', 'Admin bulk price ' => 'bulk_price', 'Admin bulk ' => 'bulk', 'Refund: ' => 'refund',
+        'Admin payment: ' => 'admin_payment_detail', 'Admin edit: ' => 'edited', 'Admin bulk price ' => 'bulk_price', 'Admin bulk ' => 'bulk', 'Refund: ' => 'refund',
         'Credit note reversed: ' => 'credit_reversed', 'Capture under another provider reference: ' => 'other_reference',
         'Payment captured on a cancelled order: ' => 'captured_cancelled', 'API v1 client ' => 'api_client',
         'New payment session ' => 'payment_session', 'Payment link e-mailed by ' => 'payment_link_sent', 'Stripe dispute: ' => 'dispute',

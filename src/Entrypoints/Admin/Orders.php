@@ -270,7 +270,7 @@ function pageOrder(): void {
             <?php else: ?>
             <p class="muted"><?= esc(I18n::t('admin.order.final_status')) ?></p>
             <?php endif; ?>
-            <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.payment_method')) ?>: <?= esc(PaymentService::adminLabel($order)) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
+            <p class="muted" style="margin-top:.5rem" title="<?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method']) . (!empty($paymentSnapshot['provider']) ? ' · ' . (string)$paymentSnapshot['provider'] : '')) ?>"><?= esc(I18n::t('admin.order.payment_method')) ?>: <?= esc(PaymentService::adminLabel($order)) ?></p>
             <?php if (OrderWorkflow::isUnpaidInvoicePurchase($order) && (string)$order['status'] === 'pending'): ?>
             <p class="muted" data-invoice-purchase-hint><?= esc(I18n::format('admin.order.invoice_purchase_hint', ['days' => InvoiceService::paymentTermsDays($order, [])])) ?></p>
             <?php endif; ?>

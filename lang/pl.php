@@ -2191,6 +2191,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.item_refund_in_flight' => 'Zwrot pozycji {id} na kwotę {amount} zaksięgowany w trakcie zwrotu {pending}',
     'admin.audit.note.refund_in_flight' => 'Zwrot {provider} {id} na kwotę {amount} zaksięgowany w trakcie zwrotu {pending}',
     'admin.audit.note.mfa_enrolled' => 'Logowanie dwuskładnikowe skonfigurowane, kody odzyskiwania odnowione',
+    'admin.audit.note.admin_payment' => 'Płatność zarejestrowana w panelu',
+    'admin.audit.note.admin_payment_detail' => 'Płatność zarejestrowana w panelu: {detail}',
     'admin.audit.note.permissions' => 'Zmieniono uprawnienia do sklepu',
     'admin.audit.note.refund_legacy_identified' => 'Zwrot {provider} {id} na kwotę {amount} zaksięgowała starsza wersja (przed księgowaniem zwrotów według ID); nie zaksięgowano go ponownie',
     'admin.audit.event.admin.offline_payment_received' => 'Otrzymano płatność offline (panel)',
