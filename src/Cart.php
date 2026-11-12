@@ -386,7 +386,7 @@ class Cart {
         $rateCountry = $scenario['rate_country'];
         $applies  = $scenario['applies_vat'];
         // Downloads in an order collected in the store: supplied where the buyer lives (VatService::digitalSupply).
-        $digitalSupply = $applies && method_exists($taxProvider, 'digitalSupply') ? $taxProvider::digitalSupply($vctx) : null;
+        $digitalSupply = method_exists($taxProvider, 'digitalSupply') ? $taxProvider::digitalSupply($vctx) : null;
         // Catalog prices include the seller's domestic VAT. A zero-rated sale
         // (reverse charge, export) is charged that price without the VAT.
         $sellerCountry = strtoupper((string)$vctx['seller_country']);
@@ -417,8 +417,10 @@ class Cart {
             // A download reverse charged to a business of another member state: like the whole order would be, it is
             // charged without the seller's VAT and the buyer accounts for the VAT.
             $lineReverse = ($lineSupply['scheme'] ?? '') === 'reverse_charge';
-            $rate     = $applies && !$lineReverse ? $taxProvider::rate($lineCountry, $vatClass, $atDate) : 0.0;
-            if ($stripDomesticVat || $lineReverse) {
+            // R33: a download taxed where the buyer lives keeps its VAT next to exported or reverse-charged goods.
+            $lineTaxed = $lineSupply !== null ? !$lineReverse : $applies;
+            $rate     = $lineTaxed ? $taxProvider::rate($lineCountry, $vatClass, $atDate) : 0.0;
+            if ($lineSupply !== null ? $lineReverse : $stripDomesticVat) {
                 $unitNet = Money::round($taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'], (string)$summary['currency']);
                 $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];
                 $item['price'] = $unitNet;
@@ -431,7 +433,7 @@ class Cart {
                 (int)$item['price'],
                 (int)$item['qty'],
                 $rate,
-                !$applies || $lineReverse
+                !$lineTaxed
             );
 
             $item['vat_class']  = $resolved;

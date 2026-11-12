@@ -147,6 +147,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
+  download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
+  when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged
+  the e-book Austrian VAT, and the OSS report listed it under AT; sent to Switzerland and billed to Vienna, the e-book
+  was zero-rated. The e-book now pays the seller's VAT when the buyer lives in the seller's state (its own "SK" group
+  on the invoice, left out of the OSS report) and the billing country's OSS VAT next to exported goods (keeping its
+  gross price; the report now also reads export and reverse-charge invoices for such lines). A buyer billed outside
+  the EU next to exported goods still pays no VAT on the e-book.
 - **Order e-mails label the company in the order's language; method names in the admin (review round 33).** The
   IČO / DIČ / IČ DPH labels of an address block in an order e-mail followed the language the worker last ran in, not
   the order's: a Slovak e-mail read "Company ID: / Tax ID:", a Polish one the Spanish "Número de registro:". They are
