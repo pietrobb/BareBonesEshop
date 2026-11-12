@@ -428,7 +428,7 @@ function pageOrder(): void {
                 <td><?= esc($tx['provider']) ?></td>
                 <td class="muted"><?= esc($tx['provider_ref']) ?></td>
                 <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
-                <td class="muted"><?= esc($raw['event_type'] ?? '') ?></td>
+                <td class="muted"><?= esc(AuditLogLabels::note('payment_status', $id, (string)($raw['event_type'] ?? ''))) ?></td>
                 <td class="muted"><?= esc(implode(' · ', $details)) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$tx['created_at'])) ?></td>
             </tr>
