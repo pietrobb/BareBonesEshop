@@ -147,6 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The credit note of a released item refund executed late keeps the returned items' VAT rates (review round 34).**
+  When Stripe's `charge.refunded` arrives after the admin released an item refund, its credit note now credits the rates
+  the reversed item credit note did. It spread the amount over every VAT rate of the invoice, so in an order mixing
+  rates the VAT and OSS reports no longer netted to zero for that return.
 - **Checking a VAT ID no longer fails the checkout previews (review round 34).** The shipping and payment previews
   check a VAT ID in VIES within a budget of 20 lookups per 10 minutes and client, but running out of it answered the
   whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
