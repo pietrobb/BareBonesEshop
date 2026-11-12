@@ -1198,14 +1198,8 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
 
     $fullRefund = $refundedAmount >= $orderTotal;
     $eventPayload = ['charge_id' => $chargeId, 'cumulative_amount' => $refundedAmount];
-    // Oldest first: a refund booked up to 2.1.2 without its id is identified before newer ones (identifiesLegacyRefundWithin()).
-    usort($refunds, static fn(array $a, array $b): int => (int)($a['created'] ?? 0) <=> (int)($b['created'] ?? 0));
     // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
-    // R30: each refund's place in the charge's refunded total (amount_refunded counts pending refunds, not failed or
-    // canceled ones), which tells a refund a 2.0.x booking of that total covered from a later one.
-    $position = 0;
-    foreach ($refunds as $refund) {
-        if (!in_array((string)($refund['status'] ?? ''), ['failed', 'canceled'], true)) $position += max(0, (int)($refund['amount'] ?? 0));
+    foreach (stripeRefundPositions($refunds) as [$refund, $position]) {
         $refundId = (string)($refund['id'] ?? '');
         // Only money Stripe has returned: a pending refund (SEPA, bank transfers) may still fail; refund.updated books it.
         if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || (string)($refund['status'] ?? '') !== 'succeeded') continue;
@@ -1250,6 +1244,26 @@ function stripeChargeRefunds(array $charge): ?array {
 }
 
 /**
+ * Oldest first, as [refund, position]: a refund booked up to 2.1.2 without its id is identified before newer ones
+ * (identifiesLegacyRefundWithin()). R30: the position is the refund's place in the charge's refunded total
+ * (amount_refunded counts pending refunds, not failed or canceled ones), which tells a refund a 2.0.x booking of that
+ * total covered from a later one.
+ *
+ * @param list<array<string, mixed>> $refunds
+ * @return list<array{0: array<string, mixed>, 1: int}>
+ */
+function stripeRefundPositions(array $refunds): array {
+    usort($refunds, static fn(array $a, array $b): int => (int)($a['created'] ?? 0) <=> (int)($b['created'] ?? 0));
+    $position = 0;
+    $placed = [];
+    foreach ($refunds as $refund) {
+        if (!in_array((string)($refund['status'] ?? ''), ['failed', 'canceled'], true)) $position += max(0, (int)($refund['amount'] ?? 0));
+        $placed[] = [$refund, $position];
+    }
+    return $placed;
+}
+
+/**
  * R25: the shop's refund key a Stripe refund carries in its metadata (StripePayment::performRefund()), as the booking payload
  * expects it. R29: with the refund's creation time, which tells a refund booked up to 2.1.2 without its id from a newer one.
  */
@@ -1276,7 +1290,21 @@ function applyStripeRefundUpdated(array $refund, string $eventId, int $orderId):
     $payload = ['charge_id' => (string)($refund['charge'] ?? ''), 'refund_status' => (string)$refund['status']];
     if ($refund['status'] === 'succeeded') {
         // Same key as charge.refunded books it under: whichever event comes first moves the money.
-        PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId, $payload + stripeRefundKey($refund));
+        try {
+            PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId, $payload + stripeRefundKey($refund));
+        } catch (PaymentWebhookDeferred $e) {
+            // R32 (low): a refund 2.0.x booked while it was still pending gets no further charge.refunded to wait for, so
+            // its refund.updated was answered 503 for the three days Stripe redelivers it. The charge's refunds are listed
+            // here instead; only when Stripe cannot list them does the event wait.
+            $position = null;
+            $chargeId = (string)($refund['charge'] ?? '');
+            foreach ($chargeId === '' ? [] : stripeRefundPositions(stripeChargeRefunds(['id' => $chargeId]) ?? []) as [$listed, $place]) {
+                if ((string)($listed['id'] ?? '') === $refundId) $position = $place;
+            }
+            if ($position === null) throw $e;
+            PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId,
+                $payload + ['refund_position' => $position] + stripeRefundKey($refund));
+        }
         $order = Orders::byId($orderId);
         if ($order && (string)$order['payment_status'] === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', "Stripe refund {$refundId} succeeded");
