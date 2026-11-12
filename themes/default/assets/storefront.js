@@ -117,6 +117,21 @@
     }
   }
 
+  // R33: the billing fields are required only while "billing to another address" is ticked (hidden required fields
+  // would block the submit), and the toggle tells assistive technology whether the fields are shown.
+  function bindBillingToggle() {
+    const toggle = document.querySelector('.checkout-billing-toggle input[name="billing_different"]');
+    const box = document.getElementById('checkout-billing-fields');
+    if (!toggle || !box) return;
+    const sync = () => {
+      toggle.setAttribute('aria-expanded', toggle.checked ? 'true' : 'false');
+      box.querySelectorAll('input[name^="billing_"]').forEach((input) => { input.required = toggle.checked; });
+    };
+    toggle.addEventListener('change', sync);
+    sync();
+  }
+  document.addEventListener('DOMContentLoaded', bindBillingToggle);
+
   function bindReviewForm() {
     const form = document.querySelector('[data-review-form]');
     if (!form) return;

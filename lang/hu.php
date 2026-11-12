@@ -2269,6 +2269,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.invoice.type.invoice' => 'Számla',
     'admin.invoice.type.credit_note' => 'Jóváíró számla',
     'checkout.error.field_too_long_named' => 'A(z) „{field}” mező túl hosszú (legfeljebb {max} karakter).',
+    'checkout.error.field_invalid' => 'Egy mező érvénytelen karaktereket tartalmaz. Kérjük, írja be újra.',
+    'checkout.error.field_invalid_named' => 'A(z) „{field}” mező érvénytelen karaktereket tartalmaz. Kérjük, írja be újra.',
     'admin.stores.field.timezone' => 'Időzóna',
     'admin.stores.timezone_hint' => 'A számlák dátuma, a fizetési határidők és a napi forgalmi jelentés ehhez az időzónához igazodik.',
     'admin.stores.err.timezone' => 'Válasszon időzónát a listából.',
