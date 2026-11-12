@@ -147,6 +147,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Order e-mails label the company in the order's language; method names in the admin (review round 33).** The
+  IČO / DIČ / IČ DPH labels of an address block in an order e-mail followed the language the worker last ran in, not
+  the order's: a Slovak e-mail read "Company ID: / Tax ID:", a Polish one the Spanish "Número de registro:". They are
+  now in the order's language in all seven languages. The order history shows "Admin payment" and "Admin status
+  change" in the admin's language (an admin's own note stays as typed). The payment settings (countries and shipping
+  limits) and the shipping rate selects name the methods instead of listing their codes (`bank_transfer`, `cod`,
+  `gls`); the code stays the value and the tooltip.
 - **Refunds, invoices and checkout details (review round 33).** An item refund (credit note) whose refund job ran out of
   re-queues after network errors (about 9 hours) stayed pending for good; the order page now offers "Release credit
   note" with a required note once no job of it is left and the provider never answered for it: it fails like a
