@@ -95,7 +95,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.8 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.9 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -144,6 +144,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Downloads are taxed in the billing country (review round 33).** An e-service is supplied where the consumer lives
+  or the business is established, which the buyer gives as the billing address; the checkout took the delivery country
+  instead. An e-book for an Austrian consumer billed to Vienna paid 23 % Slovak VAT instead of 20 % Austrian under OSS,
+  and a German business with a valid VAT ID paid Slovak VAT instead of reverse charge. Checkout (HTML and JSON), the
+  cart, shipping and payment previews (`billing_country` parameter) and manual orders now place a download in the
+  billing country when the order is billed elsewhere, else in the delivery country as before; goods stay taxed where
+  they are delivered. The checkout form re-prices when the billing address changes while the cart holds a download.
+  A business with a valid VAT ID of the seller's own state (a Slovak VAT ID on a parcel to Czechia) is no longer an
+  OSS distance sale: it pays the seller's domestic VAT. Editing the lines of a reverse-charge order billed to another
+  address no longer refuses with "VAT treatment changed": the VAT ID on the billing address is kept.
 - **Admin and storefront details from review round 32.** A disabled "Add to cart" (while the cart call runs, or a
   saved-for-later line that cannot be moved) is grey with a not-allowed pointer in both themes; it kept the active
   colour. The audit note of a payment recorded by hand ("Admin payment", with or without the admin's note) is in the

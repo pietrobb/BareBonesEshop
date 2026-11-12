@@ -448,7 +448,7 @@ function apiShippingRates(): array {
     $subtotalGiven = isset($_GET['subtotal']) && $_GET['subtotal'] !== '';
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
     // Priced in the order's VAT scenario (country + optional buyer VAT ID): reverse charge and export are charged net.
-    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '');
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '', apiPreviewBillingCountry());
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []); // weight, units and promotions of what checkout orders
     if (cartIsDigitalOnly($cart['items'])) {
@@ -504,6 +504,12 @@ function apiPreviewVatId(): string {
     return preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId) ? $vatId : '';
 }
 
+/** R33: billing country of a preview request (?billing_country=, a download is taxed there); '' when absent or not offered. */
+function apiPreviewBillingCountry(): string {
+    $country = is_string($_GET['billing_country'] ?? null) ? strtoupper(trim($_GET['billing_country'])) : '';
+    return array_key_exists($country, ShippingService::billingCountries()) ? $country : '';
+}
+
 /** Rates with their localized delivery time (delivery_label) next to the raw delivery_days. */
 function shippingMethodsWithDeliveryLabel(array $methods): array {
     return array_map(static fn(array $method): array => $method + ['delivery_label' => ShippingService::deliveryLabel($method['delivery_days'] ?? '')], $methods);
@@ -526,7 +532,7 @@ function apiPaymentMethods(): array {
     $amount = Security::int($_GET['amount'] ?? 0);
     $shippingMethod = Security::slug($_GET['shipping_method'] ?? '');
     // Fees as the order charges them in its VAT scenario (country + optional buyer VAT ID).
-    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod);
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod, apiPreviewBillingCountry());
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []);
     $digitalOnly = cartIsDigitalOnly($cart['items']);
@@ -667,12 +673,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         http_response_code(422);
         return ['success' => false, 'error' => $buyerCompany['error']];
     }
-    // R31: another billing address than the delivery one. Shipping, pick-up points and VAT keep the delivery country.
+    // R31: another billing address than the delivery one. Shipping, pick-up points and VAT on goods keep the delivery
+    // country; R33: a download is supplied where the buyer lives, the billing country.
     $billing = OrderAddress::billingFromInput($input);
     if ($billing['error'] !== null) return checkoutRefusal((string)$billing['error_code'], 422);
     $vatId = $buyerCompany['vat_id'];
     // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges.
-    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod);
+    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, null, (string)($billing['address']['country'] ?? ''));
     [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
     [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];
     $taxProvider = Adapters::tax($taxProviderCode);
