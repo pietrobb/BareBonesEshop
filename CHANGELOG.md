@@ -144,6 +144,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The OSS report counts a sale where its VAT is owed, not where it is billed (review round 33).** Since the billing
+  address (round 31) the invoice names the billing party, and `cli/oss-report.php` took the consumption country from
+  it: goods delivered to Germany and billed to a Slovak address charged German VAT but were reported as "SK 19 %", the
+  seller's own state, and Germany's base was understated; their credit notes the same. The report now uses the country
+  whose rate the order charged (an invoice without a financial snapshot: its delivery address).
 - **Admin and storefront details from review round 32.** A disabled "Add to cart" (while the cart call runs, or a
   saved-for-later line that cannot be moved) is grey with a not-allowed pointer in both themes; it kept the active
   colour. The audit note of a payment recorded by hand ("Admin payment", with or without the admin's note) is in the
