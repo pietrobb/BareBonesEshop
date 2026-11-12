@@ -116,8 +116,10 @@ function collect(string $from, string $to, ?string $storeCode): array
     $db = Db::get();
 
     // A domestic invoice can hold OSS lines too: an e-book of a consumer from another member state next to goods
-    // collected in the seller's store. Its breakdown names their country (VatService::breakdownKey).
-    $where  = "WHERE i.issued_at BETWEEN :from AND :to AND i.vat_scenario IN ('oss', 'domestic') AND i.status = 'issued'";
+    // collected in the seller's store. Its breakdown names their country (VatService::breakdownKey). R33: so can an
+    // export or reverse-charge invoice (an e-book billed to an EU consumer next to goods leaving the EU); only those
+    // named groups of it count, below.
+    $where  = "WHERE i.issued_at BETWEEN :from AND :to AND i.vat_scenario IN ('oss', 'domestic', 'export', 'reverse_charge') AND i.status = 'issued'";
     $params = [':from' => $from, ':to' => $to];
 
     // Per-store filter via the number series (e.g. invoices "DE-20260001", credit notes "DE-CN-20260001"). The

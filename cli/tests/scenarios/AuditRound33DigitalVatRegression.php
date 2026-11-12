@@ -100,6 +100,88 @@ try {
     if ($r33vId > 0) OrderWorkflow::transition($r33vId, 'cancelled', 'R33 digital VAT fixture');
 } catch (Throwable $e) { $r33vFail('admin edit', $e); }
 
+// Capability review (run 432): an e-book next to a printed book took the goods' treatment whenever the billing country
+// worked out domestic, and was skipped when the goods carried no VAT. A parcel to Austria billed to a Slovak consumer
+// charged the e-book Austrian VAT and the OSS report listed it under AT; a parcel to Switzerland billed to Vienna
+// zero-rated an e-book supplied in Austria.
+if (!function_exists('collect')) {
+    if (!defined('BB_TEST_LOAD_OSS_ONLY')) define('BB_TEST_LOAD_OSS_ONLY', true);
+    require_once TEST_CLI_DIR . '/oss-report.php';
+}
+try {
+    $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+        VALUES (99333, 'default', 1, 'R33V print', 'r33v-print', 'R33V-PRINT', 'simple', 1230, 'eur', 'active', 10, 'continue')");
+    $_SESSION['cart'] = ['p_99331' => ['product_id' => 99331, 'variant_id' => null, 'qty' => 1], 'p_99333' => ['product_id' => 99333, 'variant_id' => null, 'qty' => 1]];
+    $r33vMixed = static function (string $delivery, string $billing): array {
+        $vat = CheckoutService::vatContext($delivery, '', '', false, null, $billing);
+        $items = array_values(array_filter(Cart::enriched($vat['context'])['items'], static fn(array $i): bool => !empty($i['available'])));
+        $snapshot = VatService::buildSnapshot($items, $vat['context'], ['currency' => 'eur', 'effective_date' => ShopTime::date('Y-m-d')]);
+        $byId = [];
+        foreach ($snapshot['components'] as $c) if (($c['type'] ?? '') === 'product') $byId[(int)$c['product_id']] = $c;
+        $cart = [];
+        foreach ($items as $i) $cart[(int)$i['product_id']] = [(int)$i['price'], (int)round((float)$i['vat_rate'] * 100)];
+        return ['snapshot' => $snapshot, 'ebook' => $byId[99331], 'print' => $byId[99333], 'cart' => $cart];
+    };
+    $r33vRate = static fn(string $country): int => (int)round(VatService::rate($country, 'standard') * 100);
+    $r33vTag = static fn(array $c): array => [(int)$c['rate_basis_points'], $c['rate_country'] ?? null, $c['supply'] ?? null];
+
+    // Parcel to Austria under OSS, billed to a Slovak consumer: the printed book pays Austrian VAT, the e-book Slovak.
+    $r33vAtSk = $r33vMixed('AT', 'SK');
+    assert_equals(['oss', [$r33vRate('AT'), null, null], [$r33vRate('SK'), 'SK', 'domestic']],
+        [$r33vAtSk['snapshot']['scenario'], $r33vTag($r33vAtSk['print']), $r33vTag($r33vAtSk['ebook'])],
+        'R33 mixed cart: a parcel to AT billed to an SK consumer — the e-book pays Slovak VAT, tagged domestic (was the Austrian rate, untagged)');
+    assert_equals([1230, $r33vRate('SK')], $r33vAtSk['cart'][99331], 'R33 mixed cart: the cart prices the e-book at the Slovak rate too');
+
+    // Parcel to Switzerland (export), billed to an Austrian consumer: goods zero-rated, the e-book Austrian VAT via OSS.
+    $r33vChAt = $r33vMixed('CH', 'AT');
+    assert_equals(['export', [0, null, null], [$r33vRate('AT'), 'AT', 'oss']],
+        [$r33vChAt['snapshot']['scenario'], $r33vTag($r33vChAt['print']), $r33vTag($r33vChAt['ebook'])],
+        'R33 mixed cart: an export billed to an AT consumer — the e-book is an Austrian OSS supply (was zero-rated)');
+    assert_equals([1230, $r33vRate('AT')], $r33vChAt['cart'][99331], 'R33 mixed cart: the e-book next to exported goods keeps its gross price and VAT');
+    assert_true($r33vChAt['cart'][99333][0] < 1230 && $r33vChAt['cart'][99333][1] === 0, 'R33 mixed cart: the exported book is still charged without VAT');
+
+    // Billed outside the EU next to exported goods: nothing backs an EU residence, the e-book is zero-rated like them.
+    $r33vChUs = $r33vMixed('CH', 'US');
+    assert_equals([0, null, null], $r33vTag($r33vChUs['ebook']), 'R33 mixed cart: an export billed to the US leaves the e-book zero-rated');
+    // The handled direction is unchanged: a domestic parcel billed to Austria taxes the e-book under OSS.
+    assert_equals([$r33vRate('AT'), 'AT', 'oss'], $r33vTag($r33vMixed('SK', 'AT')['ebook']), 'R33 mixed cart: a parcel at home billed to AT keeps the e-book under OSS');
+
+    // The OSS report lists the Austrian goods alone for the first order, and the Austrian e-book for the export.
+    $r33vReport = static function (): array {
+        $rows = [];
+        $day = ShopTime::date('Y-m-d');
+        foreach (collect($day, $day, null) as $row) $rows[$row['consumption_country'] . '|' . $row['vat_rate']] = [$row['net'], $row['vat']];
+        return $rows;
+    };
+    $r33vIssue = static function (string $number, array $snapshot, string $delivery, string $billing) use ($pdo): void {
+        $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, billing_addr, subtotal, shipping_cost, tax_amount,
+                discount_amount, payment_fee, total, currency, status, payment_status, payment_method, shipping_method, vat_scenario, financial_snapshot, store_id, created_at)
+            VALUES (?, 'R33V Mixed', 'r33v-mixed@example.test', '', ?, ?, ?, 0, 0, 0, 0, ?, 'eur', 'delivered', 'paid', 'bank_transfer', 'dpd', ?, ?, 'default', " . Db::now() . ")")
+            ->execute([$number, json_encode(['street' => 'Lieferstraße 1', 'city' => 'Wien', 'zip' => '1010', 'country' => $delivery]),
+                json_encode(['name' => 'R33V Plátca', 'street' => 'Fakturačná 9', 'city' => 'Bratislava', 'zip' => '81101', 'country' => $billing]),
+                (int)$snapshot['totals']['subtotal'], (int)$snapshot['totals']['gross'], (string)$snapshot['scenario'],
+                json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ]);
+        InvoiceService::issue((int)$pdo->lastInsertId());
+    };
+    $r33vDelta = static function (array $before, array $after): array {
+        $delta = [];
+        foreach ($after + $before as $key => $_) {
+            $change = [($after[$key][0] ?? 0) - ($before[$key][0] ?? 0), ($after[$key][1] ?? 0) - ($before[$key][1] ?? 0)];
+            if ($change !== [0, 0]) $delta[$key] = $change;
+        }
+        return $delta;
+    };
+    $r33vAt = (string)((float)$r33vRate('AT') / 100);
+    $r33vBefore = $r33vReport();
+    $r33vIssue('R33V-MIX-1', $r33vAtSk['snapshot'], 'AT', 'SK');
+    assert_equals(["AT|{$r33vAt}" => [(int)$r33vAtSk['print']['net'], (int)$r33vAtSk['print']['vat']]], $r33vDelta($r33vBefore, $r33vReport()),
+        'R33 mixed cart: the OSS report counts only the Austrian goods; the Slovak e-book is no OSS supply (was in the AT bucket)');
+    $r33vBefore = $r33vReport();
+    $r33vIssue('R33V-MIX-2', $r33vChAt['snapshot'], 'CH', 'AT');
+    assert_equals(["AT|{$r33vAt}" => [(int)$r33vChAt['ebook']['net'], (int)$r33vChAt['ebook']['vat']]], $r33vDelta($r33vBefore, $r33vReport()),
+        'R33 mixed cart: the e-book next to an export is reported as an Austrian OSS supply');
+} catch (Throwable $e) { $r33vFail('mixed cart', $e); }
+
 $r33vStoresProp->setValue(null, $r33vStores);
 Bootstrap::initStoreContext('/', '', 'default');
 $_GET = $r33vGet;

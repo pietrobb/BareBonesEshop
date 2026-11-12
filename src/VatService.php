@@ -120,7 +120,9 @@ class VatService implements TaxProvider
      * How the order's digital lines are supplied when that differs from the goods'. Goods collected in the seller's
      * store are supplied there, but a download is supplied where the buyer lives: with OSS on, an EU consumer from
      * another member state pays their own country's rate on the e-book (scheme "oss"); a business with a valid VAT ID
-     * of another member state accounts for the VAT itself (scheme "reverse_charge", 0 %). Null: as the goods.
+     * of another member state accounts for the VAT itself (scheme "reverse_charge", 0 %). R33: a buyer living in the
+     * seller's state pays the seller's VAT on it (scheme "domestic") even when the goods go abroad under OSS or leave
+     * the EU. Null: as the goods — also a buyer outside the EU next to exported goods.
      * @return array{country: string, scheme: string}|null
      */
     public static function digitalSupply(array $context): ?array
@@ -128,11 +130,18 @@ class VatService implements TaxProvider
         $declared = strtoupper(trim((string)($context['digital_customer_country'] ?? '')));
         if ($declared === '' || $declared === strtoupper(trim((string)($context['customer_country'] ?? '')))) return null;
         $scenario = self::resolveScenario(['customer_country' => $declared, 'customer_country_verified' => false] + $context);
-        return match ((string)($scenario['scenario'] ?? '')) {
-            self::SCENARIO_OSS => ['country' => (string)$scenario['rate_country'], 'scheme' => self::SCENARIO_OSS],
-            self::SCENARIO_REVERSE_CHARGE => ['country' => (string)$scenario['rate_country'], 'scheme' => self::SCENARIO_REVERSE_CHARGE],
-            default => null,
-        };
+        $country = (string)$scenario['rate_country'];
+        switch ((string)($scenario['scenario'] ?? '')) {
+            case self::SCENARIO_OSS:
+            case self::SCENARIO_REVERSE_CHARGE:
+                return ['country' => $country, 'scheme' => (string)$scenario['scenario']];
+            case self::SCENARIO_DOMESTIC:
+            case self::SCENARIO_DOMESTIC_SUBTHRESH:
+                $goods = self::resolveScenario($context);
+                if ($goods['applies_vat'] ? (string)$goods['rate_country'] === $country : !self::isEuCountry($declared)) return null;
+                return ['country' => $country, 'scheme' => self::SCENARIO_DOMESTIC];
+        }
+        return null;
     }
 
     /**
@@ -338,7 +347,7 @@ class VatService implements TaxProvider
         $currency = strtolower((string)($amounts['currency'] ?? 'eur'));
         $appliesVat = (bool)$scenario['applies_vat'];
         $rateCountry = (string)$scenario['rate_country'];
-        $digitalSupply = $appliesVat ? self::digitalSupply($context) : null;
+        $digitalSupply = self::digitalSupply($context);
 
         $products = [];
         $subtotal = 0;
@@ -354,7 +363,7 @@ class VatService implements TaxProvider
             $category = (string)($item['vat_category'] ?? ($digital ? self::digitalCategory((string)($item['vat_class'] ?? 'standard')) : ($item['vat_class'] ?? 'standard')));
             $lineSupply = $digital ? $digitalSupply : null;
             $lineCountry = $lineSupply['country'] ?? $rateCountry;
-            $rateBasisPoints = $appliesVat && ($lineSupply['scheme'] ?? '') !== self::SCENARIO_REVERSE_CHARGE
+            $rateBasisPoints = ($lineSupply !== null ? $lineSupply['scheme'] !== self::SCENARIO_REVERSE_CHARGE : $appliesVat)
                 ? (int)round(self::rate($lineCountry, $category, $effectiveDate) * 100)
                 : 0;
             $products[] = ($lineSupply !== null ? ['rate_country' => $lineCountry, 'supply' => $lineSupply['scheme']] : []) + [
@@ -556,7 +565,7 @@ class VatService implements TaxProvider
                 if ($quantity <= 0 || $unitGross < 0 || $grossBefore !== $unitGross * $quantity
                     || $componentDiscount < 0 || $componentDiscount > $grossBefore
                     || $componentGross !== $grossBefore - $componentDiscount
-                    || (isset($component['supply']) && !in_array($component['supply'], [self::SCENARIO_OSS, self::SCENARIO_REVERSE_CHARGE], true))
+                    || (isset($component['supply']) && !in_array($component['supply'], [self::SCENARIO_OSS, self::SCENARIO_REVERSE_CHARGE, self::SCENARIO_DOMESTIC], true))
                     || (($component['supply'] ?? '') === self::SCENARIO_REVERSE_CHARGE && $rateBasisPoints !== 0)) {
                     throw new \InvalidArgumentException('Financial snapshot product invariant failed');
                 }

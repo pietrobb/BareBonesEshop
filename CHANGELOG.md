@@ -144,6 +144,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
+  download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
+  when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged
+  the e-book Austrian VAT, and the OSS report listed it under AT; sent to Switzerland and billed to Vienna, the e-book
+  was zero-rated. The e-book now pays the seller's VAT when the buyer lives in the seller's state (its own "SK" group
+  on the invoice, left out of the OSS report) and the billing country's OSS VAT next to exported goods (keeping its
+  gross price; the report now also reads export and reverse-charge invoices for such lines). A buyer billed outside
+  the EU next to exported goods still pays no VAT on the e-book.
 - **Downloads are taxed in the billing country (review round 33).** An e-service is supplied where the consumer lives
   or the business is established, which the buyer gives as the billing address; the checkout took the delivery country
   instead. An e-book for an Austrian consumer billed to Vienna paid 23 % Slovak VAT instead of 20 % Austrian under OSS,
