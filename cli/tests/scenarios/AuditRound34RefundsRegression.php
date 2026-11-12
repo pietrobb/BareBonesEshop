@@ -140,10 +140,16 @@ try {
     assert_equals([0, $before], [R34rFakeStripe::$refundCalls, PaymentService::refundedAmount($o1)],
         'R34 refunds: a job of a released item refund queued again by hand sends no refund (was: paid it out)');
 
-    // Low: a second submit of a release that went through reports it, not an error.
+    // Low: a second submit of a release that went through reports it, not an error (and releases nothing more).
+    $o6 = $r34rOrder('R34R-6', 'pi_r34r_6');
+    $i6 = $r34rItemRefund($o6, 'r34r-6-item');
+    R34rFakeStripe::$lookup = ['status' => 'none'];
+    $first6 = PaymentService::releaseStalledItemRefund($o6, $i6['id'], 'r34r-admin', 'R34R first click');
+    $second6 = PaymentService::releaseStalledItemRefund($o6, $i6['id'], 'r34r-admin', 'R34R second click');
     $r34rHandler = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Orders.php');
-    assert_true(str_contains($r34rHandler, "\$refund['status'] === 'failed') \$outcome = 'released'"),
-        'R34 refunds: a double click on "release" after it went through says released (was: an error)');
+    assert_equals(['released', 'already_released', 'failed', [-$i6['amount'], $i6['amount']], true],
+        [$first6, $second6, $r34rItem($i6['id']), $r34rCredits($o6), str_contains($r34rHandler, "'already_released' => 'admin.order.msg.refund_released'")],
+        'R34 refunds: a double click on "release" after it went through says released and reverses nothing twice (was: an error)');
 
     // Low: an item refund paid back by hand (order without a payment id) mails the customer, once.
     $r34rDropQueue();

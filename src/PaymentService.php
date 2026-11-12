@@ -795,8 +795,10 @@ class PaymentService {
         if (Db::get()->inTransaction()) throw new \LogicException('Release a stalled item refund outside a transaction');
         $order = Orders::byId($orderId);
         $stalled = $order ? self::stalledItemRefund($order) : null;
-        if ($order === null || $stalled === null || $stalled['refund_id'] !== $itemRefundId) return '';
         $refund = Rma::refundById($itemRefundId) ?? [];
+        // R34 (low): a second submit (double click) of a release that went through says so instead of failing.
+        if ($order !== null && $stalled === null && (int)($refund['order_id'] ?? 0) === $orderId && ($refund['status'] ?? '') === 'failed') return 'already_released';
+        if ($order === null || $stalled === null || $stalled['refund_id'] !== $itemRefundId) return '';
         $key = (string)($refund['idempotency_key'] ?? '');
         $gateway = WorkerJobs::orderPaymentGateway([], $order);
         $found = $gateway instanceof RefundLookupAdapter ? $gateway->refundByKey((string)($order['payment_id'] ?? ''), $key) : null;
