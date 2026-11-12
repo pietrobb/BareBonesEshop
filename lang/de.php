@@ -1806,6 +1806,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_invalid' => 'Die Adresse wurde nicht gespeichert. Bitte prüfen Sie die markierten Felder.',
     'account.err_address_required' => 'Dieses Feld ist erforderlich.',
     'account.err_address_country' => 'Wählen Sie ein Land aus der Liste.',
+    'account.err_address_company_id' => 'Geben Sie eine gültige Firmen- oder Steuernummer ein: Buchstaben und Ziffern, höchstens 20 Zeichen.',
     'account.addr_type_shipping' => 'Lieferadresse',
     'account.addr_type_billing' => 'Rechnungsadresse',
     'account.downloads' => 'Downloads',
