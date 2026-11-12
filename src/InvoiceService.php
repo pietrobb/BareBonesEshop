@@ -670,11 +670,22 @@ final class InvoiceService
      * amount comes off the order's invoice in proportion to its VAT breakdown, one "Refund" row per VAT rate. It books
      * nothing on the refund ledger (the payment ledger already holds the refund). Null when the order has no issued
      * invoice, which is then nothing to correct. A repeated call with the same $refundKey returns the same credit note.
+     * $itemRates (gross and net per breakdown key) limits it to those rates: the money of a released item refund corrects
+     * the returned items' rates, as the reversed item credit note did, not every rate of the invoice.
+     * @param array<string, array{gross: int, net: int}> $itemRates
      */
-    public static function creditRefund(int $orderId, int $amount, string $refundKey, string $reason = ''): ?array
+    public static function creditRefund(int $orderId, int $amount, string $refundKey, string $reason = '', array $itemRates = []): ?array
     {
         if ($amount <= 0 || $refundKey === '') throw new InvalidArgumentException('A refund credit note needs an amount and the refund key');
-        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($orderId, $amount): array {
+        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($orderId, $amount, $itemRates): array {
+            $own = [];
+            foreach ($itemRates as $key => $part) {
+                $key = (string)$key;
+                if (!isset($rates[$key]) || $part['gross'] <= 0) continue;
+                $gross = min($part['gross'], $rates[$key]['gross']);
+                $own[$key] = ['gross' => $gross, 'net' => (int)round($part['net'] * $gross / $part['gross'])];
+            }
+            if ($own !== [] && $amount <= array_sum(array_column($own, 'gross'))) $rates = $own;
             if ($amount > $uncredited) {
                 // R16: money that came in after a cancellation credit note (a cancelled purchase on invoice paid all the same) goes
                 // back with that part of the invoice already credited: only the rest is credited. Was: refused, and the
@@ -880,6 +891,16 @@ final class InvoiceService
             AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
         $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
         if ($item->fetchColumn()) return null;
+        // R34 (capability review 437): the money of a released item refund credits the rates its reversed credit note did.
+        $released = $db->prepare("SELECT i.vat_breakdown FROM order_refunds r JOIN invoices i ON i.id = r.credit_note_id
+            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'failed' AND r.rma_id IS NOT NULL
+            AND (r.idempotency_key IN (:key, :settles) OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND r.payment_reference = :ref))
+            ORDER BY r.id DESC LIMIT 1");
+        $released->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
+        $itemRates = [];
+        foreach ((array)json_decode((string)$released->fetchColumn(), true) as $key => $rate) {
+            if (is_array($rate)) $itemRates[(string)$key] = ['gross' => -(int)($rate['net'] ?? 0) - (int)($rate['vat'] ?? 0), 'net' => -(int)($rate['net'] ?? 0)];
+        }
         // R14 #2: an item refund of the same amount whose provider refund id is not noted yet may be this very refund (its
         // webhook came before the refund job): wait for the job instead of issuing a second credit note.
         // R23: only a refund booked under a provider refund id can be that. A gateway that names none (GoPay, ThePay,
@@ -887,7 +908,7 @@ final class InvoiceService
         // refund of the same amount waited 30 minutes and then failed.
         $paymentId = (string)(Orders::byId($orderId)['payment_id'] ?? '');
         $providerRefundId = (string)$row['provider_ref'];
-        if ($providerRefundId === '' || $providerRefundId === $paymentId) return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey);
+        if ($providerRefundId === '' || $providerRefundId === $paymentId) return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey, '', $itemRates);
         $inFlight = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending'
             AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
         $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
@@ -898,7 +919,7 @@ final class InvoiceService
             JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals + 1], 60);
             return null;
         }
-        return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey);
+        return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey, '', $itemRates);
     }
 
     /** Re-render PDF for an existing invoice (e.g. file accidentally deleted). */
