@@ -305,6 +305,9 @@ class Setup
             self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
+            foreach (is_array($stores) ? (array)($stores['stores'] ?? []) : [] as $storeId => $store) {
+                if (is_array($store)) $add(...array_values(self::ossThresholdCheck($probe, (string)$storeId, $store, (array)$stores['stores'])));
+            }
             $add(...array_values(self::digitalFilesCheck($probe)));
             $add(...array_values(self::digitalBundlesCheck($probe)));
             $pricingFile = $root . '/pricing.json';
@@ -373,6 +376,49 @@ class Setup
             ? "Store {$storeId} has a {$currency} price for everything it offers."
             : "Store {$storeId} sells in {$currency}, but {$gap['count']} active product(s)/variant(s) have no {$currency} price and are not for sale there (e.g. " . implode(', ', $gap['skus']) . ').',
             'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
+    }
+
+    /** EU-wide threshold of cross-border B2C sales (goods dispatched, e-services) above which OSS VAT applies (art. 59c). */
+    public const OSS_THRESHOLD_EUR_CENTS = 1000000;
+
+    /**
+     * R34 (low): with OSS off, a consumer in another member state pays the seller's VAT only while the seller's EU
+     * cross-border B2C sales stay under 10 000 € in the current and the previous calendar year. Their net amount (issued
+     * invoices and credit notes charged so, of every store of the same seller, in EUR) is checked; above it the store
+     * must switch OSS on. Was: a manual switch nobody was reminded of.
+     * @param array<string, mixed> $stores every store (stores.json), for the stores sharing the seller
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function ossThresholdCheck(PDO $db, string $storeId, array $store, array $stores): array {
+        $name = 'stores.oss_threshold.' . $storeId;
+        $seller = (string)($store['legal']['seller'] ?? $storeId);
+        $sameSeller = [];
+        foreach ($stores as $id => $other) {
+            if (is_array($other) && (string)($other['legal']['seller'] ?? $id) === $seller) $sameSeller[] = (string)$id;
+        }
+        if (!empty($store['oss_enabled'])) {
+            return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} charges consumers in other EU states their own VAT (OSS).", 'action' => ''];
+        }
+        $sameSeller = $sameSeller ?: [$storeId];
+        $year = (int)ShopTime::date('Y');
+        $marks = implode(',', array_fill(0, count($sameSeller), '?'));
+        $stmt = $db->prepare("SELECT COALESCE(SUM(i.total_net), 0) FROM invoices i JOIN orders o ON o.id = i.order_id
+            WHERE o.store_id IN ({$marks}) AND i.status = 'issued' AND i.vat_scenario = ? AND LOWER(i.currency) = 'eur'
+              AND i.issued_at >= ? AND i.issued_at < ?");
+        $worst = [0, $year];
+        foreach ([$year - 1, $year] as $y) {
+            $stmt->execute([...$sameSeller, VatService::SCENARIO_DOMESTIC_SUBTHRESH, sprintf('%04d-01-01', $y), sprintf('%04d-01-01', $y + 1)]);
+            $sum = (int)$stmt->fetchColumn();
+            if ($sum >= $worst[0]) $worst = [$sum, $y];
+        }
+        [$sum, $y] = $worst;
+        $amount = number_format($sum / 100, 2, '.', ' ') . ' EUR';
+        if ($sum >= self::OSS_THRESHOLD_EUR_CENTS) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y} at its own VAT; above 10 000 EUR their own country's VAT applies (OSS).",
+                'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$storeId}); from then on such sales carry the buyer's country's VAT."];
+        }
+        return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
     }
 
     /**

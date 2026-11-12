@@ -52,7 +52,7 @@ final class SetupChecklist
     /** A per-store check (its SKUs, seller data) is shown only in the store the dashboard is switched to. */
     private static function concernsCurrentStore(string $checkName): bool
     {
-        if (!preg_match('/^stores\.(?:legal|currency_prices)\.(.+)$/', $checkName, $m)) return true;
+        if (!preg_match('/^stores\.(?:legal|currency_prices|oss_threshold)\.(.+)$/', $checkName, $m)) return true;
         return $m[1] === StoreContext::current()->id();
     }
 
@@ -79,7 +79,7 @@ final class SetupChecklist
     }
 
     /** Check-name prefixes followed by the store, provider or extension the check is about. */
-    private const ITEM_GROUPS = ['stores.legal.', 'stores.url_prefix.', 'stores.timezone.', 'stores.currency_prices.', 'payment.provider.', 'runtime.extension.'];
+    private const ITEM_GROUPS = ['stores.legal.', 'stores.url_prefix.', 'stores.timezone.', 'stores.currency_prices.', 'stores.oss_threshold.', 'payment.provider.', 'runtime.extension.'];
 
     public static function fixPage(string $checkName): ?string
     {

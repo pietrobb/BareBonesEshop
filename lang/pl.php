@@ -1585,6 +1585,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.stores_url_prefix' => 'Sklep {item} używa zarezerwowanego prefiksu adresu',
     'admin.doctor.stores_timezone' => 'Sklep {item} nie ma prawidłowej strefy czasowej',
     'admin.doctor.stores_currency_prices' => 'Sklep {item} ma produkty bez ceny w swojej walucie',
+    'admin.doctor.stores_oss_threshold' => 'Sklep {item} przekroczył próg 10 000 € sprzedaży konsumentom w innych państwach UE — włącz OSS',
     'admin.doctor.admin_accounts' => 'Nikt nie może zalogować się do panelu',
     'admin.doctor.admin_mfa_key' => 'Niektórzy administratorzy nie mogą się zalogować (klucz dwuskładnikowy)',
     'admin.doctor.catalog_digital_files' => 'Niektóre produkty do pobrania nie mają pliku i nie są sprzedawane',

@@ -170,7 +170,7 @@ try {
         'R6 invoice: a seller in the language\'s own country still cites its national act');
     assert_true(str_contains($r6mNotice('vat.reverse_charge_note', 'en', 'SK'), 'Article 138'), 'R6 invoice: the English wording cites the Directive for every seller');
     $r6mPdfSource = str_replace("\r\n", "\n", (string)file_get_contents(TEST_CLI_DIR . '/../src/InvoiceService.php'));
-    assert_true(str_contains($r6mPdfSource, "!empty(\$vatBreakdown['services_only']), (string)(\$sellerSnap['country'] ?? ''));"),
+    assert_true(str_contains($r6mPdfSource, "\$locale, \$vatBreakdown, (string)(\$sellerSnap['country'] ?? '')) as \$notice)"),
         'R6 invoice: the PDF passes the seller snapshot\'s country to the VAT notice');
 
 } catch (Throwable $e) {

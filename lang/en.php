@@ -1585,6 +1585,7 @@ return [
     'admin.doctor.stores_url_prefix' => 'Store {item} uses a reserved address prefix',
     'admin.doctor.stores_timezone' => 'Store {item} has no valid time zone',
     'admin.doctor.stores_currency_prices' => 'Store {item} has products without a price in its currency',
+    'admin.doctor.stores_oss_threshold' => 'Store {item} passed the 10 000 € threshold for sales to consumers in other EU states — turn on OSS',
     'admin.doctor.admin_accounts' => 'Nobody can sign in to the administration',
     'admin.doctor.admin_mfa_key' => 'Some administrators cannot sign in (two-factor key)',
     'admin.doctor.catalog_digital_files' => 'Some downloads have no file and are not for sale',
