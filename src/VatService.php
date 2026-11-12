@@ -773,6 +773,18 @@ class VatService implements TaxProvider
         ];
     }
 
+    /** R34: the status of a VAT ID while its cached VIES answer is fresh (see validateVatId()), else null. */
+    public static function cachedVatIdStatus(string $vatId): ?string
+    {
+        $vatId = strtoupper((string)preg_replace('/\s+/', '', $vatId));
+        if (!preg_match('/^[A-Z]{2}[0-9A-Z]{6,14}$/', $vatId)) return null;
+        $row = Db::get()->prepare('SELECT status, checked_at, ttl_seconds FROM vat_id_cache WHERE vat_id = :v');
+        $row->execute([':v' => $vatId]);
+        $cached = $row->fetch(\PDO::FETCH_ASSOC);
+        if (!$cached || time() - (int)strtotime((string)$cached['checked_at'] . ' UTC') >= (int)($cached['ttl_seconds'] ?? 0)) return null;
+        return (string)$cached['status'];
+    }
+
     /**
      * Build the configured VAT ID validator instance.
      *

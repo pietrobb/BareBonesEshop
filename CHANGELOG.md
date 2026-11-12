@@ -147,6 +147,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Checking a VAT ID no longer fails the checkout previews (review round 34).** The shipping and payment previews
+  check a VAT ID in VIES within a budget of 20 lookups per 10 minutes and client, but running out of it answered the
+  whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
+  the same office IP. Over the budget an unchecked VAT ID now just counts as unverified in the preview (the order
+  itself is still checked), and a VAT ID whose VIES answer is cached no longer uses up the budget.
 - **Editing an order's lines in the admin keeps the VAT of every line (review round 34).** The edit re-priced the
   buyer's VAT ID as unverified unless the whole order was reverse charge, and compared only the order's scenario. An
   e-book reverse charged for a German business next to goods taxed at home then silently paid German OSS VAT after
