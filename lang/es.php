@@ -2156,6 +2156,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.item_refund_in_flight' => 'Reembolso de artículo {id} de {amount} registrado mientras el reembolso de {pending} está en curso',
     'admin.audit.note.refund_in_flight' => 'Reembolso {provider} {id} de {amount} registrado mientras el reembolso de {pending} está en curso',
     'admin.audit.note.mfa_enrolled' => 'Inicio de sesión en dos pasos configurado, códigos de recuperación renovados',
+    'admin.audit.note.admin_payment' => 'Pago registrado en la administración',
+    'admin.audit.note.admin_payment_detail' => 'Pago registrado en la administración: {detail}',
     'admin.audit.note.permissions' => 'Permisos de tienda modificados',
     'admin.audit.note.refund_legacy_identified' => 'El reembolso {provider} {id} de {amount} lo registró una versión anterior (antes de registrar los reembolsos por su ID); no se registra de nuevo',
     'admin.audit.event.admin.offline_payment_received' => 'Pago fuera de línea recibido (administración)',

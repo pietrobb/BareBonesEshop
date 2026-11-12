@@ -2184,6 +2184,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.item_refund_in_flight' => 'A(z) {id} tétel-visszatérítés ({amount}) a folyamatban lévő {pending} visszatérítés közben könyvelve',
     'admin.audit.note.refund_in_flight' => '{provider} visszatérítés ({id}, {amount}) könyvelve a(z) {pending} folyamatban lévő visszatérítése közben',
     'admin.audit.note.mfa_enrolled' => 'Kétlépcsős bejelentkezés beállítva, helyreállító kódok megújítva',
+    'admin.audit.note.admin_payment' => 'Fizetés rögzítve az adminban',
+    'admin.audit.note.admin_payment_detail' => 'Fizetés rögzítve az adminban: {detail}',
     'admin.audit.note.permissions' => 'Bolti jogosultságok módosítva',
     'admin.audit.note.refund_legacy_identified' => 'A(z) {provider} {id} visszatérítés ({amount}) egy korábbi verzió könyvelte (a visszatérítési azonosító szerinti könyvelés előtt); nem könyveltük újra',
     'admin.audit.event.admin.offline_payment_received' => 'Offline fizetés beérkezett (admin)',

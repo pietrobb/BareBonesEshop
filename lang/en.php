@@ -2204,6 +2204,8 @@ return [
     'admin.audit.note.item_refund_in_flight' => 'Item refund {id} of {amount} booked while the refund of {pending} is in progress',
     'admin.audit.note.refund_in_flight' => '{provider} refund {id} of {amount} booked while the refund of {pending} is in progress',
     'admin.audit.note.mfa_enrolled' => 'Two-factor sign-in set up, recovery codes renewed',
+    'admin.audit.note.admin_payment' => 'Payment recorded in the admin',
+    'admin.audit.note.admin_payment_detail' => 'Payment recorded in the admin: {detail}',
     'admin.audit.note.permissions' => 'Store permissions changed',
     'admin.audit.note.refund_legacy_identified' => '{provider} refund {id} of {amount} was booked by an older version before refunds were booked by their id; not booked again',
     'admin.audit.event.admin.offline_payment_received' => 'Offline payment received (admin)',

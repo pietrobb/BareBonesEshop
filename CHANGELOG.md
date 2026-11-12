@@ -88,7 +88,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.6 (bookshop 1.0.1), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.7 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -137,6 +137,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Admin and storefront details from review round 32.** A disabled "Add to cart" (while the cart call runs, or a
+  saved-for-later line that cannot be moved) is grey with a not-allowed pointer in both themes; it kept the active
+  colour. The audit note of a payment recorded by hand ("Admin payment", with or without the admin's note) is in the
+  admin's language, and the audit log is titled "Auditný záznam" / "Auditní záznam" in Slovak and Czech. The shipping
+  page names the zones (the code, e.g. `near_eu`, stays the value and the tooltip), and the order detail shows the
+  payment method's name with its code (e.g. `bank_transfer`) only as the tooltip, as the order list does.
 - **Invoice, texts and log details from review round 30.** A malformed BIC no longer goes into the invoice's payment
   QR (the e-mail's QR already left it out). A seller with only a VAT id shows it in the CS/HU/PL order e-mail instead of
   an empty line. The audit log translates the provider refund booked during an admin refund, two-factor setup and store

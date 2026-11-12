@@ -122,6 +122,7 @@ main{padding:28px 0 8px}
 .sidebar input[type=number]{width:46%;padding:8px;border:1px solid #b9b0a1;border-radius:6px;margin:0 2% 6px 0}
 .sidebar .btn-apply,.btn-cart,.btn-checkout,.btn{background:var(--bk-accent);color:#fff;border-radius:999px}
 .sidebar .btn-apply:hover,.btn-cart:hover,.btn-checkout:hover,.btn:hover{background:var(--bk-accent-dark);color:#fff}
+.btn-cart:disabled,.btn-cart:disabled:hover,.btn-saved-to-cart:disabled,.btn-saved-to-cart:disabled:hover{background:#d9d9d9;color:#4a4a4a;cursor:not-allowed}
 .sidebar .btn-clear{display:inline-block;margin-top:8px;background:none;color:var(--bk-accent);text-decoration:underline;padding:8px 0}
 .sort-bar select,.btn-sort{border-color:#b9b0a1;border-radius:6px;padding:8px}
 .pagination a{background:var(--bk-card);border-color:var(--bk-line);color:var(--bk-ink)}.pagination a:hover{border-color:var(--bk-accent)}.pagination .current{background:var(--bk-accent)}

@@ -2184,6 +2184,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.item_refund_in_flight' => 'Positionserstattung {id} über {amount} gebucht, während die Erstattung von {pending} läuft',
     'admin.audit.note.refund_in_flight' => '{provider}-Erstattung {id} über {amount} gebucht, während die Erstattung von {pending} läuft',
     'admin.audit.note.mfa_enrolled' => 'Zwei-Faktor-Anmeldung eingerichtet, Wiederherstellungscodes erneuert',
+    'admin.audit.note.admin_payment' => 'Zahlung im Admin erfasst',
+    'admin.audit.note.admin_payment_detail' => 'Zahlung im Admin erfasst: {detail}',
     'admin.audit.note.permissions' => 'Shop-Berechtigungen geändert',
     'admin.audit.note.refund_legacy_identified' => 'Erstattung {provider} {id} über {amount} wurde von einer älteren Version gebucht (vor der Buchung nach Erstattungs-ID); nicht erneut gebucht',
     'admin.audit.event.admin.offline_payment_received' => 'Offline-Zahlung erhalten (Admin)',
