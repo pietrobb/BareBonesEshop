@@ -1510,8 +1510,9 @@ final class InvoiceService
             'ic_dph'  => (string)($addr['ic_dph']   ?? ''),
         ];
         // The goods went elsewhere: the document also names the delivery address (not for a digital-only order).
-        $delivery = OrderAddress::delivery($order);
-        if (OrderAddress::billingDiffers($order) && trim((string)($delivery['street'] ?? '')) !== '') {
+        // R33: for a pick-up order the pick-up point, not the home address the order also carries; none at the shop.
+        $delivery = OrderAddress::deliveryPlace($order);
+        if (OrderAddress::billingDiffers($order) && $delivery !== null) {
             $snapshot['delivery'] = ['name' => (string)$delivery['name'], 'street' => (string)$delivery['street'], 'city' => (string)($delivery['city'] ?? ''),
                 'zip' => (string)($delivery['zip'] ?? ''), 'country' => strtoupper((string)($delivery['country'] ?? ''))];
         }

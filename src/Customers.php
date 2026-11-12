@@ -614,12 +614,14 @@ class Customers {
                            WHERE customer_id = ? AND type = ?")
                ->execute([$customerId, $type]);
         }
+        // R33: the company's IČO and DIČ are kept too (columns of migration 20261112100000; skipped before it runs).
+        $ids = array_values(array_filter(self::ADDRESS_COMPANY_IDS, static fn(string $c): bool => Db::hasColumn('customer_addresses', $c)));
         $ins = $db->prepare(
             "INSERT INTO customer_addresses
-             (customer_id, type, is_default, name, company, vat_id, street, city, zip, country, phone)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             (customer_id, type, is_default, name, company, vat_id, street, city, zip, country, phone" . implode('', array_map(static fn(string $c): string => ", {$c}", $ids)) . ")
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?" . str_repeat(', ?', count($ids)) . ")"
         );
-        $ins->execute([
+        $ins->execute(array_merge([
             $customerId, $type, $isDefault,
             trim(Security::str($data['name'] ?? '')),
             trim(Security::str($data['company'] ?? '')),
@@ -629,9 +631,12 @@ class Customers {
             trim(Security::str($data['zip'] ?? '')),
             strtoupper(trim(Security::str($data['country'] ?? ''))),
             trim(Security::str($data['phone'] ?? '')),
-        ]);
+        ], array_map(static fn(string $c): string => strtoupper((string)preg_replace('/\s+/', '', Security::str($data[$c] ?? ''))), $ids)));
         return (int)$db->lastInsertId();
     }
+
+    /** R33: the buyer company's IDs a saved address keeps besides company and vat_id. */
+    private const ADDRESS_COMPANY_IDS = ['ico', 'dic'];
 
     public static function updateAddress(int $customerId, int $addressId, array $data): bool {
         // Ownership check
@@ -651,7 +656,8 @@ class Customers {
         }
         $fields = [];
         $params = [];
-        foreach (['name','company','vat_id','street','city','zip','country','phone'] as $k) {
+        $ids = array_values(array_filter(self::ADDRESS_COMPANY_IDS, static fn(string $c): bool => Db::hasColumn('customer_addresses', $c)));
+        foreach (['name','company','vat_id','street','city','zip','country','phone', ...$ids] as $k) {
             if (array_key_exists($k, $data)) {
                 $fields[] = "{$k} = ?";
                 $params[] = ($k === 'country')
@@ -679,7 +685,7 @@ class Customers {
         foreach (self::addresses($customerId) as $row) if ((int)$row['id'] === $addressId) $existing = $row;
         if ($existing === null) return null;
         $changes = [];
-        foreach (['type', 'name', 'company', 'vat_id', 'street', 'city', 'zip', 'country', 'phone'] as $field) {
+        foreach (['type', 'name', 'company', 'vat_id', 'street', 'city', 'zip', 'country', 'phone', ...self::ADDRESS_COMPANY_IDS] as $field) {
             if (array_key_exists($field, $posted)) $changes[$field] = trim(Security::str($posted[$field]));
         }
         if (isset($changes['country'])) $changes['country'] = strtoupper($changes['country']);

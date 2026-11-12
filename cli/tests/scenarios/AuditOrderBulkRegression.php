@@ -176,7 +176,7 @@ foreach ($a152Drivers as $a152Driver => $_) {
         $a152Html = $a152Request('note', ['order_ids' => ['A152-PAID', 'A152-SHIPPED', 'A152-CZ'], 'format' => 'html'], 'fulfillment');
         preg_match_all('~data-delivery-note="([^"]+)"~', $a152Html['output'], $a152Notes);
         assert_equals(['A152-PAID', 'A152-SHIPPED'], $a152Notes[1], "{$a152Label}: bulk HTML delivery notes for the selected orders of this store only");
-        assert_true(str_contains($a152Html['output'], 'A152-SKU') && str_contains($a152Html['output'], '81101 ' . "\t" . 'TabCity') && str_contains($a152Html['output'], 'page-break-after'), "{$a152Label}: note has items, address and one page per order");
+        assert_true(str_contains($a152Html['output'], 'A152-SKU') && str_contains($a152Html['output'], '81101 TabCity') /* R33: OrderAddress::lines() trims each field */ && str_contains($a152Html['output'], 'page-break-after'), "{$a152Label}: note has items, address and one page per order");
         foreach (['34,90', '34.90', '10,00', '30,00', '4,90', '€', 'EUR'] as $a152Price) {
             assert_true(!str_contains($a152Html['output'], $a152Price), "{$a152Label}: HTML delivery note shows no price ({$a152Price})");
         }

@@ -2241,6 +2241,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.invoice.type.invoice' => 'Factura',
     'admin.invoice.type.credit_note' => 'Factura rectificativa',
     'checkout.error.field_too_long_named' => 'El campo «{field}» es demasiado largo (máximo {max} caracteres).',
+    'checkout.error.field_invalid' => 'Un campo contiene caracteres no válidos. Vuelva a escribirlo.',
+    'checkout.error.field_invalid_named' => 'El campo «{field}» contiene caracteres no válidos. Vuelva a escribirlo.',
     'admin.stores.field.timezone' => 'Zona horaria',
     'admin.stores.timezone_hint' => 'Las fechas de factura, los plazos de pago y el informe diario de ventas siguen esta zona horaria.',
     'admin.stores.err.timezone' => 'Elija una zona horaria de la lista.',

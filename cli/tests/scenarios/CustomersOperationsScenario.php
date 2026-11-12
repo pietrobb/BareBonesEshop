@@ -54,6 +54,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS customer_addresses (
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
 )");
+(require TEST_CLI_DIR . '/../migrations/20261112100000_customer_address_company_ids.php')->up($pdo, true);
 $pdo->exec("CREATE TABLE IF NOT EXISTS password_reset_tokens (
     id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL,
     token TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL, used_at TEXT DEFAULT NULL,

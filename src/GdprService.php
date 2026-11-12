@@ -36,7 +36,7 @@ class GdprService {
      */
     public const PII_REGISTRY = [
         'customers'                    => ['columns' => ['email', 'name', 'phone', 'vat_id'], 'erase' => 'anonymize', 'export' => 'customer'],
-        'customer_addresses'           => ['columns' => ['name', 'company', 'vat_id', 'street', 'city', 'zip', 'phone'], 'erase' => 'delete', 'export' => 'addresses'],
+        'customer_addresses'           => ['columns' => ['name', 'company', 'vat_id', 'ico', 'dic', 'street', 'city', 'zip', 'phone'], 'erase' => 'delete', 'export' => 'addresses'],
         'customer_email_verifications' => ['columns' => ['customer_id', 'email'], 'erase' => 'delete', 'export' => null,
             'reason' => 'single-use token hashes; the e-mail itself is exported with the customer'],
         'password_reset_tokens'        => ['columns' => ['customer_id', 'token'], 'erase' => 'delete', 'export' => null,

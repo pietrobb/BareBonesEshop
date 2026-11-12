@@ -280,6 +280,8 @@ class ShippingService
         $cancelled->execute($params);
         $order['label_sequence'] = (int)$cancelled->fetchColumn() + 1;
         $order['shipment_id'] = $shipmentId;
+        // R33: billed elsewhere, the company is on the billing address; the label still names it.
+        $order['shipping_addr'] = (string)json_encode(OrderAddress::recipientAddress($order), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         // T9: the carrier API is called with no transaction open. Inside one, a slow carrier held the order lock (on
         // SQLite the whole database) for its timeout, and a rollback after it answered lost a label that exists.
         if ($db->inTransaction()) throw new \LogicException('ShippingService::generateLabel calls the carrier and must run outside a transaction');

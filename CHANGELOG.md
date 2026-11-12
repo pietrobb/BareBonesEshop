@@ -87,6 +87,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   override of the `order_confirmation` or `merchant_order_created` e-mail shows the addresses once it adds the
   `delivery_address` / `billing_address` loops of the default template. The orders CSV export gets nine `billing_*`
   columns at the end, and API v1 orders a `billing_address` (for keys granted `customers:read`).
+- **Migration** `20261112100000_customer_address_company_ids` adds `customer_addresses.ico` and `dic` (review round
+  33): a saved billing address keeps the company's IČO and DIČ with its name and IČ DPH, so the next checkout prefills
+  the whole company. Existing addresses keep NULL; until it runs, addresses are saved without them as before.
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -95,7 +98,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.9 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.10 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -151,6 +154,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   change" in the admin's language (an admin's own note stays as typed). The payment settings (countries and shipping
   limits) and the shipping rate selects name the methods instead of listing their codes (`bank_transfer`, `cod`,
   `gls`); the code stays the value and the tooltip.
+- **Billing address details (review round 33).** On a shared computer a guest's unfinished checkout is no longer mixed
+  with the saved address of the member who signs in next (the guest's name and city stood next to the member's
+  street); the member's own draft is kept on reload. A saved billing address keeps the IČO and DIČ (migration
+  `20261112100000_customer_address_company_ids`), so the next checkout fills the whole company; the account offers
+  the same billing countries as checkout. A `billing_address` that is not an object and a field that is not UTF-8
+  are refused at the field (422, also in the HTML checkout, which marks the empty billing fields). The address is
+  formatted the same in the account, admin, delivery note, invoice and e-mails (country by name); the carrier label
+  carries the company; a pick-up point (Packeta, personal pick-up) is named as the delivery address instead of the
+  buyer's home address.
 - **Downloads are taxed in the billing country (review round 33).** An e-service is supplied where the consumer lives
   or the business is established, which the buyer gives as the billing address; the checkout took the delivery country
   instead. An e-book for an Austrian consumer billed to Vienna paid 23 % Slovak VAT instead of 20 % Austrian under OSS,
