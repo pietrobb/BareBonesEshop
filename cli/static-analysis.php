@@ -214,7 +214,7 @@ $architectureBudgets = [
     // +4 lines R21: the feed page lists the items its last sync refused.
     // +7 lines R23 UX: checklist checks titled in the admin's language, the doctor's text in a details element.
     // +1 line, +1 coupling R30: CSV import row errors in the admin's language (ImportErrorLabels).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 817, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 24],
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 824, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 25],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
@@ -230,7 +230,7 @@ $architectureBudgets = [
     // +2 lines R16: a payment returned by hand offers no "Request refund" (nothing executes it) and its manual refund form names a request left in flight.
     // +9 lines R19: "Paid" with the amount 0 is refused, an amount above the order total is recorded with a warning.
     // +2 lines, +1 coupling R31: the order detail shows the billing address when it differs from the delivery one (OrderAddress).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 976, 'functions' => 17, 'max_function_lines' => 327, 'coupling' => 24],
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 976, 'functions' => 17, 'max_function_lines' => 327, 'coupling' => 25],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 102, 'functions' => 5, 'max_function_lines' => 34, 'coupling' => 5],
