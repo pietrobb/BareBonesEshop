@@ -159,6 +159,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   The edit now takes the VAT ID status the order was placed with (a reverse-charged line, else the VIES answer on
   record from before the order) and keeps the scheme and country of every line; a line that would be taxed
   differently refuses the edit ("VAT treatment changed") instead of re-taxing it.
+- **Goods collected in the shop pay the shop's VAT, whatever the buyer's address (review round 34).** The VAT
+  scenario looked for the pickup method in a shipping quote at weight 0; for an address abroad that quote came from
+  the zone's own rates, so an order collected in the shop by a buyer with an Austrian address (heavy enough for the
+  pickup rate to apply) paid 20 % Austrian VAT through OSS and was listed in the OSS report. The pickup method is now
+  recognised by its definition (`shipping_methods` carrier or service type `pickup`, or the pickup adapter).
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged
