@@ -5,7 +5,8 @@ class CheckoutService {
     /** Session key of the contact and address the shopper last posted at checkout (formState()). */
     public const DRAFT_KEY = 'checkout_draft';
     /** Longest contact and address fields a checkout accepts (characters); customer_name/email/phone are VARCHAR(191) on MySQL. */
-    public const FIELD_MAX_LENGTH = ['name' => 191, 'email' => 191, 'phone' => 40, 'street' => 200, 'city' => 100, 'zip' => 20, 'company' => 255];
+    public const FIELD_MAX_LENGTH = ['name' => 191, 'email' => 191, 'phone' => 40, 'street' => 200, 'city' => 100, 'zip' => 20, 'company' => 255]
+        + OrderAddress::BILLING_FIELDS;
 
     public static function isDigitalOnly(array $items): bool {
         if (!function_exists('cartIsDigitalOnly')) require_once __DIR__ . '/Http/ApiHandlers.php';
@@ -223,7 +224,9 @@ class CheckoutService {
         if (!function_exists('checkoutExecute')) {
             require_once __DIR__ . '/Http/ApiHandlers.php';
         }
-        foreach (['name', 'email', 'phone', 'country', 'street', 'city', 'zip', 'shipping_method', 'payment_method', 'vat_id', 'coupon_code', 'notes'] as $key) {
+        $input = OrderAddress::flattenBillingInput($input);
+        foreach (['name', 'email', 'phone', 'country', 'street', 'city', 'zip', 'shipping_method', 'payment_method', 'vat_id', 'coupon_code', 'notes',
+            'billing_name', 'billing_street', 'billing_city', 'billing_zip', 'billing_country'] as $key) {
             if (isset($input[$key]) && !is_string($input[$key])) {
                 http_response_code(422);
                 return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.invalid_input'];
@@ -278,6 +281,16 @@ class CheckoutService {
             'ico_label' => I18n::t('checkout_ico'), 'dic_label' => I18n::t('checkout_dic'), 'vat_id_label' => I18n::t('checkout_vat_id')];
     }
 
+    /** R31: the billing part of the checkout form (another address than the delivery one), from formState(). */
+    public static function billingView(array $state): array {
+        return ['delivery_address_label' => I18n::t('checkout_delivery_heading'), 'billing_heading' => I18n::t('checkout_billing_heading'),
+            'billing_different_label' => I18n::t('checkout_billing_different'), 'billing_different' => $state['billing_different'],
+            'billing_name_label' => I18n::t('checkout_billing_name'), 'saved_billing_addresses' => $state['billing_addresses'],
+            'saved_billing_address_label' => I18n::t('checkout_saved_billing_address'),
+            'billing_country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $state['billing_country']],
+                array_keys($state['billing_countries']), $state['billing_countries'])];
+    }
+
     /**
      * What the checkout form shows. A posted form keeps the shopper's values (after any refusal);
      * a fresh form starts from the signed-in customer's profile and default shipping address, then what the shopper
@@ -285,20 +298,31 @@ class CheckoutService {
      * cleared when the order is placed and on logout).
      * Picking one of the customer's own saved addresses replaces the address fields; an id of
      * another customer's address is ignored. Countries come from the store's shipping zones.
-     * @return array{values: array<string,string>, country: string, countries: array<string,string>, addresses: list<array{id:int,label:string,selected:bool}>}
+     * R31: the billing part (billing_* values, billing_different, billing_country) works the same way with the
+     * customer's saved billing addresses; billing countries are not limited to where the shop delivers.
+     * @return array{values: array<string,string>, country: string, countries: array<string,string>, addresses: list<array{id:int,label:string,selected:bool}>,
+     *     billing_different: bool, billing_country: string, billing_countries: array<string,string>, billing_addresses: list<array{id:int,label:string,selected:bool}>}
      */
     public static function formState(array $post, bool $posted, bool $remember = false): array {
         $values = [];
         foreach (['name' => 255, 'email' => 255, 'phone' => 64, 'street' => 255, 'city' => 255, 'zip' => 32, 'notes' => 2000,
-            'company' => 255, 'ico' => 40, 'dic' => 40, 'vat_id' => 40] as $key => $max) {
+            'company' => 255, 'ico' => 40, 'dic' => 40, 'vat_id' => 40,
+            'billing_name' => 255, 'billing_street' => 255, 'billing_city' => 255, 'billing_zip' => 32] as $key => $max) {
             $values[$key] = $posted && is_string($post[$key] ?? null) ? mb_substr(trim($post[$key]), 0, $max) : '';
         }
         $country = $posted && is_string($post['country'] ?? null) ? strtoupper(trim($post['country'])) : '';
+        $billingCountry = $posted && is_string($post['billing_country'] ?? null) ? strtoupper(trim($post['billing_country'])) : '';
+        $billingDifferent = $posted && OrderAddress::billingRequested($post);
         $customer = Customers::current();
         $addresses = $customer ? Customers::addresses((int)$customer['id'], 'shipping') : [];
+        $billingAddresses = $customer ? Customers::addresses((int)$customer['id'], 'billing') : [];
         $pickedId = $posted && ($post['address_action'] ?? '') === 'use' && is_string($post['saved_address'] ?? null) ? (int)$post['saved_address'] : 0;
         $picked = $posted ? null : ($addresses[0] ?? null);
         foreach ($addresses as $address) if ((int)$address['id'] === $pickedId) $picked = $address;
+        // R31: a saved billing address is picked like a delivery one; a fresh form starts from the default one.
+        $pickedBillingId = $posted && ($post['address_action'] ?? '') === 'use_billing' && is_string($post['saved_billing_address'] ?? null) ? (int)$post['saved_billing_address'] : 0;
+        $pickedBilling = $posted ? null : ($billingAddresses[0] ?? null);
+        foreach ($billingAddresses as $address) if ((int)$address['id'] === $pickedBillingId) $pickedBilling = $address;
         if (!$posted && $customer) {
             // A B2B member buys for their company: its legal name and VAT ID come first, then the customer's own VAT ID.
             $profile = Customers::commerceProfile((int)$customer['id']) ?? [];
@@ -312,25 +336,40 @@ class CheckoutService {
             }
             $country = strtoupper((string)$picked['country']);
         }
+        if ($pickedBilling) {
+            foreach (['name', 'street', 'city', 'zip'] as $key) $values['billing_' . $key] = (string)($pickedBilling[$key] ?? '');
+            foreach (['company', 'vat_id'] as $key) {
+                if (trim((string)($pickedBilling[$key] ?? '')) !== '') $values[$key] = (string)$pickedBilling[$key];
+            }
+            $billingCountry = strtoupper((string)$pickedBilling['country']);
+            $billingDifferent = true;
+        }
         $draft = $_SESSION[self::DRAFT_KEY] ?? null;
         if ($posted) {
             // Only a submit that passed CSRF ($remember): a forged one must not prefill every later form in the session.
-            if ($remember) $_SESSION[self::DRAFT_KEY] = ['values' => $values, 'country' => $country];
+            if ($remember) $_SESSION[self::DRAFT_KEY] = ['values' => $values, 'country' => $country, 'billing_country' => $billingCountry, 'billing_different' => $billingDifferent];
         } elseif (is_array($draft)) {
             foreach ((array)($draft['values'] ?? []) as $key => $value) {
                 if (array_key_exists($key, $values) && is_string($value) && $value !== '') $values[$key] = $value;
             }
             if (is_string($draft['country'] ?? null) && $draft['country'] !== '') $country = $draft['country'];
+            if (is_string($draft['billing_country'] ?? null) && $draft['billing_country'] !== '') $billingCountry = $draft['billing_country'];
+            if (is_bool($draft['billing_different'] ?? null)) $billingDifferent = $draft['billing_different'];
         }
         $countries = ShippingService::destinationCountries();
         if (!isset($countries[$country])) {
             $storeCountry = strtoupper((string)(StoreContext::current()->legal()['country'] ?? 'SK'));
             $country = isset($countries[$storeCountry]) ? $storeCountry : (string)array_key_first($countries);
         }
+        $billingCountries = ShippingService::billingCountries();
+        if (!isset($billingCountries[$billingCountry])) $billingCountry = $country;
+        $label = static fn(array $a): string => implode(', ', array_filter([(string)$a['name'], (string)$a['street'], trim($a['zip'] . ' ' . $a['city']), strtoupper((string)$a['country'])], static fn(string $p): bool => $p !== ''));
         return ['values' => $values, 'country' => $country, 'countries' => $countries, 'addresses' => array_map(static fn(array $a): array => [
-            'id' => (int)$a['id'], 'selected' => $picked !== null && (int)$a['id'] === (int)$picked['id'],
-            'label' => implode(', ', array_filter([(string)$a['name'], (string)$a['street'], trim($a['zip'] . ' ' . $a['city']), strtoupper((string)$a['country'])], static fn(string $p): bool => $p !== '')),
-        ], $addresses)];
+            'id' => (int)$a['id'], 'selected' => $picked !== null && (int)$a['id'] === (int)$picked['id'], 'label' => $label($a),
+        ], $addresses), 'billing_different' => $billingDifferent, 'billing_country' => $billingCountry, 'billing_countries' => $billingCountries,
+            'billing_addresses' => array_map(static fn(array $a): array => [
+                'id' => (int)$a['id'], 'selected' => $pickedBilling !== null && (int)$a['id'] === (int)$pickedBilling['id'], 'label' => $label($a),
+            ], $billingAddresses)];
     }
 
     /**

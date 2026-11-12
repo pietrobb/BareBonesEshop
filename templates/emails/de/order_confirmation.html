@@ -13,6 +13,10 @@
 {{/each}}
 </table>
 <p><strong>Gesamt: {{order_total}}</strong></p>
+{{#if delivery_address}}<h3>Lieferadresse</h3>
+<p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
+{{#if billing_address}}<h3>Rechnungsadresse</h3>
+<p>{{#each billing_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if bank_transfer}}<h3>Zahlung per Banküberweisung</h3>
 <p>Wir versenden die Bestellung nach Zahlungseingang. Verwenden Sie genau diesen Betrag und diese Zahlungsreferenz.</p>
 <table style="border-collapse:collapse">

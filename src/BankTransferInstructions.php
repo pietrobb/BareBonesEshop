@@ -57,10 +57,9 @@ final class BankTransferInstructions {
         ];
     }
 
-    /** The payer's country: the order's address, else the store's own country (the customers it sells to). */
+    /** The payer's country: the order's billing address (R31; else its delivery address), else the store's own country. */
     private static function payerCountry(array $order, array $legal): string {
-        $address = json_decode((string)($order['shipping_addr'] ?? ''), true);
-        $country = strtoupper(trim((string)(is_array($address) ? ($address['country'] ?? '') : '')));
+        $country = strtoupper(trim((string)(OrderAddress::billing($order)['country'] ?? '')));
         return $country !== '' ? $country : strtoupper(trim((string)($legal['country'] ?? '')));
     }
 

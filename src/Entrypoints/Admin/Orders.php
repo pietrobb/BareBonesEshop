@@ -242,6 +242,8 @@ function pageOrder(): void {
             <p class="muted"><?= esc(($addr['street'] ?? '') . ', ' . ($addr['zip'] ?? '') . ' ' . ($addr['city'] ?? '') . ', ' . ($addr['country'] ?? '')) ?></p>
             <?php foreach (CheckoutService::companyLines($addr) as $companyLine): ?><p class="order-company"><?= esc($companyLine) ?></p><?php endforeach; ?>
             <?php endif; ?>
+            <?php if (OrderAddress::billingDiffers($order)): // R31: invoiced to another address ?><h4 style="margin-top:.75rem"><?= esc(I18n::t('checkout_billing_heading')) ?></h4>
+            <div data-order-billing><?php foreach (OrderAddress::lines(OrderAddress::billing($order)) as $billingLine): ?><p><?= esc($billingLine) ?></p><?php endforeach; ?></div><?php endif; ?>
             <?php if (trim((string)($order['notes'] ?? '')) !== ''): ?>
             <h4 style="margin-top:.75rem"><?= esc(I18n::t('admin.order.note')) ?></h4>
             <p data-order-note style="white-space:pre-wrap"><?= esc((string)$order['notes']) ?></p>

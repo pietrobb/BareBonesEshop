@@ -8,7 +8,9 @@ final class OrderExport {
     public const PERIODS = ['today', '7', '30', 'all'];
     public const COLUMNS = ['order_number', 'created_at', 'status', 'payment_status', 'payment_method', 'shipping_method',
         'customer_name', 'customer_email', 'customer_phone', 'company', 'street', 'zip', 'city', 'country',
-        'currency', 'subtotal', 'shipping_cost', 'payment_fee', 'tax_amount', 'total', 'items', 'notes'];
+        'currency', 'subtotal', 'shipping_cost', 'payment_fee', 'tax_amount', 'total', 'items', 'notes',
+        // R31: who the order is invoiced to; the delivery address (and its company) when no other billing address was given.
+        'billing_name', 'billing_company', 'billing_ico', 'billing_dic', 'billing_ic_dph', 'billing_street', 'billing_zip', 'billing_city', 'billing_country'];
 
     /**
      * Normalized list filters (unknown values fall back to defaults) and the matching WHERE on alias o.
@@ -61,6 +63,8 @@ final class OrderExport {
                 strtoupper((string)$order['currency']), $money('subtotal'), $money('shipping_cost'), $money('payment_fee'), $money('tax_amount'), $money('total'),
                 (int)$order['item_quantity'], $order['notes'] ?? '',
             ];
+            $billing = OrderAddress::billing($order);
+            foreach (['name', 'company', 'ico', 'dic', 'ic_dph', 'street', 'zip', 'city', 'country'] as $key) $row[] = $billing[$key] ?? '';
             return array_map(static fn($cell): string => Security::csvCell(is_scalar($cell) ? (string)$cell : ''), $row);
         }, 'orders');
     }

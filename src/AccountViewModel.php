@@ -136,6 +136,11 @@ final class AccountViewModel
         $money = static fn($cents): string => I18n::price((int)$cents, $currency);
         $shipping = json_decode((string)($order['shipping_rate_snapshot'] ?? '{}'), true) ?: [];
         $address = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
+        $lines = static fn(string $name, array $a): array => array_values(array_filter([
+            $name, (string)($a['street'] ?? ''), trim((string)($a['zip'] ?? '') . ' ' . (string)($a['city'] ?? '')), (string)($a['country'] ?? ''),
+            ...CheckoutService::companyLines($a),
+        ], static fn(string $part): bool => trim($part) !== ''));
+        $billing = OrderAddress::billing($order);
         $line = static fn(string $label, $cents): array => ['label' => I18n::t($label), 'amount' => $money($cents)];
         $labels = ['subtotal' => 'subtotal', 'discount' => 'discount', 'shipping' => 'shipping', 'payment_fee' => 'account.payment_fee', 'vat' => 'tax', 'vat_included' => 'tax_included'];
         return [
@@ -143,11 +148,9 @@ final class AccountViewModel
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
             'pickup_point' => is_array($shipping['pickup_point'] ?? null)
                 ? trim((string)($shipping['pickup_point']['name'] ?? '') . ' — ' . (string)($shipping['pickup_point']['address'] ?? ''), ' —') : '',
-            'address' => array_values(array_filter([
-                (string)($order['customer_name'] ?? ''), (string)($address['street'] ?? ''),
-                trim((string)($address['zip'] ?? '') . ' ' . (string)($address['city'] ?? '')), (string)($address['country'] ?? ''),
-                ...CheckoutService::companyLines($address),
-            ], static fn(string $part): bool => trim($part) !== '')),
+            'address' => $lines((string)($order['customer_name'] ?? ''), $address),
+            // R31: only when the order is billed to another address than it is delivered to.
+            'billing_address' => OrderAddress::billingDiffers($order) ? $lines((string)($billing['name'] ?? ''), $billing) : [],
             'items' => array_map(static fn(array $item): array => [
                 'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'quantity' => (int)$item['quantity'],
                 'unit_price' => $money($item['unit_price']), 'total' => $money($item['total']),
@@ -161,10 +164,11 @@ final class AccountViewModel
     public static function orderDoneSummary(array $order, bool $withAddress = true): array
     {
         $keys = ['items' => 'account.items', 'product' => 'product', 'quantity' => 'quantity', 'price' => 'price', 'total' => 'total',
-            'shipping_address' => 'shipping_address', 'shipping_method' => 'shipping_method', 'pickup_point' => 'pickup_point'];
+            'shipping_address' => 'shipping_address', 'shipping_method' => 'shipping_method', 'pickup_point' => 'pickup_point',
+            'billing_address' => 'checkout_billing_heading'];
         $summary = self::orderSummary($order, Orders::items((int)$order['id']));
         // R14: reached through a payment link the page shows no more than the order lookup does: no name or address.
-        if (!$withAddress) $summary['address'] = [];
+        if (!$withAddress) $summary['address'] = $summary['billing_address'] = [];
         return $summary + ['t' => array_map(static fn(string $key): string => I18n::t($key), $keys)];
     }
 

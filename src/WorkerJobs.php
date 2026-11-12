@@ -88,7 +88,7 @@ final class WorkerJobs
                     'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: ($parcelId === null ? (string)($order['tracking_number'] ?? '') : ''),
                     'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
                 ]);
-                if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order), ConsumerNotice::mailVars($order));
+                if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order), ConsumerNotice::mailVars($order), OrderAddress::mailVars($order, $locale));
                 if ($template === 'refund_issued') {
                     // The refund just booked (partial, RMA credit note, by hand), not the order total; a legacy job names none.
                     $refundKey = (string)($payload['refund_key'] ?? '');

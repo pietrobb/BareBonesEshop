@@ -227,6 +227,19 @@ order address and printed on the invoice; a VIES-valid VAT ID from another EU
 member state makes the order reverse charge. A B2B member's form starts with the
 company's legal name, registration number and VAT ID.
 
+The invoice can go to another address than the parcel. The checkout form's box
+"Billing address differs from the delivery address" (`billing_different=1`) adds
+`billing_name`, `billing_street`, `billing_city`, `billing_zip` and
+`billing_country` (any country, not only the delivery zones); the JSON body may send
+them or a `billing_address` object `{name, street, city, zip, country}`. The order
+keeps the delivery address in `shipping_addr` and the billing address, with the
+company and its IDs, in `billing_addr` (NULL: billed to the delivery address).
+Invoices, credit notes and the bank-transfer payer go to the billing address;
+shipping, pick-up points, carrier labels, delivery notes and the VAT place of supply
+follow the delivery address. Both addresses are in the order e-mails, the customer
+account, the admin order, API v1 (`billing_address`) and the orders CSV export;
+a signed-in customer's billing address is saved as one and offered next time.
+
 An unpaid bank-transfer order shows payment instructions on the order-done page, in
 the customer's order detail and in the order confirmation e-mail, and returns them as
 `bank_transfer` in the JSON checkout response: beneficiary, IBAN, BIC, exact amount,
