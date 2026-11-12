@@ -41,6 +41,9 @@ if ($phase === 'setup') {
     // A known-valid VAT ID in the VIES cache: no live VIES call from the test.
     $db->prepare("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response) VALUES ('DE811907980', 'DE', 'valid', NULL, NULL, ?, 86400, NULL)")
         ->execute([gmdate('Y-m-d H:i:s')]);
+    // R33: one VIES answered is not valid.
+    $db->prepare("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response) VALUES ('DE999999999', 'DE', 'invalid', NULL, NULL, ?, 86400, NULL)")
+        ->execute([gmdate('Y-m-d H:i:s')]);
     exit(0);
 }
 
@@ -94,6 +97,7 @@ $company = ['company' => 'A135 Firma GmbH', 'ico' => ' hrb 135 ', 'dic' => '30/1
     'guest_no_name' => ['POST', ['ico' => '36123456'] + $typed],
     'guest_bad_vat' => ['POST', ['company' => 'A135 Bad s.r.o.', 'vat_id' => 'DE-12'] + $typed],
     'member_place' => ['POST', $company + $typed],
+    'guest_invalid_vat' => ['POST', ['company' => 'A135 Neplatna GmbH', 'vat_id' => 'DE999999999'] + $typed],
 };
 $_SERVER['REQUEST_METHOD'] = $method;
 if ($action !== 'member_account') {
@@ -187,6 +191,12 @@ try {
         [$l, , $html] = $a135Do('member_account');
         assert_true(str_contains($html, 'A135 Firma GmbH<br>') && str_contains($html, 'IČO: HRB135<br>') && str_contains($html, 'DIČ: 30/123/45678<br>')
             && str_contains($html, 'IČ DPH: DE811907980<br>'), "{$l}: the customer's order detail shows the company and its IDs");
+
+        [$l, $r] = $a135Do('guest_invalid_vat');
+        $a135Invalid = json_decode((string)($r['new_orders'][0]['shipping_addr'] ?? ''), true) ?: [];
+        assert_true(count($r['new_orders']) === 1 && ($a135Invalid['company'] ?? '') === 'A135 Neplatna GmbH' && !array_key_exists('ic_dph', $a135Invalid)
+            && (string)($r['new_orders'][0]['vat_scenario'] ?? '') !== 'reverse_charge',
+            "{$l}: R33 — an IČ DPH VIES answered is invalid is not stored on the order address the invoice reads, and VAT is charged (" . json_encode($a135Invalid) . ')');
     }
 } finally {
     if (isset($a135Drivers['mysql'])) $a135Run(['mysql', 'teardown', 'none', $a135App, $a135Drivers['mysql'], $a135Root, '{}']);

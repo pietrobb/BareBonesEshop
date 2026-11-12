@@ -485,6 +485,8 @@ final class WorkerJobs
 
         $order = Orders::byId($orderId);
         if (!$order) return;
+        // R33: a later step's job (shipped, paid) finds the invoice an earlier one issued and mailed: not mailed again.
+        if (InvoiceService::mailed($invoice)) return;
 
         // Build PDF attachment from disk
         $pdfPath = InvoiceService::pdfFile($invoice);

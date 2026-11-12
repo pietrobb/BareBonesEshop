@@ -115,7 +115,7 @@ function renderCheckout(): string {
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
-        'refresh_label' => $t('checkout.refresh'), 'consents' => array_values(CheckoutService::consentDefinitions($country, $cart)),
+        'refresh_label' => $t('checkout.refresh'), 'recalculate_label' => $t('checkout.recalculate'), 'consents' => array_values(CheckoutService::consentDefinitions($country, $cart)),
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
