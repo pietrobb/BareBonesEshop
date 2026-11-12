@@ -84,8 +84,10 @@ class CheckoutService {
         }
         $vatCart = Cart::enriched();
         $digitalOnly = self::isDigitalOnly(self::availableItems($vatCart['items'] ?? []));
-        // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
+        // Goods collected in the seller's own store are supplied there, whatever the buyer's address. R34: known from the
+        // method itself; a quote at weight 0 missed the pickup rate of an address abroad.
         $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0, 0, false, 0, 0, isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
+        if (!$digitalOnly && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
         // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.

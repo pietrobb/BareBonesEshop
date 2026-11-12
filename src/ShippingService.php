@@ -1196,6 +1196,26 @@ class ShippingService
         }
     }
 
+    /**
+     * R34: whether $methodCode is collection in the seller's store, whatever the cart weighs or where the buyer lives.
+     * The VAT scenario looked for a pickup quote at weight 0, which an address abroad never got (the zone's own rates
+     * answered there, the pickup adapter only above their weight bands), and taxed collected goods abroad under OSS.
+     */
+    public static function isPickupMethod(string $methodCode): bool
+    {
+        if ($methodCode === '') return false;
+        if (self::hasDatabasePricing()) {
+            $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = :code AND (carrier = 'pickup' OR service_type = 'pickup')"
+                . (Db::hasColumn('shipping_methods', 'store_id') ? ' AND store_id = :store' : '') . ' LIMIT 1');
+            $stmt->execute([':code' => $methodCode] + (Db::hasColumn('shipping_methods', 'store_id') ? [':store' => StoreContext::current()->providerId()] : []));
+            if ($stmt->fetchColumn() !== false) return true;
+        }
+        foreach (self::resolveAdapters() as $adapter) {
+            if ($adapter->carrierId() === 'pickup' && $methodCode === 'pickup') return true;
+        }
+        return false;
+    }
+
     private static function hasDatabasePricing(): bool
     {
         $db = Db::get();
