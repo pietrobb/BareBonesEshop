@@ -152,6 +152,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
   the same office IP. Over the budget an unchecked VAT ID now just counts as unverified in the preview (the order
   itself is still checked), and a VAT ID whose VIES answer is cached no longer uses up the budget.
+- **Editing an order's lines in the admin keeps the VAT of every line (review round 34).** The edit re-priced the
+  buyer's VAT ID as unverified unless the whole order was reverse charge, and compared only the order's scenario. An
+  e-book reverse charged for a German business next to goods taxed at home then silently paid German OSS VAT after
+  the edit, and the order of a business with a Slovak VAT ID delivered to Czechia (Slovak VAT) could not be edited.
+  The edit now takes the VAT ID status the order was placed with (a reverse-charged line, else the VIES answer on
+  record from before the order) and keeps the scheme and country of every line; a line that would be taxed
+  differently refuses the edit ("VAT treatment changed") instead of re-taxing it.
 - **An e-book next to goods is taxed in the billing country in every direction (review round 33 follow-up).** A
   download in a mixed cart took the goods' treatment whenever the billing country worked out domestic, and was skipped
   when the goods carried no VAT. A printed book and an e-book sent to Austria and billed to a Slovak consumer charged

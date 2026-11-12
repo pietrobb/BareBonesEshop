@@ -149,25 +149,90 @@ final class ManualOrder {
             'pickup_point' => (string)($rate['pickup_point']['id'] ?? ''),
         ];
         $customerId = !empty($order['customer_id']) ? (int)$order['customer_id'] : null;
-        // The VAT ID was checked when the order was placed: reverse charge means it was valid then. The edit keeps that
-        // verification instead of asking VIES again inside the stock transaction.
+        // The VAT ID was checked when the order was placed. The edit keeps that verification instead of asking VIES again
+        // inside the stock transaction. R34: a line reverse charged next to goods taxed at home (an e-book for a German
+        // business) proves it valid too, and so does the check on record; the whole order's scenario alone did not.
         $storedScenario = (string)($order['vat_scenario'] ?? '');
-        $vatIdStatus = $storedScenario === VatService::SCENARIO_REVERSE_CHARGE ? 'valid' : 'unverified';
+        $stored = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $stored = is_array($stored) ? $stored : [];
+        $placedStatus = self::placedVatIdStatus($order, $stored, (string)$buyer['vat_id']);
+        $statuses = $buyer['vat_id'] === '' ? [$placedStatus] : array_values(array_unique([$placedStatus, 'valid', 'unverified']));
         $detail = '';
         $locale = self::locale((string)($order['locale'] ?? ''));
-        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, $vatIdStatus, $storedScenario, $locale, &$detail): array {
-            $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus, $locale);
-            if (isset($priced['error'])) {
-                $detail = (string)($priced['detail'] ?? '');
-                return $priced;
+        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, $statuses, $stored, $storedScenario, $locale, &$detail): array {
+            foreach ($statuses as $vatIdStatus) {
+                $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus, $locale);
+                if (isset($priced['error'])) {
+                    $detail = (string)($priced['detail'] ?? '');
+                    return $priced;
+                }
+                if (strtolower($priced['currency']) !== strtolower((string)$order['currency'])) return ['error' => 'admin.order.manual.currency'];
+                // Never re-price an order under a VAT treatment it was not placed under (e.g. an OSS threshold crossed
+                // since): neither the order's scenario nor, R34, the scheme and country of any of its lines.
+                if (($storedScenario === '' || $priced['vat_scenario'] === $storedScenario) && self::keepsLineSupplies($stored, $priced)) return $priced;
             }
-            if (strtolower($priced['currency']) !== strtolower((string)$order['currency'])) return ['error' => 'admin.order.manual.currency'];
-            // Never re-price an order under a VAT treatment it was not placed under (e.g. an OSS threshold crossed since).
-            if ($storedScenario !== '' && $priced['vat_scenario'] !== $storedScenario) return ['error' => 'admin.order.edit.vat_changed'];
-            return $priced;
+            return ['error' => 'admin.order.edit.vat_changed'];
         });
         if ($error !== null) return self::refusal($error, $detail);
         return ['ok' => true, 'error' => null];
+    }
+
+    /**
+     * R34: the VAT ID status an order was placed with: valid when a line of it was reverse charged, else the last VIES
+     * answer on record from before the order (the check log, then the cache), else unverified.
+     */
+    private static function placedVatIdStatus(array $order, array $snapshot, string $vatId): string {
+        if ($vatId === '') return 'unverified';
+        if ((string)($order['vat_scenario'] ?? '') === VatService::SCENARIO_REVERSE_CHARGE) return 'valid';
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (($component['supply'] ?? '') === VatService::SCENARIO_REVERSE_CHARGE) return 'valid';
+        }
+        $placedAt = (string)($order['created_at'] ?? '');
+        $latest = ['', 'unverified'];
+        foreach (['vat_id_checks', 'vat_id_cache'] as $table) {
+            if ($placedAt === '' || !Db::tableExists($table)) continue;
+            $check = Db::get()->prepare("SELECT checked_at, status FROM {$table} WHERE vat_id = :vat_id AND checked_at <= :placed ORDER BY checked_at DESC LIMIT 1");
+            $check->execute([':vat_id' => $vatId, ':placed' => $placedAt]);
+            $row = $check->fetch(PDO::FETCH_NUM);
+            if ($row !== false && (string)$row[0] >= $latest[0]) $latest = [(string)$row[0], (string)$row[1]];
+        }
+        return $latest[1] === 'valid' ? 'valid' : 'unverified';
+    }
+
+    /**
+     * R34: whether re-priced lines keep how the order's lines were supplied ("scheme country" of each product line):
+     * every line already on the order its own, a download added to it the one of a download it holds. Without a
+     * financial snapshot (older orders) only the order's scenario is compared.
+     */
+    private static function keepsLineSupplies(array $stored, array $priced): bool {
+        $before = self::lineSupplies($stored);
+        if ($before === []) return true;
+        $digital = [];
+        foreach ($priced['items'] as $item) $digital[(int)$item['product_id'] . ':' . (int)($item['variant_id'] ?? 0)] = VariantAvailability::isDigitalItem($item);
+        $storedDownload = null;
+        foreach ((array)($stored['components'] ?? []) as $component) {
+            $key = (int)($component['product_id'] ?? 0) . ':' . (int)($component['variant_id'] ?? 0);
+            if (($component['type'] ?? '') === 'product' && (isset($component['supply']) || !empty($digital[$key]))) {
+                $storedDownload = $before[$key];
+                break;
+            }
+        }
+        foreach (self::lineSupplies((array)$priced['financial_snapshot']) as $key => $supply) {
+            $expected = $before[$key] ?? (!empty($digital[$key]) ? $storedDownload : null);
+            if ($expected !== null && $expected !== $supply) return false;
+        }
+        return true;
+    }
+
+    /** @return array<string, string> "product_id:variant_id" => "scheme COUNTRY" of each product line of a snapshot. */
+    private static function lineSupplies(array $snapshot): array {
+        $supplies = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (($component['type'] ?? '') !== 'product') continue;
+            $supplies[(int)($component['product_id'] ?? 0) . ':' . (int)($component['variant_id'] ?? 0)] = (string)($component['supply'] ?? $snapshot['scenario'] ?? '')
+                . ' ' . strtoupper((string)($component['rate_country'] ?? $snapshot['rate_country'] ?? ''));
+        }
+        return $supplies;
     }
 
     /** The customer hears about the order: confirmation now for offline payment, else the e-mail with the payment link. */
