@@ -691,6 +691,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, null, (string)($billing['address']['country'] ?? ''));
     [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
     [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];
+    // R33 (low): an IČ DPH VIES answered is not valid is not printed on the invoice as the buyer's VAT registration.
+    $buyerCompany['fields'] = CheckoutService::withoutInvalidVatId($buyerCompany['fields'], $vatIdStatus);
     $taxProvider = Adapters::tax($taxProviderCode);
     if ($vatId !== '') {
         // Persist VAT ID on logged-in customer so future orders remember it

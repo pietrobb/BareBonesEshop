@@ -219,6 +219,7 @@ final class ManualOrder {
             // R33: a download is supplied in the billing country (billed elsewhere), goods where they are delivered.
             $billingCountry = OrderAddress::billingRequested($buyer) ? strtoupper(trim(Security::str($buyer['billing_country'] ?? ''))) : '';
             $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry);
+            $company['fields'] = CheckoutService::withoutInvalidVatId($company['fields'], $vat['vat_id_status']);
             $cart = Cart::enriched($vat['context']);
             $requested = [];
             foreach ($lines as $line) {
