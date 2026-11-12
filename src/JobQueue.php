@@ -351,6 +351,29 @@ class JobQueue {
     }
 
     /**
+     * The payloads of the active store's jobs of $type still waiting or running (pending, in backoff, processing), or
+     * null when the backend cannot list them (none of the configurable ones: file, database, redis).
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    public static function openJobs(string $type): ?array {
+        $store = StoreContext::current()->id();
+        $backend = self::backend();
+        if ($backend instanceof DatabaseQueue || $backend instanceof RedisQueue) return $backend->openPayloads($type, $store);
+        if ($backend !== null) return null;
+        $payloads = [];
+        foreach (['pending', 'processing'] as $state) {
+            $dir = self::dir() . '/' . $state;
+            self::eachJobFileName($dir, static function (string $name) use (&$payloads, $type, $store, $dir): void {
+                $job = self::readJobFile("{$dir}/{$name}");
+                if ($job === null || ($job['type'] ?? null) !== $type || !is_array($job['payload'] ?? null)) return;
+                if ((string)($job['payload']['_store_id'] ?? 'default') === $store) $payloads[] = $job['payload'];
+            });
+        }
+        return $payloads;
+    }
+
+    /**
      * File backend only (empty for the database and Redis backends): the job files in pending/,
      * processing/, failed/ and completed/ that $keep accepts, with their state. Read by the GDPR
      * export. Files are streamed and filtered one by one: completed/ keeps a week of every store's

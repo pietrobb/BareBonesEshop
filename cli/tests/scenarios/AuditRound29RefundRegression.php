@@ -10,7 +10,7 @@ echo "\n--- R29: an item refund during an admin refund keeps it in flight; a dec
 
 Bootstrap::initStoreContext('/', '', 'default');
 VatService::reset();
-JobQueue::setDir(test_fixture_path('r29f-jobs'));
+JobQueue::setDir($r29fJobs = test_fixture_path('r29f-jobs'));
 (require TEST_CLI_DIR . '/../migrations/20261012090000_operational_incidents.php')->up($pdo, true);
 if (!class_exists('R29fFakeStripe', false)) {
     class R29fFakeStripe extends StripePayment {
@@ -110,6 +110,8 @@ try {
         $transient[] = $r29fThrows(static fn() => $r29fJob($o3, 1000, 'r29f-3_execute'));
     }
     R29fFakeStripe::$answer = null;
+    // R32: after its attempts the job left the queue (failed/); while it still waits there no retry is offered.
+    foreach (glob($r29fJobs . '/pending/*.json') ?: [] as $r29fFile) @unlink($r29fFile);
     $r29fDashboard($o3, 're_r29f_dash3', 500);
     assert_equals([['RuntimeException', 'RuntimeException', 'RuntimeException'], 'refund_pending', ['amount' => 1000, 'idempotency_key' => 'r29f-3_execute']],
         [$transient, $r29fState($o3)[1], PaymentService::unexecutedRefundRequest(Orders::byId($o3))],

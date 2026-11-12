@@ -150,6 +150,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   admin's language, and the audit log is titled "Auditný záznam" / "Auditní záznam" in Slovak and Czech. The shipping
   page names the zones (the code, e.g. `near_eu`, stays the value and the tooltip), and the order detail shows the
   payment method's name with its code (e.g. `bank_transfer`) only as the tooltip, as the order list does.
+- **Refund details from review round 32.** The `refund.updated` of a refund 2.0.x booked while it was still pending
+  lists the charge's refunds and is recognised at once; it was answered with 503 for three days, with a warning, until
+  Stripe gave up. "Retry refund" is no longer offered while the request's job still waits, runs or waits out a
+  backoff in the queue (file, database and Redis queues), and a duplicate job of an earlier request no longer settles a later
+  one or calls Stripe again. Setting "paid" by hand releases the refund request in flight, so a later credit note no
+  longer finds it in flight for good. A refund job whose three attempts all failed on network errors is queued again
+  with a growing delay (5 minutes up to an hour, about 9 hours in total, within the day Stripe keeps the idempotency
+  key) before it fails and raises its incident; an item refund's job ended at once and its credit note stayed pending.
 - **Billing address other than the delivery address (round 31).** The checkout (form without JS and JSON) has a box
   "Billing address differs from the delivery address" with name, street, city, zip and country; the buyer company and
   its IDs then belong to the billing address. The invoice, its credit notes and the bank-transfer payer use it, and the
