@@ -134,6 +134,14 @@ final class ManualOrder {
         if ($lines === []) return self::refusal('admin.order.manual.no_lines');
         $address = json_decode((string)($order['shipping_addr'] ?? ''), true) ?: [];
         $rate = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true) ?: [];
+        // R33: billed elsewhere, the company and its VAT ID live on the billing address and a download is supplied in
+        // its country; re-pricing from the delivery address alone lost the VAT ID and refused a reverse-charge order.
+        if (OrderAddress::billingDiffers($order)) {
+            $billing = OrderAddress::billing($order);
+            $address = array_diff_key($address, array_flip(OrderAddress::COMPANY_KEYS))
+                + array_intersect_key($billing, array_flip(OrderAddress::COMPANY_KEYS))
+                + ['billing_different' => true, 'billing_country' => (string)($billing['country'] ?? '')];
+        }
         $buyer = $address + [
             'vat_id' => (string)($address['ic_dph'] ?? ''),
             'shipping_method' => (string)($order['shipping_method'] ?? ''),
@@ -208,7 +216,9 @@ final class ManualOrder {
             $company = CheckoutService::buyerCompany($buyer);
             if ($company['error'] !== null) return ['error' => 'admin.order.manual.company', 'detail' => (string)$company['error']];
             $vatId = $company['vat_id'];
-            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus);
+            // R33: a download is supplied in the billing country (billed elsewhere), goods where they are delivered.
+            $billingCountry = OrderAddress::billingRequested($buyer) ? strtoupper(trim(Security::str($buyer['billing_country'] ?? ''))) : '';
+            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry);
             $cart = Cart::enriched($vat['context']);
             $requested = [];
             foreach ($lines as $line) {
