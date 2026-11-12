@@ -48,8 +48,19 @@ $r32rDropQueue = static function () use ($r32rJobsDir): void {
     foreach (['pending', 'processing'] as $sub) foreach (glob($r32rJobsDir . '/' . $sub . '/*.json') ?: [] as $file) @unlink($file);
 };
 
+// The Redis queue of "retry while queued" (CI's Redis service): ext-redis and TEST_REDIS_HOST, required with BAREBONES_REQUIRE_REDIS_TEST=1.
+$r32rRedis = null;
+if (class_exists('Redis') && (string)(getenv('TEST_REDIS_HOST') ?: '') !== '') {
+    $r32rRedis = ['host' => (string)getenv('TEST_REDIS_HOST'), 'port' => (int)(getenv('TEST_REDIS_PORT') ?: 6379),
+        'prefix' => 'bbe:test:r32r:' . getmypid() . ':' . bin2hex(random_bytes(4)) . ':', 'lease_seconds' => 30];
+} elseif (getenv('BAREBONES_REQUIRE_REDIS_TEST') === '1') {
+    assert_true(false, 'R32 refunds Redis: BAREBONES_REQUIRE_REDIS_TEST=1 needs ext-redis and TEST_REDIS_HOST');
+} else {
+    echo "  [SKIP] R32 refunds Redis queue (load ext-redis and set TEST_REDIS_HOST)\n";
+}
+
 // All five findings against one database ($tag 'SQLite' or 'MySQL'); every section is checked on its own.
-$r32rChecks = static function (PDO $pdo, string $tag) use ($r32rQueued, $r32rDropQueue): void {
+$r32rChecks = static function (PDO $pdo, string $tag, ?array $redis = null) use ($r32rQueued, $r32rDropQueue): void {
     $r32rProduct = (int)$pdo->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn();
     $r32rOrders = [];
     $r32rOrder = static function (string $number, string $paymentStatus = 'paid') use ($pdo, $r32rProduct, &$r32rOrders): int {
@@ -95,6 +106,44 @@ $r32rChecks = static function (PDO $pdo, string $tag) use ($r32rQueued, $r32rDro
         assert_equals([null, false, 1, 1000], [...$queuedRetry, PaymentService::unexecutedRefundRequest(Orders::byId($o1))['amount'] ?? null],
             "R32 refunds {$tag}: no \"retry\" while the request's job waits in the queue; once no job is left it is offered (was: offered at once, a second job queued)");
     } catch (Throwable $e) { $r32rFail('retry while queued', $e); }
+    if ($redis !== null) try {
+        // 1r. The same on the Redis queue, whose jobs were not listed: "retry" was offered while the job waited, ran or
+        // waited out a backoff (a network error re-queues it with a delay of up to hours).
+        $rq = new RedisQueue($redis);
+        $rqClient = new Redis();
+        $rqClient->connect($redis['host'], $redis['port'], 2.0);
+        JobQueue::useBackend($rq);
+        try {
+            $o1r = $r32rOrder('R32R-1R');
+            PaymentService::requestRefundAndQueue($o1r, 1000, 'r32r-1r', ['reason' => 'R32R']);
+            // The order's payment_refund jobs in Redis's pending, delayed and processing sets, read with a plain client.
+            $rqMine = static function () use ($rqClient, $redis, $o1r): int {
+                $count = 0;
+                foreach (['pending', 'delayed', 'processing'] as $index) foreach ($rqClient->zRange($redis['prefix'] . $index, 0, -1) ?: [] as $id) {
+                    $row = $rqClient->hMGet($redis['prefix'] . 'job:' . $id, ['type', 'payload']);
+                    if (($row['type'] ?? null) === 'payment_refund' && (int)(json_decode((string)$row['payload'], true)['order_id'] ?? 0) === $o1r) $count++;
+                }
+                return $count;
+            };
+            $rqLook = static fn(): array => [PaymentService::unexecutedRefundRequest(Orders::byId($o1r)), PaymentService::retryRefundRequest($o1r, 'r32r-admin'), $rqMine()];
+            $rqPending = $rqLook();
+            $rqJob = array_values(array_filter($rq->pull(100), static fn(array $job): bool => $job['type'] === 'payment_refund' && (int)($job['payload']['order_id'] ?? 0) === $o1r))[0] ?? [];
+            $rqClaim = $rq->markProcessing($rqJob);
+            $rqRunning = $rqLook();
+            $rq->fail($rqClaim, $rqJob, 'Connection timed out');
+            $rqDelayed = $rqLook();
+            $rqKeys = $rqClient->keys($redis['prefix'] . '*');
+            if ($rqKeys) $rqClient->del($rqKeys); // the job is lost (Redis flushed): now nothing will send it
+            assert_equals([[null, false, 1], [null, false, 1], [null, false, 1], 1000],
+                [$rqPending, $rqRunning, $rqDelayed, PaymentService::unexecutedRefundRequest(Orders::byId($o1r))['amount'] ?? null],
+                "R32 refunds {$tag} + Redis queue: no \"retry\" while the request's job is pending, running or delayed; once no job is left it is offered (was: offered at once, a second job queued)");
+        } finally {
+            JobQueue::useBackend(null); // back to the file queue the suite uses
+            $rqKeys = $rqClient->keys($redis['prefix'] . '*');
+            if ($rqKeys) $rqClient->del($rqKeys);
+            $rqClient->close();
+        }
+    } catch (Throwable $e) { $r32rFail('retry while queued on Redis', $e); }
     try {
         // 2. A duplicate job of a settled request after a later request: it neither calls Stripe nor closes the later request.
         $o2 = $r32rOrder('R32R-2');
@@ -187,7 +236,7 @@ $r32rAdapters->setValue(null, ['payment' => new R32rFakeStripe()] + $r32rSavedAd
 $r32rSqlite = Db::get();
 $r32rSqliteDriver = Db::driver();
 try {
-    $r32rChecks($r32rSqlite, 'SQLite');
+    $r32rChecks($r32rSqlite, 'SQLite', $r32rRedis);
     if (getenv('TEST_MYSQL_DSN')) {
         $r32rNative = new PDO(getenv('TEST_MYSQL_DSN'), getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '',
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]);

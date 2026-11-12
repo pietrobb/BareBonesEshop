@@ -352,14 +352,14 @@ class JobQueue {
 
     /**
      * The payloads of the active store's jobs of $type still waiting or running (pending, in backoff, processing), or
-     * null when the backend cannot list them (Redis).
+     * null when the backend cannot list them (none of the configurable ones: file, database, redis).
      *
      * @return list<array<string, mixed>>|null
      */
     public static function openJobs(string $type): ?array {
         $store = StoreContext::current()->id();
         $backend = self::backend();
-        if ($backend instanceof DatabaseQueue) return $backend->openPayloads($type, $store);
+        if ($backend instanceof DatabaseQueue || $backend instanceof RedisQueue) return $backend->openPayloads($type, $store);
         if ($backend !== null) return null;
         $payloads = [];
         foreach (['pending', 'processing'] as $state) {

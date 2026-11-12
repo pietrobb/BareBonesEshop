@@ -139,8 +139,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 - **Refund details from review round 32.** The `refund.updated` of a refund 2.0.x booked while it was still pending
   lists the charge's refunds and is recognised at once; it was answered with 503 for three days, with a warning, until
-  Stripe gave up. "Retry refund" is no longer offered while the request's job still waits in the queue (file and
-  database queues; Redis cannot list its jobs), and a duplicate job of an earlier request no longer settles a later
+  Stripe gave up. "Retry refund" is no longer offered while the request's job still waits, runs or waits out a
+  backoff in the queue (file, database and Redis queues), and a duplicate job of an earlier request no longer settles a later
   one or calls Stripe again. Setting "paid" by hand releases the refund request in flight, so a later credit note no
   longer finds it in flight for good. A refund job whose three attempts all failed on network errors is queued again
   with a growing delay (5 minutes up to an hour, about 9 hours in total, within the day Stripe keeps the idempotency

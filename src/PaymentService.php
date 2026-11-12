@@ -581,8 +581,11 @@ class PaymentService {
         $later->execute($params + [':execute' => $executeKey, ':attempt' => 'refund_attempt_' . $executeKey]);
         if ($later->fetchColumn()) return null;
         // R32 (low): "retry" was offered while the request's job still waited in the queue (the worker had not run yet), and
-        // the second job it queued ran after the first. The file and database queues are checked; Redis cannot list its jobs.
-        foreach (JobQueue::openJobs('payment_refund') ?? [] as $job) {
+        // the second job it queued ran after the first. The file, database and Redis queues list their jobs; a backend that
+        // cannot list them offers no retry (a job may still be waiting).
+        $open = JobQueue::openJobs('payment_refund');
+        if ($open === null) return null;
+        foreach ($open as $job) {
             if ((int)($job['order_id'] ?? 0) === (int)$order['id'] && (string)($job['idempotency_key'] ?? '') === $executeKey) return null;
         }
         return ['amount' => (int)$request['amount'], 'idempotency_key' => $executeKey];

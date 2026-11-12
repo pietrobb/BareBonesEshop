@@ -399,6 +399,27 @@ class RedisQueue implements DelayedQueueBackend {
     }
 
     /**
+     * @return list<array<string, mixed>> the payloads of a store's jobs of $type still waiting, delayed or running.
+     * The three indexes are read in one MULTI so a job moving between them (claim, failure, promotion) is seen once.
+     */
+    public function openPayloads(string $type, string $store): array {
+        $this->redis->multi();
+        foreach (['pending', 'delayed', 'processing'] as $index) $this->redis->zRange($this->key($index), 0, -1);
+        $ids = array_values(array_unique(array_map('strval', array_merge(...array_map(
+            static fn($set): array => is_array($set) ? $set : [], $this->redis->exec() ?: [])))));
+        if ($ids === []) return [];
+        $this->redis->pipeline();
+        foreach ($ids as $id) $this->redis->hMGet($this->jobKey($id), ['type', 'store_id', 'payload']);
+        $payloads = [];
+        foreach ($this->redis->exec() ?: [] as $row) {
+            if (!is_array($row) || ($row['type'] ?? null) !== $type || (string)($row['store_id'] ?? '') !== $store) continue;
+            $decoded = json_decode((string)($row['payload'] ?? ''), true);
+            if (is_array($decoded)) $payloads[] = $decoded;
+        }
+        return $payloads;
+    }
+
+    /**
      * Retention: remove completed jobs older than $olderThanSeconds from the completed index and
      * delete their hashes (normally already expired).
      */
