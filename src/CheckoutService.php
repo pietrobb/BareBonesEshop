@@ -96,6 +96,9 @@ class CheckoutService {
         // R34 (low): an e-service to a business is supplied where it is established (art. 44): a valid VAT ID of another
         // member state puts a download there under reverse charge, wherever it is billed (the seller's state, outside the EU).
         if ($vatIdValid && !$vatIdOfSeller && VatService::isEuCountry($vatIdCountry)) $residence = $vatIdCountry;
+        // R35 (low): so is a business registered for VAT in the seller's state: a Slovak company's e-book next to goods
+        // exported to the USA was zero-rated with them; it pays the seller's VAT.
+        if ($vatIdValid && $vatIdOfSeller) $residence = $sellerCountry;
         $context = [
             'seller_country'        => $sellerCountry,
             'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,

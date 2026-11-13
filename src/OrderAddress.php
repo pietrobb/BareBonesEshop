@@ -8,7 +8,8 @@
 final class OrderAddress
 {
     /** The buyer company keys that belong to the billing address. */
-    public const COMPANY_KEYS = ['company', 'ico', 'dic', 'ic_dph'];
+    /** R35 (low): with the "not verified in VIES" marker of its IČ DPH (lost when a manual order was billed elsewhere). */
+    public const COMPANY_KEYS = ['company', 'ico', 'dic', 'ic_dph', 'ic_dph_unverified'];
     /** Billing fields of the checkout form / JSON body and their maximum length. */
     public const BILLING_FIELDS = ['billing_name' => 191, 'billing_street' => 200, 'billing_city' => 100, 'billing_zip' => 20];
 

@@ -122,13 +122,20 @@ class VatService implements TaxProvider
      * another member state pays their own country's rate on the e-book (scheme "oss"); a business with a valid VAT ID
      * of another member state accounts for the VAT itself (scheme "reverse_charge", 0 %). R33: a buyer living in the
      * seller's state pays the seller's VAT on it (scheme "domestic") even when the goods go abroad under OSS or leave
-     * the EU. Null: as the goods — also a buyer outside the EU next to exported goods.
+     * the EU. R35 (low): next to goods reverse charged in the same state (an exempt intra-Community supply, art. 138),
+     * the e-book is a reverse-charged service there (art. 44/196), its own group: was summed into the goods' group and
+     * the invoice cited only art. 138. Null: as the goods — also a buyer outside the EU next to exported goods.
      * @return array{country: string, scheme: string}|null
      */
     public static function digitalSupply(array $context): ?array
     {
         $declared = strtoupper(trim((string)($context['digital_customer_country'] ?? '')));
-        if ($declared === '' || $declared === strtoupper(trim((string)($context['customer_country'] ?? '')))) return null;
+        if ($declared === '') return null;
+        if ($declared === strtoupper(trim((string)($context['customer_country'] ?? '')))) {
+            $goods = self::resolveScenario($context);
+            return ($goods['scenario'] ?? '') === self::SCENARIO_REVERSE_CHARGE
+                ? ['country' => (string)$goods['rate_country'], 'scheme' => self::SCENARIO_REVERSE_CHARGE] : null;
+        }
         $scenario = self::resolveScenario(['customer_country' => $declared, 'customer_country_verified' => false] + $context);
         $country = (string)$scenario['rate_country'];
         switch ((string)($scenario['scenario'] ?? '')) {
