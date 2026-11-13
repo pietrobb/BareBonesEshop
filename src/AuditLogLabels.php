@@ -129,6 +129,10 @@ final class AuditLogLabels {
         if (preg_match('/^(Provider|Manual) refund of (.+?) (?:confirmed|completed) by (.*)$/s', $note, $m) === 1) {
             return I18n::format('admin.audit.note.refund_' . strtolower($m[1]), ['amount' => $money($m[2]), 'detail' => $m[3]]);
         }
+        if (preg_match('/^Stripe refund (\S+) succeeded$/', $note, $m) === 1) return I18n::format('admin.audit.note.stripe_refund_succeeded', ['id' => $m[1]]);
+        if (preg_match('/^Item refund released by (.*?): (.*)$/s', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.item_refund_released', ['actor' => $m[1], 'detail' => $m[2]]);
+        }
         if (preg_match('/^Stripe full refund: (.+?)(?: cents)?$/', $note, $m) === 1) {
             return I18n::format('admin.audit.note.stripe_full_refund', ['amount' => $money($m[1])]);
         }
@@ -160,6 +164,13 @@ final class AuditLogLabels {
         'TOTP enrolled and recovery codes rotated' => 'mfa_enrolled', 'Store permissions changed' => 'permissions',
         // R32: payment recorded by hand in the admin (PaymentService::markPaidByAdmin()) stayed in English.
         'Admin payment' => 'admin_payment',
+        // R34: the order history still showed these in English, and two (written before 2.3.11) in Slovak.
+        'All goods shipped' => 'all_shipped', 'Payment confirmed via webhook' => 'webhook_paid', 'Manual order without charge' => 'manual_free',
+        'Free digital order' => 'free_digital', 'Bezplatná digitálna objednávka' => 'free_digital',
+        'Bank transfer received' => 'transfer_received', 'Platba prevodom prijatá' => 'transfer_received',
+        'Provider refund confirmed' => 'provider_refund_confirmed', 'Refund confirmed via webhook' => 'webhook_refund',
+        'Manual refund completed' => 'manual_refund_completed', 'Expired unpaid online checkout' => 'expired_online',
+        'Expired unpaid offline order' => 'expired_offline', 'The payment provider declined the item refund' => 'item_refund_declined',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';
@@ -169,6 +180,9 @@ final class AuditLogLabels {
         'Credit note reversed: ' => 'credit_reversed', 'Capture under another provider reference: ' => 'other_reference',
         'Payment captured on a cancelled order: ' => 'captured_cancelled', 'API v1 client ' => 'api_client',
         'New payment session ' => 'payment_session', 'Payment link e-mailed by ' => 'payment_link_sent', 'Stripe dispute: ' => 'dispute',
+        // R34
+        'Stripe webhook: ' => 'stripe_webhook', 'Bank transfer received: ' => 'transfer_received_detail', 'Platba prevodom prijatá: ' => 'transfer_received_detail',
+        'Payment refund completed: ' => 'payment_refund_completed', 'Refund declined by the provider: ' => 'item_refund_declined_detail',
     ];
 
     /** "admin.paid" → "Set in the admin: Paid"; a known event by its label; a provider's own event code as it is. */

@@ -47,9 +47,9 @@ function productVariantsHtml(array $product): string {
     $variants = ProductVariants::forEditor((int)$product['id']);
     $variants[] = ProductVariants::blank(count($variants));
     $currency = ProductVariants::currency($product);
-    $select = static function(string $name, array $options, string $value, string $label): string {
+    $select = static function(string $name, array $options, string $value, string $label, string $prefix): string {
         $html = '<select name="' . esc($name) . '" aria-label="' . esc($label) . '">';
-        foreach ($options as $option) $html .= '<option value="' . esc($option) . '"' . ($option === $value ? ' selected' : '') . '>' . esc($option) . '</option>';
+        foreach ($options as $option) $html .= '<option value="' . esc($option) . '"' . ($option === $value ? ' selected' : '') . '>' . esc(adminCodeLabel($prefix, $option)) . '</option>';
         return $html . '</select>';
     };
     ob_start();
@@ -70,8 +70,8 @@ function productVariantsHtml(array $product): string {
                         <td><input name="<?= esc("{$p}[price_absolute]") ?>" value="<?= esc(Money::adminValue($v['price_absolute'] === null ? null : (int)$v['price_absolute'], $currency)) ?>" inputmode="decimal" aria-label="<?= esc(I18n::t('admin.th.price') . ' ' . $label) ?>"></td>
                         <td><input name="<?= esc("{$p}[price_delta]") ?>" value="<?= esc(Money::adminValue((int)$v['price_delta'], $currency)) ?>" inputmode="decimal" aria-label="<?= esc(I18n::t('admin.variant.delta') . ' ' . $label) ?>"></td>
                         <td><input name="<?= esc("{$p}[stock]") ?>" value="<?= (int)$v['stock'] ?>" inputmode="numeric" aria-label="<?= esc(I18n::t('admin.th.stock') . ' ' . $label) ?>"><?php if ($key !== 'new'): ?><input type="hidden" name="<?= esc("{$p}[stock_loaded]") ?>" value="<?= (int)($v['stock_loaded'] ?? $v['stock']) ?>"><?php endif; ?></td>
-                        <td><?= $select("{$p}[availability]", ProductVariants::availabilities(), (string)$v['availability'], I18n::t('admin.variant.availability') . ' ' . $label) ?></td>
-                        <td><?= $select("{$p}[inventory_policy]", ProductVariants::POLICIES, (string)$v['inventory_policy'], I18n::t('admin.variant.policy') . ' ' . $label) ?></td>
+                        <td><?= $select("{$p}[availability]", ProductVariants::availabilities(), (string)$v['availability'], I18n::t('admin.variant.availability') . ' ' . $label, 'admin.variant.availability.') ?></td>
+                        <td><?= $select("{$p}[inventory_policy]", ProductVariants::POLICIES, (string)$v['inventory_policy'], I18n::t('admin.variant.policy') . ' ' . $label, 'admin.variant.policy.') ?></td>
                         <td><input type="checkbox" name="<?= esc("{$p}[digital]") ?>" value="1"<?= (int)($v['digital'] ?? 0) === 1 ? ' checked' : '' ?> aria-label="<?= esc(I18n::t('admin.variant.digital') . ' ' . $label) ?>"><?php if (!empty($v['missing_file'])): ?><br><small class="flash-err" data-variant-no-file><?= esc(I18n::t('admin.variant.no_file')) ?></small><?php endif; ?></td>
                         <td><input name="<?= esc("{$p}[sort_order]") ?>" value="<?= (int)$v['sort_order'] ?>" inputmode="numeric" size="3" aria-label="<?= esc(I18n::t('admin.common.sort_order') . ' ' . $label) ?>"></td>
                         <td><?php if ($key !== 'new'): ?><input type="checkbox" name="<?= esc("{$p}[delete]") ?>" value="1" aria-label="<?= esc(I18n::t('admin.btn.delete') . ' ' . $label) ?>"><?php endif; ?></td>

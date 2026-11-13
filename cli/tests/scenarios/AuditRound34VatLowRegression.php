@@ -110,8 +110,8 @@ try {
     $valid = $snapshotOf->invoke(null, ['customer_name' => 'R34L', 'shipping_addr' => json_encode(['name' => 'R34L', 'country' => 'DE']
         + CheckoutService::withoutInvalidVatId(['company' => 'R34L GmbH', 'ic_dph' => 'DE123456789'], 'valid'))]);
     $sk = $labelsOf->invoke(null, 'sk');
-    assert_true(in_array('IČ DPH: DE999999999 (neoverené v systéme VIES)', $linesOf->invoke(null, $unverified, $sk), true)
-        && in_array('IČ DPH: DE123456789', $linesOf->invoke(null, $valid, $sk), true) && !isset($valid['ic_dph_unverified']),
+    assert_true(in_array('IČ DPH: DE999999999 (neoverené v systéme VIES)', $linesOf->invoke(null, $unverified, $sk, 'sk'), true)
+        && in_array('IČ DPH: DE123456789', $linesOf->invoke(null, $valid, $sk, 'sk'), true) && !isset($valid['ic_dph_unverified']),
         'R34 VAT: an IČ DPH VIES did not confirm is printed as unverified on the invoice; a valid one as before');
     $missing = [];
     foreach (['sk', 'cs', 'pl', 'hu', 'de', 'es', 'en'] as $locale) if (trim((string)($labelsOf->invoke(null, $locale)['ic_dph_unverified'] ?? '')) === '') $missing[] = $locale;

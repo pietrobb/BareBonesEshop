@@ -293,6 +293,7 @@ final class AccountViewModel
                 'number' => (string)$return['rma_number'],
                 'order_number' => (string)($order['order_number'] ?? ('#' . $return['order_id'])),
                 'status' => (string)$return['status'],
+                'status_label' => OrderStatusLabels::rma((string)$return['status']),
                 'date' => I18n::dateTime((string)$return['created_at']),
             ];
         }

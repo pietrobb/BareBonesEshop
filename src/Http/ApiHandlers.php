@@ -888,7 +888,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
         if ($freeDigitalOrder) {
             PaymentService::updatePaymentStatus($orderId, 'paid');
-            OrderWorkflow::transition($orderId, 'paid', 'Bezplatná digitálna objednávka');
+            OrderWorkflow::transition($orderId, 'paid', 'Free digital order');
         }
 
         AbandonedCarts::markConverted($orderId);

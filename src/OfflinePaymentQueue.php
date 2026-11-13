@@ -47,7 +47,7 @@ class OfflinePaymentQueue {
 
         $recorded = PaymentService::transitionPayment($orderId, 'paid', 'admin.offline_payment_received', 0,
             'offline_paid_' . $orderId, ['actor' => $actor, 'note' => $note]);
-        PaymentService::settleCapture($orderId, 'Platba prevodom prijatá' . ($note !== '' ? ': ' . $note : ''));
+        PaymentService::settleCapture($orderId, 'Bank transfer received' . ($note !== '' ? ': ' . $note : ''));
         return $recorded;
     }
 

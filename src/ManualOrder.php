@@ -124,7 +124,7 @@ final class ManualOrder {
 
     /**
      * Replace the lines of a pending order; buyer, address, shipping and payment method stay those of the order.
-     * @return array{ok: bool, error: ?string, detail?: string}
+     * @return array{ok: bool, error: ?string, detail?: string, notice?: string}
      */
     public static function editItems(int $orderId, array $lines): array {
         $order = Orders::byId($orderId);
@@ -174,7 +174,21 @@ final class ManualOrder {
             return ['error' => 'admin.order.edit.vat_changed'];
         });
         if ($error !== null) return self::refusal($error, $detail);
-        return ['ok' => true, 'error' => null];
+        $limited = self::limitedDownloads($orderId, $lines);
+        return ['ok' => true, 'error' => null] + ($limited === '' ? [] : ['notice' => $limited]);
+    }
+
+    /** R34: the downloads asked for more than once and saved once (a download is sold one per order line), by SKU. */
+    private static function limitedDownloads(int $orderId, array $lines): string {
+        $stmt = Db::get()->prepare('SELECT sku, quantity FROM order_items WHERE order_id = :id AND digital = 1');
+        $stmt->execute([':id' => $orderId]);
+        $saved = array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'quantity', 'sku');
+        $limited = [];
+        foreach ($lines as $line) {
+            $sku = (string)($line['sku'] ?? '');
+            if (isset($saved[$sku]) && (int)$line['qty'] > (int)$saved[$sku]) $limited[$sku] = $sku;
+        }
+        return implode(', ', $limited);
     }
 
     /**

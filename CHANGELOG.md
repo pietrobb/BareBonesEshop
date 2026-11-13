@@ -147,6 +147,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
+  country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
+  goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
+  by the code ("Payment confirmed via webhook", "All goods shipped", "Item refund released by …", expired orders,
+  refunds confirmed) read in the admin's language; the free digital order and the received bank transfer were noted
+  in Slovak and are now written in English and translated (older Slovak notes too). The payment history's event
+  column reads "Set in the admin: Paid" instead of `admin.paid`. The customer's returns list shows the status in
+  words ("Requested"). The variant table's availability and stock policy options read in words. An admin edit that
+  asks for more than one of a download saves one, as before, and now says so next to "Items saved".
 - **The credit note of a released item refund executed late keeps the returned items' VAT rates (review round 34).**
   When Stripe's `charge.refunded` arrives after the admin released an item refund, its credit note now credits the rates
   the reversed item credit note did. It spread the amount over every VAT rate of the invoice, so in an order mixing

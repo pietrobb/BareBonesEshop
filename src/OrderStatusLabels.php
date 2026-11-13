@@ -16,6 +16,12 @@ final class OrderStatusLabels
         return self::label('payment_status.', $status, $locale);
     }
 
+    /** R34: a return's status in words ("Requested"), the labels the admin's return list uses. */
+    public static function rma(string $status, ?string $locale = null): string
+    {
+        return self::label('admin.rma.status.', $status, $locale);
+    }
+
     /** The payment status of this order: an unpaid purchase on invoice reads "on invoice, awaiting payment". */
     public static function paymentOf(array $order, ?string $locale = null): string
     {

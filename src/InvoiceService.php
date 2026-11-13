@@ -2027,11 +2027,22 @@ final class InvoiceService
         return $country === '' ? [] : ['country' => $country, 'supply' => (string)($info['supply'] ?? 'oss')];
     }
 
-    /** Rate as the document prints it: "10%", and for a line supplied in another country "10% AT". */
-    private static function rateLabel(float $rate, array $info): string
+    /**
+     * Rate as the document prints it: "10%", and for a line supplied in another country "10% AT". R34: on an OSS invoice
+     * ($ossCountry) a taxed line of the invoice's own scenario (goods, shipping) names the consumer country's rate too.
+     */
+    private static function rateLabel(float $rate, array $info, string $ossCountry = ''): string
     {
-        $supply = self::supplyOf($info);
-        return self::rateKey($rate) . '%' . ($supply === [] ? '' : ' ' . $supply['country']);
+        $country = self::supplyOf($info)['country'] ?? ($rate > 0 ? $ossCountry : '');
+        return self::rateKey($rate) . '%' . ($country === '' ? '' : ' ' . $country);
+    }
+
+    /** The country whose rates an OSS invoice charges (its snapshot's rate_country), or '' for any other scenario. */
+    private static function ossCountry(array $invoice): string
+    {
+        if ((string)($invoice['vat_scenario'] ?? '') !== VatService::SCENARIO_OSS) return '';
+        $snapshot = json_decode((string)($invoice['financial_snapshot'] ?? ''), true);
+        return is_array($snapshot) ? strtoupper((string)($snapshot['rate_country'] ?? '')) : '';
     }
 
     private static function renderPdf(
@@ -2129,6 +2140,7 @@ final class InvoiceService
         $locale = (string)$invoice['locale'];
         $L = self::loadInvoiceLabels($locale);
         $currency = (string)$invoice['currency'];
+        $ossCountry = self::ossCountry($invoice);
 
         $pdf = new MinimalPdf();
         $pdf->addPage();
@@ -2163,14 +2175,14 @@ final class InvoiceService
         $pdf->text(110, $y, $L['customer'], ['size' => 10, 'bold' => true]);
         $y += 6;
         $sy = $y; $cy = $y;
-        foreach (self::partyLines($sellerSnap, $L) as $line) { $pdf->text(20, $sy, $line, ['size' => 9]); $sy += 4.5; }
-        foreach (self::partyLines($customerSnap, $L) as $line) { $pdf->text(110, $cy, $line, ['size' => 9]); $cy += 4.5; }
+        foreach (self::partyLines($sellerSnap, $L, $locale) as $line) { $pdf->text(20, $sy, $line, ['size' => 9]); $sy += 4.5; }
+        foreach (self::partyLines($customerSnap, $L, $locale) as $line) { $pdf->text(110, $cy, $line, ['size' => 9]); $cy += 4.5; }
         // R31: billed to one address, delivered to another — the delivery address under the customer.
         if (is_array($customerSnap['delivery'] ?? null)) {
             $cy += 2;
             $pdf->text(110, $cy, $L['delivery_address'], ['size' => 9, 'bold' => true]);
             $cy += 4.5;
-            foreach (self::partyLines($customerSnap['delivery'], $L) as $line) { $pdf->text(110, $cy, $line, ['size' => 9]); $cy += 4.5; }
+            foreach (self::partyLines($customerSnap['delivery'], $L, $locale) as $line) { $pdf->text(110, $cy, $line, ['size' => 9]); $cy += 4.5; }
         }
         $y = max($sy, $cy) + 4;
 
@@ -2217,7 +2229,7 @@ final class InvoiceService
                 $cell('col_qty', (string)$row['qty']);
                 $cell('col_unit_net', I18n::price((int)round($row['net'] / $row['qty']), $currency));
             }
-            $cell('col_vat', self::rateLabel((float)$row['rate'], $row));
+            $cell('col_vat', self::rateLabel((float)$row['rate'], $row, $ossCountry));
             $cell('col_net_total', I18n::price($row['net'], $currency));
             $cell('col_total', I18n::price($row['gross'], $currency));
             $y += 5 + (count($nameLines) - 1) * 3.2;
@@ -2249,7 +2261,7 @@ final class InvoiceService
             $y += 5;
             foreach ($vatBreakdown['rates'] as $r => $info) {
                 $ensureSpace(5);
-                $pdf->text(20, $y, self::rateLabel((float)$r, $info), ['size' => 9]);
+                $pdf->text(20, $y, self::rateLabel((float)$r, $info, $ossCountry), ['size' => 9]);
                 $pdf->text(40, $y, $L['col_net'] . ' ' . I18n::price((int)$info['net'], $currency), ['size' => 9]);
                 $pdf->text(100, $y, $L['col_vat'] . ' ' . I18n::price((int)$info['vat'], $currency), ['size' => 9]);
                 $y += 5;
@@ -2345,7 +2357,7 @@ final class InvoiceService
         return BankTransferInstructions::variableSymbol(['id' => (int)$invoice['order_id']]);
     }
 
-    private static function partyLines(array $p, array $L): array
+    private static function partyLines(array $p, array $L, string $locale): array
     {
         $out = [];
         if (!empty($p['name']))    $out[] = $p['name'];
@@ -2354,7 +2366,8 @@ final class InvoiceService
         if (!empty($p['city']) || !empty($p['zip'])) {
             $out[] = trim(($p['zip'] ?? '') . ' ' . ($p['city'] ?? ''));
         }
-        if (!empty($p['country'])) $out[] = $p['country'];
+        // R34: the country by name in the document's language, as the address reads everywhere else (OrderAddress::lines).
+        if (!empty($p['country'])) $out[] = ShippingService::countryNameIn((string)$p['country'], $locale);
         if (!empty($p['ico']))     $out[] = $L['ico'] . ': ' . $p['ico'];
         if (!empty($p['dic']))     $out[] = $L['dic'] . ': ' . $p['dic'];
         if (!empty($p['ic_dph']))  $out[] = $L['ic_dph'] . ': ' . $p['ic_dph'] . (!empty($p['ic_dph_unverified']) ? ' (' . $L['ic_dph_unverified'] . ')' : '');

@@ -96,7 +96,7 @@ function handleOrderItemsEdit(): void {
     $result = $parsed['errors'] !== []
         ? ['ok' => false, 'error' => 'admin.order.manual.unknown_sku', 'detail' => implode(', ', $parsed['errors'])]
         : ManualOrder::editItems($orderId, $parsed['lines']);
-    setFlash($result['ok'] ? 'ok' : 'err', $result['ok'] ? I18n::t('admin.order.edit.saved') : manualOrderMessage($result));
+    setFlash($result['ok'] ? 'ok' : 'err', $result['ok'] ? trim(I18n::t('admin.order.edit.saved') . ' ' . (isset($result['notice']) ? I18n::format('admin.order.edit.download_once', ['skus' => $result['notice']]) : '')) : manualOrderMessage($result));
     header('Location: admin.php?p=order&id=' . $orderId);
     exit;
 }
