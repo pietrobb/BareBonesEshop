@@ -47,6 +47,15 @@ try {
     // price lists (no store rates apply to it) still gets no switched-off pickup and no Packeta abroad or over 10 kg.
     $r35sOther = StoreContext::current()->currency() === 'CZK' ? 'EUR' : 'CZK';
     assert_true(!StoreContext::current()->usesProviderPrices($r35sOther), 'R35 shipping: the test currency is not the store price lists\' currency');
+    // The built-in Packeta tiers are EUR only, so a stand-in quoting every currency checks the filter, not the adapter.
+    $r35sAnyPacketa = new class implements ShippingAdapter {
+        public function getRates(array $params): array { return [['carrier' => 'packeta', 'method_code' => 'packeta', 'label' => 'Packeta', 'price' => 1000, 'cod_surcharge' => 0, 'delivery_days' => '1-2', 'cod' => false]]; }
+        public function generateLabel(array $order): array { throw new LogicException('no labels'); }
+        public function trackShipment(string $awb): array { return []; }
+        public function supportsCOD(): bool { return false; }
+        public function carrierId(): string { return 'packeta'; }
+    };
+    ShippingService::setAdapters(['packeta' => $r35sAnyPacketa, 'pickup' => new PersonalPickup(), 'r35s-courier' => $r35sCarrier]);
     $czkAt8 = $r35sMethods('AT', 8000, $r35sOther);
     $czkCz24 = $r35sMethods('CZ', 24000, $r35sOther);
     $czkSk1 = $r35sMethods('SK', 1000, $r35sOther);
@@ -56,6 +65,19 @@ try {
         "R35 shipping: Packeta goes neither to Austria nor over its 10 kg limit for a cart charged in {$r35sOther} (got CZ 24 kg: " . implode(',', $czkCz24) . ')');
     assert_true(in_array('r35s-courier', $czkAt8, true),
         "R35 shipping: a carrier the store never set up is still quoted for a cart charged in {$r35sOther}");
+    // ...but a method the merchant allows there (active, in zone, within its limits) keeps the carrier's built-in
+    // tiers in that currency (the R8 rule: the store's price list does not apply, the carrier's own prices do).
+    $pdo->exec("UPDATE shipping_methods SET active = 1 WHERE store_id = 'default' AND code = 'pickup'");
+    $czkSk1On = $r35sMethods('SK', 1000, $r35sOther);
+    $czkCz5 = $r35sMethods('CZ', 5000, $r35sOther);
+    assert_true(in_array('pickup', $czkSk1On, true),
+        "R35 shipping: an active pickup set up for Slovakia is offered there for a cart charged in {$r35sOther} (got: " . implode(',', $czkSk1On) . ')');
+    assert_true(in_array('packeta', $czkCz5, true),
+        "R35 shipping: Packeta within its 10 kg limit is offered to Czechia for a cart charged in {$r35sOther} (got: " . implode(',', $czkCz5) . ')');
+    $czkAt8On = $r35sMethods('AT', 8000, $r35sOther);
+    $czkCz24On = $r35sMethods('CZ', 24000, $r35sOther);
+    assert_true(!in_array('pickup', $czkAt8On, true) && !in_array('packeta', $czkAt8On, true) && !in_array('packeta', $czkCz24On, true),
+        "R35 shipping: with pickup active, still no pickup or Packeta to Austria and no Packeta over 10 kg for a cart charged in {$r35sOther}");
 } catch (Throwable $e) {
     assert_true(false, 'R35 shipping (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {

@@ -142,9 +142,15 @@ class ShippingService
                 return self::applyFreeShippingRules(array_merge($dbRates, $legacy), $subtotal, $physicalQty);
             }
         }
-        // R35: the merchant's method settings (active, weight limit, zones) hold in every charge currency; only the
-        // price lookups above depend on it.
-        if (self::hasDatabasePricing()) $configured = self::configuredCarriers();
+        // R35: the merchant's method settings (active, weight limit, zones) hold in every charge currency. In the price
+        // lists' currency the store's own rates are the offer; in another one the carrier's built-in tiers apply (R8),
+        // but only where one of its methods allows this country, weight and volume.
+        if (self::hasDatabasePricing()) {
+            $configured = self::configuredCarriers();
+            if (!StoreContext::current()->usesProviderPrices($currency)) {
+                $configured = array_values(array_diff($configured, self::allowedCarriers($country, $weightG, $volumeCm3)));
+            }
+        }
 
         $adapters = self::resolveAdapters();
         // Amounts (subtotal, free-shipping thresholds, returned prices) are minor units of the charged currency.
@@ -1228,6 +1234,30 @@ class ShippingService
     {
         $stmt = Db::get()->prepare("SELECT carrier, code FROM shipping_methods WHERE store_id = :store");
         $stmt->execute([':store' => StoreContext::current()->providerId()]);
+        $carriers = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            foreach ([(string)$row['carrier'], (string)$row['code']] as $id) if ($id !== '') $carriers[$id] = true;
+        }
+        return array_map('strval', array_keys($carriers));
+    }
+
+    /** Carriers (and method codes) with an active method that has a rate in an active zone covering $country, within its limits. */
+    private static function allowedCarriers(string $country, int $weightG, int $volumeCm3): array
+    {
+        $stmt = Db::get()->prepare("
+            SELECT DISTINCT m.carrier, m.code
+            FROM shipping_methods m
+            JOIN shipping_rates r ON r.method_code = m.code AND r.store_id = m.store_id
+            JOIN shipping_zones z ON z.code = r.zone_code AND z.store_id = m.store_id
+            JOIN shipping_zone_countries c ON c.zone_code = z.code AND c.store_id = m.store_id
+            WHERE m.store_id = :store AND c.country = :country
+              AND m.active = 1 AND z.active = 1 AND COALESCE(r.active, 1) = 1
+              AND (r.country = :rcountry OR r.country = '')
+              AND (m.max_weight_g IS NULL OR m.max_weight_g = 0 OR m.max_weight_g >= :weight)
+              AND (m.max_volume_cm3 IS NULL OR m.max_volume_cm3 = 0 OR m.max_volume_cm3 >= :volume)
+        ");
+        $stmt->execute([':store' => StoreContext::current()->providerId(), ':country' => $country, ':rcountry' => $country,
+            ':weight' => $weightG, ':volume' => $volumeCm3]);
         $carriers = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             foreach ([(string)$row['carrier'], (string)$row['code']] as $id) if ($id !== '') $carriers[$id] = true;

@@ -152,7 +152,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   prices: Packeta (set up up to 10 kg, Slovakia and Czechia) was offered for 24 kg and to Austria at 10.99 €, a
   switched-off method came back, and in-store pickup (set up for Slovakia) appeared for an address abroad only when
   the cart was heavy. A carrier set up as a shipping method is now quoted only as set up there (its countries, its
-  weight bands, active or not); built-in prices remain for carriers the store has no shipping method of. Where no
+  weight bands, active or not); built-in prices remain for carriers the store has no shipping method of. A cart charged
+  in another currency than the store's price lists still gets the carrier's built-in tiers in that currency, but only
+  where one of its methods is active, covers the country and allows the weight and volume. Where no
   method covers an address, checkout says shipping is not available there.
 - **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
   released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
