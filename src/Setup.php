@@ -379,44 +379,33 @@ class Setup
     }
 
     /** EU-wide threshold of cross-border B2C sales (goods dispatched, e-services) above which OSS VAT applies (art. 59c). */
-    public const OSS_THRESHOLD_EUR_CENTS = 1000000;
+    public const OSS_THRESHOLD_EUR_CENTS = OssThreshold::EUR_CENTS;
 
     /**
      * R34 (low): with OSS off, a consumer in another member state pays the seller's VAT only while the seller's EU
-     * cross-border B2C sales stay under 10 000 € in the current and the previous calendar year. Their net amount (issued
-     * invoices and credit notes charged so, of every store of the same seller, in EUR) is checked; above it the store
-     * must switch OSS on. Was: a manual switch nobody was reminded of.
+     * cross-border B2C sales stay under 10 000 € in the current and the previous calendar year (OssThreshold: every
+     * store of the same seller, other currencies converted, e-books billed abroad next to goods supplied at home). R35:
+     * above it the checkout already charges the buyer's country's VAT; the store must register for OSS and switch it on.
+     * A currency sold in without a conversion rate warns.
      * @param array<string, mixed> $stores every store (stores.json), for the stores sharing the seller
      * @return array{status: string, name: string, message: string, action: string}
      */
     public static function ossThresholdCheck(PDO $db, string $storeId, array $store, array $stores): array {
         $name = 'stores.oss_threshold.' . $storeId;
-        $seller = (string)($store['legal']['seller'] ?? $storeId);
-        $sameSeller = [];
-        foreach ($stores as $id => $other) {
-            if (is_array($other) && (string)($other['legal']['seller'] ?? $id) === $seller) $sameSeller[] = (string)$id;
-        }
         if (!empty($store['oss_enabled'])) {
             return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} charges consumers in other EU states their own VAT (OSS).", 'action' => ''];
         }
-        $sameSeller = $sameSeller ?: [$storeId];
-        $year = (int)ShopTime::date('Y');
-        $marks = implode(',', array_fill(0, count($sameSeller), '?'));
-        $stmt = $db->prepare("SELECT COALESCE(SUM(i.total_net), 0) FROM invoices i JOIN orders o ON o.id = i.order_id
-            WHERE o.store_id IN ({$marks}) AND i.status = 'issued' AND i.vat_scenario = ? AND LOWER(i.currency) = 'eur'
-              AND i.issued_at >= ? AND i.issued_at < ?");
-        $worst = [0, $year];
-        foreach ([$year - 1, $year] as $y) {
-            $stmt->execute([...$sameSeller, VatService::SCENARIO_DOMESTIC_SUBTHRESH, sprintf('%04d-01-01', $y), sprintf('%04d-01-01', $y + 1)]);
-            $sum = (int)$stmt->fetchColumn();
-            if ($sum >= $worst[0]) $worst = [$sum, $y];
-        }
-        [$sum, $y] = $worst;
+        ['sum' => $sum, 'year' => $y, 'unconverted' => $unconverted] = OssThreshold::worstYear($db, $storeId, $store, $stores);
         $amount = number_format($sum / 100, 2, '.', ' ') . ' EUR';
         if ($sum >= self::OSS_THRESHOLD_EUR_CENTS) {
             return ['status' => 'warn', 'name' => $name,
-                'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y} at its own VAT; above 10 000 EUR their own country's VAT applies (OSS).",
-                'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$storeId}); from then on such sales carry the buyer's country's VAT."];
+                'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y} at its own VAT; above 10 000 EUR their own country's VAT applies (OSS), and checkout now charges it.",
+                'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$storeId}); the OSS report lists these sales from then on."];
+        }
+        if ($unconverted !== []) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "Store {$storeId} sold to consumers in other EU states in " . implode(', ', $unconverted) . ', which the 10 000 EUR OSS threshold cannot convert to EUR; counted so far: ' . $amount . '.',
+                'action' => 'Add the EUR rate of ' . implode(', ', $unconverted) . ' to eur_exchange_rates in config/vat-rates.json.'];
         }
         return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
     }

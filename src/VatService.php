@@ -48,6 +48,7 @@ class VatService implements TaxProvider
         self::$cfg = [];
         self::$rootDir = null;
         self::$loaded = false;
+        OssThreshold::reset();
     }
 
     public static function setConfig(array $cfg): void

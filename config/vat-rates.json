@@ -216,5 +216,11 @@
     "_digital_categories": "A download (digital variant or digital product) of a product in category X is taxed as digital_categories[X]. A country taxing e-books apart from printed books sets categories.ebooks; without it ebooks takes the books rate.",
     "digital_categories": {
         "books": "ebooks"
+    },
+
+    "_eur_exchange_rates": "EUR per unit of another currency, used only to count sales in that currency against the 10 000 EUR OSS threshold (OssThreshold). Approximate values of 2026-11; replace them with the ECB reference rates your accountant uses. A currency sold in without a rate is reported by the setup doctor (stores.oss_threshold.<store>), not counted.",
+    "eur_exchange_rates": {
+        "BGN": 0.51129, "CZK": 0.040, "DKK": 0.134, "HUF": 0.0025, "PLN": 0.235, "RON": 0.197, "SEK": 0.090,
+        "CHF": 1.06, "GBP": 1.15, "USD": 0.87
     }
 }

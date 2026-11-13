@@ -175,6 +175,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   column reads "Set in the admin: Paid" instead of `admin.paid`. The customer's returns list shows the status in
   words ("Requested"). The variant table's availability and stock policy options read in words. An admin edit that
   asks for more than one of a download saves one, as before, and now says so next to "Items saved".
+- **The 10 000 EUR OSS threshold is applied at checkout (review round 35).** With OSS off, the threshold was only a
+  doctor warning, and its count left out sales in another currency and an e-book billed to a consumer of another
+  member state on an invoice whose goods were supplied at home. Both count now (other currencies converted with the
+  new `eur_exchange_rates` of `config/vat-rates.json`; approximate values, replace them with the ECB rates your
+  accountant uses — a currency sold in without a rate is reported by `stores.oss_threshold.<store>`). Past the
+  threshold in the current or the previous year, checkout charges consumers of other member states their own
+  country's VAT as with OSS on, and the doctor asks to register for OSS and switch it on.
 - **The credit note of a released item refund executed late keeps the returned items' VAT rates (review round 34).**
   When Stripe's `charge.refunded` arrives after the admin released an item refund, its credit note now credits the rates
   the reversed item credit note did. It spread the amount over every VAT rate of the invoice, so in an order mixing
