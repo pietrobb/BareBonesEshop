@@ -1513,12 +1513,16 @@ class PaymentService {
         $itemRefundId = ($itemRow['status'] ?? '') === 'pending' ? (int)$itemRow['id'] : 0;
         // R34: the credit note of this refund was released (or declined) and reversed, yet the provider paid it out: the
         // money is booked, and a credit note for it follows (InvoiceService::creditBookedRefund()); the merchant is told.
-        if (($itemRow['status'] ?? '') === 'failed' && !self::transactionExists($eventKey) && !self::refundAlreadyRecorded($orderId, $refundId)) {
+        $lateRelease = ($itemRow['status'] ?? '') === 'failed' && !self::transactionExists($eventKey) && !self::refundAlreadyRecorded($orderId, $refundId);
+        if ($lateRelease) {
             AuditLog::log('order_refund', $orderId, 'failed', 'failed', "{$provider} refund {$refundId} of a released item refund was executed");
             IncidentMonitor::report('payment.released_refund_executed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => (int)$itemRow['id'], 'refund_id' => $refundId]);
         }
-        return self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
+        $booked = self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
             $payload + ['settles_refund_request' => self::refundRequestKey($key) ?? $key], $itemRefundId, $refundId);
+        // R35 (medium 1): that money refunded the returned units; "Refunded" on the return paid them out again.
+        if ($lateRelease && $booked) Rma::coverReleasedRefund((int)$itemRow['id'], $refundId);
+        return $booked;
     }
 
     /**
