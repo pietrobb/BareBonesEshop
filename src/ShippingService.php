@@ -6,7 +6,7 @@
  * Pricing algorithm:
  *  1. Query shipping_rates DB for carrier+country+weight match (tiered)
  *  2. Apply free_shipping threshold per adapter
- *  3. If no DB rate → adapter hardcoded fallback
+ *  3. If no DB rate → adapter hardcoded fallback, only for carriers the store has no shipping method of
  *  4. If adapter returns nothing → legacy Shipping::calculate() JSON fallback
  *
  * Example: 2 kg parcel to SK, subtotal 45 EUR (< 50 EUR free threshold)
@@ -132,6 +132,7 @@ class ShippingService
         $volumeCm3 = max(0, $volumeCm3);
         $physicalQty = max(0, $physicalQty);
 
+        $configured = [];
         if (self::hasDatabasePricing() && StoreContext::current()->usesProviderPrices($currency)) {
             $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
             if (!empty($dbRates)) {
@@ -140,6 +141,7 @@ class ShippingService
                 $legacy = self::legacyRates($country, $weightG, $subtotal, strtoupper($currency ?? StoreContext::current()->currency()), $dbCodes);
                 return self::applyFreeShippingRules(array_merge($dbRates, $legacy), $subtotal, $physicalQty);
             }
+            $configured = self::configuredCarriers();
         }
 
         $adapters = self::resolveAdapters();
@@ -154,6 +156,9 @@ class ShippingService
 
         foreach ($adapters as $providerCode => $adapter) {
             if (is_int($providerCode)) $providerCode = $adapter->carrierId();
+            // R35 (medium 2): a carrier the merchant set up as a shipping method goes only where, up to the weight and
+            // while active as set there; its built-in prices offered Packeta for 24 kg (10 kg limit) and to Austria.
+            if (in_array($adapter->carrierId(), $configured, true)) continue;
             try {
                 $adapterRates = $adapter->getRates($params);
             } catch (\Throwable $e) {
@@ -1214,6 +1219,18 @@ class ShippingService
             if ($adapter->carrierId() === 'pickup' && $methodCode === 'pickup') return true;
         }
         return false;
+    }
+
+    /** Carriers (and method codes) the store set up as shipping methods, active or not. */
+    private static function configuredCarriers(): array
+    {
+        $stmt = Db::get()->prepare("SELECT carrier, code FROM shipping_methods WHERE store_id = :store");
+        $stmt->execute([':store' => StoreContext::current()->providerId()]);
+        $carriers = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            foreach ([(string)$row['carrier'], (string)$row['code']] as $id) if ($id !== '') $carriers[$id] = true;
+        }
+        return array_map('strval', array_keys($carriers));
     }
 
     private static function hasDatabasePricing(): bool

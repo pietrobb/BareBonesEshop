@@ -147,6 +147,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Built-in carrier prices no longer override the merchant's shipping methods (review round 35, medium 2).** When
+  the store's own rates did not cover the country and weight, the checkout asked every carrier for its built-in
+  prices: Packeta (set up up to 10 kg, Slovakia and Czechia) was offered for 24 kg and to Austria at 10.99 €, a
+  switched-off method came back, and in-store pickup (set up for Slovakia) appeared for an address abroad only when
+  the cart was heavy. A carrier set up as a shipping method is now quoted only as set up there (its countries, its
+  weight bands, active or not); built-in prices remain for carriers the store has no shipping method of. Where no
+  method covers an address, checkout says shipping is not available there.
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
