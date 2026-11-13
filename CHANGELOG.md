@@ -147,6 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
+  VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
+  VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
+  dots and dashes, upper case, on a new address and on an edit.
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
