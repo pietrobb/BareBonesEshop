@@ -1817,6 +1817,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_required' => 'Ez a mező kötelező.',
     'account.err_address_country' => 'Válasszon országot a listából.',
     'account.err_address_company_id' => 'Adjon meg érvényes cégjegyzékszámot vagy adószámot: betűk és számjegyek, legfeljebb 20 karakter.',
+    'account.err_address_vat_id' => 'Adjon meg érvényes közösségi adószámot: országkód és 6–14 betű vagy számjegy, pl. SK2020123456.',
+    'account.err_address_too_long' => 'Legfeljebb 191 karakter.',
     'account.addr_type_shipping' => 'Szállítási cím',
     'account.addr_type_billing' => 'Számlázási cím',
     'account.downloads' => 'Letöltések',

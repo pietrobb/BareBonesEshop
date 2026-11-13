@@ -147,6 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
+  VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
+  VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
+  dots and dashes, upper case, on a new address and on an edit.
 - **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
   released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
   the return still offered "Refunded": a click issued another credit note and sent the money again (19.90 returned,
