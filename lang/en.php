@@ -790,6 +790,7 @@ return [
     'admin.order.msg.refund_release_refunded' => 'The payment provider did execute the refund; it was booked to the credit note and nothing was released.',
     'admin.order.msg.refund_release_pending' => 'The payment provider is still processing the refund; the credit note waits for its result and nothing was released.',
     'admin.order.msg.refund_release_unverified' => 'The refund could not be checked with the payment provider; the credit note keeps waiting. Try again later.',
+    'admin.order.msg.refund_release_forbidden' => 'The payment provider did not let the shop\'s API key read the refunds of this payment (Stripe: give the restricted key the Refunds permission, Read or Write); nothing was released. Fix the key and release again.',
     'admin.order.msg.refund_confirmed' => 'Refund confirmed and booked.',
     'admin.order.msg.refund_outstanding' => 'Refund the payment first: the order still has a refundable balance (cancel it or request a refund).',
     'admin.order.msg.refund_error' => 'Error while creating the refund request.',

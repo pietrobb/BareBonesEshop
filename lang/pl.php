@@ -788,6 +788,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_release_refunded' => 'Operator płatności wykonał zwrot; zaksięgowano go do faktury korygującej, nic nie zwolniono.',
     'admin.order.msg.refund_release_pending' => 'Operator płatności nadal przetwarza zwrot; faktura korygująca czeka na wynik, nic nie zwolniono.',
     'admin.order.msg.refund_release_unverified' => 'Nie udało się sprawdzić zwrotu u operatora płatności; faktura korygująca nadal czeka. Spróbuj później.',
+    'admin.order.msg.refund_release_forbidden' => 'Operator płatności nie pozwolił kluczowi API sklepu odczytać zwrotów tej płatności (Stripe: nadaj kluczowi ograniczonemu uprawnienie Refunds, Read lub Write); nic nie zostało zwolnione. Popraw klucz i zwolnij ponownie.',
     'admin.order.msg.refund_confirmed' => 'Zwrot potwierdzony i zaksięgowany.',
     'admin.order.msg.refund_outstanding' => 'Najpierw zwróć płatność: zamówienie ma jeszcze saldo do zwrotu (anuluj je lub poproś o zwrot).',
     'admin.order.msg.refund_error' => 'Błąd podczas tworzenia żądania zwrotu.',

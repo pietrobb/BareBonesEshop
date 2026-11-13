@@ -788,6 +788,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_release_refunded' => 'Der Zahlungsanbieter hat die Erstattung ausgeführt; sie wurde zur Gutschrift gebucht, nichts wurde freigegeben.',
     'admin.order.msg.refund_release_pending' => 'Der Zahlungsanbieter bearbeitet die Erstattung noch; die Gutschrift wartet auf das Ergebnis, nichts wurde freigegeben.',
     'admin.order.msg.refund_release_unverified' => 'Die Erstattung konnte beim Zahlungsanbieter nicht geprüft werden; die Gutschrift wartet weiter. Versuchen Sie es später erneut.',
+    'admin.order.msg.refund_release_forbidden' => 'Der Zahlungsanbieter hat dem API-Schlüssel des Shops das Lesen der Erstattungen dieser Zahlung nicht erlaubt (Stripe: geben Sie dem eingeschränkten Schlüssel die Berechtigung Refunds, Read oder Write); nichts wurde freigegeben. Korrigieren Sie den Schlüssel und geben Sie erneut frei.',
     'admin.order.msg.refund_confirmed' => 'Erstattung bestätigt und gebucht.',
     'admin.order.msg.refund_outstanding' => 'Erstatten Sie zuerst die Zahlung: Die Bestellung hat noch einen erstattbaren Restbetrag (stornieren Sie sie oder fordern Sie eine Erstattung an).',
     'admin.order.msg.refund_error' => 'Fehler beim Erstellen der Erstattungsanfrage.',

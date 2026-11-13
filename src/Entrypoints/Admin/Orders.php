@@ -828,7 +828,7 @@ function handleOrderRefundRelease(): void {
             'refunded' => 'admin.order.msg.refund_release_refunded', 'pending' => 'admin.order.msg.refund_release_pending'][$outcome] ?? 'admin.order.msg.refund_error'));
     } catch (\Throwable $e) {
         Logger::phpLog("Refund release error [{$orderId}]: " . $e->getMessage());
-        setFlash('err', I18n::t('admin.order.msg.refund_release_unverified'));
+        setFlash('err', I18n::t(in_array($e->getCode(), [401, 403], true) ? 'admin.order.msg.refund_release_forbidden' : 'admin.order.msg.refund_release_unverified')); // R35: a key without refund read (Stripe 401/403) needs its permission
     }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;

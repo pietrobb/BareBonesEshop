@@ -796,8 +796,19 @@ class PaymentService {
         $order = Orders::byId($orderId);
         $stalled = $order ? self::stalledItemRefund($order) : null;
         $refund = Rma::refundById($itemRefundId) ?? [];
-        // R34 (low): a second submit (double click) of a release that went through says so instead of failing.
-        if ($order !== null && $stalled === null && (int)($refund['order_id'] ?? 0) === $orderId && ($refund['status'] ?? '') === 'failed') return 'already_released';
+        // R34 (low): a second submit (double click) of a release that went through says so instead of failing. R35 (low):
+        // also when the first one found the refund executed ('refunded') or still processed at the provider ('pending'), only
+        // as that release's own outcome: a refund the provider accepted without a release is still not released ('').
+        if ($order !== null && $stalled === null && (int)($refund['order_id'] ?? 0) === $orderId) {
+            $found = self::releaseFoundProviderRefund($orderId, (string)($refund['payment_reference'] ?? ''));
+            $settled = match (true) {
+                ($refund['status'] ?? '') === 'failed' => 'already_released',
+                $found && ($refund['status'] ?? '') === 'succeeded' => 'refunded',
+                $found && ($refund['status'] ?? '') === 'pending' => 'pending',
+                default => '',
+            };
+            if ($settled !== '') return $settled;
+        }
         if ($order === null || $stalled === null || $stalled['refund_id'] !== $itemRefundId) return '';
         $key = (string)($refund['idempotency_key'] ?? '');
         $gateway = WorkerJobs::orderPaymentGateway([], $order);
@@ -815,6 +826,16 @@ class PaymentService {
             return 'pending';
         }
         return Rma::failRefund($itemRefundId, "Item refund released by {$actor}: {$note}") ? 'released' : '';
+    }
+
+    /** R35: an earlier release on the order found provider refund $reference executed or still processed (its audit entry). */
+    private static function releaseFoundProviderRefund(int $orderId, string $reference): bool {
+        if ($reference === '') return false;
+        foreach (AuditLog::forEntity('order_refund', $orderId, 200) as $row) {
+            $note = (string)($row['note'] ?? '');
+            if (str_starts_with($note, 'Item refund release by ') && str_contains($note, " refund {$reference} ")) return true;
+        }
+        return false;
     }
 
     /** Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited. */
