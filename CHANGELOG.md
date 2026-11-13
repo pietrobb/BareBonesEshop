@@ -147,12 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
-- **Admin texts (review round 35).** The order history notes of a released item refund that the release found executed
-  or still processing at the provider, and of a released refund the provider executed later, read in the admin's
-  language with the provider, refund id and admin. The order detail shows its last payment event in words ("Last
-  event: Partially refunded", "Refund executed") instead of the code. The Spanish admin translates the 8 texts it
-  showed in English, among them the "To" column of the status history. The R34 VAT test sets up the tables it
-  uses, so it also passes run on its own.
+- **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
+  VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
+  VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
+  dots and dashes, upper case, on a new address and on an edit.
 - **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
   released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
   the return still offered "Refunded": a click issued another credit note and sent the money again (19.90 returned,
@@ -184,6 +182,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   The edit now takes the VAT ID status the order was placed with (a reverse-charged line, else the VIES answer on
   record from before the order) and keeps the scheme and country of every line; a line that would be taxed
   differently refuses the edit ("VAT treatment changed") instead of re-taxing it.
+- **Admin texts (review round 35).** The order history notes of a released item refund that the release found executed
+  or still processing at the provider, and of a released refund the provider executed later, read in the admin's
+  language with the provider, refund id and admin. The order detail shows its last payment event in words ("Last
+  event: Partially refunded", "Refund executed") instead of the code. The Spanish admin translates the 8 texts it
+  showed in English, among them the "To" column of the status history. The R34 VAT test sets up the tables it
+  uses, so it also passes run on its own.
 - **Goods collected in the shop pay the shop's VAT, whatever the buyer's address (review round 34).** The VAT
   scenario looked for the pickup method in a shipping quote at weight 0; for an address abroad that quote came from
   the zone's own rates, so an order collected in the shop by a buyer with an Austrian address (heavy enough for the
