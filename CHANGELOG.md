@@ -147,13 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
-- **Releasing a stalled item refund (review round 35).** A second "Release" of an item refund whose first release found
-  it executed at Stripe (booked to its credit note) or still processed there showed an error: it reports the same
-  outcome again and changes nothing. Only that release's own outcome is repeated (its audit entry names the Stripe
-  refund): a refund Stripe executed or accepted without a release is still refused. A Stripe key that may not read refunds (a restricted key without the Refunds
-  permission; Write includes Read) made every release fail with "try again later": Stripe answers 403, the release is
-  still refused (nothing is released) and the admin is told to give the key that permission (new key
-  `admin.order.msg.refund_release_forbidden`).
+- **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
+  VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
+  VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
+  dots and dashes, upper case, on a new address and on an edit.
 - **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
   released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
   the return still offered "Refunded": a click issued another credit note and sent the money again (19.90 returned,
@@ -178,6 +175,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
   the same office IP. Over the budget an unchecked VAT ID now just counts as unverified in the preview (the order
   itself is still checked), and a VAT ID whose VIES answer is cached no longer uses up the budget.
+- **Releasing a stalled item refund (review round 35).** A second "Release" of an item refund whose first release found
+  it executed at Stripe (booked to its credit note) or still processed there showed an error: it reports the same
+  outcome again and changes nothing. Only that release's own outcome is repeated (its audit entry names the Stripe
+  refund): a refund Stripe executed or accepted without a release is still refused. A Stripe key that may not read refunds (a restricted key without the Refunds
+  permission; Write includes Read) made every release fail with "try again later": Stripe answers 403, the release is
+  still refused (nothing is released) and the admin is told to give the key that permission (new key
+  `admin.order.msg.refund_release_forbidden`).
 - **Editing an order's lines in the admin keeps the VAT of every line (review round 34).** The edit re-priced the
   buyer's VAT ID as unverified unless the whole order was reverse charge, and compared only the order's scenario. An
   e-book reverse charged for a German business next to goods taxed at home then silently paid German OSS VAT after

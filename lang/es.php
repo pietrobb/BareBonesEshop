@@ -1894,6 +1894,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_required' => 'Este campo es obligatorio.',
     'account.err_address_country' => 'Elija un país de la lista.',
     'account.err_address_company_id' => 'Introduzca un número de empresa o fiscal válido: letras y cifras, como máximo 20 caracteres.',
+    'account.err_address_vat_id' => 'Introduzca un NIF-IVA de la UE válido: el código de país y 6–14 letras o cifras, p. ej. SK2020123456.',
+    'account.err_address_too_long' => 'Como máximo 191 caracteres.',
     'account.addr_type_shipping' => 'Dirección de envío',
     'account.addr_type_billing' => 'Dirección de facturación',
     'account.downloads' => 'Descargas',
