@@ -7,6 +7,11 @@
 // Art. 196 one; an IČ DPH VIES could not check was printed like a verified one.
 echo "\n--- R34: VAT lows — art. 44 e-services, OSS threshold, mixed invoice notices, unverified VAT ID ---\n";
 
+// R35 (low): run on its own (after FoundationScenario) it found no digital_assets, invoices or vat_id_cache tables,
+// which only scenarios before it in the suite had migrated: an incomplete schema is migrated first.
+if (!Db::tableExists('digital_assets') || !Db::tableExists('invoices') || !Db::tableExists('vat_id_cache')) {
+    (new Migrator($pdo, dirname(TEST_CLI_DIR) . '/migrations', test_fixture_path('r34l-migrate') . '.lock'))->apply();
+}
 Bootstrap::initStoreContext('/', '', 'default');
 VatService::reset();
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));

@@ -278,7 +278,7 @@ function pageOrder(): void {
             <p class="muted"><?= esc(I18n::t('admin.order.variable_symbol')) ?>: <strong data-variable-symbol><?= esc(BankTransferInstructions::variableSymbol($order)) ?></strong></p>
             <?php endif; ?>
             <p class="muted"><?= esc(I18n::t('admin.order.payment_reference')) ?>: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
-            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(I18n::dateTime((string)$latestPaymentTx['created_at'])) : '' ?></p>
+            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc(OrderStatusLabels::transaction((string)$latestPaymentTx['status'])) . ' @ ' . esc(I18n::dateTime((string)$latestPaymentTx['created_at'])) : '' ?></p>
             <?php if (Security::adminCan('orders.edit') && PaymentLink::payable($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_link" style="margin-top:.5rem" data-payment-link>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">

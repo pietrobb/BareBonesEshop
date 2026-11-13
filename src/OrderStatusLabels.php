@@ -16,6 +16,17 @@ final class OrderStatusLabels
         return self::label('payment_status.', $status, $locale);
     }
 
+    /**
+     * R35 (low): a payment transaction's status in words ("Last event: partially_refunded" in the order detail). Its own
+     * events (initiated, refund_attempted, refund_succeeded…) by admin.order.tx_status.*, a payment status by its label.
+     */
+    public static function transaction(string $status): string
+    {
+        $key = 'admin.order.tx_status.' . $status;
+        $label = I18n::t($key);
+        return $label !== $key ? $label : self::payment($status);
+    }
+
     /** R34: a return's status in words ("Requested"), the labels the admin's return list uses. */
     public static function rma(string $status, ?string $locale = null): string
     {

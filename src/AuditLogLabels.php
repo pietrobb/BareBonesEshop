@@ -130,6 +130,13 @@ final class AuditLogLabels {
             return I18n::format('admin.audit.note.refund_' . strtolower($m[1]), ['amount' => $money($m[2]), 'detail' => $m[3]]);
         }
         if (preg_match('/^Stripe refund (\S+) succeeded$/', $note, $m) === 1) return I18n::format('admin.audit.note.stripe_refund_succeeded', ['id' => $m[1]]);
+        // R35 (low): the notes of a release that found the refund at the provider (R34) stayed in English.
+        if (preg_match('/^Item refund release by (.*?): (\S+) refund (\S+) (was executed, booked instead|is still processed)$/s', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.item_refund_release_' . ($m[4] === 'is still processed' ? 'pending' : 'booked'), ['actor' => $m[1], 'provider' => $m[2], 'id' => $m[3]]);
+        }
+        if (preg_match('/^(\S+) refund (\S+) of a released item refund was executed$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.released_refund_executed', ['provider' => $m[1], 'id' => $m[2]]);
+        }
         if (preg_match('/^Item refund released by (.*?): (.*)$/s', $note, $m) === 1) {
             return I18n::format('admin.audit.note.item_refund_released', ['actor' => $m[1], 'detail' => $m[2]]);
         }
