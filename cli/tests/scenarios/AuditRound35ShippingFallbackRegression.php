@@ -8,8 +8,8 @@
 echo "\n--- R35: built-in carrier prices do not override the merchant's shipping methods ---\n";
 
 Bootstrap::initStoreContext('/', '', 'default');
-$r35sMethods = static fn(string $country, int $weightG): array => array_values(array_unique(array_map(
-    static fn(array $r): string => (string)($r['method_code'] ?? ''), ShippingService::calculateRates($country, $weightG, 1000))));
+$r35sMethods = static fn(string $country, int $weightG, ?string $currency = null): array => array_values(array_unique(array_map(
+    static fn(array $r): string => (string)($r['method_code'] ?? ''), ShippingService::calculateRates($country, $weightG, 1000, false, 0, 0, $currency))));
 $r35sSaved = $pdo->query("SELECT code, active, max_weight_g FROM shipping_methods WHERE store_id = 'default' AND code IN ('packeta', 'pickup', 'gls')")->fetchAll(PDO::FETCH_ASSOC);
 $r35sCarrier = new class implements ShippingAdapter {
     public function getRates(array $params): array { return [['carrier' => 'r35s-courier', 'label' => 'R35S courier', 'price' => 1500, 'cod_surcharge' => 0, 'delivery_days' => '2', 'cod' => false]]; }
@@ -42,6 +42,20 @@ try {
     $pdo->exec("UPDATE shipping_methods SET active = 0 WHERE store_id = 'default' AND code = 'pickup'");
     assert_true(!in_array('pickup', $r35sMethods('SK', 1000), true) && !in_array('pickup', $r35sMethods('CZ', 24000), true),
         'R35 shipping: a switched-off pickup method is offered nowhere');
+
+    // The merchant's settings do not depend on the currency: a cart charged in another currency than the store's
+    // price lists (no store rates apply to it) still gets no switched-off pickup and no Packeta abroad or over 10 kg.
+    $r35sOther = StoreContext::current()->currency() === 'CZK' ? 'EUR' : 'CZK';
+    assert_true(!StoreContext::current()->usesProviderPrices($r35sOther), 'R35 shipping: the test currency is not the store price lists\' currency');
+    $czkAt8 = $r35sMethods('AT', 8000, $r35sOther);
+    $czkCz24 = $r35sMethods('CZ', 24000, $r35sOther);
+    $czkSk1 = $r35sMethods('SK', 1000, $r35sOther);
+    assert_true(!in_array('pickup', $czkAt8, true) && !in_array('pickup', $czkCz24, true) && !in_array('pickup', $czkSk1, true),
+        "R35 shipping: a switched-off pickup is offered nowhere for a cart charged in {$r35sOther} either (got AT: " . implode(',', $czkAt8) . ')');
+    assert_true(!in_array('packeta', $czkAt8, true) && !in_array('packeta', $czkCz24, true),
+        "R35 shipping: Packeta goes neither to Austria nor over its 10 kg limit for a cart charged in {$r35sOther} (got CZ 24 kg: " . implode(',', $czkCz24) . ')');
+    assert_true(in_array('r35s-courier', $czkAt8, true),
+        "R35 shipping: a carrier the store never set up is still quoted for a cart charged in {$r35sOther}");
 } catch (Throwable $e) {
     assert_true(false, 'R35 shipping (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {

@@ -141,8 +141,10 @@ class ShippingService
                 $legacy = self::legacyRates($country, $weightG, $subtotal, strtoupper($currency ?? StoreContext::current()->currency()), $dbCodes);
                 return self::applyFreeShippingRules(array_merge($dbRates, $legacy), $subtotal, $physicalQty);
             }
-            $configured = self::configuredCarriers();
         }
+        // R35: the merchant's method settings (active, weight limit, zones) hold in every charge currency; only the
+        // price lookups above depend on it.
+        if (self::hasDatabasePricing()) $configured = self::configuredCarriers();
 
         $adapters = self::resolveAdapters();
         // Amounts (subtotal, free-shipping thresholds, returned prices) are minor units of the charged currency.
