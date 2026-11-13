@@ -125,7 +125,9 @@ try {
     $r5sRates = null;
     $r5sError = $r5sThrows(static function () use (&$r5sRates): void { $r5sRates = ShippingService::calculateRates('IS', 1000, 2000); });
     assert_true($r5sError === null, 'R5 carriers: a carrier whose constructor throws does not take the rates (checkout) down (' . ($r5sError ? $r5sError->getMessage() : 'ok') . ')');
-    assert_true(in_array('pickup', array_column($r5sRates ?? [], 'carrier'), true), 'R5 carriers: the working carriers are still offered');
+    // R35: in-store pickup (a shipping method set up for Slovakia) is no longer quoted to Iceland by its built-in price;
+    // the store's other methods (shipping.json) still are.
+    assert_true(($r5sRates ?? []) !== [] && !in_array('r5-broken', array_column($r5sRates ?? [], 'carrier'), true), 'R5 carriers: the working carriers are still offered');
     assert_true((int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'shipping.adapter_unavailable'")->fetchColumn() >= 1,
         'R5 carriers: the broken carrier raises an incident for the merchant');
 } finally {
