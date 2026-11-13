@@ -284,7 +284,7 @@ class DigitalDelivery {
     private static function notCreditedLineSql(): string {
         if (!Db::hasColumn('digital_entitlements', 'order_item_id') || !Db::tableExists('credit_note_items')) return '';
         return " AND NOT EXISTS (SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
-                  WHERE cni.order_item_id = digital_entitlements.order_item_id AND r.status IN ('pending', 'succeeded'))";
+                  WHERE cni.order_item_id = digital_entitlements.order_item_id AND " . Rma::LIVE_REFUND_SQL . ")";
     }
 
     /** Free resumes of one counted download (inside its window, never past the bytes it already served). */
@@ -556,7 +556,7 @@ class DigitalDelivery {
     private static function lineCredited(int $orderItemId): bool {
         if (!Db::tableExists('credit_note_items')) return false;
         $stmt = Db::get()->prepare("SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
-            WHERE cni.order_item_id = :item AND r.status IN ('pending', 'succeeded') LIMIT 1");
+            WHERE cni.order_item_id = :item AND " . Rma::LIVE_REFUND_SQL . " LIMIT 1");
         $stmt->execute([':item' => $orderItemId]);
         return (bool)$stmt->fetchColumn();
     }

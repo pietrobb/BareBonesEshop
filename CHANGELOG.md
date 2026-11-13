@@ -154,6 +154,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   accountant uses — a currency sold in without a rate is reported by `stores.oss_threshold.<store>`). Past the
   threshold in the current or the previous year, checkout charges consumers of other member states their own
   country's VAT as with OSS on, and the doctor asks to register for OSS and switch it on.
+- **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
+  released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
+  the return still offered "Refunded": a click issued another credit note and sent the money again (19.90 returned,
+  23.89 paid back; a return of several lines was refunded twice in full). That money now refunds the returned units:
+  the return becomes refunded, nothing of it can be credited, refunded or exchanged again, and a returned e-book
+  stays revoked. A released refund nobody paid out leaves the return refundable as before.
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
