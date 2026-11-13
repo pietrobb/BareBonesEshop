@@ -1826,6 +1826,8 @@ return [
     'account.err_address_required' => 'Toto pole je povinné.',
     'account.err_address_country' => 'Vyberte krajinu zo zoznamu.',
     'account.err_address_company_id' => 'Zadajte platné IČO alebo DIČ: písmená a číslice, najviac 20 znakov.',
+    'account.err_address_vat_id' => 'Zadajte platné IČ DPH: kód krajiny a 6–14 písmen alebo číslic, napr. SK2020123456.',
+    'account.err_address_too_long' => 'Najviac 191 znakov.',
     'account.addr_type_shipping' => 'Doručovacia adresa',
     'account.addr_type_billing' => 'Fakturačná adresa',
     'account.downloads' => 'Na stiahnutie',

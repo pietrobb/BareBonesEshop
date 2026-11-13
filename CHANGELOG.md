@@ -147,15 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
-- **Checkout details (review round 35).** Over the VAT ID check budget of the previews, an unchecked VAT ID was shown
-  with VAT, but the order checked it in VIES and charged reverse charge (27,89 € shown, 22,68 € charged; without
-  JavaScript a "total changed" message the buyer did not cause). The session remembers a VAT ID the previews could
-  not check, and the order prices it the same way: unverified, at the total shown (the invoice marks it "not verified
-  in VIES"); once VIES has answered, previews and order use the answer. Without JavaScript, cash on delivery with
-  in-store pickup was refused with "Delivery is not available to the selected country": it now says cash on delivery
-  is not available with that delivery method (new key `checkout.error.cod_unavailable`). The "total changed" message
-  names the new total, which on a phone is far below it. Moving through the billing country list of an order with a
-  download with the arrow keys reloaded the page on every step: it re-prices once the buyer stops or leaves the list.
+- **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
+  VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
+  VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
+  dots and dashes, upper case, on a new address and on an edit.
 - **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
   released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
   the return still offered "Refunded": a click issued another credit note and sent the money again (19.90 returned,
@@ -175,6 +170,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   When Stripe's `charge.refunded` arrives after the admin released an item refund, its credit note now credits the rates
   the reversed item credit note did. It spread the amount over every VAT rate of the invoice, so in an order mixing
   rates the VAT and OSS reports no longer netted to zero for that return.
+- **Checkout details (review round 35).** Over the VAT ID check budget of the previews, an unchecked VAT ID was shown
+  with VAT, but the order checked it in VIES and charged reverse charge (27,89 € shown, 22,68 € charged; without
+  JavaScript a "total changed" message the buyer did not cause). The session remembers a VAT ID the previews could
+  not check, and the order prices it the same way: unverified, at the total shown (the invoice marks it "not verified
+  in VIES"); once VIES has answered, previews and order use the answer. Without JavaScript, cash on delivery with
+  in-store pickup was refused with "Delivery is not available to the selected country": it now says cash on delivery
+  is not available with that delivery method (new key `checkout.error.cod_unavailable`). The "total changed" message
+  names the new total, which on a phone is far below it. Moving through the billing country list of an order with a
+  download with the arrow keys reloaded the page on every step: it re-prices once the buyer stops or leaves the list.
 - **Checking a VAT ID no longer fails the checkout previews (review round 34).** The shipping and payment previews
   check a VAT ID in VIES within a budget of 20 lookups per 10 minutes and client, but running out of it answered the
   whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
