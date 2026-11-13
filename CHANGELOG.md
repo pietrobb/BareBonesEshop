@@ -147,6 +147,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **VAT details (review round 35).** A manual order billed to another address than delivered to lost the "not
+  verified in VIES" marker of its IČ DPH, so the invoice printed it as a checked registration. An e-book next to goods
+  reverse charged in the same member state (an exempt intra-Community supply) was summed into the goods' VAT group and
+  the invoice cited only Art. 138; it is now its own reverse-charge group ("0 DE RC") and the invoice also cites Art.
+  196. The e-book of a business with a valid VAT ID of the seller's state is supplied in the seller's state (art. 44):
+  next to goods exported to the USA it was zero-rated with them, it now pays the seller's VAT. Unchanged by design: a
+  consumer's e-book billed outside the EU next to goods exported there is zero-rated with them (the billing and the
+  delivery address both place the buyer outside the EU), while a consumer download alone billed outside the EU keeps
+  the seller's VAT (round 5: a declared country alone is no evidence).
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
