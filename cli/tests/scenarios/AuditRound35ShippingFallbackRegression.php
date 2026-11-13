@@ -8,9 +8,9 @@
 echo "\n--- R35: built-in carrier prices do not override the merchant's shipping methods ---\n";
 
 Bootstrap::initStoreContext('/', '', 'default');
-$r35sMethods = static fn(string $country, int $weightG, ?string $currency = null): array => array_values(array_unique(array_map(
-    static fn(array $r): string => (string)($r['method_code'] ?? ''), ShippingService::calculateRates($country, $weightG, 1000, false, 0, 0, $currency))));
-$r35sSaved = $pdo->query("SELECT code, active, max_weight_g FROM shipping_methods WHERE store_id = 'default' AND code IN ('packeta', 'pickup', 'gls')")->fetchAll(PDO::FETCH_ASSOC);
+$r35sMethods = static fn(string $country, int $weightG, ?string $currency = null, bool $cod = false): array => array_values(array_unique(array_map(
+    static fn(array $r): string => (string)($r['method_code'] ?? ''), ShippingService::calculateRates($country, $weightG, 1000, $cod, 0, 0, $currency))));
+$r35sSaved = $pdo->query("SELECT code, active, max_weight_g, supports_cod FROM shipping_methods WHERE store_id = 'default' AND code IN ('packeta', 'pickup', 'gls')")->fetchAll(PDO::FETCH_ASSOC);
 $r35sCarrier = new class implements ShippingAdapter {
     public function getRates(array $params): array { return [['carrier' => 'r35s-courier', 'label' => 'R35S courier', 'price' => 1500, 'cod_surcharge' => 0, 'delivery_days' => '2', 'cod' => false]]; }
     public function generateLabel(array $order): array { throw new LogicException('no labels'); }
@@ -78,10 +78,18 @@ try {
     $czkCz24On = $r35sMethods('CZ', 24000, $r35sOther);
     assert_true(!in_array('pickup', $czkAt8On, true) && !in_array('packeta', $czkAt8On, true) && !in_array('packeta', $czkCz24On, true),
         "R35 shipping: with pickup active, still no pickup or Packeta to Austria and no Packeta over 10 kg for a cart charged in {$r35sOther}");
+    // A method the merchant set to take no cash on delivery is not offered to a COD cart in any currency.
+    $pdo->exec("UPDATE shipping_methods SET supports_cod = 0 WHERE store_id = 'default' AND code = 'packeta'");
+    $codHome = $r35sMethods('CZ', 5000, null, true);
+    $codOther = $r35sMethods('CZ', 5000, $r35sOther, true);
+    assert_true(!in_array('packeta', $codHome, true) && !in_array('packeta', $codOther, true),
+        "R35 shipping: Packeta set to no cash on delivery is offered to a COD cart neither in the price lists' currency nor in {$r35sOther} (got: " . implode(',', $codOther) . ')');
+    assert_true(in_array('packeta', $r35sMethods('CZ', 5000, $r35sOther, false), true),
+        "R35 shipping: the same Packeta is still offered to a cart without COD charged in {$r35sOther}");
 } catch (Throwable $e) {
     assert_true(false, 'R35 shipping (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
     ShippingService::setAdapters([]);
-    $r35sRestore = $pdo->prepare("UPDATE shipping_methods SET active = ?, max_weight_g = ? WHERE store_id = 'default' AND code = ?");
-    foreach ($r35sSaved as $r35sRow) $r35sRestore->execute([$r35sRow['active'], $r35sRow['max_weight_g'], $r35sRow['code']]);
+    $r35sRestore = $pdo->prepare("UPDATE shipping_methods SET active = ?, max_weight_g = ?, supports_cod = ? WHERE store_id = 'default' AND code = ?");
+    foreach ($r35sSaved as $r35sRow) $r35sRestore->execute([$r35sRow['active'], $r35sRow['max_weight_g'], $r35sRow['supports_cod'], $r35sRow['code']]);
 }
