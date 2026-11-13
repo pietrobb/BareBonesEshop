@@ -43,6 +43,13 @@ test('HTML card checkout opens a real Stripe test-mode Checkout session', async 
     testInfo.annotations.push({ type: 'stripe-render-not-asserted', description: 'Stripe hosted page does not render in Playwright WebKit (Stripe CSP); redirect + shop CSP asserted above' });
     return;
   }
-  // Stripe rendered its hosted page (amount and a pay button), not an error page.
-  await expect(page.locator('body')).toContainText(/€|EUR/, { timeout: 30_000 });
+  // Stripe rendered its hosted page with the order's EUR amount, not an error page. With Adaptive Pricing Stripe
+  // shows a US runner the amount in dollars and puts the EUR amount in its currency picker, which is an iframe.
+  await expect.poll(async () => {
+    for (const frame of page.frames()) {
+      const text = await frame.locator('body').innerText({ timeout: 1_000 }).catch(() => '');
+      if (/€|EUR/.test(text)) return true;
+    }
+    return false;
+  }, { timeout: 30_000, message: 'Stripe hosted page (or its currency picker) shows the EUR amount' }).toBe(true);
 });
