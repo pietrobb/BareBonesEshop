@@ -147,6 +147,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Admin texts (review round 35).** The order history notes of a released item refund that the release found executed
+  or still processing at the provider, and of a released refund the provider executed later, read in the admin's
+  language with the provider, refund id and admin. The order detail shows its last payment event in words ("Last
+  event: Partially refunded", "Refund executed") instead of the code. The Spanish admin translates the 8 texts it
+  showed in English, among them the "To" column of the status history. The R34 VAT test sets up the tables it
+  uses, so it also passes run on its own.
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
