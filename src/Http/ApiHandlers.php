@@ -688,7 +688,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if ($billing['error'] !== null) return checkoutRefusal((string)$billing['error_code'], 422);
     $vatId = $buyerCompany['vat_id'];
     // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges.
-    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, null, (string)($billing['address']['country'] ?? ''));
+    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''));
     [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
     [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];
     // R33 (low): an IČ DPH VIES answered is not valid is not printed on the invoice as the buyer's VAT registration.
@@ -780,6 +780,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
         : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']), $cartCurrency);
+    // R35 (low): a method that delivers but not cash on delivery (in-store pickup) is a payment problem, not "no delivery".
+    if (!$selectedRate && PaymentService::isCashOnDelivery($paymentMethod)
+        && ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, false, $totalVolume, ShippingService::physicalQuantity($cart['items']), $cartCurrency)) {
+        return checkoutRefusal('checkout.error.cod_unavailable');
+    }
     if (!$selectedRate) return checkoutRefusal('checkout.error.shipping_unavailable');
     if (!$digitalOnly) {
         // Point-delivery carriers: the chosen pick-up point must be on the carrier's list for this address.

@@ -2017,6 +2017,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.address_required' => 'La dirección de entrega es obligatoria para productos físicos.',
     'checkout.error.field_too_long' => 'Un campo es demasiado largo. Acorte el nombre, el contacto o la dirección.',
     'checkout.error.shipping_unavailable' => 'El envío no está disponible para el país seleccionado.',
+    'checkout.error.cod_unavailable' => 'El pago contra reembolso no está disponible con el método de entrega seleccionado. Elija otro pago u otro método de entrega.',
     'checkout.error.payment_unavailable' => 'El método de pago seleccionado no está disponible para este pedido.',
     'checkout.error.total_changed' => 'El importe del pedido se ha recalculado tras cambiar el envío, el pago o el país. Revise el nuevo importe y confirme el pedido de nuevo.',
     'checkout.error.synthetic_requires_online' => 'El pedido sintético requiere un método de pago en línea.',

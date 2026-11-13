@@ -2045,6 +2045,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.address_required' => 'U fyzických produktů je doručovací adresa povinná.',
     'checkout.error.field_too_long' => 'Některé pole je příliš dlouhé. Zkraťte prosím jméno, kontakt nebo adresu.',
     'checkout.error.shipping_unavailable' => 'Doručení do zvolené země není dostupné.',
+    'checkout.error.cod_unavailable' => 'Dobírka není u zvoleného způsobu doručení dostupná. Zvolte jinou platbu nebo jiný způsob doručení.',
     'checkout.error.payment_unavailable' => 'Zvolený způsob platby není pro tuto objednávku dostupný.',
     'checkout.error.total_changed' => 'Částka objednávky byla po změně dopravy, platby nebo země přepočítána. Zkontrolujte novou částku a objednávku potvrďte znovu.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',

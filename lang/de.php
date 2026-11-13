@@ -2045,6 +2045,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.address_required' => 'Für physische Produkte ist eine Lieferadresse erforderlich.',
     'checkout.error.field_too_long' => 'Ein Feld ist zu lang. Bitte kürzen Sie Name, Kontakt oder Adresse.',
     'checkout.error.shipping_unavailable' => 'Die Lieferung in das gewählte Land ist nicht verfügbar.',
+    'checkout.error.cod_unavailable' => 'Nachnahme ist mit der gewählten Versandart nicht verfügbar. Wählen Sie eine andere Zahlungs- oder Versandart.',
     'checkout.error.payment_unavailable' => 'Die gewählte Zahlungsart ist für diese Bestellung nicht verfügbar.',
     'checkout.error.total_changed' => 'Der Bestellbetrag wurde nach der Änderung von Versand, Zahlung oder Land neu berechnet. Prüfen Sie den neuen Betrag und bestätigen Sie die Bestellung erneut.',
     'checkout.error.synthetic_requires_online' => 'Der synthetische Checkout erfordert eine Online-Zahlungsart.',

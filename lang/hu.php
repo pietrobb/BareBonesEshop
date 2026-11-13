@@ -2045,6 +2045,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.address_required' => 'Fizikai termékeknél a szállítási cím megadása kötelező.',
     'checkout.error.field_too_long' => 'Az egyik mező túl hosszú. Kérjük, rövidítse le a nevet, az elérhetőséget vagy a címet.',
     'checkout.error.shipping_unavailable' => 'A kiválasztott országba nem lehetséges a szállítás.',
+    'checkout.error.cod_unavailable' => 'Az utánvét a kiválasztott szállítási móddal nem érhető el. Válasszon másik fizetési vagy szállítási módot.',
     'checkout.error.payment_unavailable' => 'A választott fizetési mód ennél a rendelésnél nem érhető el.',
     'checkout.error.total_changed' => 'A szállítás, a fizetés vagy az ország módosítása után a rendelés összege újraszámolódott. Ellenőrizze az új összeget, és erősítse meg újra a rendelést.',
     'checkout.error.synthetic_requires_online' => 'A szintetikus rendeléshez online fizetési mód szükséges.',

@@ -130,7 +130,28 @@ class CheckoutService {
         $known = $vatId !== '' ? VatService::cachedVatIdStatus($vatId) : null;
         $verify = $known === null && $vatId !== '' && Security::rateLimitAllows('checkout_vat_preview', 20, 600);
         if ($verify) Security::rateLimitRecord('checkout_vat_preview');
+        if ($vatId !== '') self::rememberUncheckedVatId($vatId, $known === null && !$verify);
         return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry);
+    }
+
+    /**
+     * R35 (low): a VAT ID the previews could not check (budget used up) was shown with VAT, but the order checked it in
+     * VIES and charged reverse charge (27,89 € shown, 22,68 € charged; without JS a "total changed" the buyer did not
+     * cause). The session remembers it, and the order prices it as the previews did: unverified, at the total shown.
+     */
+    private static function rememberUncheckedVatId(string $vatId, bool $unchecked): void {
+        Security::sessionStart();
+        $ids = is_array($_SESSION['checkout_vat_unchecked'] ?? null) ? $_SESSION['checkout_vat_unchecked'] : [];
+        unset($ids[$vatId]);
+        if ($unchecked) $ids[$vatId] = true;
+        $_SESSION['checkout_vat_unchecked'] = array_slice($ids, -10, null, true);
+    }
+
+    /** The status an order prices $vatId with: unverified when the previews could not check it, else null (check it). */
+    public static function orderVatIdStatus(string $vatId): ?string {
+        if ($vatId === '' || VatService::cachedVatIdStatus($vatId) !== null) return null;
+        Security::sessionStart();
+        return isset($_SESSION['checkout_vat_unchecked'][$vatId]) ? 'unverified' : null;
     }
 
     /**

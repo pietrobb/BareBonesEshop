@@ -98,7 +98,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.11 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.12 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -179,6 +179,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   When Stripe's `charge.refunded` arrives after the admin released an item refund, its credit note now credits the rates
   the reversed item credit note did. It spread the amount over every VAT rate of the invoice, so in an order mixing
   rates the VAT and OSS reports no longer netted to zero for that return.
+- **Checkout details (review round 35).** Over the VAT ID check budget of the previews, an unchecked VAT ID was shown
+  with VAT, but the order checked it in VIES and charged reverse charge (27,89 € shown, 22,68 € charged; without
+  JavaScript a "total changed" message the buyer did not cause). The session remembers a VAT ID the previews could
+  not check, and the order prices it the same way: unverified, at the total shown (the invoice marks it "not verified
+  in VIES"); once VIES has answered, previews and order use the answer. Without JavaScript, cash on delivery with
+  in-store pickup was refused with "Delivery is not available to the selected country": it now says cash on delivery
+  is not available with that delivery method (new key `checkout.error.cod_unavailable`). The "total changed" message
+  names the new total, which on a phone is far below it. Moving through the billing country list of an order with a
+  download with the arrow keys reloaded the page on every step: it re-prices once the buyer stops or leaves the list.
 - **Checking a VAT ID no longer fails the checkout previews (review round 34).** The shipping and payment previews
   check a VAT ID in VIES within a budget of 20 lookups per 10 minutes and client, but running out of it answered the
   whole request with HTTP 429: about ten changes of a business's details broke the JS checkout, for everybody behind
