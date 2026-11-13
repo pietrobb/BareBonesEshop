@@ -99,7 +99,8 @@ class CheckoutService {
         $context = [
             'seller_country'        => $sellerCountry,
             'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
-            'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false),
+            // R35 (low): past the 10 000 EUR threshold a consumer of another member state pays their own VAT, OSS on or not.
+            'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false) || OssThreshold::exceeded(),
             // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).
             'customer_country'      => $digitalOnly ? $residence : vatSupplyCountry($rate, $country, $sellerCountry),
             'customer_vat_id_valid' => $vatIdValid && !$vatIdOfSeller,

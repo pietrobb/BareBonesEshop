@@ -147,6 +147,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The 10 000 EUR OSS threshold is applied at checkout (review round 35).** With OSS off, the threshold was only a
+  doctor warning, and its count left out sales in another currency and an e-book billed to a consumer of another
+  member state on an invoice whose goods were supplied at home. Both count now (other currencies converted with the
+  new `eur_exchange_rates` of `config/vat-rates.json`; approximate values, replace them with the ECB rates your
+  accountant uses — a currency sold in without a rate is reported by `stores.oss_threshold.<store>`). Past the
+  threshold in the current or the previous year, checkout charges consumers of other member states their own
+  country's VAT as with OSS on, and the doctor asks to register for OSS and switch it on.
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written
