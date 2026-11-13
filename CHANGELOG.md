@@ -149,7 +149,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 - **Releasing a stalled item refund (review round 35).** A second "Release" of an item refund whose first release found
   it executed at Stripe (booked to its credit note) or still processed there showed an error: it reports the same
-  outcome again and changes nothing. A Stripe key that may not read refunds (a restricted key without the Refunds
+  outcome again and changes nothing. Only that release's own outcome is repeated (its audit entry names the Stripe
+  refund): a refund Stripe executed or accepted without a release is still refused. A Stripe key that may not read refunds (a restricted key without the Refunds
   permission; Write includes Read) made every release fail with "try again later": Stripe answers 403, the release is
   still refused (nothing is released) and the admin is told to give the key that permission (new key
   `admin.order.msg.refund_release_forbidden`).

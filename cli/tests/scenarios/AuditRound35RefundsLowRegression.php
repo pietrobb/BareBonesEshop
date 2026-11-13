@@ -90,6 +90,17 @@ try {
     assert_equals(['pending', 'pending', 'pending', [-$i2['amount']]], [$first2, $second2, $r35rItem($i2['id']), $r35rCredits($o2)],
         'R35 refunds: a second release of a refund Stripe still processes reports it again (was: an error)');
 
+    // 1c. Only a release's own outcome is repeated: a refund Stripe executed or accepted without any release is not released.
+    $o4 = $r35rOrder('R35R-4', 'pi_r35r_4');
+    $i4 = $r35rItemRefund($o4, 'r35r-4-item');
+    $pdo->prepare("UPDATE order_refunds SET status = 'succeeded', payment_reference = 're_r35r_4' WHERE id = ?")->execute([$i4['id']]);
+    $o5 = $r35rOrder('R35R-5', 'pi_r35r_5');
+    $i5 = $r35rItemRefund($o5, 'r35r-5-item');
+    $pdo->prepare("UPDATE order_refunds SET payment_reference = 're_r35r_5' WHERE id = ?")->execute([$i5['id']]);
+    assert_equals(['', '', 'succeeded', 'pending'], [PaymentService::releaseStalledItemRefund($o4, $i4['id'], 'r35r-admin', 'R35R forged'),
+        PaymentService::releaseStalledItemRefund($o5, $i5['id'], 'r35r-admin', 'R35R forged'), $r35rItem($i4['id']), $r35rItem($i5['id'])],
+        'R35 refunds: a refund Stripe executed or accepted that no release found is still refused by a forged release');
+
     // 2. A key without refund read permission: Stripe answers 403, nothing is released, the admin gets the key to fix.
     $o3 = $r35rOrder('R35R-3', 'pi_r35r_3');
     $i3 = $r35rItemRefund($o3, 'r35r-3-item');
