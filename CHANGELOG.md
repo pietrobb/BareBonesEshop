@@ -206,6 +206,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   event: Partially refunded", "Refund executed") instead of the code. The Spanish admin translates the 8 texts it
   showed in English, among them the "To" column of the status history. The R34 VAT test sets up the tables it
   uses, so it also passes run on its own.
+- **Stripe test-mode checkout check (review round 35).** Since 2026-11-12 Stripe shows the hosted Checkout to the US
+  CI runner in dollars (Adaptive Pricing) and the order's EUR amount only in its currency picker, an iframe; the
+  real-gateway check looked for "€" in the top page only and failed in Chromium and Firefox although the session
+  rendered with the card form. It now looks in every frame of the Stripe page.
 - **Goods collected in the shop pay the shop's VAT, whatever the buyer's address (review round 34).** The VAT
   scenario looked for the pickup method in a shipping quote at weight 0; for an address abroad that quote came from
   the zone's own rates, so an order collected in the shop by a buyer with an Austrian address (heavy enough for the
