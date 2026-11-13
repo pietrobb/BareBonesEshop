@@ -147,6 +147,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
+  VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
+  VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
+  dots and dashes, upper case, on a new address and on an edit.
 - **Built-in carrier prices no longer override the merchant's shipping methods (review round 35, medium 2).** When
   the store's own rates did not cover the country and weight, the checkout asked every carrier for its built-in
   prices: Packeta (set up up to 10 kg, Slovakia and Czechia) was offered for 24 kg and to Austria at 10.99 €, a
