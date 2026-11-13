@@ -67,6 +67,9 @@ try {
         foreach (ShippingService::cartQuote([['currency' => 'eur', 'weight_g' => 1000, 'qty' => 1]], $r8cSubtotal, $r8cCountry)['rates'] ?? [] as $r8cRate) {
             $r8cEurRates['quote ' . $r8cRate['method_code']] = [(int)$r8cRate['price'], null];
         }
+        foreach (['packeta', 'gls'] as $r8cCarrier) {
+            assert_true(isset($r8cEurRates[$r8cCarrier]), "R8 price lists {$r8cStore}: an EUR cart still gets {$r8cCarrier}, at the carrier's EUR tier (R35: an active, in-zone method is not dropped; " . json_encode($r8cEurRates) . ')');
+        }
         $r8cCharged = [];
         foreach (['packeta', 'gls'] as $r8cCarrier) {
             if (($r8cEurRates[$r8cCarrier] ?? null) === $r8cRates[$r8cCarrier]) $r8cCharged[] = $r8cCarrier;

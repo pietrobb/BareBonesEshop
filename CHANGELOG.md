@@ -151,6 +151,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
   dots and dashes, upper case, on a new address and on an edit.
+- **Built-in carrier prices no longer override the merchant's shipping methods (review round 35, medium 2).** When
+  the store's own rates did not cover the country and weight, the checkout asked every carrier for its built-in
+  prices: Packeta (set up up to 10 kg, Slovakia and Czechia) was offered for 24 kg and to Austria at 10.99 €, a
+  switched-off method came back, and in-store pickup (set up for Slovakia) appeared for an address abroad only when
+  the cart was heavy. A carrier set up as a shipping method is now quoted only as set up there (its countries, its
+  weight bands, active or not); built-in prices remain for carriers the store has no shipping method of. A cart charged
+  in another currency than the store's price lists still gets the carrier's built-in tiers in that currency, but only
+  where one of its methods is active, covers the country, allows the weight and volume and, for a cash-on-delivery
+  cart, takes cash on delivery. Where no
+  method covers an address, checkout says shipping is not available there.
 - **No second refund of a return Stripe paid out after its release (review round 35, medium 1).** When the admin
   released a stalled item refund and Stripe's late `charge.refunded` then booked its money (with a credit note, 2.1.3),
   the return still offered "Refunded": a click issued another credit note and sent the money again (19.90 returned,

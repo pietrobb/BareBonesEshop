@@ -22,11 +22,19 @@ JsonHttpClient::setFixtureTransport(static function (string $method, string $url
     return $aigHttpAnswer;
 });
 $aigHttp = new HttpShipping(['integrations' => ['http_shipping' => ['base_url' => 'https://carrier.example', 'api_key' => str_repeat('k', 24)]]]);
-ShippingService::setAdapters(['http-carrier' => $aigHttp, 'pickup' => new PersonalPickup()]);
+// R35: a carrier the store never set up as a shipping method (pickup is one: its settings govern it, not built-in prices).
+$aigCourier = new class implements ShippingAdapter {
+    public function getRates(array $params): array { return [['carrier' => 'aig-courier', 'label' => 'AIG courier', 'price' => 900, 'cod_surcharge' => 0, 'delivery_days' => '2', 'cod' => false]]; }
+    public function generateLabel(array $order): array { throw new LogicException('no labels'); }
+    public function trackShipment(string $awb): array { return []; }
+    public function supportsCOD(): bool { return false; }
+    public function carrierId(): string { return 'aig-courier'; }
+};
+ShippingService::setAdapters(['http-carrier' => $aigHttp, 'aig-courier' => $aigCourier]);
 $aigRates = null;
 $aigError = $aigThrows(static function () use (&$aigRates): void { $aigRates = ShippingService::calculateRates('IS', 1000, 2000); });
 assert_true($aigError === null && is_array($aigRates), '1 rates: a carrier answering HTTP 503 does not throw out of calculateRates');
-assert_true(in_array('pickup', array_column($aigRates ?? [], 'carrier'), true) && !in_array('http-carrier', array_column($aigRates ?? [], 'carrier'), true),
+assert_true(in_array('aig-courier', array_column($aigRates ?? [], 'carrier'), true) && !in_array('http-carrier', array_column($aigRates ?? [], 'carrier'), true),
     '1 rates: the failing carrier is skipped, the other carriers are still offered');
 assert_true((int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'shipping.rates_adapter_failed'")->fetchColumn() >= 1, '1 rates: the failing carrier raises a warning incident');
 assert_equals('eur', $aigHttpCalls[0]['body']['currency'] ?? null, '2 currency: the HTTP carrier is asked in the store currency (default store EUR)');
