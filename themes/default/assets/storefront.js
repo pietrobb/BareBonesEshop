@@ -603,9 +603,23 @@
     const subtotalInput = document.getElementById('checkout-subtotal');
     if (subtotalInput && subtotalInput.dataset.billingReprices === '1') {
       const refresh = document.querySelector('form[data-checkout-form] [name="checkout_refresh"]');
-      document.querySelectorAll('form[data-checkout-form] input[name="billing_different"], #checkout-billing-country').forEach((field) => {
-        field.addEventListener('change', () => { if (refresh) submitCheckoutRefresh(refresh); });
-      });
+      let billingTimer = 0;
+      const reprice = () => {
+        clearTimeout(billingTimer);
+        billingTimer = 0;
+        if (refresh) submitCheckoutRefresh(refresh);
+      };
+      const toggle = document.querySelector('form[data-checkout-form] input[name="billing_different"]');
+      if (toggle) toggle.addEventListener('change', reprice);
+      // R35 (low): every arrow key in the country list fires "change"; re-price once the buyer stops (or leaves the list).
+      const billingCountry = document.getElementById('checkout-billing-country');
+      if (billingCountry) {
+        billingCountry.addEventListener('change', () => {
+          clearTimeout(billingTimer);
+          billingTimer = setTimeout(reprice, 1000);
+        });
+        billingCountry.addEventListener('blur', () => { if (billingTimer) reprice(); });
+      }
     }
     restoreCheckoutFocus();
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();

@@ -2063,6 +2063,7 @@ return [
     'checkout.error.address_required' => 'A delivery address is required for physical products.',
     'checkout.error.field_too_long' => 'A field is too long. Please shorten the name, contact or address.',
     'checkout.error.shipping_unavailable' => 'Delivery is not available to the selected country.',
+    'checkout.error.cod_unavailable' => 'Cash on delivery is not available with the selected delivery method. Choose another payment or delivery method.',
     'checkout.error.payment_unavailable' => 'The selected payment method is not available for this order.',
     'checkout.error.total_changed' => 'The order total was recalculated after the change of shipping, payment or country. Check the new total and confirm the order again.',
     'checkout.error.synthetic_requires_online' => 'The synthetic checkout requires an online payment method.',

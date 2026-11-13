@@ -112,6 +112,8 @@ function renderCheckout(): string {
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
+    // R35 (low): on a phone the summary with the new total is far below the message: the message names it.
+    if (($placed['error_code'] ?? '') === 'checkout.error.total_changed') $checkoutError .= ' ' . $t('total_price') . ': ' . $price($subtotal - $discount + $shipping + $paymentFee);
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],

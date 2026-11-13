@@ -147,6 +147,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Checkout details (review round 35).** Over the VAT ID check budget of the previews, an unchecked VAT ID was shown
+  with VAT, but the order checked it in VIES and charged reverse charge (27,89 € shown, 22,68 € charged; without
+  JavaScript a "total changed" message the buyer did not cause). The session remembers a VAT ID the previews could
+  not check, and the order prices it the same way: unverified, at the total shown (the invoice marks it "not verified
+  in VIES"); once VIES has answered, previews and order use the answer. Without JavaScript, cash on delivery with
+  in-store pickup was refused with "Delivery is not available to the selected country": it now says cash on delivery
+  is not available with that delivery method (new key `checkout.error.cod_unavailable`). The "total changed" message
+  names the new total, which on a phone is far below it. Moving through the billing country list of an order with a
+  download with the arrow keys reloaded the page on every step: it re-prices once the buyer stops or leaves the list.
 - **Documents and histories in words, not codes (review round 34).** The invoice prints the seller's and buyer's
   country by name in the invoice language, as the CHANGELOG promised. An OSS invoice names the rate country on its
   goods and shipping lines and in the VAT recap ("20% AT"), not only on the e-books. The order history notes written

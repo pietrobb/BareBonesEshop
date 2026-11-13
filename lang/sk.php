@@ -2072,6 +2072,7 @@ return [
     'checkout.error.address_required' => 'Doručovacia adresa je povinná pri fyzických produktoch.',
     'checkout.error.field_too_long' => 'Niektoré pole je príliš dlhé. Skráťte prosím meno, kontakt alebo adresu.',
     'checkout.error.shipping_unavailable' => 'Doručenie nie je dostupné do zvolenej krajiny.',
+    'checkout.error.cod_unavailable' => 'Dobierka nie je pri zvolenom spôsobe doručenia dostupná. Zvoľte inú platbu alebo iný spôsob doručenia.',
     'checkout.error.payment_unavailable' => 'Zvolený spôsob platby nie je pre túto objednávku dostupný.',
     'checkout.error.total_changed' => 'Suma objednávky sa po zmene dopravy, platby alebo krajiny prepočítala. Skontrolujte novú sumu a objednávku potvrďte znova.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',
