@@ -607,6 +607,13 @@ class Customers {
             $id = self::normalizedCompanyId($address[$column] ?? '');
             if ($id !== '' && !preg_match('/^[A-Z0-9][A-Z0-9\/-]{1,19}$/', $id)) $errors[$column] = 'account.err_address_company_id';
         }
+        // R35 (low): the VAT ID as the checkout accepts it (it was stored as typed), the text fields within their column
+        // (VARCHAR(191) on MySQL: a longer company, name or street failed the save with a 500).
+        $vatId = self::normalizedVatId($address['vat_id'] ?? '');
+        if ($vatId !== '' && !preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId)) $errors['vat_id'] = 'account.err_address_vat_id';
+        foreach (['name', 'company', 'vat_id', 'street', 'city', 'zip', 'phone'] as $field) {
+            if (!isset($errors[$field]) && mb_strlen(trim(Security::str($address[$field] ?? ''))) > self::ADDRESS_FIELD_MAX) $errors[$field] = 'account.err_address_too_long';
+        }
         return $errors;
     }
 
@@ -630,7 +637,7 @@ class Customers {
             $customerId, $type, $isDefault,
             trim(Security::str($data['name'] ?? '')),
             trim(Security::str($data['company'] ?? '')),
-            trim(Security::str($data['vat_id'] ?? '')),
+            self::normalizedVatId($data['vat_id'] ?? ''),
             trim(Security::str($data['street'] ?? '')),
             trim(Security::str($data['city'] ?? '')),
             trim(Security::str($data['zip'] ?? '')),
@@ -642,6 +649,14 @@ class Customers {
 
     /** R33: the buyer company's IDs a saved address keeps besides company and vat_id. */
     private const ADDRESS_COMPANY_IDS = ['ico', 'dic'];
+
+    /** Characters an address text column holds (MigrationSql::short(): VARCHAR(191) on MySQL). */
+    private const ADDRESS_FIELD_MAX = 191;
+
+    /** An EU VAT ID as the checkout stores it: without spaces, dots and dashes, upper case. */
+    private static function normalizedVatId(mixed $value): string {
+        return strtoupper((string)preg_replace('/[\s.-]+/', '', Security::str($value)));
+    }
 
     /** An IČO or DIČ as the checkout stores it: without spaces, upper case. */
     private static function normalizedCompanyId(mixed $value): string {
@@ -672,6 +687,7 @@ class Customers {
                 $fields[] = "{$k} = ?";
                 $params[] = match (true) {
                     $k === 'country' => strtoupper(trim(Security::str($data[$k]))),
+                    $k === 'vat_id' => self::normalizedVatId($data[$k]), // R35: as the checkout stores it
                     in_array($k, self::ADDRESS_COMPANY_IDS, true) => self::normalizedCompanyId($data[$k]), // R34: as a new address
                     default => trim(Security::str($data[$k])),
                 };
