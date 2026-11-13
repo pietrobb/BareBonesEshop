@@ -42,6 +42,15 @@ if ($phase === 'setup') {
         ->execute(['default', $cat, 'R34C-EBOOK', 'r34c-ebook', 'R34C E-book', 990]);
     $db->prepare("INSERT INTO digital_assets (sku, asset_key, label, storage_path, download_name, content_type, download_limit, expiry_seconds, active)
         VALUES ('R34C-EBOOK', 'pdf', 'PDF', 'r34c.pdf', 'r34c.pdf', 'application/pdf', 2, 3600, 1)")->execute();
+    // An export to Norway paid cash on delivery: 3,99 € carriage + 1,00 € COD surcharge, both charged net of 23 % SK VAT.
+    $db->exec("INSERT INTO shipping_zones (store_id, code, name) VALUES ('default', 'r34cno', 'R34C Norway')");
+    $db->exec("INSERT INTO shipping_zone_countries (store_id, zone_code, country) VALUES ('default', 'r34cno', 'NO')");
+    $db->exec("INSERT INTO shipping_methods (code, carrier, name, service_type, supports_cod, supports_pickup, sort_order) VALUES ('r34ccod', 'gls', 'R34C COD parcel', 'parcel', 1, 0, 1)");
+    $db->exec("INSERT INTO shipping_rates (carrier, country, zone_code, method_code, weight_from_g, weight_to_g, price, cod_surcharge, sort_order)
+        VALUES ('gls', '', 'r34cno', 'r34ccod', 0, 999999, 399, 100, 1)");
+    $db->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
+        VALUES ('r34ccodpay', 'manual', 'R34C COD', '', 'cod', 0, 0, 0, 0, NULL, 0, 1, 1)");
+    $db->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('r34ccodpay', 'NO')");
     exit(0);
 }
 
@@ -59,16 +68,16 @@ $_SERVER['REMOTE_ADDR'] = '127.0.34.3';
 $_SERVER['HTTP_HOST'] = 'shop.example';
 $_SERVER['REQUEST_URI'] = '/index.php?page=checkout';
 Bootstrap::initLocale('/index.php');
-foreach (['R34C-SKU', 'R34C-EBOOK'] as $sku) Cart::add((int)$db->query("SELECT id FROM products WHERE sku = '{$sku}'")->fetchColumn(), null, 1);
+foreach (str_starts_with($action, 'cod') ? ['R34C-SKU'] : ['R34C-SKU', 'R34C-EBOOK'] as $sku) Cart::add((int)$db->query("SELECT id FROM products WHERE sku = '{$sku}'")->fetchColumn(), null, 1);
 if (str_starts_with($action, 'free')) Pricing::setConfig(['cart_rules' => [['type' => 'automatic', 'active' => true, 'name' => 'R34C free shipping', 'action' => 'free_shipping']]]);
-$orders = static fn(): array => $db->query("SELECT id, total, shipping_cost, shipping_method FROM orders ORDER BY id")->fetchAll();
+$orders = static fn(): array => $db->query("SELECT id, total, shipping_cost, payment_fee, shipping_method, vat_scenario FROM orders ORDER BY id")->fetchAll();
 // One e-mail per action: the per-buyer checkout rate limit must not decide these cases.
-$typed = ['name' => 'R34C Buyer', 'email' => 'r34c-' . str_replace('_', '-', $action) . '@example.test', 'phone' => '+421900000034', 'street' => 'Hlavná 1',
-    'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK', 'csrf_token' => Security::csrfToken()] + (json_decode($extra, true) ?: []);
+$typed = (json_decode($extra, true) ?: []) + ['name' => 'R34C Buyer', 'email' => 'r34c-' . str_replace('_', '-', $action) . '@example.test', 'phone' => '+421900000034', 'street' => 'Hlavná 1',
+    'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK', 'csrf_token' => Security::csrfToken()];
 [$method, $post] = match ($action) {
     'get', 'free_get' => ['GET', []],
-    'refresh' => ['POST', ['checkout_refresh' => '1'] + $typed],
-    'stale', 'confirm', 'free_place' => ['POST', ['checkout' => '1'] + $typed],
+    'refresh', 'cod_refresh' => ['POST', ['checkout_refresh' => '1'] + $typed],
+    'stale', 'confirm', 'free_place', 'cod_place' => ['POST', ['checkout' => '1'] + $typed],
 };
 $_SERVER['REQUEST_METHOD'] = $method;
 $_GET = ['page' => 'checkout'];
@@ -169,6 +178,22 @@ try {
         [$l, $r] = $r34cDo('free_place', ['consents' => $r34cTicks, 'shipping_method' => $r34cOther, 'payment' => $r34cPayment, 'quoted_total' => (string)$r34cFreeShown]);
         assert_true(count($r['new_orders']) === 1 && (int)$r['new_orders'][0]['shipping_cost'] === 0 && (int)$r['new_orders'][0]['total'] === $r34cFreeShown,
             "{$l}: the other method ordered under free shipping is charged no carriage, at the total shown ({$r34cFreeShown})");
+
+        // Capability review #441: an export paid cash on delivery. The form priced the COD surcharge as
+        // net(carriage + surcharge) - net(carriage) = 4,06 - 3,24 = 0,82 €, the order as net(1,00) = 0,81 €: the shown
+        // total never matched, and every no-JS confirmation was refused again.
+        $r34cNo = ['country' => 'NO', 'street' => 'Karl Johans gate 1', 'city' => 'Oslo', 'zip' => '0154', 'shipping_method' => 'r34ccod', 'payment' => 'r34ccodpay'];
+        [$l, $r, $form] = $r34cDo('cod_refresh', $r34cNo);
+        preg_match_all('~name="consents\[([a-z_]+)\]" value="1"~', $form, $r34cCodConsents);
+        $r34cCodShown = $r34cQuoted($form);
+        assert_true($r34cCodShown !== null && $r34cChecked($form, 'shipping_method') === 'r34ccod' && $r34cChecked($form, 'payment') === 'r34ccodpay',
+            "{$l}: the export form offers the COD parcel and cash on delivery and shows a total ({$r34cCodShown})");
+        $r34cCodPost = $r34cNo + ['consents' => array_fill_keys($r34cCodConsents[1], '1'), 'quoted_total' => (string)$r34cCodShown];
+        [$l, $r, $form] = $r34cDo('cod_place', $r34cCodPost);
+        $r34cCodOrder = $r['new_orders'][0] ?? [];
+        assert_true(count($r['new_orders']) === 1 && ($r34cCodOrder['vat_scenario'] ?? '') === 'export' && (int)$r34cCodOrder['total'] === $r34cCodShown
+            && (int)$r34cCodOrder['shipping_cost'] === 324 && (int)$r34cCodOrder['payment_fee'] === 81,
+            "{$l}: confirmed at the total shown, the COD export is placed at exactly that total ({$r34cCodShown}; " . json_encode($r34cCodOrder) . ' ' . $r34cError($form) . ')');
     }
 } finally {
     if (isset($r34cDrivers['mysql'])) $r34cRun(['mysql', 'teardown', 'none', $r34cApp, $r34cDrivers['mysql'], $r34cRoot, '{}']);

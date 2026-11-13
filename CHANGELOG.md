@@ -203,6 +203,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   e-book, a refused order) keeps the consents already ticked, including the digital-delivery consent, and with JS the
   changed field keeps the focus across the reload. Under a free-shipping coupon or promotion every delivery method is
   listed free, as the summary and the order charge it (express showed 7.99 EUR).
+- **Cash on delivery of a zero-rated order: the total shown is the total charged.** Under export or reverse charge
+  the checkout form and the payment-methods API priced the carrier's COD surcharge as the difference of two net,
+  rounded prices (net(4.99) − net(3.99) = 0.82 EUR), while the order charges the surcharge net on its own
+  (net(1.00) = 0.81 EUR). The shown total was a cent off, and the no-JS confirmation refused every attempt to order.
+  Both now charge the surcharge the same way.
 - **Account addresses: IČO and DIČ (review round 34).** A longer IČO or DIČ than the checkout accepts is refused on
   the field ("Enter a valid company ID or tax ID…") instead of failing the `VARCHAR(40)` column with an error 500 on
   MySQL. An edited address stores them without spaces and in upper case, as a new address and the checkout do. An
