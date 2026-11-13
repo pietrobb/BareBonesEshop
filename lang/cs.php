@@ -782,6 +782,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_release_refunded' => 'Platební brána vrácení peněz provedla; zaúčtovali jsme ho k dobropisu, nic se neuvolnilo.',
     'admin.order.msg.refund_release_pending' => 'Platební brána vrácení ještě zpracovává; dobropis čeká na její výsledek, nic se neuvolnilo.',
     'admin.order.msg.refund_release_unverified' => 'Vrácení se nepodařilo ověřit u platební brány; dobropis dál čeká. Zkuste to později.',
+    'admin.order.msg.refund_release_forbidden' => 'Platební brána nedovolila API klíči obchodu číst refundace této platby (Stripe: dejte omezenému klíči oprávnění Refunds, Read nebo Write); nic se neuvolnilo. Opravte klíč a uvolněte znovu.',
     'admin.order.msg.refund_confirmed' => 'Refundace byla potvrzena a zaúčtována.',
     'admin.order.msg.refund_outstanding' => 'Nejprve refundujte platbu: objednávka má stále zůstatek k vrácení (zrušte ji nebo požádejte o refundaci).',
     'admin.order.msg.refund_error' => 'Chyba při vytváření požadavku na refundaci.',

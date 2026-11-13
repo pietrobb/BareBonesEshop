@@ -951,6 +951,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_release_refunded' => 'El proveedor de pago sí ejecutó el reembolso; se contabilizó en la factura rectificativa y no se liberó nada.',
     'admin.order.msg.refund_release_pending' => 'El proveedor de pago aún procesa el reembolso; la factura rectificativa espera su resultado y no se liberó nada.',
     'admin.order.msg.refund_release_unverified' => 'No se pudo comprobar el reembolso con el proveedor de pago; la factura rectificativa sigue en espera. Inténtelo más tarde.',
+    'admin.order.msg.refund_release_forbidden' => 'El proveedor de pago no permitió a la clave API de la tienda leer los reembolsos de este pago (Stripe: conceda a la clave restringida el permiso Refunds, Read o Write); no se liberó nada. Corrija la clave y vuelva a liberar.',
     'admin.order.msg.refund_confirmed' => 'Reembolso confirmado y registrado.',
     'admin.order.msg.refund_outstanding' => 'Reembolse primero el pago: el pedido aún tiene un saldo reembolsable (cancélelo o solicite un reembolso).',
     'admin.order.msg.refund_error' => 'Error al crear la solicitud de reembolso.',

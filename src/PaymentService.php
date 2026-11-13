@@ -796,8 +796,17 @@ class PaymentService {
         $order = Orders::byId($orderId);
         $stalled = $order ? self::stalledItemRefund($order) : null;
         $refund = Rma::refundById($itemRefundId) ?? [];
-        // R34 (low): a second submit (double click) of a release that went through says so instead of failing.
-        if ($order !== null && $stalled === null && (int)($refund['order_id'] ?? 0) === $orderId && ($refund['status'] ?? '') === 'failed') return 'already_released';
+        // R34 (low): a second submit (double click) of a release that went through says so instead of failing. R35 (low):
+        // also when the first one found the refund executed ('refunded') or still processed at the provider ('pending').
+        if ($order !== null && $stalled === null && (int)($refund['order_id'] ?? 0) === $orderId) {
+            $settled = match (true) {
+                ($refund['status'] ?? '') === 'failed' => 'already_released',
+                ($refund['status'] ?? '') === 'succeeded' => 'refunded',
+                ($refund['status'] ?? '') === 'pending' && (string)($refund['payment_reference'] ?? '') !== '' => 'pending',
+                default => '',
+            };
+            if ($settled !== '') return $settled;
+        }
         if ($order === null || $stalled === null || $stalled['refund_id'] !== $itemRefundId) return '';
         $key = (string)($refund['idempotency_key'] ?? '');
         $gateway = WorkerJobs::orderPaymentGateway([], $order);

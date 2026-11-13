@@ -782,6 +782,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.refund_release_refunded' => 'A fizetési szolgáltató végrehajtotta a visszatérítést; a helyesbítő számlához könyveltük, semmi sem lett feloldva.',
     'admin.order.msg.refund_release_pending' => 'A fizetési szolgáltató még feldolgozza a visszatérítést; a helyesbítő számla az eredményére vár, semmi sem lett feloldva.',
     'admin.order.msg.refund_release_unverified' => 'A visszatérítést nem sikerült ellenőrizni a fizetési szolgáltatónál; a helyesbítő számla tovább vár. Próbálja újra később.',
+    'admin.order.msg.refund_release_forbidden' => 'A fizetési szolgáltató nem engedte a bolt API-kulcsának e fizetés visszatérítéseinek olvasását (Stripe: adja meg a korlátozott kulcsnak a Refunds jogosultságot, Read vagy Write); semmi sem lett feloldva. Javítsa a kulcsot, és oldja fel újra.',
     'admin.order.msg.refund_confirmed' => 'A visszatérítés megerősítve és könyvelve.',
     'admin.order.msg.refund_outstanding' => 'Előbb térítse vissza a fizetést: a rendelésnek még van visszatéríthető egyenlege (törölje, vagy kérjen visszatérítést).',
     'admin.order.msg.refund_error' => 'Hiba a visszatérítési kérelem létrehozásakor.',

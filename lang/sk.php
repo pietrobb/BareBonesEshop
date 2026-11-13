@@ -789,6 +789,7 @@ return [
     'admin.order.msg.refund_release_refunded' => 'Platobná brána vrátenie peňazí vykonala; zaúčtovali sme ho k dobropisu, nič sa neuvoľnilo.',
     'admin.order.msg.refund_release_pending' => 'Platobná brána vrátenie ešte spracúva; dobropis čaká na jej výsledok, nič sa neuvoľnilo.',
     'admin.order.msg.refund_release_unverified' => 'Vrátenie sa nepodarilo overiť u platobnej brány; dobropis ostáva čakať. Skúste to neskôr.',
+    'admin.order.msg.refund_release_forbidden' => 'Platobná brána nedovolila API kľúču obchodu čítať refundácie tejto platby (Stripe: dajte reštrikovanému kľúču oprávnenie Refunds, Read alebo Write); nič sa neuvoľnilo. Opravte kľúč a uvoľnite znova.',
     'admin.order.msg.refund_confirmed' => 'Refund bol potvrdený a zaúčtovaný.',
     'admin.order.msg.refund_outstanding' => 'Najprv refundujte platbu: objednávka má stále zostatok na vrátenie (zrušte ju alebo požiadajte o refund).',
     'admin.order.msg.refund_error' => 'Chyba pri vytváraní refund požiadavky.',
