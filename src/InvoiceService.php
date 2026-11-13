@@ -302,7 +302,7 @@ final class InvoiceService
     /** Received quantity of one RMA item not yet committed to a credit note or an exchange. */
     private static function uncommittedQuantity(array $rmaItem): int {
         $stmt = Db::get()->prepare("SELECT
-                COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=:item AND r.status IN ('pending','succeeded')),0) AS credited,
+                COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=:item AND " . Rma::LIVE_REFUND_SQL . "),0) AS credited,
                 COALESCE((SELECT SUM(re.quantity) FROM return_exchanges re WHERE re.rma_item_id=:item2 AND re.store_id=:store AND re.status!='cancelled'),0) AS exchanged");
         $stmt->execute([':item' => (int)$rmaItem['id'], ':item2' => (int)$rmaItem['id'], ':store' => StoreContext::current()->id()]);
         $reserved = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -520,7 +520,7 @@ final class InvoiceService
             if (!$orderItem || !isset($componentByItem[$orderItemId])) throw new RuntimeException('Credit source item not found');
             $priorStmt = $db->prepare("SELECT COALESCE(SUM(cni.quantity),0) FROM credit_note_items cni
                 JOIN order_refunds r ON r.id=cni.refund_id
-                WHERE cni.order_item_id=:item AND r.store_id=:store AND r.status IN ('pending','succeeded')");
+                WHERE cni.order_item_id=:item AND r.store_id=:store AND " . Rma::LIVE_REFUND_SQL);
             $priorStmt->execute([':item' => $orderItemId, ':store' => StoreContext::current()->id()]);
             $before = (int)$priorStmt->fetchColumn();
             // An unfinished SELECT keeps a SQLite read snapshot open, and the write below then fails at once with

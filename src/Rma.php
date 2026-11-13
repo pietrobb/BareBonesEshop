@@ -31,6 +31,16 @@ class Rma {
     ];
 
     /**
+     * SQL condition on an item refund aliased `r`: its credit note counts for the units it lists (they cannot be credited,
+     * refunded or exchanged again). A pending or succeeded refund, and R35 (medium 1) a released one (failed, credit note
+     * reversed) the provider paid out after all (coverReleasedRefund() noted its refund id; the money is booked under it).
+     */
+    public const LIVE_REFUND_SQL = "(r.status IN ('pending','succeeded') OR (r.status='failed' AND r.payment_reference IS NOT NULL AND r.payment_reference<>''
+        AND EXISTS (SELECT 1 FROM payment_transactions lt WHERE lt.order_id=r.order_id AND lt.store_id=r.store_id AND lt.provider_ref=r.payment_reference
+            AND lt.status IN ('partially_refunded','refunded','refund_succeeded') AND lt.amount>0
+            AND lt.provider_ref<>COALESCE((SELECT lo.payment_id FROM orders lo WHERE lo.id=r.order_id),''))))";
+
+    /**
      * Open a return request for an order.
      *
      * @param int      $orderId    Order the return is for.
@@ -425,7 +435,7 @@ class Rma {
         $rma = self::lockedRma($rmaId);
         if (!$rma || !in_array((string)$rma['status'], ['received', 'refunded'], true)) throw new LogicException('RMA is not received');
         $stmt = Db::get()->prepare("SELECT ri.*,
-                COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=ri.id AND r.status IN ('pending','succeeded')),0) AS credited,
+                COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=ri.id AND " . self::LIVE_REFUND_SQL . "),0) AS credited,
                 COALESCE((SELECT SUM(quantity) FROM return_exchanges re WHERE re.rma_item_id=ri.id AND re.store_id=:store2 AND re.status!='cancelled'),0) AS exchanged
             FROM rma_items ri JOIN rma_requests rr ON rr.id=ri.rma_id
             WHERE ri.id=:item AND ri.rma_id=:rma AND rr.store_id=:store");
@@ -464,24 +474,60 @@ class Rma {
             if ($refund['status'] !== 'pending') throw new LogicException('Refund is not pending');
             $db->prepare("UPDATE order_refunds SET status='succeeded', payment_reference=:reference, updated_at=" . Db::now() . " WHERE id=:id")
                 ->execute([':reference' => $paymentReference, ':id' => $refundId]);
-            $lines = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund');
-            $lines->execute([':refund' => $refundId]);
-            foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
-                $db->prepare('UPDATE rma_items SET refunded_quantity = refunded_quantity + :quantity WHERE id=:id')
-                    ->execute([':quantity' => (int)$line['quantity'], ':id' => (int)$line['rma_item_id']]);
-            }
-            $remaining = $db->prepare("SELECT COUNT(*) FROM rma_items ri WHERE ri.rma_id=:rma AND ri.refunded_quantity +
-                COALESCE((SELECT SUM(quantity) FROM return_exchanges re WHERE re.rma_item_id=ri.id AND re.status IN ('requested','fulfilled')),0) < ri.received_quantity");
-            $remaining->execute([':rma' => (int)$refund['rma_id']]);
-            if ((int)$remaining->fetchColumn() === 0) {
-                $db->prepare("UPDATE rma_requests SET status='refunded', credit_note_id=:credit, updated_at=" . Db::now() . " WHERE id=:rma AND store_id=:store")
-                    ->execute([':credit' => (int)$refund['credit_note_id'], ':rma' => (int)$refund['rma_id'], ':store' => StoreContext::current()->id()]);
-            }
+            self::refundUnits($db, $refund);
             if ($own) $db->commit();
             return true;
         } catch (Throwable $e) {
             if ($own && $db->inTransaction()) $db->rollBack();
             throw $e;
+        }
+    }
+
+    /**
+     * R35 (medium 1): the provider paid out a released item refund after all (its money is booked under $providerRefundId,
+     * a credit note for it follows). Its returned units are refunded: the return no longer offers "Refunded", whose click
+     * issued another credit note and sent the money a second time. The item refund stays failed (its credit note is
+     * reversed); the refund id noted on it makes it count again (LIVE_REFUND_SQL). Called once, by the booking of that money.
+     */
+    public static function coverReleasedRefund(int $refundId, string $providerRefundId): bool {
+        if ($providerRefundId === '') return false;
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $stmt = $db->prepare("SELECT * FROM order_refunds WHERE id=:id AND store_id=:store" . (Db::isMysql() ? ' FOR UPDATE' : ''));
+            $stmt->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
+            $refund = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt->closeCursor();
+            $covered = false;
+            if ($refund && $refund['status'] === 'failed') {
+                $db->prepare("UPDATE order_refunds SET payment_reference=:reference, updated_at=" . Db::now() . " WHERE id=:id AND status='failed'")
+                    ->execute([':reference' => $providerRefundId, ':id' => $refundId]);
+                self::refundUnits($db, $refund);
+                $covered = true;
+            }
+            if ($own) $db->commit();
+            return $covered;
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /** The units of an item refund's credit note are refunded; the return is refunded once nothing of it is left. */
+    private static function refundUnits(PDO $db, array $refund): void {
+        $lines = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund');
+        $lines->execute([':refund' => (int)$refund['id']]);
+        foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $db->prepare('UPDATE rma_items SET refunded_quantity = refunded_quantity + :quantity WHERE id=:id')
+                ->execute([':quantity' => (int)$line['quantity'], ':id' => (int)$line['rma_item_id']]);
+        }
+        $remaining = $db->prepare("SELECT COUNT(*) FROM rma_items ri WHERE ri.rma_id=:rma AND ri.refunded_quantity +
+            COALESCE((SELECT SUM(quantity) FROM return_exchanges re WHERE re.rma_item_id=ri.id AND re.status IN ('requested','fulfilled')),0) < ri.received_quantity");
+        $remaining->execute([':rma' => (int)$refund['rma_id']]);
+        if ((int)$remaining->fetchColumn() === 0) {
+            $db->prepare("UPDATE rma_requests SET status='refunded', credit_note_id=:credit, updated_at=" . Db::now() . " WHERE id=:rma AND store_id=:store")
+                ->execute([':credit' => (int)$refund['credit_note_id'], ':rma' => (int)$refund['rma_id'], ':store' => StoreContext::current()->id()]);
         }
     }
 
