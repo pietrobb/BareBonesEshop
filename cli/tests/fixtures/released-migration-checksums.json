@@ -666,5 +666,13 @@
         "crlf": [
             "375f944a31ece0e0fc809e24b00f4835bb9c0e04d30cf57675d6605ede350f81"
         ]
+    },
+    "20261113180000_invoice_oss_net": {
+        "lf": [
+            "33ed12fe3841bc45ca8d79d556c0f962c1e5b427d03f13f52ed29a4ad89bdf4b"
+        ],
+        "crlf": [
+            "db7c4e0b53d1f67efb07e55cc9525a70980340320fd93aac611c60b837d9ee35"
+        ]
     }
 }

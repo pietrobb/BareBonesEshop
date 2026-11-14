@@ -2075,6 +2075,7 @@ return [
     'checkout.error.cod_unavailable' => 'Cash on delivery is not available with the selected delivery method. Choose another payment or delivery method.',
     'checkout.error.payment_unavailable' => 'The selected payment method is not available for this order.',
     'checkout.error.total_changed' => 'The order total was recalculated after the change of shipping, payment or country. Check the new total and confirm the order again.',
+    'checkout.error.vat_changed' => 'The VAT of the order changed in the meantime (the 10 000 EUR distance-sales threshold was passed). Check the new total and confirm the order again.',
     'checkout.error.synthetic_requires_online' => 'The synthetic checkout requires an online payment method.',
     'checkout.error.payment_session_failed' => 'Payment processing is unavailable. Please try again.',
     'payment_status.expired' => 'Expired',

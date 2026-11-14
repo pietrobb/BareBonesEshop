@@ -185,6 +185,7 @@ final class InvoiceService
             ]);
             $invoiceId = (int)$db->lastInsertId();
             self::recordSeller($db, $invoiceId, $sellerCode);
+            OssThreshold::record($db, $invoiceId);
             AuditLog::log('invoice', $invoiceId, null, ['number' => $number, 'order_id' => $orderId, 'type' => 'invoice', 'seller' => $sellerCode,
                 'total_gross' => (int)$order['total'], 'currency' => (string)($order['currency'] ?? 'eur')] + ($replaces !== null ? ['replaces_invoice_id' => $replaces] : []),
                 'Invoice issued');
@@ -613,6 +614,7 @@ final class InvoiceService
             ]);
             $invoiceId = (int)$db->lastInsertId();
             self::recordSeller($db, $invoiceId, $sellerCode);
+            OssThreshold::record($db, $invoiceId);
             $refund = $db->prepare("INSERT INTO order_refunds
                 (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
                 VALUES (:store, :order, :rma, :credit, :amount, :currency, 'pending', :key)");
@@ -852,6 +854,7 @@ final class InvoiceService
             ]);
             $invoiceId = (int)$db->lastInsertId();
             self::recordSeller($db, $invoiceId, $sellerCode);
+            OssThreshold::record($db, $invoiceId);
             AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey, 'gross' => $totals['gross']], $kind === 'cancellation' ? 'Cancellation credit issued' : 'Refund credit issued');
             if ($ownTransaction) $db->commit();
         } catch (Throwable $e) {
@@ -1028,6 +1031,7 @@ final class InvoiceService
             ]);
             $invoiceId = (int)$db->lastInsertId();
             self::recordSeller($db, $invoiceId, $sellerCode);
+            OssThreshold::record($db, $invoiceId);
             AuditLog::log('credit_note', $invoiceId, null, ['reverses_credit_note_id' => $creditNoteId, 'gross' => $totals['gross']], 'Credit note reversed: ' . mb_substr($reason, 0, 200));
             if ($ownTransaction) $db->commit();
         } catch (Throwable $e) {

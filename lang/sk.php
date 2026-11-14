@@ -2084,6 +2084,7 @@ return [
     'checkout.error.cod_unavailable' => 'Dobierka nie je pri zvolenom spôsobe doručenia dostupná. Zvoľte inú platbu alebo iný spôsob doručenia.',
     'checkout.error.payment_unavailable' => 'Zvolený spôsob platby nie je pre túto objednávku dostupný.',
     'checkout.error.total_changed' => 'Suma objednávky sa po zmene dopravy, platby alebo krajiny prepočítala. Skontrolujte novú sumu a objednávku potvrďte znova.',
+    'checkout.error.vat_changed' => 'DPH objednávky sa medzitým zmenila (prekročený limit 10 000 EUR pre predaj na diaľku). Skontrolujte novú sumu a objednávku potvrďte znova.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',
     'checkout.error.payment_session_failed' => 'Spracovanie platby je momentálne nedostupné. Skúste to znova.',
     'payment_status.expired' => 'Vypršala',

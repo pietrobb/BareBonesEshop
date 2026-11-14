@@ -90,6 +90,7 @@ class CheckoutService {
         if (!$digitalOnly && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
+        $consumerResidence = $residence;
         // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
         $vatIdCountry = substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2);
         $vatIdOfSeller = $vatIdCountry === $sellerCountry;
@@ -102,8 +103,7 @@ class CheckoutService {
         $context = [
             'seller_country'        => $sellerCountry,
             'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
-            // R35 (low): past the 10 000 EUR threshold a consumer of another member state pays their own VAT, OSS on or not.
-            'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false) || OssThreshold::exceeded(),
+            'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false),
             // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).
             'customer_country'      => $digitalOnly ? $residence : vatSupplyCountry($rate, $country, $sellerCountry),
             'customer_vat_id_valid' => $vatIdValid && !$vatIdOfSeller,
@@ -116,6 +116,19 @@ class CheckoutService {
             'digital_customer_country' => $digitalOnly ? '' : $residence,
             'tax_provider'          => $taxProviderCode,
         ];
+        // R35 (low): past the 10 000 EUR threshold a consumer of another member state pays their own VAT, OSS on or not.
+        // R36 (low): so does the sale that passes it — the cart's goods sent to such a consumer, its downloads when the
+        // consumer lives there (OssThreshold::saleNet(); Orders::create() checks the decision again under a lock).
+        if (!$context['seller_oss_enabled']) {
+            $goodsAbroad = Adapters::tax($taxProviderCode)::resolveScenario($context)['scenario'] === VatService::SCENARIO_DOMESTIC_SUBTHRESH;
+            $downloadsAbroad = !$vatIdValid && $consumerResidence !== $sellerCountry && VatService::isEuCountry($consumerResidence);
+            if ($goodsAbroad || $downloadsAbroad) {
+                $lines = array_map(static fn(array $item): array => ['gross' => (int)($item['total'] ?? 0), 'vat_class' => (string)($item['vat_class'] ?? 'standard'),
+                    'digital' => VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))], array_values(self::availableItems($vatCart['items'] ?? [])));
+                $saleNet = OssThreshold::saleNet($lines, $goodsAbroad, $downloadsAbroad, (string)($vatCart['currency'] ?? 'eur'), $sellerCountry);
+                $context['seller_oss_enabled'] = OssThreshold::exceeded($saleNet);
+            }
+        }
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
         return ['context' => $context, 'scenario' => $scenario, 'net' => Cart::chargesNetOfDomesticVat($scenario),
             'vat_id_valid' => $vatIdValid, 'vat_id_status' => $vatIdStatus, 'seller_country' => $sellerCountry, 'tax_provider' => $taxProviderCode];

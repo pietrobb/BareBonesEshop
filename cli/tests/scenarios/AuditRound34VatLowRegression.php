@@ -66,6 +66,12 @@ try {
 // 2. OSS threshold: invoices of cross-border consumer sales at the seller's VAT (OSS off) count against 10 000 EUR.
 try {
     $year = (int)ShopTime::date('Y');
+    // R36: every distance sale of other tests counts now (OSS invoices, open orders); set them aside meanwhile.
+    $r34lSince = sprintf('%04d-01-01', $year - 1);
+    $r34lStashedInvoices = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '{$r34lSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$r34lSince}'");
+    $r34lStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$r34lSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$r34lSince}'");
     $r34lInvoice = static function (string $number, int $net, string $scenario, int $year, string $currency = 'eur') use ($pdo, &$r34lOrders): void {
         $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount,
                 total, currency, status, payment_status, payment_method, shipping_method, store_id, created_at)
@@ -94,6 +100,10 @@ try {
     assert_true($checklistTitle !== null && str_contains($checklistTitle, 'default') && SetupChecklist::fixPage('stores.oss_threshold.default') === 'stores',
         'R34 VAT: the dashboard checklist shows the OSS threshold warning translated, with the store settings to fix it');
 } catch (Throwable $e) { $r34lFail('OSS threshold', $e); }
+$r34lRestore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
+foreach ($r34lStashedInvoices ?? [] as $r34lId => $r34lAt) $r34lRestore->execute([$r34lAt, $r34lId]);
+$r34lRestore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
+foreach ($r34lStashedOrders ?? [] as $r34lId => $r34lAt) $r34lRestore->execute([$r34lAt, $r34lId]);
 
 // 3. A mixed invoice states the legal ground of each scheme: export (§ 47 / Art. 146) and reverse charge (Art. 196).
 try {

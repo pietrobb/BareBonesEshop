@@ -35,8 +35,14 @@ class Orders {
             if (!Pricing::soldInStore($currency)) throw new OrderRejectedException("Not priced in the store currency: {$currency}");
         }
         $sqliteLock = self::acquireCheckoutLock();
+        $ossLock = null;
 
         try {
+            // R36 (low): a distance sale is counted against the OSS threshold again under the seller's lock, before the
+            // transaction (a MySQL snapshot taken earlier would not see orders committed while waiting for the lock).
+            $ossSnapshot = $customer['financial_snapshot'] ?? null;
+            if (is_string($ossSnapshot) && $ossSnapshot !== '') $ossSnapshot = json_decode($ossSnapshot, true);
+            if (is_array($ossSnapshot)) $ossLock = OssThreshold::guardOrder($db, $ossSnapshot, $customer, array_values($cartItems));
             $db->beginTransaction();
             // 1. Atomically reserve stock for each item and freeze its exact allocation.
             ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($cartItems);
@@ -242,6 +248,7 @@ class Orders {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         } finally {
+            OssThreshold::releaseOrderLock($db, $ossLock);
             self::releaseCheckoutLock($sqliteLock);
         }
     }
