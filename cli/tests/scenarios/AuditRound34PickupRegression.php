@@ -20,6 +20,9 @@ try {
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (99361, 'default', 1, 'R34P table', 'r34p-table', 'R34P-TABLE', 'simple', 12300, 'eur', 'active', 10, 'continue')");
     $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1]];
+    // R36: pickup counts only where it is offered; this merchant offers it to Austrian addresses too.
+    $pdo->exec("INSERT INTO shipping_rates (store_id, method_code, carrier, country, zone_code, weight_from_g, weight_to_g, price, cod_surcharge, delivery_days, sort_order)
+        VALUES ('default', 'pickup', 'pickup', 'AT', 'near_eu', 0, 999999, 0, 0, '0', 9)");
     $r34pScenario = static fn(string $country, string $method): array => array_values(array_intersect_key(
         CheckoutService::vatContext($country, '', $method, false)['scenario'], ['scenario' => 1, 'rate_country' => 1]));
 
@@ -41,6 +44,7 @@ try {
 } catch (Throwable $e) {
     assert_true(false, 'R34 pickup (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 }
+$pdo->exec("DELETE FROM shipping_rates WHERE store_id = 'default' AND method_code = 'pickup' AND country = 'AT'");
 $r34pStoresProp->setValue(null, $r34pStores);
 Bootstrap::initStoreContext('/', '', 'default');
 if ($r34pCart === null) unset($_SESSION['cart']); else $_SESSION['cart'] = $r34pCart;

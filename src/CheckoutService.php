@@ -83,11 +83,17 @@ class CheckoutService {
             $vatIdStatus = 'unverified';
         }
         $vatCart = Cart::enriched();
-        $digitalOnly = self::isDigitalOnly(self::availableItems($vatCart['items'] ?? []));
+        $vatGoods = self::availableItems($vatCart['items'] ?? []);
+        $digitalOnly = self::isDigitalOnly($vatGoods);
         // Goods collected in the seller's own store are supplied there, whatever the buyer's address. R34: known from the
-        // method itself; a quote at weight 0 missed the pickup rate of an address abroad.
-        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0, 0, false, 0, 0, isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
-        if (!$digitalOnly && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
+        // method itself; a quote at weight 0 missed the pickup rate of an address abroad. R36 (medium 3): only when the
+        // method is offered to this address, quoted at the cart's weight: after a change of country the form still named
+        // in-store pickup (the default), which is not offered abroad, and the preview charged a business with a valid ATU
+        // Slovak VAT (26.40) while the order went by courier under reverse charge (22.68).
+        $vatWeight = 0;
+        foreach ($vatGoods as $item) $vatWeight += (int)($item['weight_g'] ?? 0) * (int)($item['qty'] ?? 0);
+        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, $vatWeight, 0, false, 0, ShippingService::physicalQuantity($vatGoods), isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
+        if ($rate !== null && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
         $consumerResidence = $residence;
