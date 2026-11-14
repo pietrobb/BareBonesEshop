@@ -93,6 +93,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261113180000_invoice_oss_net` adds `invoices.oss_net` (review round 36): what an issued invoice or
   credit note adds to the 10 000 EUR OSS threshold. It fills it for the documents of the current and the previous year;
   until it runs, the threshold counts every document from its lines as before (slower).
+- **Migration** `20261113190000_oss_threshold_totals` adds the table `oss_threshold_totals`, `orders.oss_net` and two
+  indexes (review round 36): the threshold's year totals per store, filled for the current and the previous year, and
+  what each order of those years adds until it is invoiced. On a large shop it reads two years of orders once: both
+  migrations together took 7.7 minutes for 200 000 invoices on MySQL 8.4 (they commit every 500 rows).
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -163,6 +167,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (art. 59c). Placing such an order counts again under a per-seller lock: when another order passed the threshold in
   the meantime, the buyer is asked to confirm the new total ("The VAT of the order changed in the meantime"). The
   doctor names the store by its name.
+- **The OSS threshold check no longer slows down checkout (review round 36, medium 1).** It read every invoice of two
+  years on each checkout preview and order: about 5 s per request on MySQL at 200 000 invoices (1.6 s on SQLite), on
+  every change of country or shipping. Issued and cancelled documents now update a per-store, per-year total (new
+  table `oss_threshold_totals`), a placed order stores what it adds until it is invoiced (`orders.oss_net`), and the
+  check reads those few rows; past the threshold last year it stops there.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
