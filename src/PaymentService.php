@@ -1533,7 +1533,17 @@ class PaymentService {
         $booked = self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
             $payload + ['settles_refund_request' => self::refundRequestKey($key) ?? $key], $itemRefundId, $refundId);
         // R35 (medium 1): that money refunded the returned units; "Refunded" on the return paid them out again.
-        if ($lateRelease && $booked) Rma::coverReleasedRefund((int)$itemRow['id'], $refundId);
+        if ($lateRelease && $booked && Rma::coverReleasedRefund((int)$itemRow['id'], $refundId)) {
+            // R36 (medium 4): the admin may have refunded those items again meanwhile; that second refund is stopped.
+            $duplicates = Rma::stopDuplicateRefunds($orderId, (int)$itemRow['id'], "Item refund {refund} stopped: {$provider} refund {$refundId} of the released item refund {$itemRow['id']} paid it");
+            foreach ($duplicates['stopped'] as $stopped) {
+                IncidentMonitor::report('payment.duplicate_refund_stopped', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $stopped]);
+            }
+            foreach ($duplicates['sent'] as $sent) {
+                AuditLog::log('order_refund', $orderId, 'pending', 'pending', "Item refund {$sent} was already sent to {$provider}: the released item refund {$itemRow['id']} paid the same items ({$provider} refund {$refundId})");
+                IncidentMonitor::report('payment.duplicate_refund_sent', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $sent]);
+            }
+        }
         return $booked;
     }
 

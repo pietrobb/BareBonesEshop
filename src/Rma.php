@@ -514,6 +514,32 @@ class Rma {
         }
     }
 
+    /**
+     * R36 (medium 4): a released item refund the provider paid out after all (coverReleasedRefund()) refunded units the
+     * admin may have refunded again meanwhile. A pending item refund of the order that now credits more units than came
+     * back is stopped, newest first: one not sent to the provider yet fails (its credit note reversed, its queued job pays
+     * nothing, WorkerJobs), one the provider already holds cannot be stopped and is returned as sent. Was: the second
+     * refund stayed queued and the worker paid the same items out again. In the caller's transaction (order locked).
+     * @return array{stopped: list<int>, sent: list<int>}
+     */
+    public static function stopDuplicateRefunds(int $orderId, int $releasedRefundId, string $note): array {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $pending = $db->prepare("SELECT id, payment_reference FROM order_refunds WHERE order_id=:order AND store_id=:store AND status='pending' AND id<>:released ORDER BY id DESC");
+        $pending->execute([':order' => $orderId, ':store' => $store, ':released' => $releasedRefundId]);
+        $over = $db->prepare("SELECT COUNT(*) FROM rma_items ri WHERE ri.id IN (SELECT rma_item_id FROM credit_note_items WHERE refund_id=:refund)
+            AND ri.refunded_quantity + COALESCE((SELECT SUM(c.quantity) FROM credit_note_items c JOIN order_refunds p ON p.id=c.refund_id
+                WHERE c.rma_item_id=ri.id AND p.status='pending'),0) > ri.received_quantity");
+        $result = ['stopped' => [], 'sent' => []];
+        foreach ($pending->fetchAll(PDO::FETCH_ASSOC) as $refund) {
+            $over->execute([':refund' => (int)$refund['id']]);
+            if ((int)$over->fetchColumn() === 0) continue;
+            if (trim((string)($refund['payment_reference'] ?? '')) !== '') { $result['sent'][] = (int)$refund['id']; continue; }
+            if (self::failRefund((int)$refund['id'], str_replace('{refund}', (string)$refund['id'], $note))) $result['stopped'][] = (int)$refund['id'];
+        }
+        return $result;
+    }
+
     /** The units of an item refund's credit note are refunded; the return is refunded once nothing of it is left. */
     private static function refundUnits(PDO $db, array $refund): void {
         $lines = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund');

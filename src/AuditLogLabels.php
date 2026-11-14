@@ -137,6 +137,12 @@ final class AuditLogLabels {
         if (preg_match('/^(\S+) refund (\S+) of a released item refund was executed$/', $note, $m) === 1) {
             return I18n::format('admin.audit.note.released_refund_executed', ['provider' => $m[1], 'id' => $m[2]]);
         }
+        if (preg_match('/^Item refund (\d+) stopped: (\S+) refund (\S+) of the released item refund (\d+) paid it$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.duplicate_refund_stopped', ['refund' => $m[1], 'provider' => $m[2], 'id' => $m[3], 'released' => $m[4]]);
+        }
+        if (preg_match('/^Item refund (\d+) was already sent to (\S+): the released item refund (\d+) paid the same items \(\S+ refund (\S+)\)$/', $note, $m) === 1) {
+            return I18n::format('admin.audit.note.duplicate_refund_sent', ['refund' => $m[1], 'provider' => $m[2], 'released' => $m[3], 'id' => $m[4]]);
+        }
         if (preg_match('/^Item refund released by (.*?): (.*)$/s', $note, $m) === 1) {
             return I18n::format('admin.audit.note.item_refund_released', ['actor' => $m[1], 'detail' => $m[2]]);
         }
