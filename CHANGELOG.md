@@ -90,6 +90,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261112100000_customer_address_company_ids` adds `customer_addresses.ico` and `dic` (review round
   33): a saved billing address keeps the company's IČO and DIČ with its name and IČ DPH, so the next checkout prefills
   the whole company. Existing addresses keep NULL; until it runs, addresses are saved without them as before.
+- **Migration** `20261113180000_invoice_oss_net` adds `invoices.oss_net` (review round 36): what an issued invoice or
+  credit note adds to the 10 000 EUR OSS threshold. It fills it for the documents of the current and the previous year;
+  until it runs, the threshold counts every document from its lines as before (slower).
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -147,6 +150,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The OSS threshold counts every distance sale (review round 36, medium 2).** Only invoices charged the seller's
+  own VAT counted toward the 10 000 EUR threshold. A shop that sold past it last year under OSS and switched OSS off
+  counted 0 this year, as did a shop whose later sales this year were already charged the buyer's VAT, and one credit
+  note brought it back under: Austrian consumers paid 23 % Slovak VAT again and the doctor reported "under the
+  threshold". Now every invoice and credit note stores what it adds (new column `invoices.oss_net`; the migration
+  fills it for this and last year's documents): goods sent to a consumer of another member state, whatever VAT they
+  were invoiced with, and an e-book where the consumer lives in another member state (also next to goods exported
+  outside the EU; an e-book billed to a consumer in the seller's state no longer counts with goods sent abroad). A
+  credit note subtracts its lines, or credited by amount its invoice's share. Orders placed and not invoiced yet (an
+  unpaid bank transfer) count too, and the sale that passes 10 000 EUR is the first one charged the consumer's VAT
+  (art. 59c). Placing such an order counts again under a per-seller lock: when another order passed the threshold in
+  the meantime, the buyer is asked to confirm the new total ("The VAT of the order changed in the meantime"). The
+  doctor names the store by its name.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,

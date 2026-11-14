@@ -2055,6 +2055,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.cod_unavailable' => 'Nachnahme ist mit der gewählten Versandart nicht verfügbar. Wählen Sie eine andere Zahlungs- oder Versandart.',
     'checkout.error.payment_unavailable' => 'Die gewählte Zahlungsart ist für diese Bestellung nicht verfügbar.',
     'checkout.error.total_changed' => 'Der Bestellbetrag wurde nach der Änderung von Versand, Zahlung oder Land neu berechnet. Prüfen Sie den neuen Betrag und bestätigen Sie die Bestellung erneut.',
+    'checkout.error.vat_changed' => 'Die Mehrwertsteuer der Bestellung hat sich inzwischen geändert (Schwelle von 10 000 EUR für Fernverkäufe überschritten). Prüfen Sie den neuen Betrag und bestätigen Sie die Bestellung erneut.',
     'checkout.error.synthetic_requires_online' => 'Der synthetische Checkout erfordert eine Online-Zahlungsart.',
     'checkout.error.payment_session_failed' => 'Die Zahlungsabwicklung ist derzeit nicht verfügbar. Bitte versuchen Sie es erneut.',
     'payment_status.expired' => 'Abgelaufen',

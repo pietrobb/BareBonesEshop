@@ -112,6 +112,8 @@ final class ManualOrder {
             $orderId = Orders::create($priced['items'], $customer, $priced['payment_code']);
         } catch (OrderRejectedException $e) {
             return self::refusal('admin.order.edit.out_of_stock');
+        } catch (VatChangedException $e) {
+            return self::refusal('checkout.error.vat_changed');
         }
         AuditLog::log('order', $orderId, null, ['source' => 'admin', 'admin' => Security::adminUser()], 'Manual order entered in the admin');
         if ($priced['payment_code'] === 'free') {

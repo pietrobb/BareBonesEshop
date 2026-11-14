@@ -985,6 +985,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
         return checkoutRefusal('stock_changed');
+    } catch (VatChangedException $e) {
+        // R36 (low): another order passed the OSS threshold meanwhile; the buyer sees the new total before confirming.
+        VatService::reset();
+        return checkoutRefusal('checkout.error.vat_changed');
     } catch (CouponRejectedException $e) {
         // Same refusal as a used-up code at pricing time (no oracle): a concurrent order took the last use.
         return ['success' => false, 'error' => sprintf(I18n::t('coupon_invalid'), $couponCode), 'error_code' => 'coupon_invalid'];

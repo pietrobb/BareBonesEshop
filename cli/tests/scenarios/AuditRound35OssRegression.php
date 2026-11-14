@@ -21,6 +21,9 @@ try {
     $year = (int)ShopTime::date('Y');
     $r35oStashed = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '" . sprintf('%04d-01-01', $year - 1) . "'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '" . sprintf('%04d-01-01', $year - 1) . "'");
+    // R36: orders not invoiced yet count too.
+    $r35oStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '" . sprintf('%04d-01-01', $year - 1) . "'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '" . sprintf('%04d-01-01', $year - 1) . "'");
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (99381, 'default', 1, 'R35O lamp', 'r35o-lamp', 'R35O-LAMP', 'simple', 12300, 'eur', 'active', 10, 'continue')");
     $r35oInvoice = static function (string $number, int $net, string $scenario, string $currency, array $billing = [], int $digitalNet = 0) use ($pdo, $year, &$r35oOrders): void {
@@ -80,6 +83,8 @@ try {
     $pdo->prepare("DELETE FROM invoices WHERE number LIKE 'R35O-%'")->execute();
     $restore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
     foreach ($r35oStashed as $id => $issuedAt) $restore->execute([$issuedAt, $id]);
+    $restore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
+    foreach ($r35oStashedOrders as $id => $createdAt) $restore->execute([$createdAt, $id]);
 } catch (Throwable $e) {
     assert_true(false, 'R35 OSS (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 }

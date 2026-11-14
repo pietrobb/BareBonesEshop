@@ -2055,6 +2055,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.cod_unavailable' => 'Dobírka není u zvoleného způsobu doručení dostupná. Zvolte jinou platbu nebo jiný způsob doručení.',
     'checkout.error.payment_unavailable' => 'Zvolený způsob platby není pro tuto objednávku dostupný.',
     'checkout.error.total_changed' => 'Částka objednávky byla po změně dopravy, platby nebo země přepočítána. Zkontrolujte novou částku a objednávku potvrďte znovu.',
+    'checkout.error.vat_changed' => 'DPH objednávky se mezitím změnila (překročen limit 10 000 EUR pro prodej na dálku). Zkontrolujte novou částku a objednávku potvrďte znovu.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',
     'checkout.error.payment_session_failed' => 'Zpracování platby je momentálně nedostupné. Zkuste to znovu.',
     'payment_status.expired' => 'Vypršela',

@@ -392,22 +392,26 @@ class Setup
      */
     public static function ossThresholdCheck(PDO $db, string $storeId, array $store, array $stores): array {
         $name = 'stores.oss_threshold.' . $storeId;
+        // R36 (low): the store by the name the merchant gave it ("default" told nothing).
+        $label = trim((string)($store['name'] ?? '')) !== '' ? '"' . trim((string)$store['name']) . '"' : $storeId;
         if (!empty($store['oss_enabled'])) {
-            return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} charges consumers in other EU states their own VAT (OSS).", 'action' => ''];
+            return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} charges consumers in other EU states their own VAT (OSS).", 'action' => ''];
         }
         ['sum' => $sum, 'year' => $y, 'unconverted' => $unconverted] = OssThreshold::worstYear($db, $storeId, $store, $stores);
         $amount = number_format($sum / 100, 2, '.', ' ') . ' EUR';
-        if ($sum >= self::OSS_THRESHOLD_EUR_CENTS) {
+        // R36: every distance sale counts, whatever VAT it was invoiced with; above the threshold (art. 59c) the VAT of the
+        // consumer's state applies for the rest of that year and the whole next one.
+        if ($sum > self::OSS_THRESHOLD_EUR_CENTS) {
             return ['status' => 'warn', 'name' => $name,
-                'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y} at its own VAT; above 10 000 EUR their own country's VAT applies (OSS), and checkout now charges it.",
-                'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$storeId}); the OSS report lists these sales from then on."];
+                'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}; above 10 000 EUR their own country's VAT applies (OSS) for the rest of that year and the next, and checkout now charges it.",
+                'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$label}); the OSS report lists these sales from then on."];
         }
         if ($unconverted !== []) {
             return ['status' => 'warn', 'name' => $name,
-                'message' => "Store {$storeId} sold to consumers in other EU states in " . implode(', ', $unconverted) . ', which the 10 000 EUR OSS threshold cannot convert to EUR; counted so far: ' . $amount . '.',
+                'message' => "Store {$label} sold to consumers in other EU states in " . implode(', ', $unconverted) . ', which the 10 000 EUR OSS threshold cannot convert to EUR; counted so far: ' . $amount . '.',
                 'action' => 'Add the EUR rate of ' . implode(', ', $unconverted) . ' to eur_exchange_rates in config/vat-rates.json.'];
         }
-        return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
+        return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
     }
 
     /**

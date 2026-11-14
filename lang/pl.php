@@ -2055,6 +2055,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.cod_unavailable' => 'Płatność przy odbiorze nie jest dostępna dla wybranej metody dostawy. Wybierz inną płatność lub inną metodę dostawy.',
     'checkout.error.payment_unavailable' => 'Wybrana metoda płatności jest niedostępna dla tego zamówienia.',
     'checkout.error.total_changed' => 'Kwota zamówienia została przeliczona po zmianie dostawy, płatności lub kraju. Sprawdź nową kwotę i potwierdź zamówienie ponownie.',
+    'checkout.error.vat_changed' => 'VAT zamówienia w międzyczasie się zmienił (przekroczono próg 10 000 EUR sprzedaży na odległość). Sprawdź nową kwotę i potwierdź zamówienie ponownie.',
     'checkout.error.synthetic_requires_online' => 'Syntetyczne zamówienie wymaga płatności online.',
     'checkout.error.payment_session_failed' => 'Przetwarzanie płatności jest niedostępne. Spróbuj ponownie.',
     'payment_status.expired' => 'Wygasła',
