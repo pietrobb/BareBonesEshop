@@ -200,6 +200,7 @@ class Orders {
 
             // 4. Insert order items (with per-line VAT snapshot when available)
             self::insertItems($orderId, $orderItems);
+            OssThreshold::recordOrder($db, $orderId); // R36: what it adds to the OSS threshold until invoiced
 
             // 5. Record coupon use atomically within the order transaction
             // A free-shipping coupon discounts no goods (discount 0) but is still a use against its limits.
@@ -320,6 +321,7 @@ class Orders {
                     tax_amount = :tax, total = :total, vat_total = :vattotal, net_total = :nettotal, vat_scenario = :vatscen{$extra},
                     updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store")->execute($params);
             self::insertItems($orderId, $orderItems);
+            OssThreshold::recordOrder($db, $orderId);
             foreach ($orderItems as $item) {
                 foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
             }

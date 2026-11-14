@@ -669,10 +669,18 @@
     },
     "20261113180000_invoice_oss_net": {
         "lf": [
-            "33ed12fe3841bc45ca8d79d556c0f962c1e5b427d03f13f52ed29a4ad89bdf4b"
+            "92a6abf73856f4192fa429ffee63f1c556bb82785cf067265a8a782a096d0213"
         ],
         "crlf": [
-            "db7c4e0b53d1f67efb07e55cc9525a70980340320fd93aac611c60b837d9ee35"
+            "636c4b885f868668cda2b941bf038d59c43ef66a38ad68a2ad94aa787d9a4223"
+        ]
+    },
+    "20261113190000_oss_threshold_totals": {
+        "lf": [
+            "96239f6e04dc076703161d36d4b89eee067875a00206a601d1721f039a188dca"
+        ],
+        "crlf": [
+            "770d79087bb20f782ba7c463c4c2ff797aa57d8218fdf290794b5361f194630c"
         ]
     }
 }
