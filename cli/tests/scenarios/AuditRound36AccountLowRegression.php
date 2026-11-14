@@ -18,7 +18,7 @@ try {
 
     // 2. Address: text that is not UTF-8 is a field error in every text field.
     $base = ['type' => 'billing', 'name' => 'R36A Buyer', 'street' => 'Hlavná 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'];
-    assert_equals(['name' => 'account.err_invalid_text', 'company' => 'account.err_invalid_text', 'street' => 'account.err_invalid_text', 'ico' => 'account.err_invalid_text'],
+    assert_equals(['name' => 'account.err_invalid_text', 'company' => 'account.err_invalid_text', 'ico' => 'account.err_invalid_text', 'street' => 'account.err_invalid_text'],
         Customers::addressErrors(['name' => $r36aBad, 'company' => $r36aBad, 'street' => $r36aBad, 'ico' => "\xC3"] + $base),
         'R36 account: an address with text that is not UTF-8 is refused per field (was a MySQL 500)');
     assert_equals([], Customers::addressErrors($base), 'R36 account: a valid address still passes');
@@ -32,7 +32,7 @@ try {
     assert_true(str_contains($template, 'aria-describedby="account-profile-name-error"') && str_contains($template, 'aria-describedby="account-profile-phone-error"'),
         'R36 account: the profile fields carry their error (aria-invalid, aria-describedby)');
     $entry = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/Account.php');
-    assert_true(str_contains($entry, '$fieldErrors = Customers::profileErrors($profile);') && str_contains($entry, 'Customers::update($cid, $profile);'),
+    assert_true(preg_match('/if \(\$fieldErrors = Customers::profileErrors\(\$profile\)\).*?\} else \{\s*Customers::update\(\(int\)\$_SESSION\[\'customer_id\'\], \$profile\);/s', $entry) === 1,
         'R36 account: the profile is saved only when it has no field errors');
 
     // 4. Saved addresses show IČO, DIČ and VAT ID; long values without spaces wrap inside the card.

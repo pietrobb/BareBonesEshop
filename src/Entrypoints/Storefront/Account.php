@@ -213,21 +213,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     elseif ($action === 'update_profile' && Customers::isLoggedIn()) {
-        $cid = (int)$_SESSION['customer_id'];
-        $profile = [
-            'name'   => Security::clean($_POST['name'] ?? ''),
-            'phone'  => Security::clean($_POST['phone'] ?? ''),
-            'locale' => in_array($_POST['locale'] ?? '', $supported, true)
-                        ? $_POST['locale'] : $locale,
-        ];
-        // R36 (low): a too long or non-UTF-8 name or phone is an error at the field, not a MySQL 500.
-        $fieldErrors = Customers::profileErrors($profile);
-        if ($fieldErrors) {
+        $profile = ['name' => Security::clean($_POST['name'] ?? ''), 'phone' => Security::clean($_POST['phone'] ?? ''),
+            'locale' => in_array($_POST['locale'] ?? '', $supported, true) ? $_POST['locale'] : $locale];
+        if ($fieldErrors = Customers::profileErrors($profile)) { // R36: too long / not UTF-8 is a field error, not a MySQL 500
             http_response_code(400);
             $fieldValues = array_map(static fn(string $v): string => mb_scrub($v, 'UTF-8'), $profile);
             [$flash, $flashType] = [$t('account.err_profile_invalid'), 'error'];
         } else {
-            Customers::update($cid, $profile);
+            Customers::update((int)$_SESSION['customer_id'], $profile);
             [$flash, $flashType] = [$t('account.profile_saved'), 'ok'];
         }
         $p = 'profile';
