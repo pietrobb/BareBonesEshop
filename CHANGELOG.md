@@ -193,6 +193,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   note reversed, its queued job pays nothing) and the order history says which and why. One Stripe already holds cannot
   be stopped; the order history names it so the admin can check it at Stripe. Both report an incident, and the
   incident list in Operations links an incident to its order. A pending refund of other returned units is left alone.
+- **Order history texts and tests run on their own (review round 36, low).** "Credit note reversed: Item refund
+  released by admin: …" and "Admin receipt" stayed in English in every admin language; they are translated now. The
+  history row of a late refund of a released item refund no longer reads "Payment failed → Payment failed". Running
+  one scenario on its own (`php cli/test.php --only=FoundationScenario.php,X.php`) now applies every migration
+  after Foundation, so the R34–R36 regressions also pass when run alone.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,

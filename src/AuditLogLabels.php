@@ -92,7 +92,11 @@ final class AuditLogLabels {
         // R23 UX: the notes the code writes (in English) in the admin's language; the log keeps what was written.
         if (isset(self::NOTES[$note])) return I18n::t('admin.audit.note.' . self::NOTES[$note]);
         foreach (self::NOTE_PREFIXES as $prefix => $key) {
-            if (str_starts_with($note, $prefix) && strlen($note) > strlen($prefix)) return I18n::format('admin.audit.note.' . $key, ['detail' => substr($note, strlen($prefix))]);
+            if (!str_starts_with($note, $prefix) || strlen($note) <= strlen($prefix)) continue;
+            $detail = substr($note, strlen($prefix));
+            // R36: a reversal names why its credit note's refund failed ("Item refund released by admin: …"), a refund note.
+            if ($key === 'credit_reversed') $detail = self::note('order_refund', $entityId, $detail, static fn(int $id): string => self::recordCurrency('credit_note', $id));
+            return I18n::format('admin.audit.note.' . $key, ['detail' => $detail]);
         }
         if (preg_match('/^Admin [a-z][a-z -]* delete$/', $note) === 1) return I18n::t('admin.audit.note.deleted');
         if (preg_match('/^Admin (?:' . self::SAVED_ENTITIES . ')$/', $note) === 1) return I18n::t('admin.audit.note.saved');
@@ -184,6 +188,8 @@ final class AuditLogLabels {
         'Provider refund confirmed' => 'provider_refund_confirmed', 'Refund confirmed via webhook' => 'webhook_refund',
         'Manual refund completed' => 'manual_refund_completed', 'Expired unpaid online checkout' => 'expired_online',
         'Expired unpaid offline order' => 'expired_offline', 'The payment provider declined the item refund' => 'item_refund_declined',
+        // R36: the receipt of a return entered in the admin stayed in English.
+        'Admin receipt' => 'return_receipt',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';

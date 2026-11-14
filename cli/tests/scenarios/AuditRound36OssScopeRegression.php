@@ -26,6 +26,10 @@ try {
     $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$since}'");
     $r36oStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$since}'");
+    // Run alone, the stored year totals (R36 oss-perf migration) already exist and would keep counting other documents.
+    $r36oTotals = Db::tableExists('oss_threshold_totals', $pdo);
+    $r36oStashedTotals = $r36oTotals ? $pdo->query('SELECT * FROM oss_threshold_totals')->fetchAll(PDO::FETCH_ASSOC) : [];
+    if ($r36oTotals) $pdo->exec('DELETE FROM oss_threshold_totals');
     (require TEST_CLI_DIR . '/../migrations/20261113180000_invoice_oss_net.php')->up($pdo, Db::isSqlite());
     Db::forgetSchema($pdo);
     assert_true(Db::hasColumn('invoices', 'oss_net', $pdo), 'R36 OSS: the migration adds invoices.oss_net');
@@ -59,7 +63,8 @@ try {
             ->execute([$order['id'], $number, sprintf('%04d-03-15 10:00:00', $docYear), $net, $net, 'r36o-' . $number, $scenario, $type, $refersTo, $credit === null ? null : json_encode($credit)]);
         return (int)$pdo->lastInsertId();
     };
-    $r36oClean = static function () use ($pdo): void {
+    $r36oClean = static function () use ($pdo, $r36oTotals): void {
+        if ($r36oTotals) $pdo->exec('DELETE FROM oss_threshold_totals');
         $pdo->exec("DELETE FROM invoices WHERE number LIKE 'R36O-%'");
         $pdo->exec("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'R36O-%')");
         $pdo->exec("DELETE FROM orders WHERE order_number LIKE 'R36O-%'");
@@ -161,6 +166,12 @@ $restore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
 foreach ($r36oStashedInvoices ?? [] as $id => $issuedAt) $restore->execute([$issuedAt, $id]);
 $restore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
 foreach ($r36oStashedOrders ?? [] as $id => $createdAt) $restore->execute([$createdAt, $id]);
+if ($r36oTotals ?? false) {
+    $pdo->exec('DELETE FROM oss_threshold_totals');
+    foreach ($r36oStashedTotals as $row) {
+        $pdo->prepare('INSERT INTO oss_threshold_totals (' . implode(', ', array_keys($row)) . ') VALUES (' . implode(', ', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
+    }
+}
 $r36oStoresProp->setValue(null, $r36oStores);
 Bootstrap::initStoreContext('/', '', 'default');
 VatService::reset();

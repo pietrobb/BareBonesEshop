@@ -1540,7 +1540,8 @@ class PaymentService {
         // money is booked, and a credit note for it follows (InvoiceService::creditBookedRefund()); the merchant is told.
         $lateRelease = ($itemRow['status'] ?? '') === 'failed' && !self::transactionExists($eventKey) && !self::refundAlreadyRecorded($orderId, $refundId);
         if ($lateRelease) {
-            AuditLog::log('order_refund', $orderId, 'failed', 'failed', "{$provider} refund {$refundId} of a released item refund was executed");
+            // R36 (low): no status pair: "failed → failed" read "Payment failed → Payment failed"; the booking logs the payment's change.
+            AuditLog::log('order_refund', $orderId, null, null, "{$provider} refund {$refundId} of a released item refund was executed");
             IncidentMonitor::report('payment.released_refund_executed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => (int)$itemRow['id'], 'refund_id' => $refundId]);
         }
         $booked = self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
