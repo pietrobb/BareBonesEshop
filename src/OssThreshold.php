@@ -66,7 +66,7 @@ final class OssThreshold
         $worst = ['sum' => 0, 'year' => $year, 'unconverted' => []];
         $unconverted = [];
         foreach ([$year - 1, $year] as $y) {
-            $sales = self::yearSales($db, self::sellerStores($storeId, $store, $stores), self::sellerCountry($store), $y, $y === $year);
+            $sales = self::yearSales($db, self::sellerStores($storeId, $store, $stores), $y, $y === $year);
             $unconverted = array_merge($unconverted, $sales['unconverted']);
             if ($sales['sum'] >= $worst['sum']) $worst = ['sum' => $sales['sum'], 'year' => $y, 'unconverted' => []];
         }
@@ -114,13 +114,63 @@ final class OssThreshold
         return -(int)round($credited * self::storedNet($db, (int)$source['id']) / $sourceNet);
     }
 
-    /** Store an issued document's distance-sale net (InvoiceService, after it inserted the row); skipped before the migration. */
+    /**
+     * Store an issued document's distance-sale net (InvoiceService, after it inserted the row, in its transaction) and
+     * add it to its store's year total (oss_threshold_totals, R36 medium 1); skipped before the migrations. Once only.
+     */
     public static function record(PDO $db, int $invoiceId): void
     {
         if (!Db::hasColumn('invoices', 'oss_net', $db)) return;
         $doc = self::invoiceRow($db, $invoiceId);
         if ($doc === null) return;
-        $db->prepare('UPDATE invoices SET oss_net = :net WHERE id = :id')->execute([':net' => self::documentNet($db, $doc), ':id' => $invoiceId]);
+        $net = self::documentNet($db, $doc);
+        $stmt = $db->prepare('UPDATE invoices SET oss_net = :net WHERE id = :id AND oss_net IS NULL');
+        $stmt->execute([':net' => $net, ':id' => $invoiceId]);
+        if ($stmt->rowCount() === 1 && (string)($doc['status'] ?? '') === 'issued') self::addToTotal($db, $doc, $net);
+    }
+
+    /** An issued document was cancelled (InvoiceService::cancel()): its stored net leaves its year total. */
+    public static function forget(PDO $db, int $invoiceId): void
+    {
+        $doc = self::invoiceRow($db, $invoiceId);
+        if ($doc === null || !array_key_exists('oss_net', $doc) || $doc['oss_net'] === null) return;
+        self::addToTotal($db, $doc, -(int)$doc['oss_net']);
+    }
+
+    /**
+     * Store the distance-sale net of a placed order (Orders::create(), in its transaction): what it adds to the threshold
+     * until it is invoiced (orders.oss_net, in the order's currency; 0 for any other sale). Skipped before the migration.
+     */
+    public static function recordOrder(PDO $db, int $orderId): void
+    {
+        if (!Db::hasColumn('orders', 'oss_net', $db)) return;
+        $order = self::orderRow($db, $orderId);
+        if ($order === null) return;
+        $db->prepare('UPDATE orders SET oss_net = :net WHERE id = :id')->execute([':net' => self::orderNet($db, $order), ':id' => $orderId]);
+    }
+
+    /** Distance-sale net of an order not invoiced yet, from its snapshot and lines. */
+    public static function orderNet(PDO $db, array $order): int
+    {
+        $scenario = (string)($order['vat_scenario'] ?? '');
+        if (!in_array($scenario, [VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT], true)) return 0;
+        $store = self::storeConfig((string)($order['store_id'] ?? 'default'));
+        [$goods, $digital] = self::distance($order, $scenario, self::sellerCountry($store));
+        if (!$goods && !$digital) return 0;
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $total = is_array($snapshot) ? (int)($snapshot['totals']['net'] ?? 0) : (int)($order['net_total'] ?? 0);
+        $digitalNet = min($total, self::digitalNet($db, $order, (string)($order['financial_snapshot'] ?? '')));
+        return ($goods ? $total - $digitalNet : 0) + ($digital ? $digitalNet : 0);
+    }
+
+    /** @param array<string, mixed> $doc an invoices row */
+    private static function addToTotal(PDO $db, array $doc, int $net): void
+    {
+        if ($net === 0 || !Db::tableExists('oss_threshold_totals', $db)) return;
+        $order = self::orderRow($db, (int)($doc['order_id'] ?? 0));
+        $key = [(string)($order['store_id'] ?? $doc['store_id'] ?? 'default'), (int)substr((string)($doc['issued_at'] ?? ''), 0, 4), strtolower((string)($doc['currency'] ?? 'eur'))];
+        $db->prepare(Db::insertIgnore() . ' INTO oss_threshold_totals (store_id, year, currency, net) VALUES (?, ?, ?, 0)')->execute($key);
+        $db->prepare('UPDATE oss_threshold_totals SET net = net + ? WHERE store_id = ? AND year = ? AND currency = ?')->execute([$net, ...$key]);
     }
 
     /**
@@ -228,50 +278,56 @@ final class OssThreshold
     {
         $year = (int)ShopTime::date('Y');
         $sameSeller = self::sellerStores($storeId, $store, $stores);
-        $sellerCountry = self::sellerCountry($store);
-        return ['previous' => self::yearSales($db, $sameSeller, $sellerCountry, $year - 1, false)['sum'],
-            'current' => self::yearSales($db, $sameSeller, $sellerCountry, $year, true)['sum']];
+        $previous = self::yearSales($db, $sameSeller, $year - 1, false)['sum'];
+        // Past the threshold last year: this year does not matter (art. 59c), nothing more to read.
+        if ($previous > self::EUR_CENTS) return ['previous' => $previous, 'current' => 0];
+        return ['previous' => $previous, 'current' => self::yearSales($db, $sameSeller, $year, true)['sum']];
     }
 
     /**
      * @param list<string> $storeIds
      * @return array{sum: int, unconverted: list<string>}
      */
-    private static function yearSales(PDO $db, array $storeIds, string $sellerCountry, int $year, bool $withOpenOrders): array
+    private static function yearSales(PDO $db, array $storeIds, int $year, bool $withOpenOrders): array
     {
         $marks = implode(',', array_fill(0, count($storeIds), '?'));
         $range = [sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)];
         $byCurrency = [];
+        $add = static function (string $currency, int $net) use (&$byCurrency): void {
+            $byCurrency[strtolower($currency)] = ($byCurrency[strtolower($currency)] ?? 0) + $net;
+        };
         $stored = Db::hasColumn('invoices', 'oss_net', $db);
         $documents = "FROM invoices i JOIN orders o ON o.id = i.order_id
             WHERE o.store_id IN ({$marks}) AND i.status = 'issued' AND i.type IN ('invoice', 'credit_note') AND i.issued_at >= ? AND i.issued_at < ?";
-        if ($stored) {
+        // R36 (medium 1): the stored nets are summed per store and year as documents are issued (oss_threshold_totals),
+        // so a checkout reads a few rows instead of every invoice of two years (~5 s per request at 200 000 invoices).
+        if ($stored && Db::tableExists('oss_threshold_totals', $db)) {
+            $stmt = $db->prepare("SELECT currency, SUM(net) AS net FROM oss_threshold_totals WHERE store_id IN ({$marks}) AND year = ? GROUP BY currency");
+            $stmt->execute([...$storeIds, $year]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $add((string)$row['currency'], (int)$row['net']);
+        } elseif ($stored) {
             $stmt = $db->prepare("SELECT LOWER(i.currency) AS currency, COALESCE(SUM(i.oss_net), 0) AS net {$documents} AND i.oss_net <> 0 GROUP BY LOWER(i.currency)");
             $stmt->execute([...$storeIds, ...$range]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $byCurrency[(string)$row['currency']] = ($byCurrency[(string)$row['currency']] ?? 0) + (int)$row['net'];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $add((string)$row['currency'], (int)$row['net']);
         }
         // A document without its stored net (written before the migration, or by another writer) is counted from its lines.
         $stmt = $db->prepare('SELECT i.* ' . $documents . ($stored ? ' AND i.oss_net IS NULL' : '') . ' ORDER BY i.id');
         $stmt->execute([...$storeIds, ...$range]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $doc) {
-            $currency = strtolower((string)($doc['currency'] ?? 'eur'));
-            $byCurrency[$currency] = ($byCurrency[$currency] ?? 0) + self::documentNet($db, $doc);
-        }
-        // Placed, not cancelled and not invoiced yet (an unpaid bank transfer, a cash-on-delivery parcel on its way).
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $doc) $add((string)($doc['currency'] ?? 'eur'), self::documentNet($db, $doc));
+        // Placed, not cancelled and not invoiced yet (an unpaid bank transfer, a cash-on-delivery parcel on its way): by
+        // the net stored when it was placed (orders.oss_net, recordOrder()), else from its lines.
         if ($withOpenOrders) {
-            $stmt = $db->prepare("SELECT o.* FROM orders o WHERE o.store_id IN ({$marks}) AND o.created_at >= ? AND o.created_at < ?
-                  AND o.status NOT IN ('cancelled', 'refunded', 'failed') AND o.vat_scenario IN (?, ?, ?, ?)
-                  AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.type = 'invoice' AND i.status = 'issued')");
-            $stmt->execute([...$storeIds, ...$range, VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) {
-                [$goods, $digital] = self::distance($order, (string)$order['vat_scenario'], $sellerCountry);
-                if (!$goods && !$digital) continue;
-                $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
-                $total = is_array($snapshot) ? (int)($snapshot['totals']['net'] ?? 0) : (int)($order['net_total'] ?? 0);
-                $digitalNet = min($total, self::digitalNet($db, $order, (string)($order['financial_snapshot'] ?? '')));
-                $currency = strtolower((string)($order['currency'] ?? 'eur'));
-                $byCurrency[$currency] = ($byCurrency[$currency] ?? 0) + ($goods ? $total - $digitalNet : 0) + ($digital ? $digitalNet : 0);
+            $open = "FROM orders o WHERE o.store_id IN ({$marks}) AND o.created_at >= ? AND o.created_at < ? AND o.status NOT IN ('cancelled', 'refunded', 'failed')
+                  AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.type = 'invoice' AND i.status = 'issued')";
+            if (Db::hasColumn('orders', 'oss_net', $db)) {
+                $stmt = $db->prepare("SELECT LOWER(o.currency) AS currency, SUM(o.oss_net) AS net {$open} AND o.oss_net > 0 GROUP BY LOWER(o.currency)");
+                $stmt->execute([...$storeIds, ...$range]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $add((string)$row['currency'], (int)$row['net']);
+                $open .= ' AND o.oss_net IS NULL';
             }
+            $stmt = $db->prepare("SELECT o.* {$open} AND o.vat_scenario IN (?, ?, ?, ?)");
+            $stmt->execute([...$storeIds, ...$range, VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) $add((string)($order['currency'] ?? 'eur'), self::orderNet($db, $order));
         }
         $rates = array_change_key_case((array)(VatService::config()['eur_exchange_rates'] ?? []), CASE_LOWER);
         $sum = 0;

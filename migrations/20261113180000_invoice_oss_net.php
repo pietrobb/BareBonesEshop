@@ -18,6 +18,16 @@ return new class {
         $since = sprintf('%04d-01-01', (int)gmdate('Y') - 1);
         $ids = $db->prepare("SELECT id FROM invoices WHERE oss_net IS NULL AND status = 'issued' AND type IN ('invoice', 'credit_note') AND issued_at >= ? ORDER BY id");
         $ids->execute([$since]);
-        foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $id) OssThreshold::record($db, (int)$id);
+        // MySQL runs a migration without a transaction: one commit per 500 documents, not per document (~40 min at 200 000).
+        foreach (array_chunk($ids->fetchAll(PDO::FETCH_COLUMN), 500) as $chunk) {
+            if (!$isSqlite) $db->beginTransaction();
+            try {
+                foreach ($chunk as $id) OssThreshold::record($db, (int)$id);
+                if (!$isSqlite) $db->commit();
+            } catch (Throwable $e) {
+                if (!$isSqlite && $db->inTransaction()) $db->rollBack();
+                throw $e;
+            }
+        }
     }
 };

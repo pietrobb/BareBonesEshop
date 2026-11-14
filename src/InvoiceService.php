@@ -969,6 +969,7 @@ final class InvoiceService
             ':id'     => $invoiceId,
             ':store'  => StoreContext::current()->id(),
         ]);
+        if ($stmt->rowCount() === 1) OssThreshold::forget(Db::get(), $invoiceId);
         AuditLog::log('invoice_cancelled', $invoiceId, self::STATUS_ISSUED, self::STATUS_CANCELLED, $note);
     }
 
