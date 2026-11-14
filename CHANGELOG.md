@@ -193,6 +193,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   note reversed, its queued job pays nothing) and the order history says which and why. One Stripe already holds cannot
   be stopped; the order history names it so the admin can check it at Stripe. Both report an incident, and the
   incident list in Operations links an incident to its order. A pending refund of other returned units is left alone.
+- **A refund booked while an item refund is in flight gets its credit note (review round 36).** Money refunded in the
+  Stripe dashboard (or by an admin refund) while an item refund of the order waited for its job found the invoice
+  credited already by that item refund's credit note, whose money had not moved. Its credit-note job failed for good
+  ("The refund exceeds what the invoice still has uncredited"); once the item refund was released or declined, the
+  ledger held money without a credit note. The job now waits for the item refund in flight (re-checked after 1, 2, 4 …
+  at most 15 minutes) and issues the credit note when it settles. A new refund fuzzer
+  (`AuditRound36RefundFuzzRegression`, `R36_REFUND_FUZZ_RUNS` seeds, SQLite and native MySQL) checks that Stripe, the
+  ledger and the credit notes hold the same money after random returns, releases, late payouts and dashboard refunds.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
