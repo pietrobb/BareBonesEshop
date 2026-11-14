@@ -78,7 +78,10 @@ class PaymentService {
         $methods = [];
         $ownPrices = StoreContext::current()->usesProviderPrices($currency);
         $businessBuyer = Customers::isBusinessBuyer($customerId);
+        $shippingRefusesCod = $shippingMethod !== '' && self::shippingMethodRefusesCod($shippingMethod);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            // R36 (low): a delivery method set to "no cash on delivery" is not offered with it; the order refused it after.
+            if ($shippingRefusesCod && ($row['service_type'] ?? '') === 'cod') continue;
             // An online method whose gateway has no credentials cannot start a payment: not offered (the doctor reports it).
             if ((int)($row['requires_online'] ?? 0) === 1 && !self::gatewayCanStart((string)($row['provider'] ?? ''))) continue;
             // A transfer to a missing or mistyped IBAN would leave the customer with an order they cannot pay.
@@ -99,6 +102,16 @@ class PaymentService {
             $methods[] = self::methodRowToQuote($row, $amount, $currency);
         }
         return $methods;
+    }
+
+    /** Whether the store's shipping method $code is set up without cash on delivery (supports_cod = 0). */
+    private static function shippingMethodRefusesCod(string $code): bool {
+        $db = Db::get();
+        if (!Db::tableExists('shipping_methods', $db) || !Db::hasColumn('shipping_methods', 'store_id')) return false;
+        $stmt = $db->prepare('SELECT supports_cod FROM shipping_methods WHERE store_id = :store AND code = :code LIMIT 1');
+        $stmt->execute([':store' => StoreContext::current()->providerId(), ':code' => $code]);
+        $supports = $stmt->fetchColumn();
+        return $supports !== false && (int)$supports === 0;
     }
 
     /** False only for a shipped gateway (not an extension's or a substituted adapter) that lacks its credentials. */

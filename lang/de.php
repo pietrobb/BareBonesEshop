@@ -1502,6 +1502,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.rate_invalid' => 'Ungültiger Versandtarif.',
     'admin.shipping.rate_saved' => 'Tarif gespeichert.',
     'admin.shipping.rate_deleted' => 'Tarif gelöscht.',
+    'admin.shipping.help_rates' => 'Die Tarife unten sind in {currency} und gelten für Warenkörbe, die in {currency} berechnet werden. Ein Warenkorb in einer anderen Währung erhält die eingebauten Preise der Versanddienstleister, aber nur bei einer Methode unten, die das Land, die Gewichtsstufe eines ihrer Tarife und Nachnahme erlaubt.',
+    'admin.shipping.help_legacy' => '„Standard“ und „Express“ an der Kasse sind die Versandarten der Datei shipping.json, die neben den Methoden unten in der Währung dieser Datei angeboten werden; ihre Preise und Länder werden dort festgelegt.',
     'admin.payments.methods' => 'Zahlungsarten',
     'admin.payments.provider_type' => 'Anbieter/Typ',
     'admin.payments.fee' => 'Gebühr',

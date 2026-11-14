@@ -1481,6 +1481,8 @@ return [
     'admin.shipping.rate_invalid' => 'Neplatná sadzba dopravy.',
     'admin.shipping.rate_saved' => 'Sadzba uložená.',
     'admin.shipping.rate_deleted' => 'Sadzba zmazaná.',
+    'admin.shipping.help_rates' => 'Sadzby nižšie sú v {currency} a platia pre košíky účtované v {currency}. Košík účtovaný v inej mene dostane zabudované ceny dopravcov, ale len pri metóde nižšie, ktorá povoľuje danú krajinu, hmotnostné pásmo niektorej svojej sadzby a dobierku.',
+    'admin.shipping.help_legacy' => '„Štandard“ a „Expres“ v pokladni sú spôsoby doručenia zo súboru shipping.json, ponúkané popri metódach nižšie v mene toho súboru; ich ceny a krajiny sa nastavujú tam.',
     'admin.payments.methods' => 'Platobné metódy',
     'admin.payments.provider_type' => 'Poskytovateľ/typ',
     'admin.payments.fee' => 'Poplatok',

@@ -174,6 +174,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (art. 59c). Placing such an order counts again under a per-seller lock: when another order passed the threshold in
   the meantime, the buyer is asked to confirm the new total ("The VAT of the order changed in the meantime"). The
   doctor names the store by its name.
+- **Shipping: weight bands in every currency, no COD with a no-COD method, settings page (review round 36, low).** A
+  cart charged in another currency than the store's price lists gets the carriers' built-in prices only for a method
+  whose rate covers the country and also the cart's weight and volume band; only the method's maximum weight was
+  checked, and GLS was offered for 8 kg to Austria where its rates end at 5 kg. Checkout no longer offers cash on
+  delivery with a delivery method set to "no cash on delivery" (the order refused it after). The shipping settings
+  page says which prices apply in which currency and that "Standard" and "Express" at checkout come from
+  `shipping.json`, and its tables scroll inside their card instead of pushing the page sideways on a desktop.
 - **The OSS threshold check no longer slows down checkout (review round 36, medium 1).** It read every invoice of two
   years on each checkout preview and order: about 5 s per request on MySQL at 200 000 invoices (1.6 s on SQLite), on
   every change of country or shipping. Issued and cancelled documents now update a per-store, per-year total (new

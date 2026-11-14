@@ -1241,7 +1241,11 @@ class ShippingService
         return array_map('strval', array_keys($carriers));
     }
 
-    /** Carriers (and method codes) with an active method that has a rate in an active zone covering $country, within its limits (and taking COD when $cod). */
+    /**
+     * Carriers (and method codes) with an active method that has a rate in an active zone covering $country, within its
+     * limits and the rate's weight and volume band (and taking COD when $cod). R36: only the method's maximum weight was
+     * checked, so in another currency GLS was offered for 8 kg to Austria where its rates end at 5 kg.
+     */
     private static function allowedCarriers(string $country, int $weightG, int $volumeCm3, bool $cod): array
     {
         $stmt = Db::get()->prepare("
@@ -1253,11 +1257,13 @@ class ShippingService
             WHERE m.store_id = :store AND c.country = :country
               AND m.active = 1 AND z.active = 1 AND COALESCE(r.active, 1) = 1
               AND (r.country = :rcountry OR r.country = '')
+              AND r.weight_from_g <= :wfrom AND r.weight_to_g >= :wto
+              AND (r.volume_to_cm3 IS NULL OR r.volume_to_cm3 = 0 OR r.volume_to_cm3 >= :rvolume)
               AND (m.max_weight_g IS NULL OR m.max_weight_g = 0 OR m.max_weight_g >= :weight)
               AND (m.max_volume_cm3 IS NULL OR m.max_volume_cm3 = 0 OR m.max_volume_cm3 >= :volume)
         " . ($cod ? " AND m.supports_cod = 1" : ''));
         $stmt->execute([':store' => StoreContext::current()->providerId(), ':country' => $country, ':rcountry' => $country,
-            ':weight' => $weightG, ':volume' => $volumeCm3]);
+            ':wfrom' => $weightG, ':wto' => $weightG, ':rvolume' => $volumeCm3, ':weight' => $weightG, ':volume' => $volumeCm3]);
         $carriers = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             foreach ([(string)$row['carrier'], (string)$row['code']] as $id) if ($id !== '') $carriers[$id] = true;
