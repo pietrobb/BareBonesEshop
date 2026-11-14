@@ -692,7 +692,7 @@ final class InvoiceService
                 // R16: money that came in after a cancellation credit note (a cancelled purchase on invoice paid all the same) goes
                 // back with that part of the invoice already credited: only the rest is credited. Was: refused, and the
                 // refund_credit_note job failed for ever with a critical incident.
-                if ($amount - $uncredited > self::cancellationCredited($orderId)) throw new LogicException('The refund exceeds what the invoice still has uncredited');
+                if ($amount - $uncredited > self::cancellationCredited($orderId)) throw new RefundExceedsUncreditedException('The refund exceeds what the invoice still has uncredited');
                 $amount = $uncredited;
                 if ($amount <= 0) return [];
             }
@@ -876,7 +876,7 @@ final class InvoiceService
      * refund booked by its webhook before the refund job noted its id on an item refund (credit()) is recognised as
      * that item refund by then, and gets no second credit note.
      */
-    public static function creditBookedRefund(int $orderId, string $ledgerKey, int $deferrals = 0): ?array
+    public static function creditBookedRefund(int $orderId, string $ledgerKey, int $deferrals = 0, int $waits = 0): ?array
     {
         $db = Db::get();
         $stmt = $db->prepare("SELECT amount, provider_ref, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
@@ -911,7 +911,7 @@ final class InvoiceService
         // refund of the same amount waited 30 minutes and then failed.
         $paymentId = (string)(Orders::byId($orderId)['payment_id'] ?? '');
         $providerRefundId = (string)$row['provider_ref'];
-        if ($providerRefundId === '' || $providerRefundId === $paymentId) return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey, '', $itemRates);
+        if ($providerRefundId === '' || $providerRefundId === $paymentId) return self::creditBookedOrWait($orderId, (int)$row['amount'], $ledgerKey, $itemRates, $deferrals, $waits);
         $inFlight = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending'
             AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
         $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
@@ -919,10 +919,30 @@ final class InvoiceService
             if ($deferrals >= self::BOOKED_REFUND_DEFERRALS) {
                 throw new RuntimeException("Refund {$ledgerKey} of order {$orderId} may belong to an item refund still without its provider refund id; no credit note issued");
             }
-            JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals + 1], 60);
+            JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals + 1, 'waits' => $waits], 60);
             return null;
         }
-        return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey, '', $itemRates);
+        return self::creditBookedOrWait($orderId, (int)$row['amount'], $ledgerKey, $itemRates, $deferrals, $waits);
+    }
+
+    /**
+     * R36 (low, refund fuzzer): money refunded outside an item refund (in the Stripe dashboard, by an admin refund) while an
+     * item refund of the order was in flight found the invoice credited already by that item refund's credit note, whose
+     * money had not moved: "The refund exceeds what the invoice still has uncredited", and the job failed for good. The
+     * provider cannot pay out both beyond the charge, so that item refund fails (its credit note is reversed) or the
+     * money fits after all: the credit note waits for it, re-checked after 1, 2, 4 … at most 15 minutes. Was: the item
+     * refund failed or was released later, and the money stayed on the ledger without a credit note.
+     */
+    private static function creditBookedOrWait(int $orderId, int $amount, string $ledgerKey, array $itemRates, int $deferrals, int $waits): ?array
+    {
+        try {
+            return self::creditRefund($orderId, $amount, $ledgerKey, '', $itemRates);
+        } catch (RefundExceedsUncreditedException $e) {
+            if (PaymentService::unbookedCreditAmount($orderId) <= 0) throw $e;
+            JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals, 'waits' => $waits + 1],
+                min(900, 60 * 2 ** min($waits, 4)));
+            return null;
+        }
     }
 
     /** Re-render PDF for an existing invoice (e.g. file accidentally deleted). */
