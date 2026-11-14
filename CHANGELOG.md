@@ -154,6 +154,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The checkout prices the delivery it offers after a change of country (review round 36, medium 3).** The form
+  still named in-store pickup (the default) after the buyer switched to an address abroad, where pickup is not
+  offered, and the VAT preview counted the goods as collected in the shop: a business with a valid Austrian VAT ID saw
+  Slovak VAT (26,40 €) while the order went by courier under reverse charge (22,68 €), and without JavaScript got a
+  "total changed" it did not cause. Goods count as collected in the shop only where pickup is offered for the
+  address and the cart's weight. Without JavaScript, cash on delivery refused for in-store pickup names the new
+  total, as "total changed" does.
 - **The OSS threshold counts every distance sale (review round 36, medium 2).** Only invoices charged the seller's
   own VAT counted toward the 10 000 EUR threshold. A shop that sold past it last year under OSS and switched OSS off
   counted 0 this year, as did a shop whose later sales this year were already charged the buyer's VAT, and one credit
