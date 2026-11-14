@@ -214,14 +214,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'update_profile' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
-        Customers::update($cid, [
+        $profile = [
             'name'   => Security::clean($_POST['name'] ?? ''),
             'phone'  => Security::clean($_POST['phone'] ?? ''),
             'locale' => in_array($_POST['locale'] ?? '', $supported, true)
                         ? $_POST['locale'] : $locale,
-        ]);
-        $flash = $t('account.profile_saved');
-        $flashType = 'ok';
+        ];
+        // R36 (low): a too long or non-UTF-8 name or phone is an error at the field, not a MySQL 500.
+        $fieldErrors = Customers::profileErrors($profile);
+        if ($fieldErrors) {
+            http_response_code(400);
+            $fieldValues = array_map(static fn(string $v): string => mb_scrub($v, 'UTF-8'), $profile);
+            [$flash, $flashType] = [$t('account.err_profile_invalid'), 'error'];
+        } else {
+            Customers::update($cid, $profile);
+            [$flash, $flashType] = [$t('account.profile_saved'), 'ok'];
+        }
         $p = 'profile';
     }
 
@@ -238,7 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ' . Template::storeUrl('/account.php?p=addresses&ok=1'));
             exit;
         }
-        $fieldValues = $address;
+        $fieldValues = array_map(static fn(mixed $v): mixed => is_string($v) ? mb_scrub($v, 'UTF-8') : $v, $address);
         $flash = $t('account.err_address_invalid');
         $flashType = 'error';
         $p = 'addresses';

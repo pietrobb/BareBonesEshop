@@ -163,6 +163,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (art. 59c). Placing such an order counts again under a per-seller lock: when another order passed the threshold in
   the meantime, the buyer is asked to confirm the new total ("The VAT of the order changed in the meantime"). The
   doctor names the store by its name.
+- **Account profile and addresses (review round 36, low).** A profile name or phone over 191 characters or not in
+  UTF-8, and a new address with text not in UTF-8, failed on MySQL with an error page; now the field says what is
+  wrong, the typed value stays in the form and nothing is saved. Saved addresses show their IČO, DIČ and VAT ID, and
+  long values without spaces wrap inside the card instead of pushing the account page sideways on a phone.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
