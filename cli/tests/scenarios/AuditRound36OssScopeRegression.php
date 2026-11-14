@@ -129,7 +129,7 @@ try {
 
     // 6. Placing the order counts again under the seller's lock: an order priced at home VAT while another order passed
     // the threshold meanwhile is refused (the buyer confirms the new total), one priced at the consumer's VAT goes through.
-    $r36oSnapshot = static fn(string $scenario): array => ['scenario' => $scenario, 'currency' => 'eur',
+    $r36oSnapshot = static fn(string $scenario): array => ['scenario' => $scenario, 'currency' => 'eur', 'totals' => ['net' => 10000],
         'components' => [['type' => 'product', 'sku' => 'R36O-LAMP', 'vat_class' => 'standard', 'gross_before_discount' => 12300, 'rate_basis_points' => 2300]]];
     $r36oCustomer = ['name' => 'R36O', 'address' => $r36oAt];
     $r36oRefused = false;

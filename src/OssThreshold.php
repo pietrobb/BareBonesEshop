@@ -174,10 +174,10 @@ final class OssThreshold
     }
 
     /**
-     * Distance-sale net in EUR cents that a checkout of $items adds (exceeded($saleNet)): the goods when $goods (they go
-     * to a consumer of another member state), the downloads when $digital (the consumer lives in one), at the gross the
-     * cart shows less the seller's VAT of each line's class — the net they are invoiced at under the threshold. The same
-     * inputs at checkout (cart lines) and when the order is placed (snapshot lines) give the same amount.
+     * Estimate in EUR cents of what a cart of $items adds (exceeded($saleNet)) before its shipping, payment fee and
+     * discounts are known: the goods when $goods (they go to a consumer of another member state), the downloads when
+     * $digital (the consumer lives in one), at the gross the cart shows less the seller's VAT of each line's class. Only
+     * the previews decide on it; an order decides on snapshotNet() (CheckoutService::thresholdVat(), guardOrder()).
      * @param list<array{gross: int, vat_class: string, digital: bool}> $items
      */
     public static function saleNet(array $items, bool $goods, bool $digital, string $currency, string $sellerCountry): int
@@ -188,6 +188,30 @@ final class OssThreshold
             $rate = VatService::rate($sellerCountry, VatService::resolveClass((string)$item['vat_class']));
             $net += (int)round((int)$item['gross'] / (1 + $rate / 100));
         }
+        return self::inEur($net, $currency);
+    }
+
+    /**
+     * Distance-sale net in EUR cents of an order priced at home VAT by financial snapshot $snapshot — what its invoice
+     * adds (documentNet(), orderNet()): its net less the downloads' when $goods (shipping, payment fee and discounts
+     * included), its downloads when $digital. $items are its lines in snapshot order (their product type).
+     * @param list<array<string, mixed>> $items
+     */
+    public static function snapshotNet(array $snapshot, array $items, bool $goods, bool $digital): int
+    {
+        $total = (int)($snapshot['totals']['net'] ?? 0);
+        $products = array_values(array_filter((array)($snapshot['components'] ?? []), static fn($c): bool => is_array($c) && ($c['type'] ?? '') === 'product'));
+        $digitalNet = 0;
+        foreach ($products as $position => $component) {
+            $item = $items[$position] ?? [];
+            if (!empty($item['digital']) || VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))) $digitalNet += (int)($component['net'] ?? 0);
+        }
+        $digitalNet = min($total, $digitalNet);
+        return self::inEur(($goods ? $total - $digitalNet : 0) + ($digital ? $digitalNet : 0), (string)($snapshot['currency'] ?? 'eur'));
+    }
+
+    private static function inEur(int $net, string $currency): int
+    {
         if ($net === 0 || strtolower($currency) === 'eur') return $net;
         $rate = array_change_key_case((array)(VatService::config()['eur_exchange_rates'] ?? []), CASE_LOWER)[strtolower($currency)] ?? null;
         // No rate: the checkout cannot tell how much it adds; the doctor reports the currency.
@@ -229,13 +253,9 @@ final class OssThreshold
             if ((int)$stmt->fetchColumn() !== 1) throw new RuntimeException('Could not take the OSS threshold lock');
         }
         try {
-            $items = [];
-            foreach ($components as $position => $component) {
-                $items[] = ['gross' => (int)($component['gross_before_discount'] ?? 0), 'vat_class' => (string)($component['vat_class'] ?? 'standard'),
-                    'digital' => !empty($cartItems[$position]['digital']) || VariantAvailability::isDigitalType((string)($cartItems[$position]['product_type'] ?? ''))];
-            }
             unset(self::$years[$context->id()]);
-            $abroad = self::exceeded(self::saleNet($items, $goods, $digital, (string)($snapshot['currency'] ?? 'eur'), $sellerCountry));
+            // Capability review (R36): on what the invoice records — shipping, payment fee and discounts included.
+            $abroad = self::exceeded(self::snapshotNet($snapshot, $cartItems, $goods, $digital));
             // Only the home VAT can turn wrong meanwhile: the sales only grow while the lock is held (an order priced
             // abroad by the caller — a manual order, a test — is left to it).
             if ($abroad && !$chargedAbroad) throw new VatChangedException('The OSS threshold decides another VAT than the order was priced with');

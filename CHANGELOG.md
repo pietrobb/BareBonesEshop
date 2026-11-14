@@ -186,6 +186,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   every change of country or shipping. Issued and cancelled documents now update a per-store, per-year total (new
   table `oss_threshold_totals`), a placed order stores what it adds until it is invoiced (`orders.oss_net`), and the
   check reads those few rows; past the threshold last year it stops there.
+- **The sale that passes the OSS threshold is decided on all it is invoiced at (review round 36, capability review).**
+  Checkout, manual orders and the order lock counted only the cart's goods, before discounts and without shipping or
+  the payment fee, while the invoice counts all of them: with 9 992,28 EUR sold, a 9,00 EUR item and a paid parcel to
+  Austria were charged Slovak VAT and invoiced past 10 000 EUR; a discount erred the other way. The order now decides
+  on its goods after discounts plus shipping and payment fee, net of home VAT, and is priced (with its lines) at the
+  VAT that decides. The previews still estimate on the cart lines; the total charged does not change, only its VAT.
 - **A late refund of a released item refund stops the second one (review round 36, medium 4).** The admin released a
   stalled item refund (its credit note reversed) and refunded the return again; when Stripe then paid out the released
   one after all, the second refund stayed queued and the worker sent it too: a multi-item return refunded twice, with

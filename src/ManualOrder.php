@@ -374,7 +374,7 @@ final class ManualOrder {
                 'mail' => Adapters::defaultProviderCode('mail'),
             ];
             if (Adapters::integration() !== null) $providers['erp'] = Adapters::defaultProviderCode('erp');
-            $snapshot = Adapters::tax($vat['tax_provider'])::buildSnapshot($items, $vat['context'], [
+            $amounts = [
                 'discount' => $discount,
                 'line_discounts' => $promotion > 0 && class_exists('Promotions') ? Promotions::lineDiscounts($autoRules, $items) : [],
                 'shipping' => $shippingCost,
@@ -382,7 +382,10 @@ final class ManualOrder {
                 'currency' => $currency,
                 'effective_date' => ShopTime::date('Y-m-d'),
                 'providers' => $providers,
-            ]);
+            ];
+            // R36: the sale that passes the OSS threshold is decided on all it is invoiced at (as checkout).
+            [$vat, $items] = CheckoutService::thresholdVat($vat, $items, $amounts);
+            $snapshot = Adapters::tax($vat['tax_provider'])::buildSnapshot($items, $vat['context'], $amounts);
             $text = static fn(string $field): string => $digitalOnly ? '' : mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', Security::str($buyer[$field] ?? ''))), 0, 255);
             return [
                 'items' => $items,
