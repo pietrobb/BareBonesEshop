@@ -2241,6 +2241,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.expired_online' => 'A ki nem fizetett online rendelés lejárt',
     'admin.audit.note.expired_offline' => 'A ki nem fizetett rendelés lejárt',
     'admin.audit.note.item_refund_declined' => 'A fizetési szolgáltató elutasította a tételek visszatérítését',
+    'admin.audit.note.return_receipt' => 'Visszaküldés átvéve az adminisztrációban',
     'admin.audit.note.item_refund_declined_detail' => 'A fizetési szolgáltató elutasította a visszatérítést: {detail}',
     'admin.audit.note.stripe_webhook' => 'Fizetés megerősítve a Stripe-on keresztül: {detail}',
     'admin.audit.note.payment_refund_completed' => 'A fizetés visszatérítése teljesítve: {detail}',

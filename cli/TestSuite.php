@@ -59,6 +59,8 @@ if (is_string($suiteOnly)) $scenarioFiles = array_map('basename', explode(',', $
 try {
 foreach ($scenarioFiles as $scenarioFile) {
     require __DIR__ . '/tests/scenarios/' . $scenarioFile;
+    // R36 (low): --only=FoundationScenario.php,X.php runs X on every migration's schema (alone it lacked other scenarios' tables).
+    if (is_string($suiteOnly) && $scenarioFile === 'FoundationScenario.php') (new Migrator(Db::get(), dirname(__DIR__) . '/migrations', test_fixture_path('only-migrate') . '.lock'))->apply();
 }
 if (!is_string($suiteOnly)) {
     // Every *Regression.php, historical order first, then auto-discovered (tests/RegressionSuite.php).

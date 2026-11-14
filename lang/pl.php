@@ -2241,6 +2241,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.expired_online' => 'Nieopłacone zamówienie online wygasło',
     'admin.audit.note.expired_offline' => 'Nieopłacone zamówienie wygasło',
     'admin.audit.note.item_refund_declined' => 'Bramka płatnicza odrzuciła zwrot za pozycje',
+    'admin.audit.note.return_receipt' => 'Zwrot przyjęty w panelu administracyjnym',
     'admin.audit.note.item_refund_declined_detail' => 'Bramka płatnicza odrzuciła zwrot: {detail}',
     'admin.audit.note.stripe_webhook' => 'Płatność potwierdzona przez Stripe: {detail}',
     'admin.audit.note.payment_refund_completed' => 'Zwrot płatności zakończony: {detail}',

@@ -2241,6 +2241,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.expired_online' => 'Nezaplacená online objednávka vypršela',
     'admin.audit.note.expired_offline' => 'Nezaplacená objednávka vypršela',
     'admin.audit.note.item_refund_declined' => 'Platební brána odmítla vrácení peněz za položky',
+    'admin.audit.note.return_receipt' => 'Vrácení přijato v administraci',
     'admin.audit.note.item_refund_declined_detail' => 'Platební brána odmítla vrácení peněz: {detail}',
     'admin.audit.note.stripe_webhook' => 'Platba potvrzena přes Stripe: {detail}',
     'admin.audit.note.payment_refund_completed' => 'Vrácení platby dokončeno: {detail}',

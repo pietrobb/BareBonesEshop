@@ -2270,6 +2270,7 @@ return [
     'admin.audit.note.expired_online' => 'Nezaplatená online objednávka vypršala',
     'admin.audit.note.expired_offline' => 'Nezaplatená objednávka vypršala',
     'admin.audit.note.item_refund_declined' => 'Platobná brána odmietla vrátenie peňazí za položky',
+    'admin.audit.note.return_receipt' => 'Vrátenie prijaté v administrácii',
     'admin.audit.note.item_refund_declined_detail' => 'Platobná brána odmietla vrátenie peňazí: {detail}',
     'admin.audit.note.stripe_webhook' => 'Platba potvrdená cez Stripe: {detail}',
     'admin.audit.note.payment_refund_completed' => 'Vrátenie platby dokončené: {detail}',

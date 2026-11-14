@@ -2241,6 +2241,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.expired_online' => 'Unbezahlte Online-Bestellung abgelaufen',
     'admin.audit.note.expired_offline' => 'Unbezahlte Bestellung abgelaufen',
     'admin.audit.note.item_refund_declined' => 'Der Zahlungsanbieter hat die Erstattung der Positionen abgelehnt',
+    'admin.audit.note.return_receipt' => 'Rücksendung in der Verwaltung angenommen',
     'admin.audit.note.item_refund_declined_detail' => 'Der Zahlungsanbieter hat die Erstattung abgelehnt: {detail}',
     'admin.audit.note.stripe_webhook' => 'Zahlung über Stripe bestätigt: {detail}',
     'admin.audit.note.payment_refund_completed' => 'Zahlungserstattung abgeschlossen: {detail}',

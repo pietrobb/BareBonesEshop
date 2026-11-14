@@ -2261,6 +2261,7 @@ return [
     'admin.audit.note.expired_online' => 'Unpaid online order expired',
     'admin.audit.note.expired_offline' => 'Unpaid order expired',
     'admin.audit.note.item_refund_declined' => 'The payment gateway declined the item refund',
+    'admin.audit.note.return_receipt' => 'Return received in the admin',
     'admin.audit.note.item_refund_declined_detail' => 'The payment gateway declined the refund: {detail}',
     'admin.audit.note.stripe_webhook' => 'Payment confirmed through Stripe: {detail}',
     'admin.audit.note.payment_refund_completed' => 'Payment refund completed: {detail}',

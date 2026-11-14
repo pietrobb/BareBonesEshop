@@ -203,6 +203,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   note reversed, its queued job pays nothing) and the order history says which and why. One Stripe already holds cannot
   be stopped; the order history names it so the admin can check it at Stripe. Both report an incident, and the
   incident list in Operations links an incident to its order. A pending refund of other returned units is left alone.
+- **Order history texts and tests run on their own (review round 36, low).** "Credit note reversed: Item refund
+  released by admin: …" and "Admin receipt" stayed in English in every admin language; they are translated now. The
+  history row of a late refund of a released item refund no longer reads "Payment failed → Payment failed". Running
+  one scenario on its own (`php cli/test.php --only=FoundationScenario.php,X.php`) now applies every migration
+  after Foundation, so the R34–R36 regressions also pass when run alone.
 - **A refund booked while an item refund is in flight gets its credit note (review round 36).** Money refunded in the
   Stripe dashboard (or by an admin refund) while an item refund of the order waited for its job found the invoice
   credited already by that item refund's credit note, whose money had not moved. Its credit-note job failed for good

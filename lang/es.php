@@ -2213,6 +2213,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.expired_online' => 'Pedido online sin pagar caducado',
     'admin.audit.note.expired_offline' => 'Pedido sin pagar caducado',
     'admin.audit.note.item_refund_declined' => 'La pasarela de pago rechazó el reembolso de los artículos',
+    'admin.audit.note.return_receipt' => 'Devolución recibida en la administración',
     'admin.audit.note.item_refund_declined_detail' => 'La pasarela de pago rechazó el reembolso: {detail}',
     'admin.audit.note.stripe_webhook' => 'Pago confirmado a través de Stripe: {detail}',
     'admin.audit.note.payment_refund_completed' => 'Reembolso del pago completado: {detail}',
