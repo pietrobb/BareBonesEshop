@@ -78,7 +78,10 @@ class PaymentService {
         $methods = [];
         $ownPrices = StoreContext::current()->usesProviderPrices($currency);
         $businessBuyer = Customers::isBusinessBuyer($customerId);
+        $shippingRefusesCod = $shippingMethod !== '' && self::shippingMethodRefusesCod($shippingMethod);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            // R36 (low): a delivery method set to "no cash on delivery" is not offered with it; the order refused it after.
+            if ($shippingRefusesCod && ($row['service_type'] ?? '') === 'cod') continue;
             // An online method whose gateway has no credentials cannot start a payment: not offered (the doctor reports it).
             if ((int)($row['requires_online'] ?? 0) === 1 && !self::gatewayCanStart((string)($row['provider'] ?? ''))) continue;
             // A transfer to a missing or mistyped IBAN would leave the customer with an order they cannot pay.
@@ -99,6 +102,16 @@ class PaymentService {
             $methods[] = self::methodRowToQuote($row, $amount, $currency);
         }
         return $methods;
+    }
+
+    /** Whether the store's shipping method $code is set up without cash on delivery (supports_cod = 0). */
+    private static function shippingMethodRefusesCod(string $code): bool {
+        $db = Db::get();
+        if (!Db::tableExists('shipping_methods', $db) || !Db::hasColumn('shipping_methods', 'store_id')) return false;
+        $stmt = $db->prepare('SELECT supports_cod FROM shipping_methods WHERE store_id = :store AND code = :code LIMIT 1');
+        $stmt->execute([':store' => StoreContext::current()->providerId(), ':code' => $code]);
+        $supports = $stmt->fetchColumn();
+        return $supports !== false && (int)$supports === 0;
     }
 
     /** False only for a shipped gateway (not an extension's or a substituted adapter) that lacks its credentials. */
@@ -1533,7 +1546,17 @@ class PaymentService {
         $booked = self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey,
             $payload + ['settles_refund_request' => self::refundRequestKey($key) ?? $key], $itemRefundId, $refundId);
         // R35 (medium 1): that money refunded the returned units; "Refunded" on the return paid them out again.
-        if ($lateRelease && $booked) Rma::coverReleasedRefund((int)$itemRow['id'], $refundId);
+        if ($lateRelease && $booked && Rma::coverReleasedRefund((int)$itemRow['id'], $refundId)) {
+            // R36 (medium 4): the admin may have refunded those items again meanwhile; that second refund is stopped.
+            $duplicates = Rma::stopDuplicateRefunds($orderId, (int)$itemRow['id'], "Item refund {refund} stopped: {$provider} refund {$refundId} of the released item refund {$itemRow['id']} paid it");
+            foreach ($duplicates['stopped'] as $stopped) {
+                IncidentMonitor::report('payment.duplicate_refund_stopped', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $stopped]);
+            }
+            foreach ($duplicates['sent'] as $sent) {
+                AuditLog::log('order_refund', $orderId, 'pending', 'pending', "Item refund {$sent} was already sent to {$provider}: the released item refund {$itemRow['id']} paid the same items ({$provider} refund {$refundId})");
+                IncidentMonitor::report('payment.duplicate_refund_sent', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $sent]);
+            }
+        }
         return $booked;
     }
 
