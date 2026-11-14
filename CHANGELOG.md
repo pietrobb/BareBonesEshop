@@ -172,6 +172,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   every change of country or shipping. Issued and cancelled documents now update a per-store, per-year total (new
   table `oss_threshold_totals`), a placed order stores what it adds until it is invoiced (`orders.oss_net`), and the
   check reads those few rows; past the threshold last year it stops there.
+- **The sale that passes the OSS threshold is decided on all it is invoiced at (review round 36, capability review).**
+  Checkout, manual orders and the order lock counted only the cart's goods, before discounts and without shipping or
+  the payment fee, while the invoice counts all of them: with 9 992,28 EUR sold, a 9,00 EUR item and a paid parcel to
+  Austria were charged Slovak VAT and invoiced past 10 000 EUR; a discount erred the other way. The order now decides
+  on its goods after discounts plus shipping and payment fee, net of home VAT, and is priced (with its lines) at the
+  VAT that decides. The previews still estimate on the cart lines; the total charged does not change, only its VAT.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,

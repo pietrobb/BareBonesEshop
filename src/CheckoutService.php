@@ -119,10 +119,13 @@ class CheckoutService {
         // R35 (low): past the 10 000 EUR threshold a consumer of another member state pays their own VAT, OSS on or not.
         // R36 (low): so does the sale that passes it — the cart's goods sent to such a consumer, its downloads when the
         // consumer lives there (OssThreshold::saleNet(); Orders::create() checks the decision again under a lock).
+        // The cart lines are an estimate; an order decides on what it is invoiced at (thresholdVat()).
+        $threshold = null;
         if (!$context['seller_oss_enabled']) {
             $goodsAbroad = Adapters::tax($taxProviderCode)::resolveScenario($context)['scenario'] === VatService::SCENARIO_DOMESTIC_SUBTHRESH;
             $downloadsAbroad = !$vatIdValid && $consumerResidence !== $sellerCountry && VatService::isEuCountry($consumerResidence);
             if ($goodsAbroad || $downloadsAbroad) {
+                $threshold = ['goods' => $goodsAbroad, 'digital' => $downloadsAbroad, 'home_context' => $context];
                 $lines = array_map(static fn(array $item): array => ['gross' => (int)($item['total'] ?? 0), 'vat_class' => (string)($item['vat_class'] ?? 'standard'),
                     'digital' => VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))], array_values(self::availableItems($vatCart['items'] ?? [])));
                 $saleNet = OssThreshold::saleNet($lines, $goodsAbroad, $downloadsAbroad, (string)($vatCart['currency'] ?? 'eur'), $sellerCountry);
@@ -131,7 +134,32 @@ class CheckoutService {
         }
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
         return ['context' => $context, 'scenario' => $scenario, 'net' => Cart::chargesNetOfDomesticVat($scenario),
-            'vat_id_valid' => $vatIdValid, 'vat_id_status' => $vatIdStatus, 'seller_country' => $sellerCountry, 'tax_provider' => $taxProviderCode];
+            'vat_id_valid' => $vatIdValid, 'vat_id_status' => $vatIdStatus, 'seller_country' => $sellerCountry, 'tax_provider' => $taxProviderCode,
+            'oss_threshold' => $threshold];
+    }
+
+    /**
+     * R36 (capability review): the sale that passes the OSS threshold is decided on what its invoice records — the
+     * goods after discounts plus shipping and payment fee, priced at home VAT (OssThreshold::snapshotNet()) — not on the
+     * cart lines vatContext() estimates with: 9 990 € sold, 7,32 € of goods and 4,07 € of shipping were charged home VAT
+     * and invoiced to 10 001,39 €. $amounts are buildSnapshot()'s; the same under both decisions (consumer sales are
+     * charged gross). Returns [$vat, $items] to price the order with: re-resolved and the lines re-priced when it differs.
+     * @param list<array<string, mixed>> $items the lines ordered (Cart::enriched() under $vat)
+     * @return array{0: array, 1: list<array<string, mixed>>}
+     */
+    public static function thresholdVat(array $vat, array $items, array $amounts): array {
+        $check = $vat['oss_threshold'] ?? null;
+        if (!is_array($check)) return [$vat, $items];
+        $home = $check['home_context'];
+        $taxProvider = Adapters::tax((string)$vat['tax_provider']);
+        $snapshot = $taxProvider::buildSnapshot($items, $home, $amounts);
+        $abroad = OssThreshold::exceeded(OssThreshold::snapshotNet($snapshot, $items, (bool)$check['goods'], (bool)$check['digital']));
+        if ($abroad === (bool)$vat['context']['seller_oss_enabled']) return [$vat, $items];
+        $context = ['seller_oss_enabled' => $abroad] + $home;
+        $scenario = $taxProvider::resolveScenario($context);
+        $priced = array_column(Cart::enriched($context)['items'] ?? [], null, 'key');
+        $items = array_map(static fn(array $item): array => $priced[$item['key'] ?? ''] ?? $item, $items);
+        return [['context' => $context, 'scenario' => $scenario, 'net' => Cart::chargesNetOfDomesticVat($scenario)] + $vat, $items];
     }
 
     /**

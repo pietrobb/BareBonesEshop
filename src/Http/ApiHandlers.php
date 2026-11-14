@@ -825,7 +825,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'mail' => Adapters::defaultProviderCode('mail'),
     ];
     if (Adapters::integration() !== null) $providerCodes['erp'] = Adapters::defaultProviderCode('erp');
-    $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, [
+    $snapshotAmounts = [
         'discount' => $totalDiscount,
         'line_discounts' => $promotionDiscount > 0 && class_exists('Promotions') ? Promotions::lineDiscounts($autoRules, $availableItems) : [],
         'shipping' => $shippingCost,
@@ -833,7 +833,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'currency' => $currency,
         'effective_date' => ShopTime::date('Y-m-d'),
         'providers' => $providerCodes,
-    ]);
+    ];
+    // R36: the sale that passes the OSS threshold is decided on all it is invoiced at, shipping and fee included.
+    [$vat, $availableItems] = CheckoutService::thresholdVat($vat, $availableItems, $snapshotAmounts);
+    [$vatContext, $vatScenario] = [$vat['context'], $vat['scenario']];
+    $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, $snapshotAmounts);
     // R34: the no-JS form posts the total it showed. Another shipping, payment or country picked without "Recalculate"
     // re-prices the order: it is shown again for confirmation instead of being charged at a total the buyer never saw.
     $quotedTotal = $input['quoted_total'] ?? null;
