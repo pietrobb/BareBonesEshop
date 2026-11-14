@@ -687,7 +687,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $billing = OrderAddress::billingFromInput($input);
     if ($billing['error'] !== null) return checkoutRefusal((string)$billing['error_code'], 422);
     $vatId = $buyerCompany['vat_id'];
-    // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges.
+    // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges. R36: the
+    // sale that passes the OSS threshold (below, thresholdVat()) only re-splits the same gross; the checkout page decides
+    // it as this does, the JSON previews estimate it on the cart lines (they do not know the shipping and fee chosen).
     $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''));
     [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
     [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];

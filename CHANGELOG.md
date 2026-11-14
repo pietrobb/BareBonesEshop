@@ -196,6 +196,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   Austria were charged Slovak VAT and invoiced past 10 000 EUR; a discount erred the other way. The order now decides
   on its goods after discounts plus shipping and payment fee, net of home VAT, and is priced (with its lines) at the
   VAT that decides. The previews still estimate on the cart lines; the total charged does not change, only its VAT.
+- **The checkout page shows the VAT scenario of the sale that passes the OSS threshold.** The page decided it on the
+  cart lines while the order decides on goods, shipping and fee after discounts: a 9,00 EUR mug and a 7,99 EUR parcel
+  to Austria were shown under Slovak VAT and charged Austrian VAT (the total was the same). The page now decides as
+  the order does; the JSON shipping and payment previews still estimate on the cart lines (they do not know the
+  delivery and payment chosen), and when their scenario differs after a change of country the form is re-rendered.
 - **A late refund of a released item refund stops the second one (review round 36, medium 4).** The admin released a
   stalled item refund (its credit note reversed) and refunded the return again; when Stripe then paid out the released
   one after all, the second refund stayed queued and the worker sent it too: a multi-item return refunded twice, with

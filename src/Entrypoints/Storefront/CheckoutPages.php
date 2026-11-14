@@ -133,7 +133,7 @@ function renderCheckout(): string {
         'payment_unavailable' => $paymentMethods ? '' : CheckoutService::paymentUnavailableMessage($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $customerId ?: null), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'] . (($item['variant_name'] ?? '') !== '' ? ' (' . $item['variant_name'] . ')' : ''), 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
-        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'billing_reprices' => CheckoutService::hasDownload($goods), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
+        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)CheckoutService::shownVat($vat, $goods, $subtotal, $preview, $shipping, $paymentFee, $customerId ?: null)['scenario']['scenario'], 'billing_reprices' => CheckoutService::hasDownload($goods), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee), 'total_cents' => $subtotal - $discount + $shipping + $paymentFee,
