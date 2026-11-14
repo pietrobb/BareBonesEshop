@@ -1639,6 +1639,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.rate_invalid' => 'Tarifa de envío no válida.',
     'admin.shipping.rate_saved' => 'Tarifa guardada.',
     'admin.shipping.rate_deleted' => 'Tarifa eliminada.',
+    'admin.shipping.help_rates' => 'Las tarifas de abajo están en {currency} y se aplican a los carritos cobrados en {currency}. Un carrito cobrado en otra moneda recibe los precios integrados de los transportistas, pero solo con un método de abajo que admita el país, el tramo de peso de alguna de sus tarifas y el contra reembolso.',
+    'admin.shipping.help_legacy' => '«Estándar» y «Exprés» en el pago son los métodos de envío del archivo shipping.json, ofrecidos junto a los métodos de abajo en la moneda de ese archivo; sus precios y países se configuran allí.',
     'admin.payments.methods' => 'Métodos de pago',
     'admin.payments.provider_type' => 'Proveedor/tipo',
     'admin.payments.fee' => 'Recargo',

@@ -163,6 +163,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (art. 59c). Placing such an order counts again under a per-seller lock: when another order passed the threshold in
   the meantime, the buyer is asked to confirm the new total ("The VAT of the order changed in the meantime"). The
   doctor names the store by its name.
+- **Shipping: weight bands in every currency, no COD with a no-COD method, settings page (review round 36, low).** A
+  cart charged in another currency than the store's price lists gets the carriers' built-in prices only for a method
+  whose rate covers the country and also the cart's weight and volume band; only the method's maximum weight was
+  checked, and GLS was offered for 8 kg to Austria where its rates end at 5 kg. Checkout no longer offers cash on
+  delivery with a delivery method set to "no cash on delivery" (the order refused it after). The shipping settings
+  page says which prices apply in which currency and that "Standard" and "Express" at checkout come from
+  `shipping.json`, and its tables scroll inside their card instead of pushing the page sideways on a desktop.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,

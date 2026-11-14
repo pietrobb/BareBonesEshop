@@ -1501,6 +1501,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.rate_invalid' => 'Érvénytelen szállítási díj.',
     'admin.shipping.rate_saved' => 'Díj mentve.',
     'admin.shipping.rate_deleted' => 'Díj törölve.',
+    'admin.shipping.help_rates' => 'Az alábbi díjak {currency} pénznemben vannak, és a {currency} pénznemben számlázott kosarakra vonatkoznak. Más pénznemben számlázott kosár a futárszolgálatok beépített árait kapja, de csak olyan alábbi módnál, amely engedi az országot, valamelyik díjának súlysávját és az utánvétet.',
+    'admin.shipping.help_legacy' => 'A pénztárban a „Standard” és az „Expressz” a shipping.json fájl szállítási módjai, amelyek az alábbi módok mellett a fájl pénznemében jelennek meg; áraik és országaik ott állíthatók be.',
     'admin.payments.methods' => 'Fizetési módok',
     'admin.payments.provider_type' => 'Szolgáltató/típus',
     'admin.payments.fee' => 'Díj',

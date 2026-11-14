@@ -1475,6 +1475,8 @@ return [
     'admin.shipping.rate_invalid' => 'Invalid shipping rate.',
     'admin.shipping.rate_saved' => 'Rate saved.',
     'admin.shipping.rate_deleted' => 'Rate deleted.',
+    'admin.shipping.help_rates' => 'The rates below are in {currency} and price carts charged in {currency}. A cart charged in another currency gets the carriers\' built-in prices, but only for a method below that allows the country, the weight band of one of its rates and cash on delivery.',
+    'admin.shipping.help_legacy' => '"Standard" and "Express" at checkout are the delivery methods of the shipping.json file, offered next to the methods below in the currency of that file; their prices and countries are set there.',
     'admin.payments.methods' => 'Payment methods',
     'admin.payments.provider_type' => 'Provider/type',
     'admin.payments.fee' => 'Fee',

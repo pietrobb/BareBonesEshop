@@ -1501,6 +1501,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.rate_invalid' => 'Neplatná sazba dopravy.',
     'admin.shipping.rate_saved' => 'Sazba uložena.',
     'admin.shipping.rate_deleted' => 'Sazba smazána.',
+    'admin.shipping.help_rates' => 'Sazby níže jsou v {currency} a platí pro košíky účtované v {currency}. Košík účtovaný v jiné měně dostane vestavěné ceny dopravců, ale jen u metody níže, která povoluje danou zemi, hmotnostní pásmo některé své sazby a dobírku.',
+    'admin.shipping.help_legacy' => '„Standard“ a „Expres“ v pokladně jsou způsoby doručení ze souboru shipping.json, nabízené vedle metod níže v měně toho souboru; jejich ceny a země se nastavují tam.',
     'admin.payments.methods' => 'Platební metody',
     'admin.payments.provider_type' => 'Poskytovatel/typ',
     'admin.payments.fee' => 'Poplatek',

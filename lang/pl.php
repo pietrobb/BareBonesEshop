@@ -1501,6 +1501,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.rate_invalid' => 'Nieprawidłowa stawka wysyłki.',
     'admin.shipping.rate_saved' => 'Stawka zapisana.',
     'admin.shipping.rate_deleted' => 'Stawka usunięta.',
+    'admin.shipping.help_rates' => 'Stawki poniżej są w {currency} i dotyczą koszyków rozliczanych w {currency}. Koszyk rozliczany w innej walucie otrzymuje wbudowane ceny przewoźników, ale tylko przy metodzie poniżej, która dopuszcza dany kraj, przedział wagowy jednej ze swoich stawek i płatność przy odbiorze.',
+    'admin.shipping.help_legacy' => '„Standard” i „Ekspres” w kasie to metody dostawy z pliku shipping.json, oferowane obok metod poniżej w walucie tego pliku; ich ceny i kraje ustawia się tam.',
     'admin.payments.methods' => 'Metody płatności',
     'admin.payments.provider_type' => 'Dostawca/typ',
     'admin.payments.fee' => 'Opłata',
