@@ -169,6 +169,22 @@ class CheckoutService {
     }
 
     /**
+     * R36 (capability review): the VAT the checkout page shows is the one the order is charged. The page decided the sale
+     * that passes the OSS threshold on the cart lines: a mug and its parcel to Austria were shown under Slovak VAT and
+     * charged Austrian VAT (the gross is the same). Decided as checkoutExecute() does, on the goods after discounts
+     * ($preview: discountPreview()) plus the shipping and payment fee shown.
+     * @param list<array<string, mixed>> $goods the lines ordered (Cart::enriched() under $vat)
+     */
+    public static function shownVat(array $vat, array $goods, int $subtotal, array $preview, int $shipping, int $paymentFee, ?int $customerId): array {
+        if (!is_array($vat['oss_threshold'] ?? null)) return $vat;
+        $currency = strtolower((string)($goods[0]['currency'] ?? 'eur'));
+        $promotion = (int)$preview['promotion_discount'];
+        $lineDiscounts = $promotion > 0 && class_exists('Promotions') ? Promotions::lineDiscounts(Pricing::autoCartRules($subtotal, $goods, $customerId, $currency), $goods) : [];
+        return self::thresholdVat($vat, $goods, ['discount' => min($subtotal, (int)$preview['coupon_discount'] + $promotion), 'line_discounts' => $lineDiscounts,
+            'shipping' => $shipping, 'payment_fee' => $paymentFee, 'currency' => $currency, 'effective_date' => ShopTime::date('Y-m-d')])[0];
+    }
+
+    /**
      * VAT scenario of a preview: a VAT ID is checked in VIES (cached) within a per-client budget, else it counts as
      * unverified. R34: the budget counts only lookups VIES has to answer (a cached answer is free) and running out of it
      * never answers the preview with HTTP 429: the shipping and payment previews of a business behind one office IP

@@ -177,7 +177,7 @@ final class OssThreshold
      * Estimate in EUR cents of what a cart of $items adds (exceeded($saleNet)) before its shipping, payment fee and
      * discounts are known: the goods when $goods (they go to a consumer of another member state), the downloads when
      * $digital (the consumer lives in one), at the gross the cart shows less the seller's VAT of each line's class. Only
-     * the previews decide on it; an order decides on snapshotNet() (CheckoutService::thresholdVat(), guardOrder()).
+     * the JSON previews decide on it; an order and the checkout page decide on snapshotNet() (CheckoutService::thresholdVat(), guardOrder()).
      * @param list<array{gross: int, vat_class: string, digital: bool}> $items
      */
     public static function saleNet(array $items, bool $goods, bool $digital, string $currency, string $sellerCountry): int
