@@ -179,6 +179,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   every change of country or shipping. Issued and cancelled documents now update a per-store, per-year total (new
   table `oss_threshold_totals`), a placed order stores what it adds until it is invoiced (`orders.oss_net`), and the
   check reads those few rows; past the threshold last year it stops there.
+- **A late refund of a released item refund stops the second one (review round 36, medium 4).** The admin released a
+  stalled item refund (its credit note reversed) and refunded the return again; when Stripe then paid out the released
+  one after all, the second refund stayed queued and the worker sent it too: a multi-item return refunded twice, with
+  only an incident that did not say which order. Now the second refund of the same units is stopped (failed, its credit
+  note reversed, its queued job pays nothing) and the order history says which and why. One Stripe already holds cannot
+  be stopped; the order history names it so the admin can check it at Stripe. Both report an incident, and the
+  incident list in Operations links an incident to its order. A pending refund of other returned units is left alone.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or
   VAT ID longer than its column (191 characters) failed the save with a 500 on MySQL; it is now a field error. The
   VAT ID is checked as the checkout checks it (country code and 6–14 letters or digits) and stored without spaces,
