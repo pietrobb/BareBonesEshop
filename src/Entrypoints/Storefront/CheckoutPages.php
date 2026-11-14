@@ -112,7 +112,7 @@ function renderCheckout(): string {
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
-    if (in_array($placed['error_code'] ?? '', ['checkout.error.total_changed', 'checkout.error.vat_changed'], true)) $checkoutError .= ' ' . $t('total_price') . ': ' . $price($subtotal - $discount + $shipping + $paymentFee); // R35: on a phone the new total is far below the message
+    if (in_array($placed['error_code'] ?? '', ['checkout.error.total_changed', 'checkout.error.vat_changed', 'checkout.error.cod_unavailable'], true)) $checkoutError .= ' ' . $t('total_price') . ': ' . $price($subtotal - $discount + $shipping + $paymentFee); // R35: on a phone the new total is far below the message; R36: also after a refused cash on delivery (pickup)
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
         'refresh_label' => $t('checkout.refresh'), 'recalculate_label' => $t('checkout.recalculate'), 'consents' => CheckoutService::consentsView($country, $cart, $posted ? ($_POST['consents'] ?? null) : null),
