@@ -1829,6 +1829,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_company_id' => 'Geben Sie eine gültige Firmen- oder Steuernummer ein: Buchstaben und Ziffern, höchstens 20 Zeichen.',
     'account.err_address_vat_id' => 'Geben Sie eine gültige USt-IdNr. ein: Ländercode und 6–14 Buchstaben oder Ziffern, z. B. SK2020123456.',
     'account.err_address_too_long' => 'Höchstens 191 Zeichen.',
+    'account.err_invalid_text' => 'Der Text enthält ungültige Zeichen; bitte geben Sie ihn erneut ein.',
+    'account.err_profile_invalid' => 'Das Profil wurde nicht gespeichert: Bitte korrigieren Sie die markierten Felder.',
     'account.addr_type_shipping' => 'Lieferadresse',
     'account.addr_type_billing' => 'Rechnungsadresse',
     'account.downloads' => 'Downloads',

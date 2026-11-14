@@ -1829,6 +1829,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_company_id' => 'Podaj prawidłowy numer firmy lub NIP: litery i cyfry, najwyżej 20 znaków.',
     'account.err_address_vat_id' => 'Podaj prawidłowy numer VAT UE: kod kraju i 6–14 liter lub cyfr, np. SK2020123456.',
     'account.err_address_too_long' => 'Najwyżej 191 znaków.',
+    'account.err_invalid_text' => 'Tekst zawiera nieprawidłowe znaki; wpisz go ponownie.',
+    'account.err_profile_invalid' => 'Profil nie został zapisany: popraw zaznaczone pola.',
     'account.addr_type_shipping' => 'Adres dostawy',
     'account.addr_type_billing' => 'Adres rozliczeniowy',
     'account.downloads' => 'Do pobrania',

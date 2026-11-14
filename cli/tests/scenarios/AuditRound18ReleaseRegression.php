@@ -63,6 +63,7 @@ $r18rFingerprints = [
     '2.3.10' => '7f39669ed66ebda3894df8f0e4000afe699e50f2a4eedf707481d52145eb4743',
     '2.3.11' => 'a6aa0a2368547719902f701325ed6875a5a9b9f14e0f6385cb648b926f1086a7',
     '2.3.12' => '1fccfb862a34dba2ce274bc41296cb2b0e5b5817b740d422bb970718ee3d48fc',
+    '2.3.13' => 'a82e27fddf8bc3e69c2778c9fc413c19d28e0341e8101156bc4a322539946128',
 ];
 $r18rVersion = (string)($r18rManifest['version'] ?? '');
 assert_equals($r18rFingerprints[$r18rVersion] ?? '(no fingerprint recorded for theme version ' . $r18rVersion . ')', hash_final($r18rHash),

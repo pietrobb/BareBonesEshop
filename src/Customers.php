@@ -593,8 +593,10 @@ class Customers {
      * @return array<string,string>
      */
     public static function addressErrors(array $address): array {
-        $errors = [];
+        // R36 (low): text that is not UTF-8 failed the save on MySQL with a 500 ("Incorrect string value").
+        $errors = self::invalidTextErrors($address, ['name', 'company', 'ico', 'dic', 'vat_id', 'street', 'city', 'zip', 'country', 'phone']);
         foreach (['name', 'street', 'city', 'zip', 'country'] as $field) {
+            if (isset($errors[$field])) continue;
             if (trim((string)($address[$field] ?? '')) === '') $errors[$field] = 'account.err_address_required';
         }
         // R31: a billing address may be in any country the buyer is registered in, not only where the shop delivers.
@@ -605,12 +607,12 @@ class Customers {
         // R34: IČO and DIČ as the checkout accepts them (a longer value failed the VARCHAR(40) columns with a 500 on MySQL).
         foreach (self::ADDRESS_COMPANY_IDS as $column) {
             $id = self::normalizedCompanyId($address[$column] ?? '');
-            if ($id !== '' && !preg_match('/^[A-Z0-9][A-Z0-9\/-]{1,19}$/', $id)) $errors[$column] = 'account.err_address_company_id';
+            if (!isset($errors[$column]) && $id !== '' && !preg_match('/^[A-Z0-9][A-Z0-9\/-]{1,19}$/', $id)) $errors[$column] = 'account.err_address_company_id';
         }
         // R35 (low): the VAT ID as the checkout accepts it (it was stored as typed), the text fields within their column
         // (VARCHAR(191) on MySQL: a longer company, name or street failed the save with a 500).
         $vatId = self::normalizedVatId($address['vat_id'] ?? '');
-        if ($vatId !== '' && !preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId)) $errors['vat_id'] = 'account.err_address_vat_id';
+        if (!isset($errors['vat_id']) && $vatId !== '' && !preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId)) $errors['vat_id'] = 'account.err_address_vat_id';
         foreach (['name', 'company', 'vat_id', 'street', 'city', 'zip', 'phone'] as $field) {
             if (!isset($errors[$field]) && mb_strlen(trim(Security::str($address[$field] ?? ''))) > self::ADDRESS_FIELD_MAX) $errors[$field] = 'account.err_address_too_long';
         }
@@ -645,6 +647,28 @@ class Customers {
             trim(Security::str($data['phone'] ?? '')),
         ], array_map(static fn(string $c): string => self::normalizedCompanyId($data[$c] ?? ''), $ids)));
         return (int)$db->lastInsertId();
+    }
+
+    /**
+     * R36 (low): profile check, field => error message key. A name or phone over its column (VARCHAR(191) on MySQL) or
+     * not UTF-8 failed the save with a 500; now the field says what is wrong and nothing is saved.
+     * @return array<string,string>
+     */
+    public static function profileErrors(array $profile): array {
+        $errors = self::invalidTextErrors($profile, ['name', 'phone']);
+        foreach (['name', 'phone'] as $field) {
+            if (!isset($errors[$field]) && mb_strlen(trim(Security::str($profile[$field] ?? ''))) > self::ADDRESS_FIELD_MAX) $errors[$field] = 'account.err_address_too_long';
+        }
+        return $errors;
+    }
+
+    /** @return array<string,string> the $fields of $values that are not valid UTF-8 */
+    private static function invalidTextErrors(array $values, array $fields): array {
+        $errors = [];
+        foreach ($fields as $field) {
+            if (!mb_check_encoding(Security::str($values[$field] ?? ''), 'UTF-8')) $errors[$field] = 'account.err_invalid_text';
+        }
+        return $errors;
     }
 
     /** R33: the buyer company's IDs a saved address keeps besides company and vat_id. */

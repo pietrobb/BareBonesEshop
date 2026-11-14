@@ -105,7 +105,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.12 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.13 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -174,6 +174,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (art. 59c). Placing such an order counts again under a per-seller lock: when another order passed the threshold in
   the meantime, the buyer is asked to confirm the new total ("The VAT of the order changed in the meantime"). The
   doctor names the store by its name.
+- **Account profile and addresses (review round 36, low).** A profile name or phone over 191 characters or not in
+  UTF-8, and a new address with text not in UTF-8, failed on MySQL with an error page; now the field says what is
+  wrong, the typed value stays in the form and nothing is saved. Saved addresses show their IČO, DIČ and VAT ID, and
+  long values without spaces wrap inside the card instead of pushing the account page sideways on a phone.
 - **Shipping: weight bands in every currency, no COD with a no-COD method, settings page (review round 36, low).** A
   cart charged in another currency than the store's price lists gets the carriers' built-in prices only for a method
   whose rate covers the country and also the cart's weight and volume band; only the method's maximum weight was

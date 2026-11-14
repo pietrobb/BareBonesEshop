@@ -1829,6 +1829,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_company_id' => 'Adjon meg érvényes cégjegyzékszámot vagy adószámot: betűk és számjegyek, legfeljebb 20 karakter.',
     'account.err_address_vat_id' => 'Adjon meg érvényes közösségi adószámot: országkód és 6–14 betű vagy számjegy, pl. SK2020123456.',
     'account.err_address_too_long' => 'Legfeljebb 191 karakter.',
+    'account.err_invalid_text' => 'A szöveg érvénytelen karaktereket tartalmaz; kérjük, írja be újra.',
+    'account.err_profile_invalid' => 'A profil nem lett mentve: kérjük, javítsa a megjelölt mezőket.',
     'account.addr_type_shipping' => 'Szállítási cím',
     'account.addr_type_billing' => 'Számlázási cím',
     'account.downloads' => 'Letöltések',

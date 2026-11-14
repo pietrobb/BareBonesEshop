@@ -60,7 +60,9 @@ final class AccountViewModel
         } elseif ($page === 'addresses' && $customer) {
             $model += self::addresses((int)$customer['id'], $fieldValues, $fieldErrors);
         } elseif ($page === 'profile' && $customer) {
-            $model['profile'] = $customer;
+            // R36 (low): a refused save shows what was typed, with the error at its field.
+            $model['profile'] = array_merge($customer, array_intersect_key($fieldValues, ['name' => 1, 'phone' => 1]));
+            $model['profile_errors'] = array_map(static fn(mixed $key): string => I18n::t((string)$key), array_intersect_key($fieldErrors, ['name' => 1, 'phone' => 1]));
             $model['locales'] = array_map(static fn(string $locale): array => [
                 'code' => $locale, 'selected' => $locale === (string)$customer['locale'],
             ], $supportedLocales);

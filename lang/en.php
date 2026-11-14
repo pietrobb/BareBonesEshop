@@ -1829,6 +1829,8 @@ return [
     'account.err_address_company_id' => 'Enter a valid company ID or tax ID: letters and digits, at most 20 characters.',
     'account.err_address_vat_id' => 'Enter a valid EU VAT ID: the country code and 6–14 letters or digits, e.g. SK2020123456.',
     'account.err_address_too_long' => 'At most 191 characters.',
+    'account.err_invalid_text' => 'The text contains characters that are not valid; please type it again.',
+    'account.err_profile_invalid' => 'The profile was not saved: please correct the marked fields.',
     'account.addr_type_shipping' => 'Shipping address',
     'account.addr_type_billing' => 'Billing address',
     'account.downloads' => 'Downloads',

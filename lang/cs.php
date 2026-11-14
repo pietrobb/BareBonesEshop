@@ -1829,6 +1829,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.err_address_company_id' => 'Zadejte platné IČO nebo DIČ: písmena a číslice, nejvýše 20 znaků.',
     'account.err_address_vat_id' => 'Zadejte platné DIČ pro DPH v EU: kód země a 6–14 písmen nebo číslic, např. SK2020123456.',
     'account.err_address_too_long' => 'Nejvýše 191 znaků.',
+    'account.err_invalid_text' => 'Text obsahuje neplatné znaky; napište ho prosím znovu.',
+    'account.err_profile_invalid' => 'Profil nebyl uložen: opravte prosím označená pole.',
     'account.addr_type_shipping' => 'Doručovací adresa',
     'account.addr_type_billing' => 'Fakturační adresa',
     'account.downloads' => 'Ke stažení',
