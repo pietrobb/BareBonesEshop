@@ -141,14 +141,14 @@ if ($command === 'install-payments') {
 
 try {
     if ($command === 'doctor') {
-        $result = Setup::doctor();
+        $result = Setup::doctor(ossCache: in_array('--oss-cache', $argv, true));
     } elseif ($command === 'apply') {
         $result = Setup::apply();
         $result['doctor'] = Setup::doctor();
-    } else {
-        throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply [--json] [--strict] [--app-url=URL] [--admin-email=ADDRESS] [--admin-username=NAME]'
-            . ' [--db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER, password in BBE_DB_PASSWORD]');
-    }
+    } elseif ($command === 'repair-oss-cache') {
+        $result = OssThresholdCache::repair(Db::get(), in_array('--writers-stopped', $argv, true));
+        echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n"; exit(0);
+    } else { throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply|repair-oss-cache [--json] [--strict]; doctor --oss-cache is an explicit deep audit; repair-oss-cache --writers-stopped requires all writers stopped and drained plus a database backup. Install: --app-url=URL --admin-email=ADDRESS --admin-username=NAME --db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER (password in BBE_DB_PASSWORD).'); }
 
     if ($json) {
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";

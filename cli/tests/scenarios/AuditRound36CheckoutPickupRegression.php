@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (medium 3 + low, goal #456): after a change of country the checkout form still named in-store pickup
 // (the default), which is not offered abroad. The VAT preview counted the goods as collected in the shop, so a business

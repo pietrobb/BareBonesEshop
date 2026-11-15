@@ -41,6 +41,7 @@ final class AccountViewModel
             $model['verify_token'] = preg_match('/^[a-f0-9]{64}$/', $verifyToken) ? $verifyToken : '';
         } elseif ($page === 'register') {
             $model['register_token'] = Security::formTrapToken('account_register');
+            $model['name_error'] = isset($fieldErrors['name']) ? I18n::t((string)$fieldErrors['name']) : '';
         } elseif ($page === 'reset') {
             $model['reset_token'] = Security::clean($_GET['token'] ?? $fieldValues['token'] ?? '');
         } elseif ($page === 'dashboard' && $customer) {

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (low, refunds):
 // 1. A second "Release" of a stalled item refund whose first release found it executed at Stripe ('refunded') or still

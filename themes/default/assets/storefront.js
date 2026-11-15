@@ -170,7 +170,7 @@
     });
   }
 
-  async function refreshCheckoutPayments(shippingMethod) {
+  async function refreshCheckoutPayments(shippingMethod, userChange = false) {
     const country = document.getElementById('checkout-country');
     const box = document.getElementById('payment-options');
     const subtotalElement = document.getElementById('checkout-subtotal');
@@ -201,6 +201,8 @@
       return;
     }
     if (request !== paymentRequest) return;
+    // Pickup can change the goods VAT too; only a buyer change should trigger a server re-price.
+    if (userChange === true && repriceCheckout(result.vat_scenario)) return;
     const methods = Array.isArray(result.methods) ? result.methods : [];
     if (!methods.length) {
       box.innerHTML = `<div class="payment-empty">${escapeHtml(result.unavailable || text.paymentUnavailable)}</div>`;
@@ -239,11 +241,13 @@
     return toggle && toggle.checked && select ? select.value : '';
   }
 
-  // Another VAT scenario (export, reverse charge) re-prices the whole order: let the server re-render it.
-  function repriceCheckout(scenario) {
+  // Another VAT scenario (export, reverse charge) re-prices the whole order: let the server re-render it. R37: so does
+  // another rate within OSS when the store keeps the net abroad (AT 20 % → HU 27 %): the goods cost another gross.
+  function repriceCheckout(scenario, goodsSubtotal) {
     const subtotalElement = document.getElementById('checkout-subtotal');
     const rendered = subtotalElement ? subtotalElement.dataset.vatScenario : '';
-    if (!rendered || !scenario || rendered === scenario) return false;
+    const otherGoods = Number.isInteger(goodsSubtotal) && subtotalElement && goodsSubtotal !== parseInt(subtotalElement.value || '0', 10);
+    if (!rendered || !scenario || (rendered === scenario && !otherGoods)) return false;
     const button = document.querySelector('form[data-checkout-form] [name="checkout_refresh"]');
     if (!button) return false;
     submitCheckoutRefresh(button);
@@ -300,7 +304,7 @@
       return;
     }
     if (request !== shippingRequest) return;
-    if (userChange === true && repriceCheckout(result.vat_scenario)) return;
+    if (userChange === true && repriceCheckout(result.vat_scenario, result.goods_subtotal)) return;
     const methods = Array.isArray(result.methods) ? result.methods : [];
     const freeHint = document.getElementById('free-shipping-hint');
     if (freeHint) {
@@ -325,7 +329,7 @@
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
       label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span> <strong>${formatCents(price)}</strong>`;
-      label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
+      label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode, true));
       box.appendChild(label);
     });
     await refreshCheckoutPayments(methods[selectedIndex].method_code || methods[selectedIndex].key || '');

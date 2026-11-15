@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (2026-11-13), medium 4 (goal #457): the admin released a stalled item refund (credit note reversed) and
 // refunded the return again; then Stripe's late charge.refunded paid out the released one. R35 covered its units, but the
@@ -90,6 +91,7 @@ $r36rLate = static function (int $orderId, array $refund, string $refundId): voi
     }
 };
 $r36rIncident = static fn(string $code, int $orderId): bool => IncidentMonitor::reportedForOrder($code, $orderId);
+$r36rLocale = I18n::locale(); I18n::setLocale('sk');
 $r36rNotes = static fn(int $orderId): array => array_map(static fn($n): string => AuditLogLabels::note('order_refund', $orderId, (string)$n),
     $pdo->query("SELECT note FROM audit_log WHERE entity = 'order_refund' AND entity_id = {$orderId} ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
 
@@ -148,6 +150,7 @@ try {
 } catch (Throwable $e) {
     assert_true(false, 'R36 refund late (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
+    I18n::setLocale($r36rLocale);
     $r36rAdapters->setValue(null, $r36rSavedAdapters);
     $r36rDropQueue();
     foreach ($r36rOrders as $r36rCleanup) {

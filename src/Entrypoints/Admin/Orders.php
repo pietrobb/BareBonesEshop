@@ -638,7 +638,7 @@ function handleRmaStatus(): void {
             if (!$decisions || !Rma::receive($id, $decisions, 'admin-receive-' . $id, 'Admin receipt')) {
                 throw new RuntimeException(I18n::t('admin.rma.already_received'));
             }
-        } elseif ($status === 'refunded') {
+        } elseif ($status === 'refunded' && !Rma::settleAlreadyRefunded($id)) {
             $rma = Rma::byId($id);
             if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
@@ -650,7 +650,7 @@ function handleRmaStatus(): void {
             if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
                 PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0));
             }
-        } elseif (!Rma::setStatus($id, $status)) {
+        } elseif ($status !== 'refunded' && !Rma::setStatus($id, $status)) {
             throw new LogicException(I18n::t('admin.rma.transition_refused'));
         }
         setFlash('ok', I18n::format('admin.rma.status_changed', ['id' => $id, 'status' => $status]));

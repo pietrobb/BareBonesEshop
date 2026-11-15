@@ -137,7 +137,8 @@ try {
     assert_equals(['export', [0, null, null], [$r33vRate('AT'), 'AT', 'oss']],
         [$r33vChAt['snapshot']['scenario'], $r33vTag($r33vChAt['print']), $r33vTag($r33vChAt['ebook'])],
         'R33 mixed cart: an export billed to an AT consumer — the e-book is an Austrian OSS supply (was zero-rated)');
-    assert_equals([1230, $r33vRate('AT')], $r33vChAt['cart'][99331], 'R33 mixed cart: the e-book next to exported goods keeps its gross price and VAT');
+    // R37: by default (cross_border_pricing "net") the e-book keeps its 10 € net and is charged Austrian VAT on it.
+    assert_equals([(int)round(1000 * (1 + VatService::rate('AT', 'standard') / 100)), $r33vRate('AT')], $r33vChAt['cart'][99331], 'R33 mixed cart: the e-book next to exported goods keeps its net price and pays Austrian VAT');
     assert_true($r33vChAt['cart'][99333][0] < 1230 && $r33vChAt['cart'][99333][1] === 0, 'R33 mixed cart: the exported book is still charged without VAT');
 
     // Billed outside the EU next to exported goods: nothing backs an EU residence, the e-book is zero-rated like them.

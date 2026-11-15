@@ -186,7 +186,7 @@ class Setup
         ];
     }
 
-    public static function doctor(?array $config = null, ?string $root = null, ?PDO $db = null): array
+    public static function doctor(?array $config = null, ?string $root = null, ?PDO $db = null, bool $ossCache = false): array
     {
         $root ??= dirname(__DIR__);
         $config ??= require AppConfig::path($root);
@@ -302,7 +302,7 @@ class Setup
             } catch (Throwable $e) {
                 $add('fail', 'database.schema', 'Commerce schema is not ready.', 'Run php cli/migrate.php.');
             }
-            self::retentionCheck($probe, $add);
+            if ($ossCache) $add(...array_values(OssThresholdCache::doctorCheck($probe))); self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
             foreach (is_array($stores) ? (array)($stores['stores'] ?? []) : [] as $storeId => $store) {
@@ -405,6 +405,11 @@ class Setup
             return ['status' => 'warn', 'name' => $name,
                 'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}; above 10 000 EUR their own country's VAT applies (OSS) for the rest of that year and the next, and checkout now charges it.",
                 'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$label}); the OSS report lists these sales from then on."];
+        }
+        if (OssThreshold::activated($db, $storeId, $store, (int)ShopTime::date('Y'), true, $stores)) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "Store {$label} previously crossed 10 000 EUR this year or last year (counted at its own VAT); OSS still applies despite later credits. Recorded net turnover in {$y}: {$amount}.",
+                'action' => "Register for OSS and turn on \"OSS\" in Admin → Stores ({$label})."];
         }
         if ($unconverted !== []) {
             return ['status' => 'warn', 'name' => $name,

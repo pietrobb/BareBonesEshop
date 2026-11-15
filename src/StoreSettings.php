@@ -196,13 +196,15 @@ final class StoreSettings {
         if (!$sharesSeller && array_filter($printed, static fn(string $f): bool => (string)($before['legal'][$f] ?? '') !== (string)$legal[$f])) $legal['updated_at'] = date('Y-m-d');
         $store['name'] = $storeName;
         $store['oss_enabled'] = ($input['oss_enabled'] ?? '') === '1';
+        // A form without the field keeps the store's choice (Cart::keepsNetAbroad(), default "net").
+        if (in_array($input['cross_border_pricing'] ?? null, ['net', 'gross'], true)) $store['cross_border_pricing'] = $input['cross_border_pricing'];
         if ($timezone !== '') $store['timezone'] = $timezone;
         $store['legal'] = $legal;
         if ($public) unset($store['public']); else $store['public'] = false;
         $data['stores'][$storeId] = $store;
         if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
-        AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'timezone' => $before['timezone'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
-            ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'public' => $public, 'legal' => $store['legal']]);
+        AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'timezone' => $before['timezone'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'cross_border_pricing' => $before['cross_border_pricing'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
+            ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'cross_border_pricing' => $store['cross_border_pricing'] ?? null, 'public' => $public, 'legal' => $store['legal']]);
         return ['ok' => true, 'errors' => []];
     }
 

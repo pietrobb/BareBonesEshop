@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fieldValues = $_POST;
         $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $password = Security::str($_POST['password'] ?? '');
-        $name = Security::clean($_POST['name'] ?? '');
+        $name = Security::str($_POST['name'] ?? '');
         $rlKey = 'account_register_' . md5(Security::rateLimitSubject());
         $looksHuman = Security::formTrapValidate(
             'account_register',
@@ -98,12 +98,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($ok || $err === 'email_taken') {
                 $flash = str_replace('{email}', $email, $t('account.register_check_email'));
                 $flashType = 'ok';
-                $p = 'login';
-                $fieldValues = ['email' => $email];
+                $p = 'login'; $fieldValues = ['email' => $email];
             } else {
-                $fieldErrors[$err] = true;
-                $flash = $t('account.err_' . $err) ?: $err;
-                $flashType = 'error';
+                if (in_array($err, ['address_too_long', 'invalid_text'], true)) { http_response_code(400);
+                    $fieldErrors['name'] = 'account.err_' . $err; $fieldValues['name'] = mb_scrub($name, 'UTF-8');
+                } else $fieldErrors[$err] = true;
+                $flash = $t('account.err_' . $err) ?: $err; $flashType = 'error';
             }
         }
         if ($p !== 'login') $p = 'register';
@@ -213,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     elseif ($action === 'update_profile' && Customers::isLoggedIn()) {
-        $profile = ['name' => Security::clean($_POST['name'] ?? ''), 'phone' => Security::clean($_POST['phone'] ?? ''),
+        $profile = ['name' => trim(Security::str($_POST['name'] ?? ''), ' '), 'phone' => trim(Security::str($_POST['phone'] ?? ''), ' '),
             'locale' => in_array($_POST['locale'] ?? '', $supported, true) ? $_POST['locale'] : $locale];
         if ($fieldErrors = Customers::profileErrors($profile)) { // R36: too long / not UTF-8 is a field error, not a MySQL 500
             http_response_code(400);
@@ -230,7 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cid = (int)$_SESSION['customer_id'];
         $address = ['type' => Security::str($_POST['type'] ?? 'shipping'), 'is_default' => !empty($_POST['is_default'])];
         foreach (['name', 'company', 'ico', 'dic', 'vat_id', 'street', 'city', 'zip', 'country', 'phone'] as $field) {
-            $address[$field] = trim(Security::str($_POST[$field] ?? ''));
+            $address[$field] = trim(Security::str($_POST[$field] ?? ''), ' ');
         }
         $address['country'] = strtoupper($address['country']);
         $fieldErrors = Customers::addressErrors($address);

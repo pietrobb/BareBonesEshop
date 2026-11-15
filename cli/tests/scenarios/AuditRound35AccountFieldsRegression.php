@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (low, account addresses): a company, name, street or VAT ID longer than 191 characters failed the
 // VARCHAR(191) columns with a 500 on MySQL (the R34 IČO/DIČ class of bug in the other fields); the VAT ID was neither

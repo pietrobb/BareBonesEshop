@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (2026-11-13), medium 1 (goal #445): the admin released a stalled item refund (credit note reversed), then
 // Stripe's late charge.refunded booked its money and a credit note (R34). The return still offered "Refunded": a click

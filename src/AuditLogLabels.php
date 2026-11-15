@@ -7,7 +7,7 @@ final class AuditLogLabels {
     private const ORDER = ['order_status', 'order_dispute'];
     private const PAYMENT = ['payment_status', 'order_refund', 'payment_link', 'payment_webhook_ignored', 'payment_duplicate_capture'];
     private const STATUS_PREFIX = ['shipment' => 'admin.shipment.status.', 'product' => 'admin.product.status.', 'customer' => 'admin.customer.status.',
-        'review' => 'admin.reviews.status.', 'purchase_order' => 'admin.po.status.', 'invoice_cancelled' => 'admin.invoice.status.'];
+        'review' => 'admin.reviews.status.', 'purchase_order' => 'admin.po.status.', 'invoice_cancelled' => 'admin.invoice.status.', 'rma_status' => 'admin.rma.status.'];
     /** JSON keys of audit values that hold an amount in cents. */
     private const MONEY_KEYS = ['total', 'cod_amount', 'gross', 'price', 'compare_price', 'amount'];
     /** The currency of the record an audit entry is about. */
@@ -29,6 +29,7 @@ final class AuditLogLabels {
         // R21: the amount a Stripe refund webhook records is in cents: shown in the order's currency.
         if ($entity === 'order_refund' && $entityId !== null && ctype_digit($value)) return self::amount((int)$value, self::orderCurrency($entityId));
         $code = preg_match('/^[a-z_]+$/', $value) === 1;
+        if ($entity === 'order_refund' && in_array($value, ['pending', 'failed', 'succeeded'], true)) return $value === 'pending' ? OrderStatusLabels::payment('refund_pending') : OrderStatusLabels::transaction('refund_' . $value);
         if ($code && in_array($entity, self::ORDER, true)) return OrderStatusLabels::order($value);
         if ($code && in_array($entity, self::PAYMENT, true)) return OrderStatusLabels::payment($value);
         $prefix = self::STATUS_PREFIX[$entity] ?? null;
@@ -185,7 +186,7 @@ final class AuditLogLabels {
         'All goods shipped' => 'all_shipped', 'Payment confirmed via webhook' => 'webhook_paid', 'Manual order without charge' => 'manual_free',
         'Free digital order' => 'free_digital', 'Bezplatná digitálna objednávka' => 'free_digital',
         'Bank transfer received' => 'transfer_received', 'Platba prevodom prijatá' => 'transfer_received',
-        'Provider refund confirmed' => 'provider_refund_confirmed', 'Refund confirmed via webhook' => 'webhook_refund',
+        'Provider refund confirmed' => 'provider_refund_confirmed', 'Settled by an already booked and credited full order refund' => 'provider_refund_confirmed', 'Refund confirmed via webhook' => 'webhook_refund',
         'Manual refund completed' => 'manual_refund_completed', 'Expired unpaid online checkout' => 'expired_online',
         'Expired unpaid offline order' => 'expired_offline', 'The payment provider declined the item refund' => 'item_refund_declined',
         // R36: the receipt of a return entered in the admin stayed in English.

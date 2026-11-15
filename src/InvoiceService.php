@@ -307,7 +307,7 @@ final class InvoiceService
                 COALESCE((SELECT SUM(re.quantity) FROM return_exchanges re WHERE re.rma_item_id=:item2 AND re.store_id=:store AND re.status!='cancelled'),0) AS exchanged");
         $stmt->execute([':item' => (int)$rmaItem['id'], ':item2' => (int)$rmaItem['id'], ':store' => StoreContext::current()->id()]);
         $reserved = $stmt->fetch(PDO::FETCH_ASSOC);
-        return (int)$rmaItem['received_quantity'] - (int)$reserved['credited'] - (int)$reserved['exchanged'];
+        return (int)$rmaItem['received_quantity'] - max((int)$reserved['credited'], (int)$rmaItem['refunded_quantity']) - (int)$reserved['exchanged'];
     }
 
     /**
@@ -939,6 +939,10 @@ final class InvoiceService
             return self::creditRefund($orderId, $amount, $ledgerKey, '', $itemRates);
         } catch (RefundExceedsUncreditedException $e) {
             if (PaymentService::unbookedCreditAmount($orderId) <= 0) throw $e;
+            if ($waits >= 96) {
+                if (!IncidentMonitor::reportedForOrder('payment.credit_note_stalled', $orderId)) IncidentMonitor::report('payment.credit_note_stalled', 'payment', 'critical', ['order_id' => $orderId, 'attempts' => $waits]);
+                throw new RuntimeException("Credit note for refund {$ledgerKey} of order {$orderId} is still blocked after about 24 hours; reconcile the pending item refund and retry this job", 0, $e);
+            }
             JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals, 'waits' => $waits + 1],
                 min(900, 60 * 2 ** min($waits, 4)));
             return null;

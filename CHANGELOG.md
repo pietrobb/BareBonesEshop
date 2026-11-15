@@ -96,7 +96,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261113190000_oss_threshold_totals` adds the table `oss_threshold_totals`, `orders.oss_net` and two
   indexes (review round 36): the threshold's year totals per store, filled for the current and the previous year, and
   what each order of those years adds until it is invoiced. On a large shop it reads two years of orders once: both
-  migrations together took 7.7 minutes for 200 000 invoices on MySQL 8.4 (they commit every 500 rows).
+  migrations originally took 7.7 minutes for 200 000 invoices on MySQL 8.4. The new prerequisite `20261113175959_oss_physical_backfill` bulk-fills physical invoices before those unchanged migrations; digital invoices and credit notes still use their original batched calculation. It is a no-op on stores with existing OSS totals.
+- **Migration** `20261114210000_oss_threshold_activations` records historical OSS crossings per seller and year from issued documents and still-open orders. A later credit reduces the accounting turnover, but no longer removes OSS for that year and the next; checkout previews do not activate it. The doctor distinguishes this obligation from the reduced turnover.
+- **Migration** `20261114200000_oss_open_orders` removes already-invoiced and closed orders from the OSS open-order
+  index. Issuing an invoice now clears its order's contribution; cancelling it restores a still-live order. The
+  invoice totals remain unchanged, and the migration can be retried safely. A covering index keeps the open-order scan off the full order rows.
 - **Maintenance window (from the next update, and for a rollback run after this one):** a refused or failed update
   step of the 2.1.3 updater no longer reopens the shop. A rollback refused (without
   `--accept-data-loss`, unknown snapshot, changed files) or an update refused after it entered maintenance puts back
@@ -105,7 +109,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   half-restored shop by hand. A failed pre-migration backup ran no migration and reopens the shop. A window whose
   lock another process holds ends after 24 hours at most; one left by a killed updater still ends after an hour.
   Updates are rolled back newest first: a rollback of an older snapshot is refused while a later update is installed.
-- **Theme assets:** the default theme is version 2.3.13 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Prices for consumers in other EU states (review round 37) — a pricing change.** A new store setting, Admin → Stores
+  → "Price for sales to other EU countries" (`stores.json` `cross_border_pricing`), decides what a sale taxed at the
+  consumer's VAT (OSS, or the 10 000 € threshold passed) costs. `"net"`, the default also for existing stores, keeps
+  the catalog price's net: 123 € (SK 23 %) costs a Hungarian consumer 127 € (HU 27 %), an Austrian one 120 €. Until now
+  every store kept the gross (123 €, the seller absorbed the higher VAT); choose `"gross"` to keep that. Shipping and
+  payment fees follow their price lists. The checkout page and its previews re-price when another country changes the
+  gross. With OSS off, the sale that passes the threshold at the seller's own VAT activates OSS for the year even when
+  its net at the consumer's rate stays under it (9 990 € + 12,50 € at HU 27 % = 9 999,84 €); the next sale no longer
+  falls back to Slovak VAT, and `doctor` rebuilds that activation.
+- **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
+- **Theme assets:** the default theme is version 2.3.14 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -207,7 +221,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   only an incident that did not say which order. Now the second refund of the same units is stopped (failed, its credit
   note reversed, its queued job pays nothing) and the order history says which and why. One Stripe already holds cannot
   be stopped; the order history names it so the admin can check it at Stripe. Both report an incident, and the
-  incident list in Operations links an incident to its order. A pending refund of other returned units is left alone.
+  incident list in Operations links an incident to its order. A pending refund of other returned units is left alone. R37 records an atomic dispatch claim before calling the provider: an already-started dispatch is reported as in flight, not falsely stopped; a stale released request cannot dispatch. Stalled-release checks the queue again under the order lock after provider lookup. Fully refunded and credited orders can close received returns without another payout or document; partial coverage and active exchanges are not guessed.
 - **Order history texts and tests run on their own (review round 36, low).** "Credit note reversed: Item refund
   released by admin: …" and "Admin receipt" stayed in English in every admin language; they are translated now. The
   history row of a late refund of a released item refund no longer reads "Payment failed → Payment failed". Running
@@ -218,7 +232,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   credited already by that item refund's credit note, whose money had not moved. Its credit-note job failed for good
   ("The refund exceeds what the invoice still has uncredited"); once the item refund was released or declined, the
   ledger held money without a credit note. The job now waits for the item refund in flight (re-checked after 1, 2, 4 …
-  at most 15 minutes) and issues the credit note when it settles. A new refund fuzzer
+  at most 15 minutes) and issues the credit note when it settles. R37 bounds this to 96 delayed checks (about a day), then raises a critical incident and leaves the job for reconciliation and retry instead of silently waiting forever. A new refund fuzzer
   (`AuditRound36RefundFuzzRegression`, `R36_REFUND_FUZZ_RUNS` seeds, SQLite and native MySQL) checks that Stripe, the
   ledger and the credit notes hold the same money after random returns, releases, late payouts and dashboard refunds.
 - **Account addresses: long fields and the VAT ID (review round 35).** A company, name, street, city, ZIP, phone or

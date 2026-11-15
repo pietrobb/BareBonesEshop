@@ -35,15 +35,16 @@ final class OssThreshold
 
     /**
      * Whether a consumer of another member state pays their own country's VAT in the current store with OSS off: the
-     * seller passed the threshold last year, or passes it this year with the sales so far plus $saleNet (EUR cents,
+     * seller passed the threshold last year, or passes it this year with the sales so far plus $saleNet (currency cents,
      * saleNet()) — the supply that exceeds it is the first one taxed in the consumer's state (art. 59c).
      */
-    public static function exceeded(int $saleNet = 0): bool
+    public static function exceeded(int $saleNet = 0, string $currency = 'eur'): bool
     {
         $context = StoreContext::current();
         $storeId = $context->id();
         $store = $context->config();
         if (!empty($store['oss_enabled']) || !Db::tableExists('invoices')) return false;
+        if (self::activated(Db::get(), $storeId, $store, (int)ShopTime::date('Y'))) return true;
         try {
             $years = self::$years[$storeId] ??= self::years(Db::get(), $storeId, $store, (array)(Bootstrap::stores()['stores'] ?? []));
         } catch (\Throwable $e) {
@@ -51,7 +52,9 @@ final class OssThreshold
             IncidentMonitor::report('tax.oss_threshold_failed', 'tax', 'warning', ['exception' => $e]);
             return false;
         }
-        return $years['previous'] > self::EUR_CENTS || $years['current'] + max(0, $saleNet) > self::EUR_CENTS;
+        if ($years['previous'] > self::EUR_CENTS) return true;
+        if ($saleNet > 0 && strtolower($currency) !== 'eur') return self::yearSales(Db::get(), self::sellerStores($storeId, $store, (array)(Bootstrap::stores()['stores'] ?? [])), (int)ShopTime::date('Y'), true, $saleNet, $currency)['sum'] > self::EUR_CENTS;
+        return $years['current'] + max(0, $saleNet) > self::EUR_CENTS;
     }
 
     /**
@@ -127,16 +130,17 @@ final class OssThreshold
         $stmt = $db->prepare('UPDATE invoices SET oss_net = :net WHERE id = :id AND oss_net IS NULL');
         $stmt->execute([':net' => $net, ':id' => $invoiceId]);
         if ($stmt->rowCount() === 1 && (string)($doc['status'] ?? '') === 'issued') self::addToTotal($db, $doc, $net);
+        if (($doc['type'] ?? '') === 'invoice' && ($doc['status'] ?? '') === 'issued' && Db::hasColumn('orders', 'oss_net', $db)) $db->prepare('UPDATE orders SET oss_net = 0 WHERE id = ?')->execute([(int)$doc['order_id']]);
+        if ($net > 0 && ($doc['status'] ?? '') === 'issued') self::rememberCrossing($db, (string)(self::orderRow($db, (int)$doc['order_id'])['store_id'] ?? $doc['store_id']), (int)substr((string)$doc['issued_at'], 0, 4));
     }
-
     /** An issued document was cancelled (InvoiceService::cancel()): its stored net leaves its year total. */
     public static function forget(PDO $db, int $invoiceId): void
     {
         $doc = self::invoiceRow($db, $invoiceId);
         if ($doc === null || !array_key_exists('oss_net', $doc) || $doc['oss_net'] === null) return;
         self::addToTotal($db, $doc, -(int)$doc['oss_net']);
+        if (($doc['type'] ?? '') === 'invoice') self::recordOrder($db, (int)$doc['order_id']);
     }
-
     /**
      * Store the distance-sale net of a placed order (Orders::create(), in its transaction): what it adds to the threshold
      * until it is invoiced (orders.oss_net, in the order's currency; 0 for any other sale). Skipped before the migration.
@@ -146,7 +150,26 @@ final class OssThreshold
         if (!Db::hasColumn('orders', 'oss_net', $db)) return;
         $order = self::orderRow($db, $orderId);
         if ($order === null) return;
-        $db->prepare('UPDATE orders SET oss_net = :net WHERE id = :id')->execute([':net' => self::orderNet($db, $order), ':id' => $orderId]);
+        $net = self::orderNet($db, $order);
+        $db->prepare("UPDATE orders SET oss_net = CASE WHEN status IN ('cancelled', 'refunded', 'failed') OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = orders.id AND i.type = 'invoice' AND i.status = 'issued') THEN 0 ELSE :net END WHERE id = :id")->execute([':net' => $net, ':id' => $orderId]);
+        self::rememberCrossing($db, (string)$order['store_id'], (int)substr((string)$order['created_at'], 0, 4), $net > 0 && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order));
+    }
+
+    /**
+     * R37 (low, HU27): a sale of a store with OSS off charged the consumer's VAT — the threshold was passed by it at the
+     * seller's own VAT (CheckoutService::thresholdVat()). Charged as a gross that keeps its price (cross_border_pricing
+     * "gross"), its net at 27 % HU VAT can stay under the threshold (9 990 + 9,84 €) while at 23 % it passed it
+     * (9 990 + 10,16 €): the next sale was charged Slovak VAT again. That decision activates OSS for the year.
+     */
+    private static function chargedAbroad(array $order): bool
+    {
+        if (!empty(self::storeConfig((string)($order['store_id'] ?? 'default'))['oss_enabled'])) return false;
+        if ((string)($order['vat_scenario'] ?? '') === VatService::SCENARIO_OSS) return true;
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        foreach (is_array($snapshot) ? (array)($snapshot['components'] ?? []) : [] as $component) {
+            if (is_array($component) && ($component['supply'] ?? '') === VatService::SCENARIO_OSS) return true;
+        }
+        return false;
     }
 
     /** Distance-sale net of an order not invoiced yet, from its snapshot and lines. */
@@ -174,13 +197,13 @@ final class OssThreshold
     }
 
     /**
-     * Estimate in EUR cents of what a cart of $items adds (exceeded($saleNet)) before its shipping, payment fee and
+     * Estimate in the cart's currency cents of what $items add (exceeded($saleNet, $currency)) before shipping, fee and
      * discounts are known: the goods when $goods (they go to a consumer of another member state), the downloads when
      * $digital (the consumer lives in one), at the gross the cart shows less the seller's VAT of each line's class. Only
      * the JSON previews decide on it; an order and the checkout page decide on snapshotNet() (CheckoutService::thresholdVat(), guardOrder()).
      * @param list<array{gross: int, vat_class: string, digital: bool}> $items
      */
-    public static function saleNet(array $items, bool $goods, bool $digital, string $currency, string $sellerCountry): int
+    public static function saleNet(array $items, bool $goods, bool $digital, string $sellerCountry): int
     {
         $net = 0;
         foreach ($items as $item) {
@@ -188,11 +211,11 @@ final class OssThreshold
             $rate = VatService::rate($sellerCountry, VatService::resolveClass((string)$item['vat_class']));
             $net += (int)round((int)$item['gross'] / (1 + $rate / 100));
         }
-        return self::inEur($net, $currency);
+        return $net;
     }
 
     /**
-     * Distance-sale net in EUR cents of an order priced at home VAT by financial snapshot $snapshot — what its invoice
+     * Distance-sale net in the snapshot's currency cents of an order priced at home VAT — what its invoice
      * adds (documentNet(), orderNet()): its net less the downloads' when $goods (shipping, payment fee and discounts
      * included), its downloads when $digital. $items are its lines in snapshot order (their product type).
      * @param list<array<string, mixed>> $items
@@ -207,7 +230,7 @@ final class OssThreshold
             if (!empty($item['digital']) || VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))) $digitalNet += (int)($component['net'] ?? 0);
         }
         $digitalNet = min($total, $digitalNet);
-        return self::inEur(($goods ? $total - $digitalNet : 0) + ($digital ? $digitalNet : 0), (string)($snapshot['currency'] ?? 'eur'));
+        return ($goods ? $total - $digitalNet : 0) + ($digital ? $digitalNet : 0);
     }
 
     private static function inEur(int $net, string $currency): int
@@ -244,7 +267,7 @@ final class OssThreshold
         $chargedAbroad = $scenario === VatService::SCENARIO_OSS;
         foreach ($components as $component) if (($component['supply'] ?? '') === VatService::SCENARIO_OSS) $chargedAbroad = true;
         [$goods, $digital] = self::distance($order, $scenario, $sellerCountry);
-        if (!$goods && !$digital) return null;
+        if ($chargedAbroad || (!$goods && (!$digital || !array_filter($cartItems, static fn(array $item): bool => !empty($item['digital']) || VariantAvailability::isDigitalType((string)($item['product_type'] ?? '')))))) return null;
         $lock = null;
         if (Db::isMysql()) {
             $lock = 'bbe_oss_' . substr(hash('sha256', self::sellerKey($context->id(), $store)), 0, 40);
@@ -255,10 +278,10 @@ final class OssThreshold
         try {
             unset(self::$years[$context->id()]);
             // Capability review (R36): on what the invoice records — shipping, payment fee and discounts included.
-            $abroad = self::exceeded(self::snapshotNet($snapshot, $cartItems, $goods, $digital));
+            $abroad = self::exceeded(self::snapshotNet($snapshot, $cartItems, $goods, $digital), (string)($snapshot['currency'] ?? 'eur'));
             // Only the home VAT can turn wrong meanwhile: the sales only grow while the lock is held (an order priced
             // abroad by the caller — a manual order, a test — is left to it).
-            if ($abroad && !$chargedAbroad) throw new VatChangedException('The OSS threshold decides another VAT than the order was priced with');
+            if ($abroad) throw new VatChangedException('The OSS threshold decides another VAT than the order was priced with');
         } catch (\Throwable $e) {
             self::releaseOrderLock($db, $lock);
             throw $e;
@@ -293,6 +316,66 @@ final class OssThreshold
         return [$goods, $digital];
     }
 
+    public static function activated(PDO $db, string $storeId, array $store, int $year, bool $withPrevious = true, ?array $stores = null): bool
+    {
+        if (!Db::tableExists('oss_threshold_activations', $db)) return false;
+        $stmt = $db->prepare('SELECT 1 FROM oss_threshold_activations WHERE seller_key = ? AND year BETWEEN ? AND ?');
+        $stmt->execute([self::sellerKey($storeId, $store, $stores), $year - (int)$withPrevious, $year]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    // Persist only actual sales, in the writer's transaction. A speculative checkout must never activate OSS.
+    private static function rememberCrossing(PDO $db, string $storeId, int $year, bool $decided = false): void
+    {
+        if (!Db::tableExists('oss_threshold_activations', $db)) return;
+        $store = self::storeConfig($storeId);
+        if (self::activated($db, $storeId, $store, $year, false)) return;
+        $stores = self::sellerStores($storeId, $store, (array)(Bootstrap::stores()['stores'] ?? []));
+        if (!$decided && self::yearSales($db, $stores, $year, $year === (int)ShopTime::date('Y'))['sum'] <= self::EUR_CENTS) return;
+        $db->prepare(Db::insertIgnore() . ' INTO oss_threshold_activations (seller_key, year) VALUES (?, ?)')->execute([self::sellerKey($storeId, $store), $year]);
+        self::reset();
+    }
+
+    /** Replay issued documents in date order: a later credit reduces turnover, not the year's historical peak. */
+    public static function rebuildActivations(PDO $db): void
+    {
+        $since = sprintf('%04d-01-01', (int)ShopTime::date('Y') - 1);
+        $stmt = $db->prepare("SELECT o.store_id, i.issued_at AS at_date, i.id, 0 AS kind, i.currency, i.oss_net AS net
+            FROM invoices i JOIN orders o ON o.id = i.order_id
+            WHERE i.status = 'issued' AND i.type IN ('invoice', 'credit_note') AND i.issued_at >= ? AND i.oss_net <> 0
+            UNION ALL SELECT o.store_id, o.created_at AS at_date, o.id, 1 AS kind, o.currency, o.oss_net AS net
+            FROM orders o WHERE o.created_at >= ? AND o.oss_net > 0 AND o.status NOT IN ('cancelled', 'refunded', 'failed')
+            AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.type = 'invoice' AND i.status = 'issued')
+            ORDER BY at_date, kind, id");
+        $stmt->execute([$since, $since]);
+        $totals = []; $crossed = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $storeId = (string)$row['store_id'];
+            $seller = self::sellerKey($storeId, self::storeConfig($storeId));
+            $year = (int)substr((string)$row['at_date'], 0, 4);
+            if (isset($crossed[$seller][$year])) continue;
+            $currency = strtolower((string)$row['currency']);
+            $totals[$seller][$year][$currency] = ($totals[$seller][$year][$currency] ?? 0) + (int)$row['net'];
+            $sum = 0;
+            foreach ($totals[$seller][$year] as $code => $net) $sum += self::inEur($net, $code);
+            if ($sum > self::EUR_CENTS) $crossed[$seller][$year] = true;
+        }
+        $stmt->closeCursor();
+        // R37: a sale charged the consumer's VAT with OSS off was the threshold decision (chargedAbroad()).
+        $stmt = $db->prepare("SELECT * FROM orders WHERE created_at >= ? AND oss_net IS NOT NULL AND status NOT IN ('cancelled', 'refunded', 'failed')
+            AND (vat_scenario = ? OR financial_snapshot LIKE ?)");
+        $stmt->execute([$since, VatService::SCENARIO_OSS, '%"supply":"' . VatService::SCENARIO_OSS . '"%']);
+        while ($order = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            [$seller, $year] = [self::sellerKey((string)$order['store_id'], self::storeConfig((string)$order['store_id'])), (int)substr((string)$order['created_at'], 0, 4)];
+            if (!isset($crossed[$seller][$year]) && self::chargedAbroad($order) && self::orderNet($db, $order) > 0) $crossed[$seller][$year] = true;
+        }
+        $stmt->closeCursor();
+        // A rebuild adds evidence; it cannot erase a crossing recorded before a later cancellation.
+        $insert = $db->prepare(($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? 'INSERT OR IGNORE' : 'INSERT IGNORE') . ' INTO oss_threshold_activations (seller_key, year) VALUES (?, ?)');
+        foreach ($crossed as $seller => $years) foreach ($years as $year => $_) $insert->execute([$seller, $year]);
+        self::reset();
+    }
+
     /** @return array{previous: int, current: int} */
     private static function years(PDO $db, string $storeId, array $store, array $stores): array
     {
@@ -308,7 +391,7 @@ final class OssThreshold
      * @param list<string> $storeIds
      * @return array{sum: int, unconverted: list<string>}
      */
-    private static function yearSales(PDO $db, array $storeIds, int $year, bool $withOpenOrders): array
+    private static function yearSales(PDO $db, array $storeIds, int $year, bool $withOpenOrders, int $saleNet = 0, string $saleCurrency = 'eur'): array
     {
         $marks = implode(',', array_fill(0, count($storeIds), '?'));
         $range = [sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)];
@@ -349,6 +432,7 @@ final class OssThreshold
             $stmt->execute([...$storeIds, ...$range, VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) $add((string)($order['currency'] ?? 'eur'), self::orderNet($db, $order));
         }
+        if ($saleNet > 0) $add($saleCurrency, $saleNet);
         $rates = array_change_key_case((array)(VatService::config()['eur_exchange_rates'] ?? []), CASE_LOWER);
         $sum = 0;
         $unconverted = [];
@@ -364,7 +448,7 @@ final class OssThreshold
     /** Net of the order's downloads: their snapshot components (lines in order), else the lines' own net. */
     private static function digitalNet(PDO $db, array $order, string $snapshotJson): int
     {
-        if (!Db::hasColumn('order_items', 'digital', $db)) return 0;
+        if (!self::hasColumn('order_items', 'digital', $db)) return 0;
         $stmt = $db->prepare('SELECT id, digital, net_amount FROM order_items WHERE order_id = ? ORDER BY id');
         $stmt->execute([(int)$order['id']]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -381,7 +465,7 @@ final class OssThreshold
     /** @return array<int, true> */
     private static function digitalItemIds(PDO $db, int $orderId): array
     {
-        if (!Db::hasColumn('order_items', 'digital', $db)) return [];
+        if (!self::hasColumn('order_items', 'digital', $db)) return [];
         $stmt = $db->prepare('SELECT id FROM order_items WHERE order_id = ? AND digital = 1');
         $stmt->execute([$orderId]);
         return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
@@ -416,22 +500,29 @@ final class OssThreshold
     /** @return list<string> */
     private static function sellerStores(string $storeId, array $store, array $stores): array
     {
-        $seller = self::sellerKey($storeId, $store);
+        $seller = self::sellerKey($storeId, $store, $stores);
         $sameSeller = [];
         foreach ($stores as $id => $other) {
-            if (is_array($other) && (string)($other['legal']['seller'] ?? $id) === $seller) $sameSeller[] = (string)$id;
+            if (is_array($other) && self::sellerKey((string)$id, $other, $stores) === $seller) $sameSeller[] = (string)$id;
         }
         return $sameSeller ?: [$storeId];
     }
 
-    private static function sellerKey(string $storeId, array $store): string
+    private static function sellerKey(string $storeId, array $store, ?array $stores = null): string
     {
-        return (string)($store['legal']['seller'] ?? $storeId);
+        return InvoiceService::sellerCode(['stores' => [$storeId => $store] + ($stores ?? (Bootstrap::stores()['stores'] ?? []))] + Bootstrap::stores(), $storeId, (string)($store['currency'] ?? '')) ?? $storeId;
     }
 
     private static function sellerCountry(array $store): string
     {
         return strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+    }
+
+    // A signed update runs the migrations under the old release's Db class (v2.0.0 has no hasColumn()); the
+    // migration calling rebuildActivations() runs after the one that added the column.
+    private static function hasColumn(string $table, string $column, PDO $db): bool
+    {
+        return !in_array('hasColumn', get_class_methods(Db::class), true) || Db::hasColumn($table, $column, $db);
     }
 
     /** The store's stores.json entry; [] (seller country SK) when unknown, e.g. in a migration without a store context. */

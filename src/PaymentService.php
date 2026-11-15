@@ -353,6 +353,16 @@ class PaymentService {
         ?string $idempotencyKey = null,
         ?string $currency = null
     ): array {
+        // Claim item dispatch under the same order lock as late-refund cancellation. No DB lock spans provider I/O.
+        if ($idempotencyKey !== null && $idempotencyKey !== '' && !self::withLockedOrder($orderId, static function (array $order) use ($orderId, $idempotencyKey, $gateway): bool {
+            $item = Db::get()->prepare('SELECT status FROM order_refunds WHERE order_id = ? AND store_id = ? AND idempotency_key = ?');
+            $item->execute([$orderId, StoreContext::current()->id(), $idempotencyKey]);
+            $status = $item->fetchColumn(); $item->closeCursor();
+            if ($status === false) return true;
+            if ($status !== 'pending') return false;
+            self::logTransaction($orderId, self::providerName($gateway), '', 'refund_attempted', 0, (string)$order['currency'], 'refund_dispatch_' . $idempotencyKey, ['item_dispatch_started' => true], true);
+            return true;
+        })) return ['status' => 'skipped'];
         if ($idempotencyKey !== null && $idempotencyKey !== '' && $gateway instanceof IdempotentRefundAdapter) {
             $result = $gateway->refundWithIdempotency($paymentId, $amount, $idempotencyKey);
         } elseif ($idempotencyKey !== null && $idempotencyKey !== '') {
@@ -838,7 +848,11 @@ class PaymentService {
             AuditLog::log('order_refund', $orderId, 'pending', 'pending', "Item refund release by {$actor}: {$provider} refund {$providerRefundId} is still processed");
             return 'pending';
         }
-        return Rma::failRefund($itemRefundId, "Item refund released by {$actor}: {$note}") ? 'released' : '';
+        return self::withLockedOrder($orderId, static function (array $current) use ($itemRefundId, $actor, $note): bool {
+            $stalled = self::stalledItemRefund($current);
+            if ($stalled === null || $stalled['refund_id'] !== $itemRefundId) return false;
+            return Rma::failRefund($itemRefundId, "Item refund released by {$actor}: {$note}");
+        }) ? 'released' : '';
     }
 
     /** R35: an earlier release on the order found provider refund $reference executed or still processed (its audit entry). */

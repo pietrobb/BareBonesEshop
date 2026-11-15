@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (2026-11-13), low "refunds" (goal #460): the reviewer's refund fuzzer once ended with 2.80 more on the
 // payment ledger than on the credit notes, the refund_credit_note job having failed with "The refund exceeds what the
@@ -273,7 +274,8 @@ $r36zChecks = static function (PDO $pdo, string $tag) use ($r36zJobsDir, $r36zRu
             $ledger = PaymentService::refundedAmount($orderId);
             $credits = (int)$pdo->query("SELECT COALESCE(SUM(-total_gross), 0) FROM invoices WHERE order_id = {$orderId} AND type = 'credit_note' AND status <> 'cancelled'")->fetchColumn();
             $openItem = (int)$pdo->query("SELECT COUNT(*) FROM order_refunds WHERE order_id = {$orderId} AND status = 'pending'")->fetchColumn();
-            if ($stripe !== $ledger || $ledger !== $credits || $creditErrors !== [] || $stripe > $paid || $openItem > 0) {
+            $overUnits = (int)$pdo->query("SELECT COUNT(*) FROM rma_items ri JOIN rma_requests rr ON rr.id = ri.rma_id WHERE rr.order_id = {$orderId} AND ri.refunded_quantity > ri.received_quantity")->fetchColumn();
+            if ($stripe !== $ledger || $ledger !== $credits || $creditErrors !== [] || $stripe > $paid || $openItem > 0 || $overUnits > 0) {
                 $violations[] = "seed {$seed}: paid {$paid}, Stripe {$stripe}, ledger {$ledger}, credit notes {$credits}, pending item refunds {$openItem}"
                     . ($creditErrors ? '; credit job failed: ' . implode(' / ', $creditErrors) : '') . "\n      " . implode("\n      ", $trace);
             }
