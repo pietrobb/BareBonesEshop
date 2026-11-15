@@ -1,5 +1,5 @@
 // Run by AuditRound37OssPricingRegression.php with its isolated real-handler HTML/API responses (AT and HU, kept net).
-/* global fixture, console, URL, URLSearchParams, process */
+/* global fixture, console, URL, URLSearchParams, process, document */
 (async () => {
   const { chromium, expect } = require(fixture.playwright);
   const browser = await chromium.launch({ headless: true });
