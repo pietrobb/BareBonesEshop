@@ -47,6 +47,21 @@ $oldestProductId = (int)$db->query("SELECT id FROM products WHERE status='active
 $db->prepare('UPDATE products SET stock = 500 WHERE id = ?')->execute([$oldestProductId]);
 // cli/seed.php books its stock on the default warehouse already; the ledger row is what checkout reserves from.
 $db->prepare('UPDATE warehouse_stock SET qty = 500 WHERE warehouse_id = ? AND sku = (SELECT sku FROM products WHERE id = ?)')->execute([$warehouseId, $oldestProductId]);
+// R37 #467 (oss-pricing.spec.js): a 123 € mug (SK 23 %) with a free delivery and an offline payment to AT and HU only,
+// so the SK checkouts of the other specs offer neither. An old created_at keeps it off the home page's newest products.
+$ossCategory = (int)$db->query("SELECT category_id FROM products WHERE status='active' AND category_id IS NOT NULL ORDER BY id LIMIT 1")->fetchColumn();
+$db->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status, weight_g, created_at) VALUES ('default', ?, 'E2E-OSS-MUG', 'e2e-oss-mug', 'E2E OSS mug', 12300, 100, 'active', 500, '2000-01-01 00:00:00')")
+    ->execute([$ossCategory]);
+$db->exec("INSERT INTO payment_methods (store_id, code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, requires_online, active, sort_order)
+    VALUES ('default', 'e2e-oss-pay', 'manual', 'E2E OSS payment', '', 'offline', 0, 0, 0, 0, 0, 1, 990)");
+$db->exec("INSERT INTO shipping_methods (store_id, code, carrier, name, service_type, supports_cod, supports_pickup, sort_order) VALUES ('default', 'e2e-oss-post', 'e2e-oss', 'E2E OSS post', 'parcel', 0, 0, 990)");
+$db->exec("INSERT INTO shipping_zones (store_id, code, name, active, sort_order) VALUES ('default', 'e2e-oss-zone', 'E2E OSS zone', 1, 990)");
+foreach (['AT', 'HU'] as $ossCountry) {
+    $db->prepare("INSERT INTO payment_method_countries (store_id, method_code, country) VALUES ('default', 'e2e-oss-pay', ?)")->execute([$ossCountry]);
+    $db->prepare("INSERT INTO shipping_zone_countries (store_id, zone_code, country) VALUES ('default', 'e2e-oss-zone', ?)")->execute([$ossCountry]);
+    $db->prepare("INSERT INTO shipping_rates (store_id, method_code, carrier, country, zone_code, weight_from_g, weight_to_g, price, cod_surcharge, delivery_days, sort_order)
+        VALUES ('default', 'e2e-oss-post', 'e2e-oss', ?, 'e2e-oss-zone', 0, 999999, 0, 0, '2', 990)")->execute([$ossCountry]);
+}
 $stockInsert = $db->prepare(Db::insertIgnore() . ' INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (?, ?, ?, 0)');
 foreach ($db->query("SELECT sku, stock FROM products WHERE status='active'")->fetchAll(PDO::FETCH_ASSOC) as $product) {
     $stockInsert->execute([$warehouseId, (string)$product['sku'], max(0, (int)$product['stock'])]);

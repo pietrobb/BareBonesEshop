@@ -1,4 +1,6 @@
 // Run by AuditRound37OssPricingRegression.php with its isolated real-handler HTML/API responses (AT and HU, kept net).
+// Mocked network: this checks the shipped storefront.js and the POST it sends. The live-server checkout (the buyer's own
+// session, nothing routed, order stored at 127 €) is tests/e2e/oss-pricing.spec.js, run by the CI browser job.
 /* global fixture, console, URL, URLSearchParams, process, document */
 (async () => {
   const { chromium, expect } = require(fixture.playwright);
