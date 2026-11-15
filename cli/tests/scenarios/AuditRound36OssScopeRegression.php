@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (medium 2 + lows, goal #454): the OSS threshold counted only invoices taxed at the seller's VAT
 // (scenario domestic_subthreshold). Sales invoiced under OSS (last year past the threshold, or this year after crossing

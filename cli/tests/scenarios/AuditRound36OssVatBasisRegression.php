@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36, capability review of goal #454 (run 456): the sale that passes the 10 000 EUR OSS threshold is the
 // first one charged the consumer's VAT (art. 59c), but checkout and the order lock decided on the cart's goods alone,

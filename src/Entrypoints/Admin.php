@@ -142,7 +142,7 @@ a{color:#2563eb;text-decoration:none}a:hover,p a:not(.btn),li a:not(.btn),.muted
 nav{width:220px;background:#1e293b;color:#fff;padding:1rem 0;flex-shrink:0}
 nav h2{padding:0 1rem 1rem;font-size:1.1rem;border-bottom:1px solid #334155}
 nav a{display:block;padding:.5rem 1rem;color:#cbd5e1}nav a:hover,nav a.active{background:#334155;color:#fff;text-decoration:none}
-main{flex:1;padding:1.5rem;max-width:1200px}
+main{flex:1;min-width:0;padding:1.5rem;max-width:1200px}
 h1{margin-bottom:1rem;font-size:1.5rem}
 .card{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1rem;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .grid{display:grid;gap:1rem}.grid>*{min-width:0}.grid-2{grid-template-columns:1fr 1fr}.grid-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}

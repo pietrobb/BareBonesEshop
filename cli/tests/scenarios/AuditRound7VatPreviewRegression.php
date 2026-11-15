@@ -140,7 +140,7 @@ PHP);
     assert_true($r7vFetchAt !== false && $r7vCheckedAt !== false && $r7vCheckedAt > $r7vFetchAt && !str_contains(substr($r7vRefresh, 0, $r7vFetchAt), ':checked'),
         'R7 checkout shipping race: the selected rate is read after the rates arrive, so a choice made while loading is not reverted');
     // A changed country or VAT ID that switches the VAT scenario re-renders the whole order on the server.
-    assert_true(str_contains($r7vRefresh, 'repriceCheckout(result.vat_scenario)') && str_contains($r7vJs, "vat_id: checkoutVatId()"),
+    assert_true(str_contains($r7vRefresh, 'repriceCheckout(result.vat_scenario, result.goods_subtotal)') && str_contains($r7vJs, "vat_id: checkoutVatId()"),
         'R7 VAT preview JS: the rate/fee requests carry the VAT ID and a scenario change re-prices the checkout');
 
     // 4. Previews price what checkout orders: a sold-out parcel line left in the cart is not ordered, so an e-book

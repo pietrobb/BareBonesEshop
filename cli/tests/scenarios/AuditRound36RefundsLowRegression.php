@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (2026-11-13), low "refunds" (goal #460): money refunded in the Stripe dashboard while an item refund of
 // the order was in flight found the invoice credited already by that item refund's credit note (its money had not moved).

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (medium 1): editing the lines of a pending order re-priced the VAT ID as unverified unless the whole
 // order was reverse charge, and compared only the whole order's scenario. An e-book reverse charged for a German

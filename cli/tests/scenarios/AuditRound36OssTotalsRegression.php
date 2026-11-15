@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (medium 1, goal #455): the OSS threshold check read every invoice of two years on each checkout
 // preview and order — 0.8 s of sums, 1.1–1.3 s of e-book lines and ~2000 more queries at 200 000 invoices, ~5 s per

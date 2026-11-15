@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (medium 2): the checkout previews check a VAT ID in VIES within a per-client budget (20 per
 // 10 minutes), but running out of it went through Security::rateLimit, which answers the whole request with HTTP 429.

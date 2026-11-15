@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (2026-11-13), VAT lows (goal #448): a manual order billed to another address lost the "not verified
 // in VIES" marker of its IČ DPH; an e-book next to goods reverse charged in the same state was summed into the goods'

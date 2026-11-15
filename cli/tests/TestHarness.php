@@ -149,6 +149,27 @@ function test_fixture_path(string $name): string {
     return sys_get_temp_dir() . '/barebones-' . $name . '-' . getmypid() . '-' . bin2hex(random_bytes(4));
 }
 
+/** Minimal migrated shop for a regression run without any preceding scenario. */
+function test_commerce_fixture(): PDO {
+    $db = new ShopPDO('sqlite:' . TEST_DATA_DIR . '/private/db/shop.sqlite');
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $db->exec('PRAGMA journal_mode = WAL');
+    $db->exec('PRAGMA foreign_keys = ON');
+    Db::init($db, 'sqlite');
+    (new Migrator($db, dirname(TEST_CLI_DIR) . '/migrations', test_fixture_path('commerce-migrate') . '.lock'))->apply();
+    $db->exec("INSERT INTO categories (id, store_id, slug, name, path, depth) VALUES (1, 'default', 'regression', 'Regression', 'regression', 0)");
+    $db->exec("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status, weight_g) VALUES (1, 'default', 1, 'REGRESSION-PRODUCT', 'regression-product', 'Regression product', 1230, 100, 'active', 500)");
+    $db->exec("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) SELECT 'default', id, 'REGRESSION-PRODUCT', 100, 0 FROM warehouses WHERE store_id = 'default' AND is_default = 1 ORDER BY id LIMIT 1");
+    $stores = Bootstrap::stores();
+    $stores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';
+    (new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $stores);
+    Bootstrap::initStoreContext('/', '', 'default');
+    Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+    Security::sessionStart();
+    return $db;
+}
+
 /**
  * A mail provider that delivers, for tests that need mail to count as sent: R26 reports mail the log provider only
  * wrote down as not sent (MailService::logged()). It captures like LogMail (LogMail::captured()) under its own id.

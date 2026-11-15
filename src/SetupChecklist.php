@@ -73,6 +73,7 @@ final class SetupChecklist
         if ($item === '' && str_starts_with($checkName, 'runtime.') && !in_array($checkName, ['runtime.php', 'runtime.vendor_bbf'], true)) {
             [$group, $item] = ['runtime.path', substr($checkName, strlen('runtime.'))];
         }
+        if ($group === 'stores.oss_threshold') $item = trim((string)(Bootstrap::stores()['stores'][$item]['name'] ?? '')) ?: $item;
         $key = 'admin.doctor.' . str_replace('.', '_', $group);
         $text = I18n::format($key, ['item' => $item]);
         return $text === $key ? null : $text;

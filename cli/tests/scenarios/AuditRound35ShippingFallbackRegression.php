@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (2026-11-13), medium 2 (goal #446): when the store's own rates (shipping_rates) did not cover the
 // country and weight, the checkout asked every carrier adapter for its built-in prices and ignored what the merchant set

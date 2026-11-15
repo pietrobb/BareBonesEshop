@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (low, texts): the invoice printed the parties' country as a code although the CHANGELOG promised its
 // name; an OSS invoice named the rate country of its e-books but not of its goods; order history notes stayed in English

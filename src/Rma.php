@@ -441,7 +441,7 @@ class Rma {
             WHERE ri.id=:item AND ri.rma_id=:rma AND rr.store_id=:store");
         $stmt->execute([':item' => $rmaItemId, ':rma' => $rmaId, ':store' => StoreContext::current()->id(), ':store2' => StoreContext::current()->id()]);
         $item = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$item || $quantity > (int)$item['received_quantity'] - (int)$item['credited'] - (int)$item['exchanged']) throw new LogicException('Exchange exceeds available received quantity');
+        if (!$item || $quantity > (int)$item['received_quantity'] - max((int)$item['credited'], (int)$item['refunded_quantity']) - (int)$item['exchanged']) throw new LogicException('Exchange exceeds available received quantity');
         $insert = Db::get()->prepare(Db::insertIgnore() . " INTO return_exchanges
             (store_id, rma_id, rma_item_id, quantity, replacement_product_id, replacement_variant_id, idempotency_key)
             VALUES (:store, :rma, :item, :quantity, :product, :variant, :key)");
@@ -458,6 +458,45 @@ class Rma {
             throw new LogicException('Exchange idempotency key was reused with different input');
         }
         return (int)$exchange['id'];
+    }
+
+    /** Close a received return covered by a fully booked, fully credited order refund, without moving money again. */
+    public static function settleAlreadyRefunded(int $rmaId): bool {
+        $rma = self::byId($rmaId);
+        if (!$rma) return false;
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            Orders::lockWithin((int)$rma['order_id']);
+            $rma = self::lockedRma($rmaId);
+            $order = $rma ? Orders::byId((int)$rma['order_id']) : null;
+            $source = $order ? InvoiceService::byOrderId((int)$order['id']) : null;
+            $covered = $rma && $rma['status'] === 'received' && $order && $source && $source['type'] === 'invoice' && $source['status'] === 'issued'
+                && (int)$order['total'] > 0 && PaymentService::refundedAmount((int)$order['id']) >= (int)$order['total'];
+            if ($covered) {
+                $credits = $db->prepare("SELECT COALESCE(SUM(-total_gross),0) FROM invoices WHERE refers_to_invoice_id = ? AND type = 'credit_note' AND status = 'issued' AND store_id = ?");
+                $credits->execute([(int)$source['id'], StoreContext::current()->id()]);
+                $credited = (int)$credits->fetchColumn(); $credits->closeCursor();
+                $pending = $db->prepare("SELECT COUNT(*) FROM order_refunds WHERE order_id = ? AND store_id = ? AND status = 'pending'");
+                $pending->execute([(int)$order['id'], StoreContext::current()->id()]);
+                $count = (int)$pending->fetchColumn(); $pending->closeCursor();
+                $exchanges = $db->prepare("SELECT COUNT(*) FROM return_exchanges WHERE rma_id = ? AND store_id = ? AND status <> 'cancelled'");
+                $exchanges->execute([$rmaId, StoreContext::current()->id()]);
+                $exchanged = (int)$exchanges->fetchColumn(); $exchanges->closeCursor();
+                $covered = $credited >= (int)$source['total_gross'] && $count === 0 && $exchanged === 0;
+            }
+            if ($covered) {
+                $db->prepare('UPDATE rma_items SET refunded_quantity = received_quantity WHERE rma_id = ?')->execute([$rmaId]);
+                $db->prepare("UPDATE rma_requests SET status = 'refunded', updated_at = " . Db::now() . ' WHERE id = ? AND store_id = ?')->execute([$rmaId, StoreContext::current()->id()]);
+                AuditLog::log('rma_status', $rmaId, 'received', 'refunded', 'Settled by an already booked and credited full order refund');
+            }
+            if ($own) $db->commit();
+            return (bool)$covered;
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     /** Complete a pending item refund; true when this call completed it (false: it was done already). */
@@ -525,7 +564,7 @@ class Rma {
     public static function stopDuplicateRefunds(int $orderId, int $releasedRefundId, string $note): array {
         $db = Db::get();
         $store = StoreContext::current()->id();
-        $pending = $db->prepare("SELECT id, payment_reference FROM order_refunds WHERE order_id=:order AND store_id=:store AND status='pending' AND id<>:released ORDER BY id DESC");
+        $pending = $db->prepare("SELECT id, payment_reference, idempotency_key FROM order_refunds WHERE order_id=:order AND store_id=:store AND status='pending' AND id<>:released ORDER BY id DESC");
         $pending->execute([':order' => $orderId, ':store' => $store, ':released' => $releasedRefundId]);
         $over = $db->prepare("SELECT COUNT(*) FROM rma_items ri WHERE ri.id IN (SELECT rma_item_id FROM credit_note_items WHERE refund_id=:refund)
             AND ri.refunded_quantity + COALESCE((SELECT SUM(c.quantity) FROM credit_note_items c JOIN order_refunds p ON p.id=c.refund_id
@@ -534,7 +573,10 @@ class Rma {
         foreach ($pending->fetchAll(PDO::FETCH_ASSOC) as $refund) {
             $over->execute([':refund' => (int)$refund['id']]);
             if ((int)$over->fetchColumn() === 0) continue;
-            if (trim((string)($refund['payment_reference'] ?? '')) !== '') { $result['sent'][] = (int)$refund['id']; continue; }
+            $dispatch = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = ? AND store_id = ? AND idempotency_key = ? AND status = 'refund_attempted'");
+            $dispatch->execute([$orderId, $store, 'refund_dispatch_' . $refund['idempotency_key']]);
+            $started = $dispatch->fetchColumn() !== false; $dispatch->closeCursor();
+            if ($started || trim((string)($refund['payment_reference'] ?? '')) !== '') { $result['sent'][] = (int)$refund['id']; continue; }
             if (self::failRefund((int)$refund['id'], str_replace('{refund}', (string)$refund['id'], $note))) $result['stopped'][] = (int)$refund['id'];
         }
         return $result;
@@ -545,8 +587,14 @@ class Rma {
         $lines = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund');
         $lines->execute([':refund' => (int)$refund['id']]);
         foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
-            $db->prepare('UPDATE rma_items SET refunded_quantity = refunded_quantity + :quantity WHERE id=:id')
-                ->execute([':quantity' => (int)$line['quantity'], ':id' => (int)$line['rma_item_id']]);
+            $item = $db->prepare('SELECT received_quantity, refunded_quantity FROM rma_items WHERE id = ?' . (Db::isMysql() ? ' FOR UPDATE' : ''));
+            $item->execute([(int)$line['rma_item_id']]);
+            $row = $item->fetch(PDO::FETCH_ASSOC); $item->closeCursor();
+            if (!$row) continue;
+            $quantity = (int)$row['refunded_quantity'] + (int)$line['quantity'];
+            if ($quantity > (int)$row['received_quantity']) IncidentMonitor::report('payment.duplicate_refund_sent', 'payment', 'critical', ['order_id' => (int)$refund['order_id'], 'item_refund_id' => (int)$refund['id'], 'rma_item_id' => (int)$line['rma_item_id'], 'excess_units' => $quantity - (int)$row['received_quantity']]);
+            $db->prepare('UPDATE rma_items SET refunded_quantity = :quantity WHERE id=:id')
+                ->execute([':quantity' => min($quantity, (int)$row['received_quantity']), ':id' => (int)$line['rma_item_id']]);
         }
         $remaining = $db->prepare("SELECT COUNT(*) FROM rma_items ri WHERE ri.rma_id=:rma AND ri.refunded_quantity +
             COALESCE((SELECT SUM(quantity) FROM return_exchanges re WHERE re.rma_item_id=ri.id AND re.status IN ('requested','fulfilled')),0) < ri.received_quantity");

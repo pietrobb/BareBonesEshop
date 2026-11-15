@@ -253,7 +253,7 @@ $architectureBudgets = [
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
-    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 89, 'functions' => 3, 'max_function_lines' => 61, 'coupling' => 6],
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 95, 'functions' => 3, 'max_function_lines' => 67, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.
@@ -305,7 +305,7 @@ $architectureBudgets = [
     // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
     // +7 lines, +1 coupling R10 UX8: checkout sign-in link + save address, account offer on a guest order's confirmation (GuestPages, GuestCheckoutAccount).
     // +1 line R11: the page after paying asks PaymentLink::returnStatus() whether a retry is paid but not yet confirmed.
-    /* #399: the cart page shows the "Buy later" list (SavedForLater::view, +1 coupling) */ 'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 267, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 18],
+    /* #399: the cart page shows the "Buy later" list (SavedForLater::view, +1 coupling); R37: lines re-priced at the threshold VAT checkout charges */ 'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 274, 'functions' => 7, 'max_function_lines' => 109, 'coupling' => 18],
     // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
     'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // R11 H1: ?page=account-claim — the e-mailed link creates the guest's account; the rules live in GuestCheckoutAccount.

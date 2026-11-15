@@ -391,6 +391,7 @@ class Cart {
         // (reverse charge, export) is charged that price without the VAT.
         $sellerCountry = strtoupper((string)$vctx['seller_country']);
         $stripDomesticVat = self::chargesNetOfDomesticVat($scenario);
+        $keepNet = self::keepsNetAbroad();
 
         $vatTotal = 0;
         $netTotal = 0;
@@ -420,6 +421,20 @@ class Cart {
             // R33: a download taxed where the buyer lives keeps its VAT next to exported or reverse-charged goods.
             $lineTaxed = $lineSupply !== null ? !$lineReverse : $applies;
             $rate     = $lineTaxed ? $taxProvider::rate($lineCountry, $vatClass, $atDate) : 0.0;
+            // R37 (operator decision): a line taxed at another state's VAT keeps the catalog price's net by default
+            // ("net": 100 € + 27 % HU = 127 €) or, with cross_border_pricing "gross", its gross (123 €, lower margin).
+            if ($lineTaxed && strtoupper((string)$lineCountry) !== $sellerCountry && $keepNet) {
+                $homeRate = $taxProvider::rate($sellerCountry, $vatClass, $atDate);
+                if ((int)round($homeRate * 100) !== (int)round($rate * 100)) {
+                    $unitNet = $taxProvider::computeLine((int)$item['price'], 1, $homeRate, false)['net'];
+                    $unitGross = Money::round((int)round($unitNet * (10000 + (int)round($rate * 100)) / 10000), (string)$summary['currency']);
+                    $summary['subtotal'] += ($unitGross - (int)$item['price']) * (int)$item['qty'];
+                    $item['price'] = $unitGross;
+                    $item['total'] = $unitGross * (int)$item['qty'];
+                    $item['price_formatted'] = I18n::price($item['price'], $summary['currency']);
+                    $item['total_formatted'] = I18n::price($item['total'], $summary['currency']);
+                }
+            }
             if ($lineSupply !== null ? $lineReverse : $stripDomesticVat) {
                 $unitNet = Money::round($taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'], (string)$summary['currency']);
                 $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];
@@ -463,6 +478,16 @@ class Cart {
     /** Reverse charge and export are zero-rated: the buyer pays the price without the seller's domestic VAT. */
     public static function chargesNetOfDomesticVat(array $scenario): bool {
         return in_array((string)($scenario['scenario'] ?? ''), ['reverse_charge', 'export'], true);
+    }
+
+    /**
+     * Store setting cross_border_pricing (Admin → Stores): "net" (default) keeps a catalog price's net when another
+     * member state's VAT applies (OSS, the threshold passed), so the buyer pays that VAT; "gross" keeps the price and
+     * the seller absorbs a higher rate.
+     */
+    public static function keepsNetAbroad(?array $store = null): bool {
+        $store ??= StoreContext::current()->config();
+        return ($store['cross_border_pricing'] ?? 'net') !== 'gross';
     }
 
     /** Domestic VAT-inclusive amount → the same amount without the seller's domestic VAT. */

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (low, account addresses): a long IČO or DIČ in an account address failed the VARCHAR(40) columns
 // with a 500 on MySQL; an address saved before the IČO/DIČ columns existed never got them; an edited address stored

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (2026-11-12), VAT lows (goal #440): a business with a valid VAT ID of another member state billed to
 // the seller's state or outside the EU paid Slovak VAT on an e-book (art. 44: reverse charge where it is established);
@@ -97,7 +98,7 @@ try {
     assert_true(str_contains($over['message'], '10 500.00 EUR') && str_contains($over['action'], 'Admin → Stores'),
         'R34 VAT: the OSS threshold warning names the amount and where to switch OSS on');
     $checklistTitle = SetupChecklist::title('stores.oss_threshold.default');
-    assert_true($checklistTitle !== null && str_contains($checklistTitle, 'default') && SetupChecklist::fixPage('stores.oss_threshold.default') === 'stores',
+    assert_true($checklistTitle !== null && str_contains($checklistTitle, trim((string)(Bootstrap::stores()['stores']['default']['name'] ?? '')) ?: 'default') && SetupChecklist::fixPage('stores.oss_threshold.default') === 'stores',
         'R34 VAT: the dashboard checklist shows the OSS threshold warning translated, with the store settings to fix it');
 } catch (Throwable $e) { $r34lFail('OSS threshold', $e); }
 $r34lRestore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (low, goal #449): the 10 000 EUR OSS threshold was only a doctor warning, never applied at checkout,
 // and its count left out sales in another currency and cross-border e-books on invoices of scenario "domestic" (goods

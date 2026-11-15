@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 35 (low, checkout):
 // 1. Over the VAT ID preview budget the previews priced an unchecked VAT ID with VAT (27,89 € shown), but the order

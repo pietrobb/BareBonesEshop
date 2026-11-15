@@ -19,6 +19,7 @@
             "url_prefix": "",
             "languages": ["sk", "cs", "en"],
             "oss_enabled": false,
+            "cross_border_pricing": "net",
             "legal": {
                 "name": "Woodle s.r.o.",
                 "street": "Hlavná 1",
@@ -54,6 +55,7 @@
             "url_prefix": "/cs",
             "languages": ["cs", "sk", "en"],
             "oss_enabled": false,
+            "cross_border_pricing": "net",
             "legal": {
                 "name": "Woodle CZ s.r.o.",
                 "street": "Vinohradská 1",
@@ -88,6 +90,7 @@
             "url_prefix": "/pl",
             "languages": ["pl", "en"],
             "oss_enabled": false,
+            "cross_border_pricing": "net",
             "legal": {
                 "name": "Woodle PL Sp. z o.o.",
                 "street": "Marszałkowska 1",
@@ -122,6 +125,7 @@
             "url_prefix": "/hu",
             "languages": ["hu", "en"],
             "oss_enabled": false,
+            "cross_border_pricing": "net",
             "legal": {
                 "name": "Woodle HU Kft.",
                 "street": "Kossuth Lajos utca 1",
@@ -156,6 +160,7 @@
             "url_prefix": "/de",
             "languages": ["de", "en"],
             "oss_enabled": false,
+            "cross_border_pricing": "net",
             "legal": {
                 "name": "Woodle GmbH",
                 "street": "Hauptstrasse 1",
@@ -190,6 +195,7 @@
             "url_prefix": "/en",
             "languages": ["en", "es"],
             "oss_enabled": false,
+            "cross_border_pricing": "net",
             "legal": {
                 "name": "Woodle Inc.",
                 "street": "1 Main St",

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (medium 3): goods collected in the shop are supplied in the seller's country, but the VAT scenario
 // looked for the pickup method in a quote at weight 0. For an address abroad that quote came from the zone's own

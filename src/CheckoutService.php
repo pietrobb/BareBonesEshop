@@ -134,8 +134,8 @@ class CheckoutService {
                 $threshold = ['goods' => $goodsAbroad, 'digital' => $downloadsAbroad, 'home_context' => $context];
                 $lines = array_map(static fn(array $item): array => ['gross' => (int)($item['total'] ?? 0), 'vat_class' => (string)($item['vat_class'] ?? 'standard'),
                     'digital' => VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))], array_values(self::availableItems($vatCart['items'] ?? [])));
-                $saleNet = OssThreshold::saleNet($lines, $goodsAbroad, $downloadsAbroad, (string)($vatCart['currency'] ?? 'eur'), $sellerCountry);
-                $context['seller_oss_enabled'] = OssThreshold::exceeded($saleNet);
+                $saleNet = OssThreshold::saleNet($lines, $goodsAbroad, $downloadsAbroad, $sellerCountry);
+                $context['seller_oss_enabled'] = OssThreshold::exceeded($saleNet, (string)($vatCart['currency'] ?? 'eur'));
             }
         }
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
@@ -158,8 +158,15 @@ class CheckoutService {
         if (!is_array($check)) return [$vat, $items];
         $home = $check['home_context'];
         $taxProvider = Adapters::tax((string)$vat['tax_provider']);
-        $snapshot = $taxProvider::buildSnapshot($items, $home, $amounts);
-        $abroad = OssThreshold::exceeded(OssThreshold::snapshotNet($snapshot, $items, (bool)$check['goods'], (bool)$check['digital']));
+        // R37: the crossing is decided on the sale at the seller's own VAT. Lines priced abroad that keep their net
+        // (Cart::keepsNetAbroad()) carry another gross: the home snapshot prices them at home.
+        $homeItems = $items;
+        if (!empty($vat['context']['seller_oss_enabled']) && Cart::keepsNetAbroad()) {
+            $atHome = array_column(Cart::enriched($home)['items'] ?? [], null, 'key');
+            $homeItems = array_map(static fn(array $item): array => $atHome[$item['key'] ?? ''] ?? $item, $items);
+        }
+        $snapshot = $taxProvider::buildSnapshot($homeItems, $home, $amounts);
+        $abroad = OssThreshold::exceeded(OssThreshold::snapshotNet($snapshot, $homeItems, (bool)$check['goods'], (bool)$check['digital']), (string)($snapshot['currency'] ?? 'eur'));
         if ($abroad === (bool)$vat['context']['seller_oss_enabled']) return [$vat, $items];
         $context = ['seller_oss_enabled' => $abroad] + $home;
         $scenario = $taxProvider::resolveScenario($context);

@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 36 (2026-11-13), low (goal #458):
 // 1. For a cart charged in another currency than the store's price lists the carriers' built-in prices apply (R8), but

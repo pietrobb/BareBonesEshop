@@ -1,4 +1,5 @@
 <?php
+$pdo ??= test_commerce_fixture();
 
 // Review round 34 (2026-11-12), medium 4 + low (goal #439): Stripe executed an item refund whose answer was lost, its job
 // ran out of retries, the admin released the credit note, then charge.refunded came: 21.00 booked as returned, the credit

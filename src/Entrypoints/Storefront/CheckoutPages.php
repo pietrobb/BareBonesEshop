@@ -111,6 +111,13 @@ function renderCheckout(): string {
     $payment = CheckoutService::paymentPreview($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null, $vat);
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
+    $shownVat = CheckoutService::shownVat($vat, $goods, $subtotal, $preview, $shipping, $paymentFee, $customerId ?: null);
+    // R37: lines that keep their net abroad (Cart::keepsNetAbroad()) change their gross when the sale that passes the OSS
+    // threshold is decided on the totals: shown as execute() charges them (CheckoutService::thresholdVat()).
+    if ((bool)$shownVat['context']['seller_oss_enabled'] !== (bool)$vat['context']['seller_oss_enabled'] && Cart::keepsNetAbroad()) {
+        $cartData = Cart::enriched($shownVat['context']);
+        [$cart, $subtotal] = [$cartData['items'], (int)$cartData['subtotal']];
+    }
     [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
     if (in_array($placed['error_code'] ?? '', ['checkout.error.total_changed', 'checkout.error.vat_changed', 'checkout.error.cod_unavailable'], true)) $checkoutError .= ' ' . $t('total_price') . ': ' . $price($subtotal - $discount + $shipping + $paymentFee); // R35: on a phone the new total is far below the message; R36: also after a refused cash on delivery (pickup)
     return Template::render('storefront/checkout', [
@@ -133,7 +140,7 @@ function renderCheckout(): string {
         'payment_unavailable' => $paymentMethods ? '' : CheckoutService::paymentUnavailableMessage($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $customerId ?: null), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'] . (($item['variant_name'] ?? '') !== '' ? ' (' . $item['variant_name'] . ')' : ''), 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
-        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)CheckoutService::shownVat($vat, $goods, $subtotal, $preview, $shipping, $paymentFee, $customerId ?: null)['scenario']['scenario'], 'billing_reprices' => CheckoutService::hasDownload($goods), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
+        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$shownVat['scenario']['scenario'], 'billing_reprices' => CheckoutService::hasDownload($goods), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee), 'total_cents' => $subtotal - $discount + $shipping + $paymentFee,

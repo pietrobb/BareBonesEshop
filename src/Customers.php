@@ -38,6 +38,9 @@ class Customers {
         if (strlen($password) < self::MIN_PASSWORD_LEN) {
             return [false, null, 'weak_password'];
         }
+        // R37: reject invalid account text before hashing, persistence or outbox serialization.
+        $textErrors = self::profileErrors(['name' => $name, 'phone' => $extras['phone'] ?? '']);
+        if ($textErrors !== []) return [false, null, substr(reset($textErrors), strlen('account.err_'))];
         // R18: hashed before the lookup, so a taken address costs the same time as a new account (no enumeration by timing).
         $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         $db = Db::get();
@@ -662,11 +665,12 @@ class Customers {
         return $errors;
     }
 
-    /** @return array<string,string> the $fields of $values that are not valid UTF-8 */
+    /** @return array<string,string> fields that are not UTF-8 single-line text (no control characters) */
     private static function invalidTextErrors(array $values, array $fields): array {
         $errors = [];
         foreach ($fields as $field) {
-            if (!mb_check_encoding(Security::str($values[$field] ?? ''), 'UTF-8')) $errors[$field] = 'account.err_invalid_text';
+            $value = Security::str($values[$field] ?? '');
+            if (!mb_check_encoding($value, 'UTF-8') || preg_match('/[\p{Cc}\p{Zl}\p{Zp}]/u', $value)) $errors[$field] = 'account.err_invalid_text';
         }
         return $errors;
     }
@@ -738,7 +742,7 @@ class Customers {
         if ($existing === null) return null;
         $changes = [];
         foreach (['type', 'name', 'company', 'vat_id', 'street', 'city', 'zip', 'country', 'phone', ...self::ADDRESS_COMPANY_IDS] as $field) {
-            if (array_key_exists($field, $posted)) $changes[$field] = trim(Security::str($posted[$field]));
+            if (array_key_exists($field, $posted)) $changes[$field] = trim(Security::str($posted[$field]), ' ');
         }
         if (isset($changes['country'])) $changes['country'] = strtoupper($changes['country']);
         if (array_key_exists('is_default', $posted)) $changes['is_default'] = !empty($posted['is_default']);

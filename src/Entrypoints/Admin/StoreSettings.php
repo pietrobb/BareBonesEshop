@@ -61,6 +61,12 @@ function pageStoreSettings(): void {
             <label style="display:block"><input type="checkbox" name="vat_registered" value="1"<?= ($draft !== null ? ($draft['vat_registered'] ?? '') === '1' : !empty($legal['vat_registered'])) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.vat_registered')) ?></label>
             <?php endif; ?>
             <label style="display:block"><input type="checkbox" name="oss_enabled" value="1"<?= ($draft !== null ? ($draft['oss_enabled'] ?? '') === '1' : !empty($store['oss_enabled'])) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.oss_enabled')) ?></label>
+            <?php $pricing = (string)($draft['cross_border_pricing'] ?? (Cart::keepsNetAbroad($store) ? 'net' : 'gross')); ?>
+            <div class="form-row"><label for="store-<?= esc($storeId) ?>-cross_border_pricing"><?= esc(I18n::t('admin.stores.field.cross_border_pricing')) ?></label>
+                <select id="store-<?= esc($storeId) ?>-cross_border_pricing" name="cross_border_pricing" data-store-cross-border-pricing aria-describedby="store-<?= esc($storeId) ?>-cross_border_pricing-hint">
+                    <?php foreach (['net', 'gross'] as $option): ?><option value="<?= $option ?>"<?= $option === $pricing ? ' selected' : '' ?>><?= esc(I18n::t('admin.stores.cross_border_pricing.' . $option)) ?></option><?php endforeach; ?>
+                </select>
+                <small class="muted" id="store-<?= esc($storeId) ?>-cross_border_pricing-hint"><?= esc(I18n::t('admin.stores.cross_border_pricing_hint')) ?></small></div>
             <?php if ($storeId !== $defaultId): ?>
             <input type="hidden" name="public" value="0"><label style="display:block"><input type="checkbox" name="public" value="1" data-store-public<?= ($draft !== null ? ($draft['public'] ?? '') === '1' : StoreContext::isPublicConfig($store)) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.public')) ?></label>
             <?php endif; ?>

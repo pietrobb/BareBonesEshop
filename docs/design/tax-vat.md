@@ -49,6 +49,8 @@ B2C goods + B2B intra-EU reverse charge + export 0 %. Digital services share the
 `stores.json[X].oss_enabled: true|false` (default false → sub-threshold = the seller's country rate).
 The operator switches the flag manually once cross-border sales in the current year exceed €10,000. **Variant B (an automatic counter from invoices)** was rejected as too complex for P0 — the limits must be legally exact, not heuristic.
 
+`stores.json[X].cross_border_pricing: "net"|"gross"` (R37, default `"net"`): a line taxed at another member state's VAT keeps the catalog price's net (the gross follows that rate) or its gross (the seller absorbs the difference). Shipping and payment fees keep their configured prices. With OSS off, the sale that passes the threshold (decided at the seller's own VAT) records an activation in `oss_threshold_activations` for its year.
+
 A counter as **read-only diagnostics** is available through `cli/oss-report.php --threshold-check` (in P1) — it informs, but does not switch the flag automatically.
 
 ### 3) VAT rates table — **`config/vat-rates.json`**
