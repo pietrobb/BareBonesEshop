@@ -30,6 +30,8 @@ if (!$order) throw new RuntimeException('Order not found');
 echo json_encode([
     'order_id' => (int)$order['id'],
     'total' => (int)$order['total'],
+    'net_total' => (int)($order['net_total'] ?? 0),
+    'vat_scenario' => (string)($order['vat_scenario'] ?? ''),
     'status' => (string)$order['status'],
     'payment_status' => (string)($order['payment_status'] ?? ''),
     'store_id' => (string)$order['store_id'],
