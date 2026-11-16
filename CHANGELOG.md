@@ -171,8 +171,33 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `<private_runtime_dir>/logs/`, and "Root" lists the two accounts as numbered steps with the crontab of the web
   server user; README and runbook name that account for cron, backups, monitoring and restores, and as the owner of
   the private runtime directory.
+- **OSS activations and manual refunds (review round 39, medium).** Migration `20261116100000_oss_activation_repair`
+  rebuilds the OSS activations from the issued documents and orders (the R38 migration judged each carried year by a
+  table it was deleting from): a year is activated only by a sale that crossed the threshold, a year carried over
+  from one is kept, and no activation is created that the documents do not explain. An order records why its VAT was
+  the consumer's (crossing or carried over), and an order from before has the same rule applied when its invoice is
+  cancelled. "Not executed" on a whole-order refund no longer orphans an item refund in flight next to it; an item
+  refund whose answer was lost asks to confirm it executed or not executed (its credit note is reversed when not);
+  "Mark as paid" on a refund-pending payment releases only a refund the provider never got, a refund the provider
+  accepted stays booked.
+- **VAT, shipping and backups (review round 39, low).** An e-book or download is taxed by the evidence: the billing
+  country, the country the goods are sent to and the IP country a trusted proxy reports (store setting
+  `vat_ip_country_header`, e.g. `CF-IPCountry`); when they disagree (a gift billed in
+  Luxembourg and sent to Slovakia, pickup in a store abroad) the checkout and the manual order ask the country of
+  residence, and the OSS threshold counts the order by the recorded evidence. The checkout shows why its VAT is
+  charged (the seller's, the consumer's under OSS, reverse charge, export). The VIES holder check no longer accepts a
+  company named by its legal form only or one shared word, matches "Müller" to "MUELLER", and accepts a VAT ID of
+  another member state than the billing one (art. 138). OSS is the VAT payer's: a store of an IČ DPH whose other store
+  has OSS on charges OSS VAT too, and the setup doctor warns about a store with OSS off next to one with it on. A store's own
+  pickup method (any carrier code, type "store pickup") is a domestic supply. `cli/eur-rates.php` stores the ECB
+  reference rates the threshold converts other currencies with (cron on working days, e.g. `35 17 * * 1-5`); the
+  rates of `config/vat-rates.json` remain the fallback. In another currency, one active method of a carrier no longer
+  offers every built-in rate of that carrier. Run as root, `cli/backup.php` copies from a connection of its own whose
+  file is checked to still be the one at `db_path` (a file root held open, moved there, was copied). README and
+  runbook: the owner of the application and the web user share the private directory through a setgid group
+  (umask 002).
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
-- **Theme assets:** the default theme is version 2.3.15 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.16 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
