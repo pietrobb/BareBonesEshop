@@ -52,7 +52,8 @@ if ($phase === 'setup') {
     exit(0);
 }
 $config = require AppConfig::path($root);
-(new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example'] + $config);
+// R40: the IP country header counts only from a trusted proxy (the fixture's REMOTE_ADDR).
+(new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example', 'trusted_proxies' => ['127.0.39.5']] + $config);
 Security::setRateDbForTesting(new PDO('sqlite::memory:'));
 ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');

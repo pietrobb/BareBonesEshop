@@ -196,6 +196,25 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   file is checked to still be the one at `db_path` (a file root held open, moved there, was copied). README and
   runbook: the owner of the application and the web user share the private directory through a setgid group
   (umask 002).
+- **Refund confirmation and root backups (review round 40, medium).** "Executed" and "not executed" on a refund whose
+  answer was lost settle only the refund the admin saw (its request key and amount are posted): a double click or a
+  page opened before another refund no longer books a refund that was not executed. Run as root, `cli/backup.php`
+  opens `db_path` component by component and accepts the copy only when every file its connection opened is that path
+  or its `-wal`/`-shm` by the kernel's name, checkpointing the WAL only after that check (a `db/` directory swapped
+  with a link to another database during the backup no longer copies that database). Without `/proc` that check cannot
+  be made, so root refuses a database reached through a directory another account owns or can write.
+- **ECB rates, VAT and refunds (review round 40, low).** `cli/eur-rates.php` refuses a feed dated after today or before
+  the stored rates, one lacking a stored currency (or naming fewer than 20 at first) and a rate more than 50 % away from
+  the one it replaces; the stored rates stay. `--force` stores a checked feed anyway, never one dated after today.
+  Rates dated after today are not used and `php cli/setup.php doctor` warns about them. The OSS threshold counts each
+  document in EUR at the rate of its issue date (art. 91(2); migration `20261116190000_invoice_oss_net_eur`). The IP
+  country header (`vat_ip_country_header`) is read only from a request of a `trusted_proxies` entry; two pieces of
+  evidence naming the same country outrank the stated residence; editing an e-book-only order taxed by its IP country
+  is no longer refused as "VAT changed". The VIES holder check ignores titles and word order, and the checkout says why
+  VAT is charged when the holder differs. A store's pickup method is looked up in that store only. A capture arriving
+  after the refund of a payment the shop still held pending settles the order (cancelled with its stock released when
+  refunded in full, paid when in part) instead of leaving it pending; a Stripe refund list that cannot be read while
+  the shop's own refunds are in flight no longer raises a critical incident.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
 - **Theme assets:** the default theme is version 2.3.16 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that

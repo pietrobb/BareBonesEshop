@@ -30,10 +30,10 @@ class BackupService
     private static ?string $livePath = null;
     /** db_sqlite_path from config.php as written; SQLite reports the link-resolved file in PRAGMA database_list. */
     private static ?string $configuredPath = null;
-    /** Files ("dev:ino" => true) root's verified read-only connections opened in this process (rootForeignDatabase());
-     *  kept by reset(): SQLite keeps their descriptors open behind another connection's lock. */
-    private static array $rootVerified = [];
-    /** Every file ("dev:ino" => true) those read-only connections opened, verified or refused. */
+    /** Descriptors (fd => [dev, ino, verified]) root's read-only connections opened in this process (rootForeignDatabase()),
+     *  verified or refused, while still open; kept by reset(): SQLite keeps them open behind another connection's lock.
+     *  R40: by descriptor, not inode (was "dev:ino" for the whole process: a deleted file's inode number, given to another
+     *  file later, counted as refused). */
     private static array $rootOpened = [];
     /** MySQL installs: callable(string $dumpPath): array that writes a consistent dump. */
     private static ?Closure $mysqlDumper = null;
@@ -268,23 +268,28 @@ class BackupService
     private static function rootForeignDatabase(string $path, ?PDO &$verified = null): ?string
     {
         $verified = null;
-        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) return null;
-        $checked = static function () use ($path): array|string {
+        if (!self::runsAsRoot()) return null;
+        // R40 (medium 2): the file and its directories were checked at different moments: the web user swapping its db/
+        // directory with a link to another one made the file lstat() see the other database while the directory check saw
+        // the real directory (2 of 50, 8 of 200 backups held the other database). The path is now resolved component by
+        // component ($canonical, following only root's links), and the descriptors the connection opened must be that
+        // path, its journal, WAL and shared memory by the kernel's own name for them (/proc/self/fd).
+        $canonical = self::rootResolvedPath($path, $error);
+        if ($canonical === null) return $error;
+        $checked = static function () use ($path, $canonical): array|string {
             clearstatcache();
-            $file = @lstat($path);
+            if (self::rootResolvedPath($path, $error) !== $canonical) return $error ?? "the database {$path} moved";
+            $file = @lstat($canonical);
             if (!is_array($file)) return "the database {$path} cannot be read";
-            if (is_link($path)) return "the database {$path} is a symbolic link";
             if (((int)$file['mode'] & 0170000) !== 0100000 || (int)$file['nlink'] !== 1) return "the database {$path} is not a regular file with a single link";
-            for ($dir = dirname($path); $dir !== dirname($dir); $dir = dirname($dir)) {
-                $s = @lstat($dir);
-                if (is_array($s) && is_link($dir) && (int)$s['uid'] !== 0) return "{$dir} is a symbolic link of another account";
-            }
             return $file;
         };
         $file = $checked();
         if (is_string($file)) return $file;
-        $inode = [(int)$file['dev'], (int)$file['ino']];
         $proc = is_dir('/proc/self/fd');
+        // Capability review run 527: without /proc the file the connection opened cannot be seen, and checks before and
+        // after the open are the race R40 closed. Root then backs up only a database no other account can move or swap.
+        if (!$proc && ($error = self::rootOnlyPath($canonical)) !== null) return $error;
         $descriptors = static function () use ($proc): array {
             if (!$proc) return [];
             $open = [];
@@ -295,34 +300,119 @@ class BackupService
             return $open;
         };
         $before = $descriptors();
+        foreach (self::$rootOpened as $fd => [$dev, $ino]) {
+            if (!isset($before[$fd]) || [$before[$fd][0], $before[$fd][1]] !== [$dev, $ino]) unset(self::$rootOpened[$fd]);
+        }
         // Read-only: SQLite reuses the descriptor a closed connection left behind another connection's lock instead of
-        // opening the file again, but only one of a connection opened the same way — here, an earlier verified one.
-        $own = (realpath(dirname($path)) ?: dirname($path)) . '/' . basename($path);
-        $others = [];
-        $connection = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
+        // opening the file again, but only one of a connection opened the same way — here, an earlier one of ours.
+        $sidecars = [$canonical . '-journal', $canonical . '-wal', $canonical . '-shm'];
+        $added = [];
+        $connection = new PDO('sqlite:' . $canonical, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
         try {
             $connection->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
         } finally {
-            // Descriptors the connection added other than this file's own journal, WAL and shared memory; each may stay
-            // open behind another connection's lock (WAL mode holds one) and be reused by a later read-only open.
-            $others = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000
-                && !in_array($d[3], [$own . '-journal', $own . '-wal', $own . '-shm'], true));
-            foreach ($others as [$dev, $ino]) self::$rootOpened[$dev . ':' . $ino] = true;
+            // Files the connection added; each but the journal, WAL and shared memory may stay open behind another
+            // connection's lock (WAL mode holds one) and be reused by a later read-only open.
+            $added = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000);
+            foreach ($added as $fd => [$dev, $ino, , $name]) if (!in_array($name, $sidecars, true)) self::$rootOpened[$fd] = [$dev, $ino, false];
+        }
+        $main = null;
+        foreach ($added as $fd => $d) {
+            if ($d[3] === $canonical) $main = [$d[0], $d[1], $fd];
+            elseif (!in_array($d[3], $sidecars, true)) return "the database open is not the file at {$path} ({$d[3]})";
         }
         $after = $checked();
         if (is_string($after)) return $after;
-        $key = $inode[0] . ':' . $inode[1];
-        // None added: SQLite reused a descriptor an earlier read-only connection of ours left. It is of this file when this
-        // file was verified before and no file such a connection opened was refused.
-        $reused = $others === [] && isset(self::$rootVerified[$key]) && array_diff_key(self::$rootOpened, self::$rootVerified) === [];
-        // Without /proc (a container without it) which file the connection opened cannot be seen; as in R38 the checks
-        // before and after the open are what remains.
-        $mainOpen = !$proc || $reused;
-        foreach ($others as [$dev, $ino]) if ([$dev, $ino] === $inode) $mainOpen = true;
-        if (!$mainOpen || [(int)$after['dev'], (int)$after['ino']] !== $inode) return "the database open is not the file at {$path}";
-        self::$rootVerified[$key] = true;
+        $inode = [(int)$after['dev'], (int)$after['ino']];
+        // None added: SQLite reused a descriptor an earlier read-only connection of ours left, of the inode it found at the
+        // path. It is of this file when one of this inode is open and none of another file that was refused (R40: was
+        // refused for the rest of the process after any refusal; a refused file is closed with its connection unless
+        // another one holds a lock on it). This file's own WAL refused while its directory was moved away is not another file.
+        $now = $descriptors();
+        $ofThisFile = false;
+        $refusedOpen = false;
+        foreach (self::$rootOpened as $fd => [$dev, $ino, $wasVerified]) {
+            if (!isset($now[$fd]) || [$now[$fd][0], $now[$fd][1]] !== [$dev, $ino]) continue;
+            if ([$dev, $ino] === $inode) $ofThisFile = true;
+            elseif (!$wasVerified && $now[$fd][3] !== $canonical && !in_array($now[$fd][3], $sidecars, true)) $refusedOpen = true;
+        }
+        $reused = $main === null && $ofThisFile && !$refusedOpen;
+        // Without /proc (a container without it) which file the connection opened cannot be seen; rootOnlyPath() above
+        // ensured no other account can change the path or the file.
+        $mainOpen = !$proc || $reused || ($main !== null && [$main[0], $main[1]] === $inode);
+        if (!$mainOpen || [(int)$file['dev'], (int)$file['ino']] !== $inode) return "the database open is not the file at {$path}";
+        if ($main !== null) self::$rootOpened[$main[2]][2] = true;
         $verified = $connection;
         return null;
+    }
+
+    private static function runsAsRoot(): bool
+    {
+        return function_exists('posix_geteuid') && posix_geteuid() === 0;
+    }
+
+    /**
+     * Null when only root can change the link-free path $canonical: every directory on it belongs to root and is writable
+     * by no other account, or is sticky and the entry in it belongs to root. Otherwise why a root backup is refused.
+     */
+    private static function rootOnlyPath(string $canonical): ?string
+    {
+        $path = '';
+        $stickyParent = false;
+        foreach (array_merge([''], array_values(array_filter(explode('/', $canonical), static fn(string $p): bool => $p !== ''))) as $part) {
+            $path = $part === '' ? '/' : rtrim($path, '/') . '/' . $part;
+            $stat = @lstat($path);
+            if (!is_array($stat)) return "the database {$canonical} cannot be read";
+            $mode = (int)$stat['mode'];
+            $isDir = ($mode & 0170000) === 0040000;
+            if ((int)$stat['uid'] !== 0 && ($stickyParent || $isDir)) {
+                return "without /proc the file opened cannot be verified and {$path} belongs to another account";
+            }
+            if ($isDir && ($mode & 0022) !== 0 && ($mode & 01000) === 0) {
+                return "without /proc the file opened cannot be verified and {$path} is writable by another account";
+            }
+            $stickyParent = $isDir && ($mode & 0022) !== 0;
+        }
+        return null;
+    }
+
+    /**
+     * R40: $path with every symbolic link resolved by hand, one component at a time (lstat, never stat): only a link root
+     * owns is followed; one of another account, or a link at the database itself, is refused ($error). The physical
+     * path the kernel reports for a descriptor of that file (/proc/self/fd) when it was opened through no swapped link.
+     */
+    private static function rootResolvedPath(string $path, ?string &$error = null): ?string
+    {
+        $error = null;
+        $pending = explode('/', str_starts_with($path, '/') ? $path : getcwd() . '/' . $path);
+        $resolved = '';
+        $links = 0;
+        while ($pending !== []) {
+            $part = array_shift($pending);
+            if ($part === '' || $part === '.') continue;
+            if ($part === '..') {
+                $resolved = $resolved === '' ? '' : rtrim(dirname($resolved), '/');
+                continue;
+            }
+            $next = $resolved . '/' . $part;
+            $stat = @lstat($next);
+            if (!is_array($stat)) {
+                $error = "the database {$path} cannot be read";
+                return null;
+            }
+            if (((int)$stat['mode'] & 0170000) !== 0120000) {
+                $resolved = $next;
+                continue;
+            }
+            if ($pending === []) $error = "the database {$path} is a symbolic link";
+            elseif ((int)$stat['uid'] !== 0) $error = "{$next} is a symbolic link of another account";
+            elseif (++$links > 40) $error = "the database {$path} has too many symbolic links";
+            if ($error !== null) return null;
+            $target = (string)readlink($next);
+            if (str_starts_with($target, '/')) $resolved = '';
+            array_unshift($pending, ...explode('/', $target));
+        }
+        return $resolved === '' ? '/' : $resolved;
     }
 
     /**
@@ -478,8 +568,9 @@ class BackupService
         $dumpInfo = null;
         $lockHandle = self::acquireLock();
         try {
-            // 1. WAL checkpoint (best-effort)
-            if ($driver !== 'mysql' && !empty(self::$cfg['wal_checkpoint'])) {
+            // 1. WAL checkpoint (best-effort). R40 (low): not as root: it wrote, before any check, to whatever database the
+            // shop's connection had open (a link swapped in). Root's VACUUM INTO of the verified file includes the WAL anyway.
+            if ($driver !== 'mysql' && !empty(self::$cfg['wal_checkpoint']) && !self::runsAsRoot()) {
                 try { self::$db->exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (\Throwable $e) { /* non-fatal */ }
             }
 

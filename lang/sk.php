@@ -61,6 +61,7 @@ return [
     'checkout.vat_reason.reverse_charge' => 'Bez DPH: dodanie platiteľovi DPH v inom členskom štáte (prenesenie daňovej povinnosti).',
     'checkout.vat_reason.export' => 'Bez DPH: vývoz mimo EÚ.',
     'checkout.vat_reason.digital' => 'Elektronický obsah podľa krajiny bydliska: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'IČ DPH je vo VIES registrované na iný názov firmy, než je uvedený v objednávke, preto sa účtuje DPH. Uveďte názov firmy tak, ako je registrovaný.',
     'checkout.recalculate' => 'Prepočítať sumu',
     'order_summary'    => 'Zhrnutie objednávky',
     'billing_address'  => 'Fakturačná adresa',

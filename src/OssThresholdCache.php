@@ -8,11 +8,13 @@ final class OssThresholdCache
         // R38 (medium 4): a credit note in the year of the invoice it corrects (OssThreshold::documentYear()).
         $at = OssThreshold::documentDateSql('invoices', 'source_invoice');
         $year = $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? "CAST(substr({$at}, 1, 4) AS INTEGER)" : "YEAR({$at})";
-        return "SELECT orders.store_id, {$year} AS year, LOWER(invoices.currency) AS currency, SUM(invoices.oss_net) AS net
+        // R40: a document converted to EUR at its issue counts in the EUR total (OssThreshold::record()).
+        [$currency, $net] = OssThreshold::storedNetSql($db, 'invoices');
+        return "SELECT orders.store_id, {$year} AS year, {$currency} AS currency, SUM({$net}) AS net
             FROM invoices JOIN orders ON orders.id = invoices.order_id LEFT JOIN invoices AS source_invoice ON source_invoice.id = invoices.refers_to_invoice_id
             WHERE invoices.status = 'issued' AND invoices.type IN ('invoice', 'credit_note')
               AND invoices.oss_net IS NOT NULL AND invoices.oss_net <> 0
-            GROUP BY orders.store_id, {$year}, LOWER(invoices.currency)";
+            GROUP BY orders.store_id, {$year}, {$currency}";
     }
 
     /** One statement/snapshot, constant-size result; SQL aggregates history only on explicit request.

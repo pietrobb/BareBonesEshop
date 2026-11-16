@@ -319,6 +319,8 @@ function pageOrder(): void {
             <?php if ($canRefund && ($unconfirmedRefund = PaymentService::unconfirmedProviderRefund($order)) !== null): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_confirm" style="margin-top:.5rem" data-refund-confirm>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input type="hidden" name="request_key" value="<?= esc($unconfirmedRefund['request_key']) ?>">
+                <input type="hidden" name="refund_amount" value="<?= (int)$unconfirmedRefund['amount'] ?>">
                 <span class="muted"><?= esc(I18n::format(empty($unconfirmedRefund['unknown']) ? 'admin.order.confirm_refund_hint' : 'admin.order.unknown_refund_hint', ['amount' => I18n::price($unconfirmedRefund['amount'], $order['currency'])])) ?></span>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.confirm_refund')) ?></button>
@@ -844,14 +846,17 @@ function handleOrderRefundConfirm(): void {
     Security::adminRequire('orders.refund');
     $orderId = Security::int($_GET['id'] ?? 0);
     $note = trim((string)($_POST['note'] ?? ''));
+    // R40 (medium 1): the refund the page showed; a double click or a stale page no longer settles the next one offered.
+    $requestKey = (string)($_POST['request_key'] ?? '');
+    $amount = Security::int($_POST['refund_amount'] ?? 0);
     try {
         if ($note === '') throw new \InvalidArgumentException('A refund confirmation needs a note');
         // R38 (medium 8): a refund whose answer was lost, checked at the provider and found not paid out, is released.
         if (($_POST['outcome'] ?? '') === 'not_executed') {
-            if (!PaymentService::releaseUnknownRefund($orderId, Security::adminUser(), $note)) throw new \LogicException('No refund of an unknown outcome on this order');
+            if (!PaymentService::releaseUnknownRefund($orderId, Security::adminUser(), $note, $requestKey, $amount)) throw new \LogicException('No refund of an unknown outcome on this order');
             setFlash('ok', I18n::t('admin.order.msg.refund_not_executed'));
         } else {
-            PaymentService::confirmProviderRefund($orderId, Security::adminUser(), $note);
+            PaymentService::confirmProviderRefund($orderId, Security::adminUser(), $note, $requestKey, $amount);
             setFlash('ok', I18n::t('admin.order.msg.refund_confirmed'));
         }
     } catch (\Throwable $e) {

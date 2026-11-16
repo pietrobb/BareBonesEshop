@@ -628,6 +628,12 @@ class Security {
         return strtolower(trim(end($proto))) === 'https';
     }
 
+    /** R40: whether the request came from one of the configured trusted_proxies (only they may set forwarded headers). */
+    public static function fromTrustedProxy(): bool {
+        $trusted = self::cfg()['trusted_proxies'] ?? [];
+        return !empty($trusted) && in_array($_SERVER['REMOTE_ADDR'] ?? '', $trusted, true);
+    }
+
     public static function clientIp(): string {
         $cfg = self::cfg();
         $trusted = $cfg['trusted_proxies'] ?? [];

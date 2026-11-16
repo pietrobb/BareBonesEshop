@@ -61,6 +61,7 @@ return [
     'checkout.vat_reason.reverse_charge' => 'No VAT: supply to a business registered for VAT in another member state (reverse charge).',
     'checkout.vat_reason.export' => 'No VAT: export outside the EU.',
     'checkout.vat_reason.digital' => 'Digital content by country of residence: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'The VAT ID is registered in VIES to another company name than the one in the order, so VAT is charged. Enter the company name as registered.',
     'checkout.recalculate' => 'Recalculate total',
     'order_summary'    => 'Order Summary',
     'billing_address'  => 'Billing Address',

@@ -61,6 +61,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.vat_reason.reverse_charge' => 'Bez VAT: dostawa dla podatnika VAT z innego państwa członkowskiego (odwrotne obciążenie).',
     'checkout.vat_reason.export' => 'Bez VAT: eksport poza UE.',
     'checkout.vat_reason.digital' => 'Treści cyfrowe według kraju zamieszkania: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'Numer VAT jest zarejestrowany w VIES na inną nazwę firmy niż podana w zamówieniu, dlatego naliczany jest VAT. Podaj nazwę firmy tak, jak jest zarejestrowana.',
     'checkout.recalculate' => 'Przelicz sumę',
     'order_summary'    => 'Podsumowanie zamówienia',
     'billing_address'  => 'Adres rozliczeniowy',

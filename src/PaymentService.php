@@ -807,6 +807,11 @@ class PaymentService {
             ? ['amount' => (int)$request['amount'], 'request_key' => (string)$request['idempotency_key'], 'unknown' => true] : null;
     }
 
+    /** @param array{amount:int, request_key:string} $pending the refund offered now (unconfirmedProviderRefund()) */
+    private static function isOfferedRefund(array $pending, string $requestKey, int $amount): bool {
+        return $requestKey !== '' && hash_equals($pending['request_key'], $requestKey) && $pending['amount'] === $amount;
+    }
+
     /**
      * R38 (medium 8): a provider without idempotent refunds (GoPay, Comgate, ThePay) was asked for the request's refund and
      * its answer never came (the attempt row, no result under the execute key), and no job of it waits: only the admin, who
@@ -830,11 +835,12 @@ class PaymentService {
      * R38 (medium 8): the admin checked the provider and the refund whose answer was lost was not executed: the request is
      * released as a declined one (declinedRefundRequest()), the payment returns to paid / partially_refunded, audited.
      */
-    public static function releaseUnknownRefund(int $orderId, string $actor, string $note): bool {
+    public static function releaseUnknownRefund(int $orderId, string $actor, string $note, string $requestKey, int $amount): bool {
         if (trim($note) === '') throw new \InvalidArgumentException('A refund release needs a note');
-        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note): bool {
+        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note, $requestKey, $amount): bool {
             $pending = self::unconfirmedProviderRefund($order);
-            if ($pending === null || empty($pending['unknown'])) return false;
+            // R40 (medium 1): only the refund the admin saw (confirmProviderRefund()).
+            if ($pending === null || empty($pending['unknown']) || !self::isOfferedRefund($pending, $requestKey, $amount)) return false;
             // R39 (medium 3): an item refund (credit note) not paid out is released as a declined one: its credit note reversed.
             if (isset($pending['refund_id'])) return Rma::failRefund((int)$pending['refund_id'], "Item refund not executed at the provider, released by {$actor}: {$note}");
             $to = self::statusAfterRelease($order);
@@ -1014,12 +1020,18 @@ class PaymentService {
         return self::unconfirmedItemRefund($order) !== null;
     }
 
-    /** Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited. */
-    public static function confirmProviderRefund(int $orderId, string $actor, string $note): void {
+    /**
+     * Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited.
+     * R40 (medium 1): only the refund the admin saw ($requestKey, $amount from the page): was re-found by the handler, so a
+     * double click or a stale page confirmed the next one offered (an older refund lost before the provider: ledger 2000,
+     * the provider paid out 1000).
+     */
+    public static function confirmProviderRefund(int $orderId, string $actor, string $note, string $requestKey, int $amount): void {
         if (trim($note) === '') throw new \InvalidArgumentException('A refund confirmation needs a note');
-        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note): bool {
+        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note, $requestKey, $amount): bool {
             $pending = self::unconfirmedProviderRefund($order);
             if ($pending === null) throw new \LogicException('No provider refund awaits confirmation on this order');
+            if (!self::isOfferedRefund($pending, $requestKey, $amount)) throw new \LogicException('The refund awaiting confirmation is not the one the admin saw');
             // Never more than the payment still holds (a provider report may have booked part of it already).
             if ($pending['amount'] > self::refundableBalance($orderId)) throw new \LogicException('The provider refund exceeds the refundable balance');
             // Names the request it settles, so a late provider report of the same refund books nothing more.
@@ -1571,7 +1583,8 @@ class PaymentService {
         // Under the order row lock, taken before the ledger insert: two events of one order at once (succeeded and
         // charge.succeeded) otherwise each held the shared lock the payment_transactions foreign key takes on the
         // order and then both waited to update it — a MySQL deadlock, and the loser was never applied.
-        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency): bool {
+        $late = false;
+        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency, &$late): bool {
             $from = (string)($order['payment_status'] ?? 'pending');
             $to = match ($eventType) {
                 'payment.paid' => 'paid',
@@ -1594,10 +1607,33 @@ class PaymentService {
             self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency ?: $orderCurrency, $eventKey, $payload + ['payment_status' => $from], $provider, $providerRef);
             if ($to !== null) AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
             // A redelivery after a failed settlement finishes it (settleCapture is idempotent).
+            $late = $to === 'paid' && in_array($from, ['partially_refunded', 'refunded'], true);
             return $to === 'paid' && $from === 'paid';
         });
 
         if ($settle) self::settleCapture($orderId, 'Payment confirmed via webhook');
+        if ($late) self::settleLateCapture($orderId, 'Payment confirmed via webhook');
+    }
+
+    /**
+     * R40 (low): a capture that arrives after the provider's refund of it was booked (bookRefundWithin(): the refund of a
+     * payment the shop still held pending, authorized or cancelled is the first sign of its capture). The capture was
+     * only logged (the payment does not leave refunded): the order stayed pending for ever with its stock reserved. The
+     * payment stays as its refunds left it; the order is settled: refunded in full it is cancelled (its stock released),
+     * in part it is paid (settleCapture()). A capture the ledger already holds (a redelivery) changes nothing.
+     */
+    public static function settleLateCapture(int $orderId, string $note): void {
+        $order = Orders::byId($orderId);
+        if (!$order) return;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'paid' LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        if ($stmt->fetchColumn() !== false) return;
+        $payment = (string)($order['payment_status'] ?? '');
+        if ($payment === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'cancelled')) {
+            OrderWorkflow::transition($orderId, 'cancelled', $note . ': captured after it was refunded in full');
+        } elseif ($payment === 'partially_refunded') {
+            self::settleCapture($orderId, $note . ': captured after a part of it was refunded');
+        }
     }
 
     /**

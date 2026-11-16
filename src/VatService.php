@@ -509,7 +509,7 @@ class VatService implements TaxProvider
         // R39 (low): the evidence the downloads' country of supply rests on (CheckoutService::digitalResidence()).
         $residence = $context['digital_residence_evidence'] ?? null;
         if (is_array($residence) && $residence !== []) {
-            $snapshot['digital_residence'] = array_map('strval', array_intersect_key($residence, array_flip(['billing', 'delivery', 'ip', 'declared'])));
+            $snapshot['digital_residence'] = array_map('strval', array_intersect_key($residence, array_flip(['billing', 'delivery', 'ip', 'declared', 'decided'])));
         }
         $snapshot['fingerprint'] = self::snapshotFingerprint($snapshot);
         self::validateSnapshot($snapshot);
@@ -795,7 +795,10 @@ class VatService implements TaxProvider
     /** Legal-form words a company name may carry or leave out ("ACME s.r.o." is "ACME"); single letters are dropped too. */
     private const LEGAL_FORMS = ['gmbh', 'mbh', 'ag', 'kg', 'ohg', 'og', 'ug', 'ltd', 'limited', 'llc', 'inc', 'plc', 'sa', 'sas', 'sarl',
         'srl', 'spa', 'bv', 'nv', 'kft', 'zrt', 'nyrt', 'bt', 'oy', 'oyj', 'ab', 'aps', 'as', 'sro', 'spol', 'zoo', 'sp', 'ks', 'vos',
-        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and'];
+        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and',
+        // R40 (low): academic titles a sole trader's name carries in one register and not the other ("Ing. Ján Novák").
+        'ing', 'mgr', 'bc', 'dr', 'judr', 'mudr', 'mvdr', 'rndr', 'phdr', 'paeddr', 'thdr', 'phd', 'csc', 'drsc', 'doc', 'prof',
+        'dipl', 'mag', 'mba', 'msc', 'bsc', 'llm', 'dott'];
 
     /**
      * R38 (low): reverse charge rested on the VAT ID alone: any valid foreign VAT ID, whoever's, took the VAT off. The
@@ -807,6 +810,8 @@ class VatService implements TaxProvider
      * VAT in any member state other than the one the goods leave from (a German registration billed in Austria was
      * charged VAT). A company named by its legal form only ("s.r.o.") matched any holder, and so did one word of it: the
      * shorter form is now the other's leading words. German spellings without umlauts match ("MUELLER" is "Müller").
+     * R40 (low): academic titles aside, and the leading words in any order; the checkout says why VAT is charged
+     * (CheckoutService::residenceView()).
      */
     public static function vatIdHolderMismatch(string $vatId, string $company): ?string
     {
@@ -819,7 +824,11 @@ class VatService implements TaxProvider
         [$holder, $named] = [self::holderTokens($registered), self::holderTokens($company)];
         if ($holder === [] || $named === []) return 'name';
         [$short, $long] = count($named) <= count($holder) ? [$named, $holder] : [$holder, $named];
-        return array_slice($long, 0, count($short)) === $short ? null : 'name';
+        // R40 (low): the leading words in any order ("Novák Ján" registered, "Ján Novák" ordered).
+        $leading = array_slice($long, 0, count($short));
+        sort($leading);
+        sort($short);
+        return $leading === $short ? null : 'name';
     }
 
     /** @return list<string> the significant words of a company name, lower case ASCII ("ü" and "ue" alike) */

@@ -38,19 +38,41 @@ final class EurRates
             $db = Db::get();
             self::$stored = Db::tableExists('eur_exchange_rates', $db) ? $db->query('SELECT currency, rate, as_of FROM eur_exchange_rates')->fetchAll(PDO::FETCH_ASSOC) : [];
         }
+        // R40 (low): rates dated after today (stored by an earlier version, or configured) no longer outrank the others for
+        // good; the setup doctor reports them (futureDated()).
+        $today = gmdate('Y-m-d', ShopTime::now());
         $storedAsOf = self::$stored === [] ? '' : (string)max(array_column(self::$stored, 'as_of'));
-        if ($storedAsOf !== '' && strcmp($storedAsOf, $asOf) >= 0) {
+        if ($storedAsOf !== '' && strcmp($storedAsOf, $today) <= 0 && (strcmp($storedAsOf, $asOf) >= 0 || strcmp($asOf, $today) > 0)) {
             foreach (self::$stored as $row) $rates[strtolower((string)$row['currency'])] = (float)$row['rate'];
             $asOf = $storedAsOf;
         }
         return ['rates' => $rates, 'as_of' => $asOf];
     }
 
+    /** R40: the date of stored or configured rates that is after today (they are not trusted), or null. */
+    public static function futureDated(): ?string
+    {
+        self::current();
+        $dates = array_merge(array_column(self::$stored ?? [], 'as_of'), [(string)(VatService::config()['eur_exchange_rates_as_of'] ?? '')]);
+        $latest = (string)max($dates);
+        return strcmp($latest, gmdate('Y-m-d', ShopTime::now())) > 0 ? $latest : null;
+    }
+
+    /** R40: a first feed (nothing stored yet) names at least this many currencies; the ECB publishes about 30. */
+    public const MIN_CURRENCIES = 20;
+    /** R40: a rate more than 50 % away from the one it replaces is refused unless the merchant forces it. */
+    public const MAX_CHANGE = 0.5;
+
     /**
      * Fetch the ECB daily reference rates and store them (all at once). Returns their date and count.
+     * R40 (low): the feed was trusted as it came: a rate of 1e-9 inflated the threshold (an OSS activation that stays), a
+     * date of 2099-12-31 outranked the configured rates for good, and a feed of one currency deleted all others. Refused
+     * now, the stored rates kept: a date after today or before the stored one, a currency stored before missing (or fewer
+     * than MIN_CURRENCIES at first), a rate more than MAX_CHANGE away from the stored or configured one. $force (checked
+     * by the merchant: php cli/eur-rates.php --force) accepts a missing currency and a large change, never a future date.
      * @return array{as_of: string, count: int}
      */
-    public static function refresh(PDO $db): array
+    public static function refresh(PDO $db, bool $force = false): array
     {
         $body = self::$fixtureTransport !== null ? (string)(self::$fixtureTransport)(self::FEED) : self::download(self::FEED);
         $previous = libxml_use_internal_errors(true);
@@ -69,6 +91,7 @@ final class EurRates
             if (preg_match('/^[A-Z]{3}$/', $code) && $perEur > 0) $rates[$code] = 1 / $perEur;
         }
         if ($rates === []) throw new RuntimeException('The ECB rates feed has no rates');
+        self::assertPlausible($db, $asOf, $rates, $force);
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
@@ -82,6 +105,35 @@ final class EurRates
         if ($own) $db->commit();
         OssThreshold::reset();
         return ['as_of' => $asOf, 'count' => count($rates)];
+    }
+
+    /** @param array<string, float> $rates EUR per unit by upper-case currency */
+    private static function assertPlausible(PDO $db, string $asOf, array $rates, bool $force): void
+    {
+        $today = gmdate('Y-m-d', ShopTime::now());
+        if (strcmp($asOf, $today) > 0) throw new RuntimeException("The ECB rates feed is dated {$asOf}, after today ({$today})");
+        $stored = [];
+        $storedAsOf = '';
+        foreach ($db->query('SELECT currency, rate, as_of FROM eur_exchange_rates')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (strcmp((string)$row['as_of'], $today) > 0) continue; // dated after today: not trusted (current()), replaced
+            $stored[strtoupper((string)$row['currency'])] = (float)$row['rate'];
+            $storedAsOf = max($storedAsOf, (string)$row['as_of']);
+        }
+        if (strcmp($asOf, $storedAsOf) < 0) throw new RuntimeException("The ECB rates feed is dated {$asOf}, before the stored rates ({$storedAsOf})");
+        if ($force) return;
+        $missing = array_diff(array_keys($stored), array_keys($rates));
+        if ($missing !== []) throw new RuntimeException('The ECB rates feed lacks ' . implode(', ', $missing) . '; check it and run php cli/eur-rates.php --force to store it anyway');
+        if ($stored === [] && count($rates) < self::MIN_CURRENCIES) throw new RuntimeException('The ECB rates feed has only ' . count($rates) . ' currencies');
+        $configured = [];
+        foreach ((array)(VatService::config()['eur_exchange_rates'] ?? []) as $code => $rate) {
+            if (is_numeric($rate) && (float)$rate > 0) $configured[strtoupper((string)$code)] = (float)$rate;
+        }
+        foreach ($rates as $code => $rate) {
+            $reference = $stored[$code] ?? $configured[$code] ?? null;
+            if ($reference !== null && abs($rate / $reference - 1) > self::MAX_CHANGE) {
+                throw new RuntimeException("The ECB rate of {$code} ({$rate} EUR) is more than 50 % away from the one it replaces ({$reference} EUR); check it and run php cli/eur-rates.php --force to store it anyway");
+            }
+        }
     }
 
     private static function download(string $url): string

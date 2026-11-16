@@ -145,7 +145,9 @@ switch ($phase) {
         $out['form'] = str_contains($page, 'action=refund_confirm');
         $out['not_executed_button'] = str_contains($page, 'data-refund-not-executed');
         if (($args[1] ?? '') !== '') {
-            $_POST = ['csrf_token' => 'r38u-token', 'note' => 'Checked in the GoPay portal'] + ($args[1] === 'not_executed' ? ['outcome' => 'not_executed'] : []);
+            // R40: the form posts the refund it shows (request key, amount), as a browser would.
+            preg_match_all('/name="(request_key|refund_amount)" value="([^"]*)"/', $page, $shown, PREG_SET_ORDER);
+            $_POST = ['csrf_token' => 'r38u-token', 'note' => 'Checked in the GoPay portal'] + array_column(array_map(static fn(array $m): array => [$m[1], html_entity_decode($m[2])], $shown), 1, 0) + ($args[1] === 'not_executed' ? ['outcome' => 'not_executed'] : []);
             register_shutdown_function(static function() use (&$out): void {
                 $out['flash'] = $_SESSION['flash'] ?? null;
                 print json_encode($out, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
