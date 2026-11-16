@@ -115,7 +115,7 @@ final class OssThreshold
         $both = self::consistently($db, static fn(): array => array_map(static fn(int $y): array => self::yearSales($db, self::sellerStores($storeId, $store, $stores), $y, $y === $year), [$year - 1 => $year - 1, $year => $year]));
         foreach ($both as $y => $sales) {
             $unconverted = array_merge($unconverted, $sales['unconverted']);
-            $converted = array_merge($converted, $sales['converted']);
+            $converted = array_merge($converted, $sales['converted'], self::convertedAtIssue($db, self::sellerStores($storeId, $store, $stores), $y));
             if ($sales['sum'] >= $worst['sum']) $worst = ['sum' => $sales['sum'], 'year' => $y];
         }
         foreach (['unconverted' => $unconverted, 'converted' => $converted] as $key => $codes) {
@@ -124,6 +124,22 @@ final class OssThreshold
             $worst[$key] = $codes;
         }
         return $worst;
+    }
+
+    /**
+     * R40: currencies of the year's documents converted to EUR at their issue (record()): counted in the EUR total, they
+     * were converted at the rates of then, so the doctor still judges those rates (Setup::ossThresholdCheck()).
+     * @param list<string> $storeIds
+     * @return list<string>
+     */
+    private static function convertedAtIssue(PDO $db, array $storeIds, int $year): array
+    {
+        if ($storeIds === [] || !self::hasColumn('invoices', 'oss_net_eur', $db)) return [];
+        $marks = implode(',', array_fill(0, count($storeIds), '?'));
+        $stmt = $db->prepare("SELECT DISTINCT UPPER(i.currency) FROM invoices i JOIN orders o ON o.id = i.order_id
+            WHERE o.store_id IN ({$marks}) AND i.status = 'issued' AND i.oss_net_eur IS NOT NULL AND i.oss_net <> 0 AND i.issued_at >= ? AND i.issued_at < ?");
+        $stmt->execute([...$storeIds, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**
@@ -189,7 +205,7 @@ final class OssThreshold
         if ($doc === null) return;
         $net = self::documentNet($db, $doc);
         // R40 (low): in another currency, also in EUR at the rate of the day it is issued (art. 91(2)); counted so.
-        $eur = Db::hasColumn('invoices', 'oss_net_eur', $db) ? self::issueEur($db, $doc, $net) : null;
+        $eur = self::hasColumn('invoices', 'oss_net_eur', $db) ? self::issueEur($db, $doc, $net) : null;
         $stmt = $db->prepare('UPDATE invoices SET oss_net = :net' . ($eur !== null ? ', oss_net_eur = :eur' : '') . ' WHERE id = :id AND oss_net IS NULL');
         $stmt->execute([':net' => $net, ':id' => $invoiceId] + ($eur !== null ? [':eur' => $eur] : []));
         if ($stmt->rowCount() === 1 && (string)($doc['status'] ?? '') === 'issued') self::addToTotal($db, $doc, $net, $eur);
@@ -308,7 +324,7 @@ final class OssThreshold
      */
     public static function storedNetSql(PDO $db, string $alias): array
     {
-        if (!Db::hasColumn('invoices', 'oss_net_eur', $db)) return ["LOWER({$alias}.currency)", "{$alias}.oss_net"];
+        if (!self::hasColumn('invoices', 'oss_net_eur', $db)) return ["LOWER({$alias}.currency)", "{$alias}.oss_net"];
         return ["CASE WHEN {$alias}.oss_net_eur IS NOT NULL THEN 'eur' ELSE LOWER({$alias}.currency) END", "COALESCE({$alias}.oss_net_eur, {$alias}.oss_net)"];
     }
 
@@ -884,11 +900,17 @@ final class OssThreshold
         return strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
     }
 
-    // A signed update runs the migrations under the old release's Db class (v2.0.0 has no hasColumn()); the
-    // migration calling rebuildActivations() runs after the one that added the column.
+    // A signed update runs the migrations under the old release's Db class (v2.0.0 has no hasColumn()): the schema is
+    // read here then (R40: oss_net_eur is added after a migration calling rebuildActivations()).
     private static function hasColumn(string $table, string $column, PDO $db): bool
     {
-        return !in_array('hasColumn', get_class_methods(Db::class), true) || Db::hasColumn($table, $column, $db);
+        if (in_array('hasColumn', get_class_methods(Db::class), true)) return Db::hasColumn($table, $column, $db);
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            return in_array($column, array_column($db->query('PRAGMA table_info(' . $table . ')')->fetchAll(PDO::FETCH_ASSOC), 'name'), true);
+        }
+        $stmt = $db->prepare('SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $stmt->execute([$table, $column]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /** The store's stores.json entry; [] (seller country SK) when unknown, e.g. in a migration without a store context. */
