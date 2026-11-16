@@ -1583,7 +1583,8 @@ class PaymentService {
         // Under the order row lock, taken before the ledger insert: two events of one order at once (succeeded and
         // charge.succeeded) otherwise each held the shared lock the payment_transactions foreign key takes on the
         // order and then both waited to update it — a MySQL deadlock, and the loser was never applied.
-        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency): bool {
+        $late = false;
+        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency, &$late): bool {
             $from = (string)($order['payment_status'] ?? 'pending');
             $to = match ($eventType) {
                 'payment.paid' => 'paid',
@@ -1606,10 +1607,33 @@ class PaymentService {
             self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency ?: $orderCurrency, $eventKey, $payload + ['payment_status' => $from], $provider, $providerRef);
             if ($to !== null) AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
             // A redelivery after a failed settlement finishes it (settleCapture is idempotent).
+            $late = $to === 'paid' && in_array($from, ['partially_refunded', 'refunded'], true);
             return $to === 'paid' && $from === 'paid';
         });
 
         if ($settle) self::settleCapture($orderId, 'Payment confirmed via webhook');
+        if ($late) self::settleLateCapture($orderId, 'Payment confirmed via webhook');
+    }
+
+    /**
+     * R40 (low): a capture that arrives after the provider's refund of it was booked (bookRefundWithin(): the refund of a
+     * payment the shop still held pending, authorized or cancelled is the first sign of its capture). The capture was
+     * only logged (the payment does not leave refunded): the order stayed pending for ever with its stock reserved. The
+     * payment stays as its refunds left it; the order is settled: refunded in full it is cancelled (its stock released),
+     * in part it is paid (settleCapture()). A capture the ledger already holds (a redelivery) changes nothing.
+     */
+    public static function settleLateCapture(int $orderId, string $note): void {
+        $order = Orders::byId($orderId);
+        if (!$order) return;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'paid' LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        if ($stmt->fetchColumn() !== false) return;
+        $payment = (string)($order['payment_status'] ?? '');
+        if ($payment === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'cancelled')) {
+            OrderWorkflow::transition($orderId, 'cancelled', $note . ': captured after it was refunded in full');
+        } elseif ($payment === 'partially_refunded') {
+            self::settleCapture($orderId, $note . ': captured after a part of it was refunded');
+        }
     }
 
     /**

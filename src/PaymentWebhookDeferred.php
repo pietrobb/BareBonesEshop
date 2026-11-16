@@ -9,6 +9,11 @@ final class PaymentWebhookDeferred extends RuntimeException {
     public int $orderId = 0;
     public string $orderNumber = '';
     public string $storeId = '';
+    /**
+     * R40 (low): the money the event reports beyond the ledger is the shop's own refunds in flight (a request, credit
+     * notes), each booked by its id once it settles: waiting for the list is no lost refund, so no critical incident.
+     */
+    public bool $explained = false;
 
     public function forOrder(int $orderId): self {
         if ($this->orderId > 0 || $orderId <= 0) return $this;

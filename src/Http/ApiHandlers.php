@@ -1150,7 +1150,7 @@ function apiWebhookStripe(): array {
     } catch (PaymentWebhookDeferred $e) {
         Idempotency::unmark($eventKey);
         $deferred = PaymentWebhookRouting::defer('stripe', (string)$event['id'], (string)$event['type'], $e);
-        $dead = $deferred['status'] === 'dead';
+        $dead = $deferred['status'] === 'dead' && !$e->explained;
         $report = static fn() => IncidentMonitor::report($dead ? 'payment.webhook_deferred_dead' : 'payment.webhook_deferred', 'webhook', $dead ? 'critical' : 'warning', [
             'event' => (string)$event['id'], 'type' => (string)$event['type'], 'reason' => $e->getMessage(),
             'order_id' => $e->orderId, 'order_number' => $e->orderNumber, 'attempts' => $deferred['attempts']]);
@@ -1227,7 +1227,9 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
         if ($paymentRef !== '') Orders::setPaymentId($orderId, $paymentRef);
         if ($sessionId !== '') CheckoutSession::markCompleted($sessionId, 'stripe');
 
-        if (($order['payment_status'] ?? 'pending') !== 'paid') {
+        // R40 (low): refunded already (the refund came first, PaymentService::settleLateCapture()): the payment stays so.
+        $late = in_array((string)($order['payment_status'] ?? 'pending'), ['partially_refunded', 'refunded'], true);
+        if (!$late && ($order['payment_status'] ?? 'pending') !== 'paid') {
             PaymentService::transitionPayment(
                 $orderId,
                 'paid',
@@ -1242,7 +1244,8 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
         if ($db->inTransaction()) $db->rollBack();
         throw $e;
     }
-    PaymentService::settleCapture($orderId, 'Stripe webhook: ' . $sessionId);
+    if ($late) PaymentService::settleLateCapture($orderId, 'Stripe webhook: ' . $sessionId);
+    else PaymentService::settleCapture($orderId, 'Stripe webhook: ' . $sessionId);
 }
 
 function onChargeRefunded(array $charge): ?string {
@@ -1271,7 +1274,14 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
     // R39 (low): every refund the charge reports is booked already (by its id: refund.created, the refund worker): nothing
     // waits for the list. Was: deferred until dead, then a critical incident on every redelivery for booked money.
     if ($refunds === null && $refundedAmount > 0 && PaymentService::refundedAmount($orderId) >= $refundedAmount) $refunds = [];
-    if ($refunds === null) throw new PaymentWebhookDeferred("Refunds of Stripe charge {$chargeId} cannot be listed");
+    if ($refunds === null) {
+        $deferred = new PaymentWebhookDeferred("Refunds of Stripe charge {$chargeId} cannot be listed");
+        // R40 (low): what the ledger lacks is the shop's own refunds in flight (booked by id when they settle): a stalled
+        // list then raised a critical "book the refund by hand" for money no one had to book.
+        $deferred->explained = PaymentService::refundedAmount($orderId) + PaymentService::requestedRefundInFlight($order)
+            + PaymentService::unbookedCreditAmount($orderId) >= $refundedAmount;
+        throw $deferred;
+    }
 
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
         'Stripe refund: ' . AuditLogLabels::amount($refundedAmount, $order['currency'] ?? 'eur') . ' of ' . AuditLogLabels::amount($orderTotal, $order['currency'] ?? 'eur'));
