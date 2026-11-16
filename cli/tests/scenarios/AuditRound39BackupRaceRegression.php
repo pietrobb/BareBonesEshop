@@ -72,6 +72,24 @@ if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || posix_ge
         $r39bShop->rollBack();
         assert_equals(['ok', 'ok'], $r39bTwice, 'R39 root backup race: a second backup in the same process during a read is made (was: "the database open is not the file")');
         $r39bShop = null;
+        // WAL keeps a lock for as long as the shop's connection is open; a restore puts another file at db_path. Backups
+        // of each file, twice, all in one process (CustomersOperationsScenario as root: backup, restore, backup, backup).
+        $r39bWal = [];
+        foreach (['first', 'restored'] as $r39bRound) {
+            $r39bNext = $r39bDb . '.next';
+            $r39bFresh = new PDO('sqlite:' . $r39bNext, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $r39bFresh->exec("PRAGMA journal_mode=WAL; CREATE TABLE shop (v TEXT); INSERT INTO shop VALUES ('R39-SHOP-{$r39bRound}')");
+            $r39bFresh = null;
+            rename($r39bNext, $r39bDb);
+            @unlink($r39bDb . '-wal'); @unlink($r39bDb . '-shm');
+            $r39bShop = new PDO('sqlite:' . $r39bDb, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $r39bShop->query('SELECT COUNT(*) FROM shop')->fetchColumn();
+            $r39bResult = $r39bBackup($r39bShop);
+            $r39bWal[] = $r39bResult['ok'] ? 'ok' : $r39bResult['error'];
+            try { BackupService::create(['label' => 'manual']); $r39bWal[] = 'ok'; } catch (Throwable $e) { $r39bWal[] = $e->getMessage(); }
+            $r39bShop = null;
+        }
+        assert_equals(['ok', 'ok', 'ok', 'ok'], $r39bWal, 'R39 root backup race: in WAL mode, before and after another file is put at db_path, every backup is made');
     } finally {
         BackupService::reset();
         shell_exec('rm -rf ' . escapeshellarg($r39bBase));

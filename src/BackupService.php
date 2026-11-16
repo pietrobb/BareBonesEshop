@@ -33,6 +33,8 @@ class BackupService
     /** Files ("dev:ino" => true) root's verified read-only connections opened in this process (rootForeignDatabase());
      *  kept by reset(): SQLite keeps their descriptors open behind another connection's lock. */
     private static array $rootVerified = [];
+    /** Every file ("dev:ino" => true) those read-only connections opened, verified or refused. */
+    private static array $rootOpened = [];
     /** MySQL installs: callable(string $dumpPath): array that writes a consistent dump. */
     private static ?Closure $mysqlDumper = null;
     /** MySQL installs: verified scratch-first restore of a backup dump (restore()). */
@@ -295,20 +297,28 @@ class BackupService
         $before = $descriptors();
         // Read-only: SQLite reuses the descriptor a closed connection left behind another connection's lock instead of
         // opening the file again, but only one of a connection opened the same way — here, an earlier verified one.
+        $own = (realpath(dirname($path)) ?: dirname($path)) . '/' . basename($path);
+        $others = [];
         $connection = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
-        $connection->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
-        $added = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000);
+        try {
+            $connection->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
+        } finally {
+            // Descriptors the connection added other than this file's own journal, WAL and shared memory; each may stay
+            // open behind another connection's lock (WAL mode holds one) and be reused by a later read-only open.
+            $others = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000
+                && !in_array($d[3], [$own . '-journal', $own . '-wal', $own . '-shm'], true));
+            foreach ($others as [$dev, $ino]) self::$rootOpened[$dev . ':' . $ino] = true;
+        }
         $after = $checked();
         if (is_string($after)) return $after;
         $key = $inode[0] . ':' . $inode[1];
-        // A reused descriptor is of a file verified before in this process, so it is this one only when no other was;
-        // then the connection may add only this file's own journal or WAL.
-        $own = (realpath(dirname($path)) ?: dirname($path)) . '/' . basename($path);
-        $others = array_filter($added, static fn(array $d): bool => !in_array($d[3], [$own . '-journal', $own . '-wal'], true));
+        // None added: SQLite reused a descriptor an earlier read-only connection of ours left. It is of this file when this
+        // file was verified before and no file such a connection opened was refused.
+        $reused = $others === [] && isset(self::$rootVerified[$key]) && array_diff_key(self::$rootOpened, self::$rootVerified) === [];
         // Without /proc (a container without it) which file the connection opened cannot be seen; as in R38 the checks
         // before and after the open are what remains.
-        $mainOpen = !$proc || ($others === [] && array_keys(self::$rootVerified) === [$key]);
-        foreach ($added as [$dev, $ino]) if ([$dev, $ino] === $inode) $mainOpen = true;
+        $mainOpen = !$proc || $reused;
+        foreach ($others as [$dev, $ino]) if ([$dev, $ino] === $inode) $mainOpen = true;
         if (!$mainOpen || [(int)$after['dev'], (int)$after['ino']] !== $inode) return "the database open is not the file at {$path}";
         self::$rootVerified[$key] = true;
         $verified = $connection;
