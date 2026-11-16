@@ -44,8 +44,9 @@ $r27oChild = $r27oApp . '/cli/restore-probe.php';
 try {
     foreach (['', '/app', '/data', '/uploads', '/backups', '/logs', '/restore-recovery'] as $r27oSub) {
         @mkdir($r27oDir . $r27oSub, 0755, true);
-        if ($r27oSub !== '') chown($r27oDir . $r27oSub, 65534);
-        if ($r27oSub !== '') chgrp($r27oDir . $r27oSub, 65534);
+        // data/ only after the backup: without /proc root backs up only a database in directories no one else can change.
+        if ($r27oSub !== '' && $r27oSub !== '/data') chown($r27oDir . $r27oSub, 65534);
+        if ($r27oSub !== '' && $r27oSub !== '/data') chgrp($r27oDir . $r27oSub, 65534);
     }
     $r27oPdo = new PDO('sqlite:' . $r27oLive, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $r27oPdo->exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, note TEXT); INSERT INTO orders (note) VALUES ('backed up')");
@@ -53,6 +54,8 @@ try {
     BackupService::init($r27oPdo, $r27oCfg, $r27oApp);
     $r27oMeta = BackupService::create(['label' => 'manual']);
     BackupService::reset();
+    chown($r27oDir . '/data', 65534);
+    chgrp($r27oDir . '/data', 65534);
     $r27oPdo->exec("INSERT INTO orders (note) VALUES ('after the backup')");
     $r27oPdo = null;
     file_put_contents($r27oUpload, 'NEWER');

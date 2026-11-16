@@ -287,6 +287,9 @@ class BackupService
         $file = $checked();
         if (is_string($file)) return $file;
         $proc = is_dir('/proc/self/fd');
+        // Capability review run 527: without /proc the file the connection opened cannot be seen, and checks before and
+        // after the open are the race R40 closed. Root then backs up only a database no other account can move or swap.
+        if (!$proc && ($error = self::rootOnlyPath($canonical)) !== null) return $error;
         $descriptors = static function () use ($proc): array {
             if (!$proc) return [];
             $open = [];
@@ -334,8 +337,8 @@ class BackupService
             elseif (!$wasVerified && $now[$fd][3] !== $canonical && !in_array($now[$fd][3], $sidecars, true)) $refusedOpen = true;
         }
         $reused = $main === null && $ofThisFile && !$refusedOpen;
-        // Without /proc (a container without it) which file the connection opened cannot be seen; as in R38 the checks
-        // before and after the open are what remains.
+        // Without /proc (a container without it) which file the connection opened cannot be seen; rootOnlyPath() above
+        // ensured no other account can change the path or the file.
         $mainOpen = !$proc || $reused || ($main !== null && [$main[0], $main[1]] === $inode);
         if (!$mainOpen || [(int)$file['dev'], (int)$file['ino']] !== $inode) return "the database open is not the file at {$path}";
         if ($main !== null) self::$rootOpened[$main[2]][2] = true;
@@ -346,6 +349,31 @@ class BackupService
     private static function runsAsRoot(): bool
     {
         return function_exists('posix_geteuid') && posix_geteuid() === 0;
+    }
+
+    /**
+     * Null when only root can change the link-free path $canonical: every directory on it belongs to root and is writable
+     * by no other account, or is sticky and the entry in it belongs to root. Otherwise why a root backup is refused.
+     */
+    private static function rootOnlyPath(string $canonical): ?string
+    {
+        $path = '';
+        $stickyParent = false;
+        foreach (array_merge([''], array_values(array_filter(explode('/', $canonical), static fn(string $p): bool => $p !== ''))) as $part) {
+            $path = $part === '' ? '/' : rtrim($path, '/') . '/' . $part;
+            $stat = @lstat($path);
+            if (!is_array($stat)) return "the database {$canonical} cannot be read";
+            $mode = (int)$stat['mode'];
+            $isDir = ($mode & 0170000) === 0040000;
+            if ((int)$stat['uid'] !== 0 && ($stickyParent || $isDir)) {
+                return "without /proc the file opened cannot be verified and {$path} belongs to another account";
+            }
+            if ($isDir && ($mode & 0022) !== 0 && ($mode & 01000) === 0) {
+                return "without /proc the file opened cannot be verified and {$path} is writable by another account";
+            }
+            $stickyParent = $isDir && ($mode & 0022) !== 0;
+        }
+        return null;
     }
 
     /**

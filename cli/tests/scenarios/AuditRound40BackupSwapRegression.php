@@ -7,13 +7,18 @@
 // path (or its journal, WAL, shared memory) by the kernel's name for it. Also: no WAL checkpoint as root before the check.
 echo "\n--- R40 root backup: db/ swapped with a link while backing up never copies another database ---\n";
 
-if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || posix_geteuid() !== 0 || !is_dir('/proc/self/fd')) {
+// Capability review run 527: without /proc (CI root job with /proc hidden) the file the connection opened cannot be seen;
+// a database the web user's directories lead to is then refused (fail closed), not checked before and after the open.
+if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
     echo "  [SKIP] R40 root backup swap: run as root on Linux (wsl -u root / CI root job)\n";
 } else {
+    $r40bNoProc = !is_dir('/proc/self/fd');
     $r40bBase = sys_get_temp_dir() . '/bbe-r40-backup-' . bin2hex(random_bytes(4));
     $r40bFlipper = null;
     try {
         foreach (['secret', 'private/db', 'backups'] as $r40bDir) mkdir($r40bBase . '/' . $r40bDir, 0700, true);
+        // private/ and db/ are the web user's directories.
+        foreach (['private', 'private/db'] as $r40bDir) { chown($r40bBase . '/' . $r40bDir, 65534); chgrp($r40bBase . '/' . $r40bDir, 65534); }
         $r40bDb = $r40bBase . '/private/db/shop.sqlite';
         $r40bLink = $r40bBase . '/private/db.link';
         // The web user's link to the directory of a database only root may read, under the same file name.
@@ -79,7 +84,12 @@ if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || posix_ge
             } catch (Throwable $e) {
                 $r40bControl = $e->getMessage();
             }
-            assert_equals('ok', $r40bControl, "R40 root backup swap ({$r40bMode}): the shop's own database is backed up as root");
+            if ($r40bNoProc) {
+                assert_true($r40bMade === 0 && str_contains($r40bControl, 'without /proc'),
+                    "R40 root backup swap ({$r40bMode}, no /proc): a database in the web user's directories is refused as root ({$r40bMade} made; control: {$r40bControl})");
+            } else {
+                assert_equals('ok', $r40bControl, "R40 root backup swap ({$r40bMode}): the shop's own database is backed up as root");
+            }
             $r40bShop = null;
         }
 
