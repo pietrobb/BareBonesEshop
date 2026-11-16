@@ -622,6 +622,16 @@ the shop's steps (one account may be both):
    `setup.php install` creates the private runtime directory as this account: where it is
    not the web server user, hand that directory over afterwards
    (`chown -R www-data: /var/www/bareboneseshop-private`), as the Docker `setup` service does.
+   `update.php` and `migrate.php` still write the database (and its `-wal`/`-journal`
+   files) in that directory, so when the owner is not the web server user both write it
+   through a shared group, not by being its owner: put the owner in the web server user's
+   group (`usermod -aG www-data deploy`), make the directory group-writable with setgid on
+   every directory so new files inherit the group
+   (`chgrp -R www-data /var/www/bareboneseshop-private && chmod -R g+rwX /var/www/bareboneseshop-private && find /var/www/bareboneseshop-private -type d -exec chmod g+s {} +`),
+   and run both accounts' steps with `umask 002` (PHP-FPM's `UMask = 0002` in its systemd
+   unit, `umask 002` before the cron lines and the update), so a file one creates stays
+   writable by the other. Backups and restores stay with the web server user (step 1;
+   docs/OPERATIONS_RUNBOOK.md describes the same layout).
 3. **From a root shell**, use the wrapper instead of `sudo php`: install `deploy/bbe-step.sh` root-owned outside the tree,
 from a release you verified (the signed package's `payload/deploy/bbe-step.sh` or the release
 tag), not from the shop's copy, which an account that can write the tree may have changed

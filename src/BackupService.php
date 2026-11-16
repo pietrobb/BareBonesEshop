@@ -255,26 +255,50 @@ class BackupService
      * root can read into a backup. As root, the file the connection has open must be the regular, singly linked file at
      * $path (same inode through /proc/self/fd, so a link swapped back after connecting does not pass), reached through no
      * symbolic link another account owns. Null when fine or not root.
+     * R39 (low): any open descriptor of that inode passed, and root holds others: the web user moved the .backup.lock it
+     * had created (root opened it) to db_path after the connection was made through a link, and the other database was
+     * copied (5 of 5). Root now copies from a connection of its own ($verified), opened after the checks; the descriptors
+     * that connection added must be of the inode checked, which must still be at $path afterwards.
      */
-    private static function rootForeignDatabase(string $path): ?string
+    private static function rootForeignDatabase(string $path, ?PDO &$verified = null): ?string
     {
+        $verified = null;
         if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) return null;
-        self::$db->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
-        clearstatcache();
-        $file = @lstat($path);
-        if (!is_array($file)) return "the database {$path} cannot be read";
-        if (is_link($path)) return "the database {$path} is a symbolic link";
-        if (((int)$file['mode'] & 0170000) !== 0100000 || (int)$file['nlink'] !== 1) return "the database {$path} is not a regular file with a single link";
-        for ($dir = dirname($path); $dir !== dirname($dir); $dir = dirname($dir)) {
-            $s = @lstat($dir);
-            if (is_array($s) && is_link($dir) && (int)$s['uid'] !== 0) return "{$dir} is a symbolic link of another account";
-        }
-        if (!is_dir('/proc/self/fd')) return null;
-        foreach (scandir('/proc/self/fd') ?: [] as $fd) {
-            $open = ctype_digit((string)$fd) ? @stat('/proc/self/fd/' . $fd) : false;
-            if (is_array($open) && $open['dev'] === $file['dev'] && $open['ino'] === $file['ino']) return null;
-        }
-        return "the database open is not the file at {$path}";
+        $checked = static function () use ($path): array|string {
+            clearstatcache();
+            $file = @lstat($path);
+            if (!is_array($file)) return "the database {$path} cannot be read";
+            if (is_link($path)) return "the database {$path} is a symbolic link";
+            if (((int)$file['mode'] & 0170000) !== 0100000 || (int)$file['nlink'] !== 1) return "the database {$path} is not a regular file with a single link";
+            for ($dir = dirname($path); $dir !== dirname($dir); $dir = dirname($dir)) {
+                $s = @lstat($dir);
+                if (is_array($s) && is_link($dir) && (int)$s['uid'] !== 0) return "{$dir} is a symbolic link of another account";
+            }
+            return $file;
+        };
+        $file = $checked();
+        if (is_string($file)) return $file;
+        if (!is_dir('/proc/self/fd')) return "/proc/self/fd is not available to tell which file a connection opens";
+        $descriptors = static function (): array {
+            $open = [];
+            foreach (scandir('/proc/self/fd') ?: [] as $fd) {
+                $s = ctype_digit((string)$fd) ? @stat('/proc/self/fd/' . $fd) : false;
+                if (is_array($s)) $open[(int)$fd] = [(int)$s['dev'], (int)$s['ino'], (int)$s['mode'] & 0170000];
+            }
+            return $open;
+        };
+        $before = $descriptors();
+        $connection = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $connection->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
+        $added = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000);
+        $after = $checked();
+        if (is_string($after)) return $after;
+        $inode = [(int)$file['dev'], (int)$file['ino']];
+        $mainOpen = false;
+        foreach ($added as [$dev, $ino]) if ([$dev, $ino] === $inode) $mainOpen = true;
+        if (!$mainOpen || [(int)$after['dev'], (int)$after['ino']] !== $inode) return "the database open is not the file at {$path}";
+        $verified = $connection;
+        return null;
     }
 
     /**
@@ -445,10 +469,11 @@ class BackupService
                 if ($driver === 'mysql') {
                     $dumpInfo = (self::$mysqlDumper)($absPath);
                 } else {
-                    $foreign = self::rootForeignDatabase(self::$configuredPath ?? (string)self::$livePath);
+                    $foreign = self::rootForeignDatabase(self::$configuredPath ?? (string)self::$livePath, $verified);
                     if ($foreign !== null) throw new RuntimeException("refused as root: {$foreign}. Run the backup as the account that owns the database");
                     $sqlPath = str_replace("'", "''", $absPath);
-                    self::$db->exec("VACUUM INTO '{$sqlPath}'");
+                    ($verified ?? self::$db)->exec("VACUUM INTO '{$sqlPath}'");
+                    $verified = null;
                 }
             } catch (\Throwable $e) {
                 @unlink($absPath);
