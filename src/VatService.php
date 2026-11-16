@@ -500,6 +500,17 @@ class VatService implements TaxProvider
                 'gross' => $netTotal + $vatTotal,
             ],
         ];
+        // R39 (medium 1): why the OSS threshold charged the consumer's VAT (OssThreshold::REASON_*): only a crossing of
+        // the year itself activates it (OssThreshold::recordOrder(), rebuildActivations()).
+        $thresholdReason = $context['oss_threshold_reason'] ?? null;
+        if (!empty($context['seller_oss_enabled']) && in_array($thresholdReason, [OssThreshold::REASON_CURRENT, OssThreshold::REASON_PREVIOUS], true)) {
+            $snapshot['oss_threshold'] = $thresholdReason;
+        }
+        // R39 (low): the evidence the downloads' country of supply rests on (CheckoutService::digitalResidence()).
+        $residence = $context['digital_residence_evidence'] ?? null;
+        if (is_array($residence) && $residence !== []) {
+            $snapshot['digital_residence'] = array_map('strval', array_intersect_key($residence, array_flip(['billing', 'delivery', 'declared'])));
+        }
         $snapshot['fingerprint'] = self::snapshotFingerprint($snapshot);
         self::validateSnapshot($snapshot);
         return $snapshot;
@@ -791,30 +802,34 @@ class VatService implements TaxProvider
      * holder VIES names must be the buyer: the VAT ID's member state is the country the buyer is billed in ($buyerCountry:
      * the billing address, or the delivery address when not billed apart), and where VIES gives the holder's name (some
      * states withhold it: "---") the company named in the order is that holder, legal form, case, accents and
-     * punctuation aside, one name may be the other's shorter form. Null when it matches; else 'country' or 'name'.
+     * punctuation aside, one name may be the other's shorter form. Null when it matches; else 'name'.
+     * R39 (low): the VAT ID's state need not be the billing country: art. 138 exempts a supply to a buyer identified for
+     * VAT in any member state other than the one the goods leave from (a German registration billed in Austria was
+     * charged VAT). A company named by its legal form only ("s.r.o.") matched any holder, and so did one word of it: the
+     * shorter form is now the other's leading words. German spellings without umlauts match ("MUELLER" is "Müller").
      */
-    public static function vatIdHolderMismatch(string $vatId, string $company, string $buyerCountry): ?string
+    public static function vatIdHolderMismatch(string $vatId, string $company): ?string
     {
         $vatId = strtoupper((string)preg_replace('/\s+/', '', $vatId));
-        $idCountry = substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2);
-        $buyerCountry = strtoupper(trim($buyerCountry));
-        if ($buyerCountry !== '' && $buyerCountry !== $idCountry) return 'country';
         if (trim($company) === '') return null; // a preview of an older page; the order takes a VAT ID only with a company
         $stmt = Db::get()->prepare('SELECT trader_name FROM vat_id_cache WHERE vat_id = :v');
         $stmt->execute([':v' => $vatId]);
         $registered = trim((string)$stmt->fetchColumn());
         if (trim($registered, '- ') === '') return null;
         [$holder, $named] = [self::holderTokens($registered), self::holderTokens($company)];
-        return array_diff($named, $holder) === [] || array_diff($holder, $named) === [] ? null : 'name';
+        if ($holder === [] || $named === []) return 'name';
+        [$short, $long] = count($named) <= count($holder) ? [$named, $holder] : [$holder, $named];
+        return array_slice($long, 0, count($short)) === $short ? null : 'name';
     }
 
-    /** @return list<string> the significant words of a company name, lower case ASCII */
+    /** @return list<string> the significant words of a company name, lower case ASCII ("ü" and "ue" alike) */
     private static function holderTokens(string $name): array
     {
         $name = mb_strtolower($name, 'UTF-8');
         $ascii = function_exists('transliterator_transliterate') ? transliterator_transliterate('Any-Latin; Latin-ASCII', $name) : false;
         if (!is_string($ascii)) $ascii = (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name);
-        $words = preg_split('/[^a-z0-9]+/', strtolower($ascii), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $ascii = str_replace(['ae', 'oe', 'ue', 'ss'], ['a', 'o', 'u', 's'], strtolower($ascii));
+        $words = preg_split('/[^a-z0-9]+/', $ascii, -1, PREG_SPLIT_NO_EMPTY) ?: [];
         return array_values(array_unique(array_filter($words, static fn(string $w): bool => strlen($w) > 1 && !in_array($w, self::LEGAL_FORMS, true))));
     }
 

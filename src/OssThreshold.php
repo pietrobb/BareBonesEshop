@@ -24,13 +24,45 @@
 final class OssThreshold
 {
     public const EUR_CENTS = 1000000;
+    /**
+     * R39 (medium 1): why exceeded() charged the consumer's VAT, stored in the order's snapshot (oss_threshold): the
+     * current year passed the threshold (a crossing of its own, it activates the year) or the previous year did (it
+     * activates nothing: the seller returns to its own VAT after two years under 10 000 EUR).
+     */
+    public const REASON_CURRENT = 'current_year';
+    public const REASON_PREVIOUS = 'previous_year';
 
     /** @var array<string, array{previous: int, current: int}> per store, for this request (VatService::reset() clears it) */
     private static array $years = [];
+    private static ?string $reason = null;
 
     public static function reset(): void
     {
         self::$years = [];
+        EurRates::reset();
+    }
+
+    /** Why the last exceeded() call returned true (REASON_*), null when it returned false. */
+    public static function lastReason(): ?string
+    {
+        return self::$reason;
+    }
+
+    /**
+     * R39 (low): OSS is the taxable person's registration (art. 369b), not a storefront's: a store of an IČ DPH whose
+     * other store has OSS on is in the scheme too. With it off in one of them, that store charged Slovak VAT to Austrian
+     * consumers (and the doctor said PASS).
+     * @param array<string, mixed> $store
+     */
+    public static function sellerOssEnabled(string $storeId, array $store, ?array $stores = null): bool
+    {
+        if (!empty($store['oss_enabled'])) return true;
+        $stores ??= (array)(Bootstrap::stores()['stores'] ?? []);
+        $seller = self::sellerKey($storeId, $store, $stores);
+        foreach ($stores as $id => $other) {
+            if ((string)$id !== $storeId && is_array($other) && !empty($other['oss_enabled']) && self::sellerKey((string)$id, $other, $stores) === $seller) return true;
+        }
+        return false;
     }
 
     /**
@@ -43,17 +75,23 @@ final class OssThreshold
         $context = StoreContext::current();
         $storeId = $context->id();
         $store = $context->config();
-        if (!empty($store['oss_enabled']) || !Db::tableExists('invoices')) return false;
+        self::$reason = null;
+        if (self::sellerOssEnabled($storeId, $store) || !Db::tableExists('invoices')) return false;
         $db = Db::get();
+        $year = (int)ShopTime::date('Y');
         try {
-            if (self::activated($db, $storeId, $store, (int)ShopTime::date('Y'))) return true;
+            if (self::activated($db, $storeId, $store, $year, false)) return (bool)(self::$reason = self::REASON_CURRENT);
+            if (self::activated($db, $storeId, $store, $year - 1, false)) return (bool)(self::$reason = self::REASON_PREVIOUS);
             $years = self::$years[$storeId] ??= self::years($db, $storeId, $store, (array)(Bootstrap::stores()['stores'] ?? []));
-            if ($years['previous'] > self::EUR_CENTS) return true;
+            if ($years['previous'] > self::EUR_CENTS) return (bool)(self::$reason = self::REASON_PREVIOUS);
             if ($saleNet > 0 && strtolower($currency) !== 'eur') {
                 $stores = self::sellerStores($storeId, $store, (array)(Bootstrap::stores()['stores'] ?? []));
-                return self::consistently($db, static fn(): int => self::yearSales($db, $stores, (int)ShopTime::date('Y'), true, $saleNet, $currency)['sum']) > self::EUR_CENTS;
+                $over = self::consistently($db, static fn(): int => self::yearSales($db, $stores, $year, true, $saleNet, $currency)['sum']) > self::EUR_CENTS;
+            } else {
+                $over = $years['current'] + max(0, $saleNet) > self::EUR_CENTS;
             }
-            return $years['current'] + max(0, $saleNet) > self::EUR_CENTS;
+            if ($over) self::$reason = self::REASON_CURRENT;
+            return $over;
         } catch (\Throwable $e) {
             // R38 (low): the threshold decides the VAT rate. A failed count charged the seller's VAT without a word (a
             // warning incident); now no order is placed on an unknown VAT (the checkout refuses, CheckoutService::vatContext()
@@ -90,11 +128,12 @@ final class OssThreshold
 
     /**
      * R38 (low): the conversion rates are fixed values of config/vat-rates.json; their date (eur_exchange_rates_as_of,
-     * Y-m-d) tells how old they are. Null when it is missing or not a date.
+     * Y-m-d) tells how old they are. Null when it is missing or not a date. R39: or the ECB rates cli/eur-rates.php
+     * stored (EurRates), when newer.
      */
     public static function ratesAge(): ?int
     {
-        $asOf = (string)(VatService::config()['eur_exchange_rates_as_of'] ?? '');
+        $asOf = EurRates::current()['as_of']; // R39: the stored ECB rates' date when they are newer
         $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $asOf) ? DateTimeImmutable::createFromFormat('!Y-m-d', $asOf, new DateTimeZone('UTC')) : false;
         if ($date === false) return null;
         return (int)floor((ShopTime::now() - $date->getTimestamp()) / 86400);
@@ -175,19 +214,33 @@ final class OssThreshold
         $net = self::orderNet($db, $order);
         $db->prepare("UPDATE orders SET oss_net = CASE WHEN status IN ('cancelled', 'refunded', 'failed') OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = orders.id AND i.type = 'invoice' AND i.status = 'issued') THEN 0 ELSE :net END WHERE id = :id")->execute([':net' => $net, ':id' => $orderId]);
         $year = self::orderYear((string)$order['store_id'], (string)$order['created_at']);
-        self::rememberCrossing($db, (string)$order['store_id'], $year, $net > 0 && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order) && !self::previousYearDecides($db, (string)$order['store_id'], $year));
+        $reason = self::snapshotReason($order);
+        self::rememberCrossing($db, (string)$order['store_id'], $year, $net > 0 && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order)
+            && ($reason === null ? self::crossesAtHome($db, $order, $year, $net) : $reason === self::REASON_CURRENT));
     }
 
     /**
-     * R38 (medium 1): a sale of $year charged the consumer's VAT because the previous year was over the threshold is
-     * no crossing of $year — else every such year activated the next one and the seller never returned to its own VAT
-     * after two years under 10 000 EUR (art. 59c). $year crosses then only by its own sales (rememberCrossing()).
+     * Capability review (R39 run 513): an order placed before R39 (no reason in its snapshot) is a crossing of its year
+     * by the rule the migration decided it with (rebuildActivations()): the year's other sales plus it at the seller's
+     * VAT (homeNet()) pass 10 000 EUR. Was "the previous year did not decide" — read from the activations table the
+     * migration repaired: cancelling the invoice of a sale the migration had judged carried recreated its year's row.
      */
-    private static function previousYearDecides(PDO $db, string $storeId, int $year): bool
+    private static function crossesAtHome(PDO $db, array $order, int $year, int $net): bool
     {
-        $store = self::storeConfig($storeId);
-        if (self::activated($db, $storeId, $store, $year - 1, false)) return true;
-        return self::yearSales($db, self::sellerStores($storeId, $store, (array)(Bootstrap::stores()['stores'] ?? [])), $year - 1, false)['sum'] > self::EUR_CENTS;
+        $storeId = (string)$order['store_id'];
+        $stores = self::sellerStores($storeId, self::storeConfig($storeId), (array)(Bootstrap::stores()['stores'] ?? []));
+        $currency = strtolower((string)($order['currency'] ?? 'eur'));
+        // With open orders in any year: this order is counted (its invoice or its stored oss_net), as the rebuild counts it.
+        $others = self::yearSales($db, $stores, $year, true)['sum'] - self::inEur($net, $currency);
+        return $others + self::inEur(self::homeNet($order, $net), $currency) > self::EUR_CENTS;
+    }
+
+    /** The REASON_* an order's snapshot records for its consumer VAT (exceeded()), null for an order placed before R39. */
+    private static function snapshotReason(array $order): ?string
+    {
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $reason = is_array($snapshot) ? ($snapshot['oss_threshold'] ?? null) : null;
+        return in_array($reason, [self::REASON_CURRENT, self::REASON_PREVIOUS], true) ? $reason : null;
     }
 
     /**
@@ -198,7 +251,8 @@ final class OssThreshold
      */
     private static function chargedAbroad(array $order): bool
     {
-        if (!empty(self::storeConfig((string)($order['store_id'] ?? 'default'))['oss_enabled'])) return false;
+        $storeId = (string)($order['store_id'] ?? 'default');
+        if (self::sellerOssEnabled($storeId, self::storeConfig($storeId))) return false;
         if ((string)($order['vat_scenario'] ?? '') === VatService::SCENARIO_OSS) return true;
         $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
         foreach (is_array($snapshot) ? (array)($snapshot['components'] ?? []) : [] as $component) {
@@ -295,7 +349,7 @@ final class OssThreshold
     private static function inEur(int $net, string $currency): int
     {
         if ($net === 0 || strtolower($currency) === 'eur') return $net;
-        $rate = array_change_key_case((array)(VatService::config()['eur_exchange_rates'] ?? []), CASE_LOWER)[strtolower($currency)] ?? null;
+        $rate = EurRates::current()['rates'][strtolower($currency)] ?? null;
         // No rate: the checkout cannot tell how much it adds; the doctor reports the currency.
         return is_numeric($rate) && (float)$rate > 0 ? (int)round($net * (float)$rate) : 0;
     }
@@ -314,7 +368,7 @@ final class OssThreshold
     {
         $context = StoreContext::current();
         $store = $context->config();
-        if (!empty($store['oss_enabled']) || !Db::tableExists('invoices', $db)) return null;
+        if (self::sellerOssEnabled($context->id(), $store) || !Db::tableExists('invoices', $db)) return null;
         $sellerCountry = self::sellerCountry($store);
         $order = [
             'shipping_addr' => json_encode($customer['address'] ?? [], JSON_UNESCAPED_UNICODE),
@@ -361,7 +415,7 @@ final class OssThreshold
     public static function lockSeller(PDO $db): ?string
     {
         $context = StoreContext::current();
-        if (!Db::isMysql() || !empty($context->config()['oss_enabled'])) return null;
+        if (!Db::isMysql() || self::sellerOssEnabled($context->id(), $context->config())) return null;
         $lock = self::sellerLockName($db, $context->id(), $context->config());
         $stmt = $db->prepare('SELECT GET_LOCK(?, 10)');
         $stmt->execute([$lock]);
@@ -448,46 +502,52 @@ final class OssThreshold
 
     /**
      * Replay issued documents in date order: a later credit reduces turnover, not the year's historical peak.
-     * $dropCarried (R38 migration): main @ c1fe7a9 recorded a year's activation for every sale charged abroad because
-     * the previous year was over the threshold; such a row that the year's own sales do not explain is removed.
+     * $dropCarried (R38/R39 migrations): main @ c1fe7a9 recorded a year's activation for every sale charged abroad
+     * because the previous year was over the threshold; such a row that the year's own sales do not explain is removed.
+     *
+     * R39 (medium 1): the evidence is the documents and orders alone, never the activations table being repaired. R38
+     * deleted oldest first and judged each next year by the table after its own deletions: with 2024 over, 2025 and 2026
+     * at 3 000 EUR each, 2025 was dropped and 2026 then looked like a crossing of its own (kept); a lone carried 2025 row
+     * was dropped and its 2026 sales recorded a new one — exceeded() stayed true to the end of 2027. A sale charged
+     * abroad is a crossing of its year when its snapshot says so (REASON_CURRENT); one placed before R39 when it is the
+     * sale that passes 10 000 EUR at the seller's VAT (homeNet()): the year's sales before it plus it at home VAT.
      */
     public static function rebuildActivations(PDO $db, bool $dropCarried = false): void
     {
         $since = sprintf('%04d-01-01', (int)ShopTime::date('Y') - 1);
         // R38 (medium 4): replayed when issued, counted in the year of the invoice a credit note corrects.
-        $stmt = $db->prepare("SELECT o.store_id, i.issued_at AS at_date, " . self::documentDateSql('i', 's') . " AS year_date, i.id, 0 AS kind, i.currency, i.oss_net AS net
+        $stmt = $db->prepare("SELECT o.store_id, i.issued_at AS at_date, " . self::documentDateSql('i', 's') . " AS year_date, i.id, 0 AS kind, i.type AS doc_type, o.id AS order_id, i.currency, i.oss_net AS net
             FROM invoices i JOIN orders o ON o.id = i.order_id LEFT JOIN invoices s ON s.id = i.refers_to_invoice_id
             WHERE i.status = 'issued' AND i.type IN ('invoice', 'credit_note') AND i.issued_at >= ? AND i.oss_net <> 0
-            UNION ALL SELECT o.store_id, o.created_at AS at_date, o.created_at AS year_date, o.id, 1 AS kind, o.currency, o.oss_net AS net
+            UNION ALL SELECT o.store_id, o.created_at AS at_date, o.created_at AS year_date, o.id, 1 AS kind, 'order' AS doc_type, o.id AS order_id, o.currency, o.oss_net AS net
             FROM orders o WHERE o.created_at >= ? AND o.oss_net > 0 AND o.status NOT IN ('cancelled', 'refunded', 'failed')
             AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.type = 'invoice' AND i.status = 'issued')
             ORDER BY at_date, kind, id");
         // Orders by their store's calendar (orderYear()): from a day earlier in UTC, the ones of an earlier year skipped.
         $stmt->execute([$since, ShopTime::addDays($since, -1)]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $totals = []; $crossed = [];
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        foreach ($rows as $row) {
             $storeId = (string)$row['store_id'];
             $seller = self::sellerKey($storeId, self::storeConfig($storeId));
             $year = (int)$row['kind'] === 1 ? self::orderYear($storeId, (string)$row['year_date']) : (int)substr((string)$row['year_date'], 0, 4);
             if ($year < (int)substr($since, 0, 4) || isset($crossed[$seller][$year])) continue;
             $currency = strtolower((string)$row['currency']);
+            $before = 0;
+            foreach ($totals[$seller][$year] ?? [] as $code => $net) $before += self::inEur($net, $code);
             $totals[$seller][$year][$currency] = ($totals[$seller][$year][$currency] ?? 0) + (int)$row['net'];
             $sum = 0;
             foreach ($totals[$seller][$year] as $code => $net) $sum += self::inEur($net, $code);
-            if ($sum > self::EUR_CENTS) $crossed[$seller][$year] = true;
+            if ($sum > self::EUR_CENTS) { $crossed[$seller][$year] = true; continue; }
+            // R37: a sale charged the consumer's VAT with OSS off was the threshold decision (chargedAbroad()).
+            if ((int)$row['net'] <= 0 || $row['doc_type'] === 'credit_note') continue;
+            $order = self::orderRow($db, (int)$row['order_id']);
+            if ($order === null || !self::chargedAbroad($order)) continue;
+            $reason = self::snapshotReason($order);
+            if ($reason === null && $before + self::inEur(self::homeNet($order, (int)$row['net']), $currency) > self::EUR_CENTS) $reason = self::REASON_CURRENT;
+            if ($reason === self::REASON_CURRENT) $crossed[$seller][$year] = true;
         }
-        $stmt->closeCursor();
         if ($dropCarried) self::dropCarriedActivations($db, (int)substr($since, 0, 4), $crossed);
-        // R37: a sale charged the consumer's VAT with OSS off was the threshold decision (chargedAbroad()).
-        $stmt = $db->prepare("SELECT * FROM orders WHERE created_at >= ? AND oss_net IS NOT NULL AND status NOT IN ('cancelled', 'refunded', 'failed')
-            AND (vat_scenario = ? OR financial_snapshot LIKE ?) ORDER BY created_at, id");
-        $stmt->execute([ShopTime::addDays($since, -1), VatService::SCENARIO_OSS, '%"supply":"' . VatService::SCENARIO_OSS . '"%']);
-        while ($order = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            [$seller, $year] = [self::sellerKey((string)$order['store_id'], self::storeConfig((string)$order['store_id'])), self::orderYear((string)$order['store_id'], (string)$order['created_at'])];
-            if ($year < (int)substr($since, 0, 4) || isset($crossed[$seller][$year]) || isset($crossed[$seller][$year - 1]) || !self::chargedAbroad($order) || self::orderNet($db, $order) <= 0) continue;
-            if (!self::previousYearDecides($db, (string)$order['store_id'], $year)) $crossed[$seller][$year] = true;
-        }
-        $stmt->closeCursor();
         // A rebuild adds evidence; it cannot erase a crossing recorded before a later cancellation.
         $insert = $db->prepare(($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? 'INSERT OR IGNORE' : 'INSERT IGNORE') . ' INTO oss_threshold_activations (seller_key, year) VALUES (?, ?)');
         foreach ($crossed as $seller => $years) foreach ($years as $year => $_) $insert->execute([$seller, $year]);
@@ -495,22 +555,47 @@ final class OssThreshold
     }
 
     /**
-     * Oldest year first, so a dropped year no longer decides the next one. A row is kept when its year crossed by its
-     * own sales ($crossed) or the previous year did not decide it (a crossing then of its own, e.g. chargedAbroad()).
+     * $net (the distance-sale net stored for an order charged the consumer's VAT) at the seller's own VAT: what it
+     * added to the threshold when it was decided (CheckoutService::thresholdVat() prices the crossing at home VAT). Each
+     * snapshot component's gross is netted at the seller's rate of its class (shipping and fee at the goods' highest);
+     * $net is scaled by that over the snapshot's net. Without a snapshot, $net.
+     */
+    private static function homeNet(array $order, int $net): int
+    {
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $snapshotNet = is_array($snapshot) ? (int)($snapshot['totals']['net'] ?? 0) : 0;
+        if ($snapshotNet <= 0) return $net;
+        $country = self::sellerCountry(self::storeConfig((string)($order['store_id'] ?? 'default')));
+        $home = 0;
+        $goodsRate = 0.0;
+        $ancillary = 0;
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) continue;
+            if (($component['type'] ?? '') !== 'product') { $ancillary += (int)($component['gross'] ?? 0); continue; }
+            $rate = VatService::rate($country, VatService::resolveClass((string)($component['vat_class'] ?? 'standard')));
+            $goodsRate = max($goodsRate, $rate);
+            $home += (int)round((int)($component['gross'] ?? 0) / (1 + $rate / 100));
+        }
+        $home += (int)round($ancillary / (1 + $goodsRate / 100));
+        return (int)round($net * $home / $snapshotNet);
+    }
+
+    /**
+     * Removes the rows from $since on that the replay ($crossed, from the documents and orders) does not explain, the
+     * same whatever the table held: rows of a seller no store maps to any more (an old key) are left alone.
      * @param array<string, array<int, true>> $crossed
      */
     private static function dropCarriedActivations(PDO $db, int $since, array $crossed): void
     {
         $stores = (array)(Bootstrap::stores()['stores'] ?? []);
-        $storeOf = [];
-        foreach ($stores as $id => $store) if (is_array($store)) $storeOf[self::sellerKey((string)$id, $store, $stores)] ??= (string)$id;
-        $stmt = $db->prepare('SELECT seller_key, year FROM oss_threshold_activations WHERE year >= ? ORDER BY year, seller_key');
+        $known = [];
+        foreach ($stores as $id => $store) if (is_array($store)) $known[self::sellerKey((string)$id, $store, $stores)] = true;
+        $stmt = $db->prepare('SELECT seller_key, year FROM oss_threshold_activations WHERE year >= ?');
         $stmt->execute([$since]);
         $delete = $db->prepare('DELETE FROM oss_threshold_activations WHERE seller_key = ? AND year = ?');
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             [$seller, $year] = [(string)$row['seller_key'], (int)$row['year']];
-            if (isset($crossed[$seller][$year]) || !isset($storeOf[$seller])) continue;
-            if (self::previousYearDecides($db, $storeOf[$seller], $year)) $delete->execute([$seller, $year]);
+            if (!isset($crossed[$seller][$year]) && isset($known[$seller])) $delete->execute([$seller, $year]);
         }
         self::reset();
     }
@@ -609,7 +694,7 @@ final class OssThreshold
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) $add((string)($order['currency'] ?? 'eur'), self::orderNet($db, $order));
         }
         if ($saleNet > 0) $add($saleCurrency, $saleNet);
-        $rates = array_change_key_case((array)(VatService::config()['eur_exchange_rates'] ?? []), CASE_LOWER);
+        $rates = EurRates::current()['rates'];
         $sum = 0;
         $unconverted = [];
         $converted = [];

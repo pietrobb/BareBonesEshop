@@ -707,10 +707,12 @@ function handleOrderStatus(): void {
  */
 function adminManualPaymentTransitions(array $order): array {
     $orderCancelled = (string)($order['status'] ?? '') === 'cancelled';
+    // R39 (medium 4): a refund the provider has is confirmed or marked not executed on its own form, never dropped by "paid".
+    $refundAtProvider = PaymentService::refundAtProvider($order);
     return array_values(array_filter(
         PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending')),
         static fn(string $to): bool => !in_array($to, ['refund_pending', 'partially_refunded', 'refunded'], true)
-            && ($to !== 'cancelled' || $orderCancelled)
+            && ($to !== 'cancelled' || $orderCancelled) && !($to === 'paid' && $refundAtProvider)
     ));
 }
 function handleOrderPaymentTransition(): void {
@@ -724,6 +726,8 @@ function handleOrderPaymentTransition(): void {
     }
 
     $newStatus = trim((string)($_POST['new_payment_status'] ?? ''));
+    // R39 (medium 4): "paid" on a refund in flight releases that refund: the refund permission's decision, not only payments'.
+    if ((string)($order['payment_status'] ?? '') === 'refund_pending') Security::adminRequire('orders.refund');
     $amount = trim((string)($_POST['amount'] ?? '')) === '' ? 0 : Money::parseInput($_POST['amount'], (string)$order['currency']);
     if ($amount < 0) {
         setFlash('err', I18n::t('admin.order.msg.refund_amount'));

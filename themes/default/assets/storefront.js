@@ -191,7 +191,7 @@
     const params = {
       country: country.value, currency: config.currency,
       amount: String(checkoutGoods(subtotal) + shippingPrice), shipping: String(shippingPrice),
-      shipping_method: selectedShipping, vat_id: checkoutVatId(), company: checkoutCompany(), billing_country: checkoutBillingCountry()
+      shipping_method: selectedShipping, vat_id: checkoutVatId(), company: checkoutCompany(), billing_country: checkoutBillingCountry(), residence_country: checkoutResidence()
     };
     let result;
     try {
@@ -247,6 +247,12 @@
     return toggle && toggle.checked && select ? select.value : '';
   }
 
+  // R39: the country of residence declared for the e-books' VAT (offered when billing and delivery countries differ).
+  function checkoutResidence() {
+    const select = document.getElementById('checkout-residence');
+    return select ? select.value : '';
+  }
+
   // Another VAT scenario (export, reverse charge) re-prices the whole order: let the server re-render it. R37: so does
   // another rate within OSS when the store keeps the net abroad (AT 20 % → HU 27 %): the goods cost another gross.
   function repriceCheckout(scenario, goodsSubtotal) {
@@ -299,7 +305,7 @@
     // The rendered options stay until new rates arrive: a failed request only adds a notice above them.
     box.querySelectorAll('.shipping-loading, .shipping-error').forEach((node) => node.remove());
     box.insertAdjacentHTML('afterbegin', `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`);
-    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId(), company: checkoutCompany(), billing_country: checkoutBillingCountry()};
+    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId(), company: checkoutCompany(), billing_country: checkoutBillingCountry(), residence_country: checkoutResidence()};
     let result;
     try {
       result = await fetchCheckoutJson('shipping_rates', params);
@@ -630,6 +636,9 @@
         });
         billingCountry.addEventListener('blur', () => { if (billingTimer) reprice(); });
       }
+      // R39: the country of residence the buyer declares decides the e-books' VAT when billing and delivery differ.
+      const residence = document.getElementById('checkout-residence');
+      if (residence) residence.addEventListener('change', reprice);
     }
     restoreCheckoutFocus();
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
