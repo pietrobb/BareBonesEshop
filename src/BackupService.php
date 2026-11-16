@@ -30,8 +30,9 @@ class BackupService
     private static ?string $livePath = null;
     /** db_sqlite_path from config.php as written; SQLite reports the link-resolved file in PRAGMA database_list. */
     private static ?string $configuredPath = null;
-    /** Root's own connection to the checked database file: [path, dev, ino, PDO] (rootForeignDatabase()). */
-    private static ?array $rootConnection = null;
+    /** Files ("dev:ino" => true) root's verified read-only connections opened in this process (rootForeignDatabase());
+     *  kept by reset(): SQLite keeps their descriptors open behind another connection's lock. */
+    private static array $rootVerified = [];
     /** MySQL installs: callable(string $dumpPath): array that writes a consistent dump. */
     private static ?Closure $mysqlDumper = null;
     /** MySQL installs: verified scratch-first restore of a backup dump (restore()). */
@@ -140,7 +141,6 @@ class BackupService
         self::$rootDir = null;
         self::$livePath = null;
         self::$configuredPath = null;
-        self::$rootConnection = null;
         self::$mysqlDumper = null;
         self::$mysqlDatabase = null;
         self::$mysqlDatabaseFactory = null;
@@ -260,8 +260,8 @@ class BackupService
      * symbolic link another account owns. Null when fine or not root.
      * R39 (low): any open descriptor of that inode passed, and root holds others: the web user moved the .backup.lock it
      * had created (root opened it) to db_path after the connection was made through a link, and the other database was
-     * copied (5 of 5). Root now copies from a connection of its own ($verified), opened after the checks; the descriptors
-     * that connection added must be of the inode checked, which must still be at $path afterwards.
+     * copied (5 of 5). Root now copies from a read-only connection of its own ($verified), opened after the checks; the
+     * descriptors that connection added must be of the inode checked, which must still be at $path afterwards.
      */
     private static function rootForeignDatabase(string $path, ?PDO &$verified = null): ?string
     {
@@ -282,35 +282,35 @@ class BackupService
         $file = $checked();
         if (is_string($file)) return $file;
         $inode = [(int)$file['dev'], (int)$file['ino']];
-        // The connection verified for this file before is still to it. Reopening could not be told apart: SQLite reuses
-        // the descriptor a closed connection left while another one held a lock, so the open would add none.
-        if (self::$rootConnection !== null && [self::$rootConnection[0], self::$rootConnection[1], self::$rootConnection[2]] === [$path, ...$inode]) {
-            $verified = self::$rootConnection[3];
-            return null;
-        }
-        self::$rootConnection = null;
         $proc = is_dir('/proc/self/fd');
         $descriptors = static function () use ($proc): array {
             if (!$proc) return [];
             $open = [];
             foreach (scandir('/proc/self/fd') ?: [] as $fd) {
                 $s = ctype_digit((string)$fd) ? @stat('/proc/self/fd/' . $fd) : false;
-                if (is_array($s)) $open[(int)$fd] = [(int)$s['dev'], (int)$s['ino'], (int)$s['mode'] & 0170000];
+                if (is_array($s)) $open[(int)$fd] = [(int)$s['dev'], (int)$s['ino'], (int)$s['mode'] & 0170000, (string)@readlink('/proc/self/fd/' . $fd)];
             }
             return $open;
         };
         $before = $descriptors();
-        $connection = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        // Read-only: SQLite reuses the descriptor a closed connection left behind another connection's lock instead of
+        // opening the file again, but only one of a connection opened the same way — here, an earlier verified one.
+        $connection = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
         $connection->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
         $added = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000);
         $after = $checked();
         if (is_string($after)) return $after;
+        $key = $inode[0] . ':' . $inode[1];
+        // A reused descriptor is of a file verified before in this process, so it is this one only when no other was;
+        // then the connection may add only this file's own journal or WAL.
+        $own = (realpath(dirname($path)) ?: dirname($path)) . '/' . basename($path);
+        $others = array_filter($added, static fn(array $d): bool => !in_array($d[3], [$own . '-journal', $own . '-wal'], true));
         // Without /proc (a container without it) which file the connection opened cannot be seen; as in R38 the checks
         // before and after the open are what remains.
-        $mainOpen = !$proc;
+        $mainOpen = !$proc || ($others === [] && array_keys(self::$rootVerified) === [$key]);
         foreach ($added as [$dev, $ino]) if ([$dev, $ino] === $inode) $mainOpen = true;
         if (!$mainOpen || [(int)$after['dev'], (int)$after['ino']] !== $inode) return "the database open is not the file at {$path}";
-        self::$rootConnection = [$path, $inode[0], $inode[1], $connection];
+        self::$rootVerified[$key] = true;
         $verified = $connection;
         return null;
     }
