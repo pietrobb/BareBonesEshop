@@ -61,6 +61,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.vat_reason.reverse_charge' => 'Áfa nélkül: más tagállamban áfa-nyilvántartott vállalkozásnak történő értékesítés (fordított adózás).',
     'checkout.vat_reason.export' => 'Áfa nélkül: EU-n kívüli export.',
     'checkout.vat_reason.digital' => 'Digitális tartalom a lakóhely szerinti ország alapján: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'Az adószám a VIES-ben más cégnévre van bejegyezve, mint a rendelésben szereplő, ezért ÁFA kerül felszámításra. Adja meg a cégnevet a bejegyzett formában.',
     'checkout.recalculate' => 'Végösszeg újraszámítása',
     'order_summary'    => 'Rendelés összegzése',
     'billing_address'  => 'Számlázási cím',

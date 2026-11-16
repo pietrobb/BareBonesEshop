@@ -131,6 +131,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.vat_reason.reverse_charge' => 'Sin IVA: entrega a una empresa registrada a efectos del IVA en otro Estado miembro (inversión del sujeto pasivo).',
     'checkout.vat_reason.export' => 'Sin IVA: exportación fuera de la UE.',
     'checkout.vat_reason.digital' => 'Contenido digital según el país de residencia: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'El NIF-IVA está registrado en VIES a otro nombre de empresa que el del pedido, por lo que se cobra el IVA. Indique el nombre de la empresa tal como está registrado.',
     'checkout.recalculate' => 'Recalcular el total',
     'order_confirmed' => 'Pedido confirmado',
     'order_number' => 'Número de pedido',

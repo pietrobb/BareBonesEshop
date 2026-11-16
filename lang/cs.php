@@ -61,6 +61,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.vat_reason.reverse_charge' => 'Bez DPH: dodání plátci DPH v jiném členském státě (přenesení daňové povinnosti).',
     'checkout.vat_reason.export' => 'Bez DPH: vývoz mimo EU.',
     'checkout.vat_reason.digital' => 'Elektronický obsah podle země bydliště: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'DIČ je ve VIES registrováno na jiný název firmy, než je uveden v objednávce, proto se účtuje DPH. Uveďte název firmy tak, jak je registrován.',
     'checkout.recalculate' => 'Přepočítat částku',
     'order_summary'    => 'Shrnutí objednávky',
     'billing_address'  => 'Fakturační adresa',

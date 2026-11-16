@@ -74,6 +74,8 @@ while true; do php cli/worker.php --once; sleep 60; done
 #      17 3 * * * php /path/to/shop/cli/gdpr-gc.php --apply --quiet
 #      40 2 * * * php /path/to/shop/cli/backup.php --gc
 #      30 16 * * * php /path/to/shop/cli/eur-rates.php   (ECB EUR rates for the OSS threshold)
+#      (a feed lacking a stored currency or moving a rate by over 50 % is refused and
+#      the stored rates stay; check it with the ECB, then run eur-rates.php --force)
 #    Hosting without cron: set 'operations' => ['web_worker' => true] instead
 #    (page requests then run one worker pass at most every 60 seconds).
 ```
@@ -185,8 +187,10 @@ E-books and other downloads are taxed where the buyer lives. Checkout weighs the
 evidence: the billing address, goods sent to an address (not collection in the store),
 and, when a store entry in `stores.json` sets `vat_ip_country_header` (for example
 `"CF-IPCountry"`, only behind a proxy that sets and overwrites it), the IP address's
-country. When they disagree, the buyer (or the admin, for a manual order) states the
-country of residence; the order records the evidence in its financial snapshot.
+country. The header is read only from a request of one of the `trusted_proxies`. When two
+pieces of evidence name the same country, that country is taxed; when they disagree, the
+buyer (or the admin, for a manual order) states the country of residence; the order
+records the evidence in its financial snapshot.
 A store's own pick-up desk under any carrier code is set up as a shipping method of
 type "Pick-up in store". OSS is the VAT payer's registration: switched on in one store, it
 applies to every store with the same VAT ID (`legal.ic_dph`).

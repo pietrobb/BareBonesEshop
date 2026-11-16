@@ -49,10 +49,16 @@ try {
         'R39 residence: a digital-only order is checked against the IP country (got ' . json_encode($r39vIpOnly) . ')');
     assert_true(!$r39vResidence(true, 'LU', '', false, '', 'T1')['required'] && !$r39vResidence(true, 'LU', '', false, '', 'xx')['required'],
         'R39 residence: an IP "country" the shop does not sell to (Tor, unknown) is no evidence');
-    $_SERVER['HTTP_CF_IPCOUNTRY'] = 'de';
+    // R40: and only from a trusted proxy (AuditRound40VatLowRegression).
+    $r39vCfg = new ReflectionProperty(Security::class, 'cfg');
+    $r39vCfgBefore = $r39vCfg->getValue();
+    $r39vCfg->setValue(null, ['trusted_proxies' => ['10.39.0.1']] + (array)(require AppConfig::path(dirname(TEST_CLI_DIR))));
+    [$_SERVER['HTTP_CF_IPCOUNTRY'], $r39vRemote, $_SERVER['REMOTE_ADDR']] = ['de', $_SERVER['REMOTE_ADDR'] ?? null, '10.39.0.1'];
     assert_true(CheckoutService::ipCountry([]) === '' && CheckoutService::ipCountry(['vat_ip_country_header' => 'CF-IPCountry']) === 'DE',
         'R39 residence: the IP country comes only from the header the store names (a client could send any)');
     unset($_SERVER['HTTP_CF_IPCOUNTRY']);
+    if ($r39vRemote === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r39vRemote;
+    $r39vCfg->setValue(null, $r39vCfgBefore);
 
     // 3. OSS of the VAT payer.
     $r39vStores = [
@@ -68,21 +74,23 @@ try {
 
     // 4. ECB rates.
     $pdo->exec('DELETE FROM eur_exchange_rates');
+    // R40: a past date (a future one is refused) and forced (a first feed of three currencies is refused otherwise).
+    $r39vDay = gmdate('Y-m-d', ShopTime::now() - 86400);
     EurRates::setFixtureTransport(static fn(string $url): string => '<?xml version="1.0" encoding="UTF-8"?>
 <gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
-<gesmes:subject>Reference rates</gesmes:subject><Cube><Cube time="2099-01-02"><Cube currency="USD" rate="1.25"/><Cube currency="CZK" rate="25.000"/><Cube currency="HUF" rate="400"/></Cube></Cube></gesmes:Envelope>');
+<gesmes:subject>Reference rates</gesmes:subject><Cube><Cube time="' . $r39vDay . '"><Cube currency="USD" rate="1.25"/><Cube currency="CZK" rate="25.000"/><Cube currency="HUF" rate="400"/></Cube></Cube></gesmes:Envelope>');
     EurRates::reset();
-    $r39vRefreshed = EurRates::refresh($pdo);
+    $r39vRefreshed = EurRates::refresh($pdo, true);
     EurRates::reset();
     $r39vCurrent = EurRates::current();
-    assert_true($r39vRefreshed === ['as_of' => '2099-01-02', 'count' => 3] && $r39vCurrent['as_of'] === '2099-01-02'
+    assert_true($r39vRefreshed === ['as_of' => $r39vDay, 'count' => 3] && $r39vCurrent['as_of'] === $r39vDay
         && abs(($r39vCurrent['rates']['czk'] ?? 0) - 0.04) < 1e-9 && abs(($r39vCurrent['rates']['usd'] ?? 0) - 0.8) < 1e-9,
         'R39 EUR rates: the ECB daily cube is stored and used for the threshold (got ' . json_encode([$r39vRefreshed, $r39vCurrent]) . ')');
     EurRates::setFixtureTransport(static fn(string $url): string => '<html>maintenance</html>');
     $r39vFailed = false;
     try { EurRates::refresh($pdo); } catch (RuntimeException $r39vE) { $r39vFailed = true; }
     EurRates::reset();
-    assert_true($r39vFailed && EurRates::current()['as_of'] === '2099-01-02', 'R39 EUR rates: a broken feed fails loudly and keeps the stored rates');
+    assert_true($r39vFailed && EurRates::current()['as_of'] === $r39vDay, 'R39 EUR rates: a broken feed fails loudly and keeps the stored rates');
 
     // 5. One allowed method of a carrier is not the carrier.
     $r39vZone = (string)$pdo->query("SELECT c.zone_code FROM shipping_zone_countries c JOIN shipping_zones z ON z.code = c.zone_code AND z.store_id = c.store_id

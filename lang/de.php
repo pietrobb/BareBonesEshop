@@ -61,6 +61,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.vat_reason.reverse_charge' => 'Ohne MwSt.: Lieferung an ein in einem anderen Mitgliedstaat registriertes Unternehmen (Reverse Charge).',
     'checkout.vat_reason.export' => 'Ohne MwSt.: Ausfuhr aus der EU.',
     'checkout.vat_reason.digital' => 'Digitale Inhalte nach Wohnsitzland: %s.',
+    'checkout.vat_reason.vat_id_holder' => 'Die USt-IdNr. ist in VIES auf einen anderen Firmennamen als den in der Bestellung registriert, daher wird USt berechnet. Geben Sie den Firmennamen wie registriert an.',
     'checkout.recalculate' => 'Summe neu berechnen',
     'order_summary'    => 'Bestellübersicht',
     'billing_address'  => 'Rechnungsadresse',

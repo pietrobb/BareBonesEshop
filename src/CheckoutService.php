@@ -183,6 +183,11 @@ class CheckoutService {
         if (array_key_exists($ipCountry, ShippingService::billingCountries())) $evidence['ip'] = $ipCountry;
         $choices = array_values(array_unique(array_filter($evidence)));
         if (count($choices) <= 1) return ['country' => $billing, 'choices' => [], 'required' => false, 'evidence' => $evidence];
+        // R40 (low): two items naming one country are the two non-contradictory items of art. 24b: they decide, and the
+        // third is no reason to ask (billed and delivered in Slovakia, an Austrian IP declared Austria and paid its VAT).
+        $counts = array_count_values(array_filter($evidence));
+        arsort($counts);
+        if (reset($counts) >= 2) return ['country' => (string)key($counts), 'choices' => [], 'required' => false, 'evidence' => $evidence + ['decided' => (string)key($counts)]];
         if (!in_array($declared, $choices, true)) return ['country' => $billing, 'choices' => $choices, 'required' => true, 'evidence' => $evidence];
         return ['country' => $declared, 'choices' => $choices, 'required' => false, 'evidence' => $evidence + ['declared' => $declared]];
     }
@@ -190,10 +195,11 @@ class CheckoutService {
     /**
      * R39 (low): the country of the buyer's IP address, from the request header the store's trusted proxy sets
      * (store setting vat_ip_country_header, e.g. "CF-IPCountry"); '' when none is configured — a client could send it.
+     * R40 (low): and only from a request of a trusted proxy (trusted_proxies); a client reaching the shop directly sent it.
      */
     public static function ipCountry(array $store): string {
         $header = trim((string)($store['vat_ip_country_header'] ?? ''));
-        if ($header === '') return '';
+        if ($header === '' || !Security::fromTrustedProxy()) return '';
         $value = $_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $header))] ?? '';
         return is_string($value) ? strtoupper(trim($value)) : '';
     }
@@ -217,10 +223,12 @@ class CheckoutService {
             default => '',
         };
         $evidence = (array)($context['digital_residence_evidence'] ?? []);
-        $residence = (string)($evidence['declared'] ?? $evidence['billing'] ?? '');
+        $residence = (string)($evidence['declared'] ?? $evidence['decided'] ?? $evidence['billing'] ?? '');
         if ($reason !== '' && $residence !== '' && !in_array($scenario, [VatService::SCENARIO_REVERSE_CHARGE, VatService::SCENARIO_EXPORT], true)) {
             $reason .= ' ' . sprintf(I18n::t('checkout.vat_reason.digital'), $name($residence));
         }
+        // R40 (low): a VAT ID VIES registers to another name was charged VAT without a word (vatIdHolderMismatch()).
+        if ($reason !== '' && str_starts_with((string)($vat['vat_id_status'] ?? ''), 'mismatch_')) $reason .= ' ' . I18n::t('checkout.vat_reason.vat_id_holder');
         return [
             'vat_reason' => $reason,
             'residence_label' => I18n::t('checkout.residence.label'), 'residence_hint' => I18n::t('checkout.residence.hint'),

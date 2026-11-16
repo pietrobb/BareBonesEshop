@@ -188,9 +188,11 @@ final class OssThreshold
         $doc = self::invoiceRow($db, $invoiceId);
         if ($doc === null) return;
         $net = self::documentNet($db, $doc);
-        $stmt = $db->prepare('UPDATE invoices SET oss_net = :net WHERE id = :id AND oss_net IS NULL');
-        $stmt->execute([':net' => $net, ':id' => $invoiceId]);
-        if ($stmt->rowCount() === 1 && (string)($doc['status'] ?? '') === 'issued') self::addToTotal($db, $doc, $net);
+        // R40 (low): in another currency, also in EUR at the rate of the day it is issued (art. 91(2)); counted so.
+        $eur = Db::hasColumn('invoices', 'oss_net_eur', $db) ? self::issueEur($db, $doc, $net) : null;
+        $stmt = $db->prepare('UPDATE invoices SET oss_net = :net' . ($eur !== null ? ', oss_net_eur = :eur' : '') . ' WHERE id = :id AND oss_net IS NULL');
+        $stmt->execute([':net' => $net, ':id' => $invoiceId] + ($eur !== null ? [':eur' => $eur] : []));
+        if ($stmt->rowCount() === 1 && (string)($doc['status'] ?? '') === 'issued') self::addToTotal($db, $doc, $net, $eur);
         if (($doc['type'] ?? '') === 'invoice' && ($doc['status'] ?? '') === 'issued' && Db::hasColumn('orders', 'oss_net', $db)) $db->prepare('UPDATE orders SET oss_net = 0 WHERE id = ?')->execute([(int)$doc['order_id']]);
         if ($net > 0 && ($doc['status'] ?? '') === 'issued') self::rememberCrossing($db, (string)(self::orderRow($db, (int)$doc['order_id'])['store_id'] ?? $doc['store_id']), self::documentYear($db, $doc));
     }
@@ -199,7 +201,7 @@ final class OssThreshold
     {
         $doc = self::invoiceRow($db, $invoiceId);
         if ($doc === null || !array_key_exists('oss_net', $doc) || $doc['oss_net'] === null) return;
-        self::addToTotal($db, $doc, -(int)$doc['oss_net']);
+        self::addToTotal($db, $doc, -(int)$doc['oss_net'], isset($doc['oss_net_eur']) ? -(int)$doc['oss_net_eur'] : null);
         if (($doc['type'] ?? '') === 'invoice') self::recordOrder($db, (int)$doc['order_id']);
     }
     /**
@@ -299,12 +301,49 @@ final class OssThreshold
             . " ELSE COALESCE(NULLIF({$doc}.delivery_date, ''), {$doc}.issued_at) END";
     }
 
-    /** @param array<string, mixed> $doc an invoices row */
-    private static function addToTotal(PDO $db, array $doc, int $net): void
+    /**
+     * R40: SQL [currency, net] a stored document of alias $alias counts with: EUR at its issue (oss_net_eur) when converted
+     * then, else its own currency (record(), addToTotal(); OssThresholdCache rebuilds the totals by the same).
+     * @return array{0: string, 1: string}
+     */
+    public static function storedNetSql(PDO $db, string $alias): array
     {
+        if (!Db::hasColumn('invoices', 'oss_net_eur', $db)) return ["LOWER({$alias}.currency)", "{$alias}.oss_net"];
+        return ["CASE WHEN {$alias}.oss_net_eur IS NOT NULL THEN 'eur' ELSE LOWER({$alias}.currency) END", "COALESCE({$alias}.oss_net_eur, {$alias}.oss_net)"];
+    }
+
+    /**
+     * R40 (low): EUR cents of a document's distance-sale net $net in another currency, at the rate it is issued at: a credit
+     * note (a reversal) at the rate of the document it corrects, else the current ECB rate (EurRates). Null in EUR, or
+     * without a rate (counted in its currency then, at the current rate).
+     * @param array<string, mixed> $doc an invoices row
+     */
+    private static function issueEur(PDO $db, array $doc, int $net): ?int
+    {
+        $currency = strtolower((string)($doc['currency'] ?? 'eur'));
+        if ($net === 0 || $currency === 'eur') return null;
+        if ((string)($doc['type'] ?? 'invoice') === 'credit_note') {
+            $credit = json_decode((string)($doc['credit_snapshot'] ?? ''), true);
+            $sourceId = is_array($credit) && ($credit['kind'] ?? '') === 'reversal' ? (int)($credit['reverses_credit_note_id'] ?? 0) : (int)($doc['refers_to_invoice_id'] ?? 0);
+            $source = self::invoiceRow($db, $sourceId);
+            if ($source !== null && isset($source['oss_net_eur']) && (int)($source['oss_net'] ?? 0) !== 0) {
+                return (int)round($net * (int)$source['oss_net_eur'] / (int)$source['oss_net']);
+            }
+        }
+        $rate = EurRates::current()['rates'][$currency] ?? null;
+        return is_numeric($rate) && (float)$rate > 0 ? (int)round($net * (float)$rate) : null;
+    }
+
+    /**
+     * @param array<string, mixed> $doc an invoices row
+     * @param ?int $eur its net in EUR at its issue (issueEur()): counted in the EUR total; else $net in its currency
+     */
+    private static function addToTotal(PDO $db, array $doc, int $net, ?int $eur = null): void
+    {
+        if ($eur !== null) $net = $eur;
         if ($net === 0 || !Db::tableExists('oss_threshold_totals', $db)) return;
         $order = self::orderRow($db, (int)($doc['order_id'] ?? 0));
-        $key = [(string)($order['store_id'] ?? $doc['store_id'] ?? 'default'), self::documentYear($db, $doc), strtolower((string)($doc['currency'] ?? 'eur'))];
+        $key = [(string)($order['store_id'] ?? $doc['store_id'] ?? 'default'), self::documentYear($db, $doc), $eur !== null ? 'eur' : strtolower((string)($doc['currency'] ?? 'eur'))];
         $db->prepare(Db::insertIgnore() . ' INTO oss_threshold_totals (store_id, year, currency, net) VALUES (?, ?, ?, 0)')->execute($key);
         $db->prepare('UPDATE oss_threshold_totals SET net = net + ? WHERE store_id = ? AND year = ? AND currency = ?')->execute([$net, ...$key]);
     }
@@ -371,6 +410,7 @@ final class OssThreshold
         if (self::sellerOssEnabled($context->id(), $store) || !Db::tableExists('invoices', $db)) return null;
         $sellerCountry = self::sellerCountry($store);
         $order = [
+            'store_id' => $context->id(),
             'shipping_addr' => json_encode($customer['address'] ?? [], JSON_UNESCAPED_UNICODE),
             'billing_addr' => !empty($customer['billing_address']) ? json_encode($customer['billing_address'], JSON_UNESCAPED_UNICODE) : null,
             'customer_name' => (string)($customer['name'] ?? ''),
@@ -461,12 +501,14 @@ final class OssThreshold
         // when collected there (CheckoutService::vatContext()).
         $method = (string)($order['shipping_method'] ?? '');
         $delivered = strtoupper(trim((string)(OrderAddress::delivery($order)['country'] ?? '')));
-        if ($method !== 'digital' && $delivered !== '') $residence = self::collected($method) ? strtoupper($sellerCountry) : $delivered;
+        if ($method !== 'digital' && $delivered !== '') $residence = self::collected($method, (string)($order['store_id'] ?? 'default')) ? strtoupper($sellerCountry) : $delivered;
         // R39 (low): an order placed since records the evidence its e-books were taxed on (CheckoutService::digitalResidence()):
         // the country declared, else the billing one. An Austrian collecting in the Bratislava store was counted at home.
         $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
         $evidence = is_array($snapshot) && is_array($snapshot['digital_residence'] ?? null) ? $snapshot['digital_residence'] : null;
-        if ($evidence !== null && ($evidence['declared'] ?? $evidence['billing'] ?? '') !== '') $residence = strtoupper((string)($evidence['declared'] ?? $evidence['billing']));
+        // R40: or the country two items of evidence named ('decided').
+        $evidenced = (string)($evidence['declared'] ?? $evidence['decided'] ?? $evidence['billing'] ?? '');
+        if ($evidence !== null && $evidenced !== '') $residence = strtoupper($evidenced);
         $business = trim((string)($billing['ic_dph'] ?? '')) !== '' && empty($billing['ic_dph_unverified']);
         $goods = in_array($scenario, [VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH], true);
         $digital = !$business && $residence !== '' && $residence !== strtoupper($sellerCountry) && VatService::isEuCountry($residence);
@@ -476,13 +518,14 @@ final class OssThreshold
     /**
      * Whether an order's method is collection in the seller's store (ShippingService::isPickupMethod() without a store
      * context, as in a migration recounting documents): the code "pickup", or a method of that carrier or adapter.
+     * R40 (low): of the order's store; another store's pickup method of the same code counted a courier order as collected.
      */
-    private static function collected(string $method): bool
+    private static function collected(string $method, string $storeId): bool
     {
         if ($method === '' || $method === 'digital') return false;
         if ($method === 'pickup') return true;
-        $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = ? AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup') LIMIT 1");
-        $stmt->execute([$method]);
+        $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = ? AND store_id = ? AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup') LIMIT 1");
+        $stmt->execute([$method, $storeId]);
         return $stmt->fetchColumn() !== false;
     }
 
@@ -522,7 +565,8 @@ final class OssThreshold
     {
         $since = sprintf('%04d-01-01', (int)ShopTime::date('Y') - 1);
         // R38 (medium 4): replayed when issued, counted in the year of the invoice a credit note corrects.
-        $stmt = $db->prepare("SELECT o.store_id, i.issued_at AS at_date, " . self::documentDateSql('i', 's') . " AS year_date, i.id, 0 AS kind, i.type AS doc_type, o.id AS order_id, i.currency, i.oss_net AS net
+        [$currencySql, $netSql] = self::storedNetSql($db, 'i'); // R40: EUR at the issue when converted then
+        $stmt = $db->prepare("SELECT o.store_id, i.issued_at AS at_date, " . self::documentDateSql('i', 's') . " AS year_date, i.id, 0 AS kind, i.type AS doc_type, o.id AS order_id, {$currencySql} AS currency, {$netSql} AS net
             FROM invoices i JOIN orders o ON o.id = i.order_id LEFT JOIN invoices s ON s.id = i.refers_to_invoice_id
             WHERE i.status = 'issued' AND i.type IN ('invoice', 'credit_note') AND i.issued_at >= ? AND i.oss_net <> 0
             UNION ALL SELECT o.store_id, o.created_at AS at_date, o.created_at AS year_date, o.id, 1 AS kind, 'order' AS doc_type, o.id AS order_id, o.currency, o.oss_net AS net
@@ -672,7 +716,9 @@ final class OssThreshold
             $stmt->execute([...$storeIds, $year]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $add((string)$row['currency'], (int)$row['net']);
         } elseif ($stored) {
-            $stmt = $db->prepare("SELECT LOWER(i.currency) AS currency, COALESCE(SUM(i.oss_net), 0) AS net {$documents} AND i.oss_net <> 0 GROUP BY LOWER(i.currency)");
+            // R40: in EUR at its issue when converted then (record()).
+            [$currencySql, $netSql] = self::storedNetSql($db, 'i');
+            $stmt = $db->prepare("SELECT {$currencySql} AS currency, COALESCE(SUM({$netSql}), 0) AS net {$documents} AND i.oss_net <> 0 GROUP BY {$currencySql}");
             $stmt->execute([...$storeIds, ...$documentRange]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $add((string)$row['currency'], (int)$row['net']);
         }
