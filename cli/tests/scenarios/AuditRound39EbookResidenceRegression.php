@@ -100,6 +100,12 @@ if ($phase === 'manual') {
     echo 'R39ERESULT' . json_encode(['result' => $result, 'new_orders' => $lines(array_slice($orders(), $before))]);
     exit(0);
 }
+if ($phase === 'edit') {
+    $result = ManualOrder::editItems((int)$args['order_id'], ManualOrder::parseLines("R39E-MUG 2\nR39E-BOOK 1")['lines']);
+    $edited = array_values(array_filter($orders(), static fn(array $o): bool => (int)$o['id'] === (int)$args['order_id']));
+    echo 'R39ERESULT' . json_encode(['result' => $result, 'order' => $lines($edited)[0] ?? null]);
+    exit(0);
+}
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_GET = ['page' => 'checkout'];
 $_POST = $typed;
@@ -167,6 +173,10 @@ try {
         $manual = $do('manual', $r39eGift + ['oss' => true, 'residence_country' => 'LU']);
         assert_true(($manual['result']['ok'] ?? false) && (($manual['new_orders'][0]['items']['R39E-BOOK'][0] ?? -1) === $r39eRate('LU')),
             "{$label}: a manual order declared LU taxes the e-book in LU (got " . json_encode($manual) . ')');
+        $edit = $do('edit', ['oss' => true, 'order_id' => (int)($manual['new_orders'][0]['id'] ?? 0)]);
+        assert_true(($edit['result']['ok'] ?? false) && ($edit['order']['items']['R39E-BOOK'][0] ?? -1) === $r39eRate('LU')
+            && ($edit['order']['items']['R39E-MUG'][0] ?? -1) === $r39eRate('SK'),
+            "{$label}: editing its lines keeps the declared residence, the e-book stays in LU (was: residence asked again; got " . json_encode($edit) . ')');
 
         // 2. An Austrian collecting in the store's own second pick-up desk (a method of another carrier code).
         foreach ([true, false] as $oss) {

@@ -189,7 +189,7 @@ country. When they disagree, the buyer (or the admin, for a manual order) states
 country of residence; the order records the evidence in its financial snapshot.
 A store's own pick-up desk under any carrier code is set up as a shipping method of
 type "Pick-up in store". OSS is the VAT payer's registration: switched on in one store, it
-applies to every store with the same IČ DPH.
+applies to every store with the same VAT ID (`legal.ic_dph`).
 
 ### Merchant setup and operations
 

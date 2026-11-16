@@ -100,7 +100,8 @@ class CheckoutService {
         $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, $vatWeight, 0, false, 0, ShippingService::physicalQuantity($vatGoods), isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
         if ($rate !== null && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
-        $residenceCheck = self::hasDownload($vatGoods)
+        // A business with a valid VAT ID gets downloads where it is established (below), so no residence is asked.
+        $residenceCheck = self::hasDownload($vatGoods) && !$vatIdValid
             ? self::digitalResidence($digitalOnly, $billingCountry, $country, ($rate['carrier'] ?? '') === 'pickup', $declaredResidence, $ipCountry)
             : ['country' => strtoupper(trim(vatSupplyCountry($rate, $country, $sellerCountry))), 'choices' => [], 'required' => false, 'evidence' => []];
         $residence = $residenceCheck['country'];

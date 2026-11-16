@@ -11,6 +11,7 @@ $pdo ??= test_commerce_fixture();
 echo "\n--- R39 VAT low: VIES holder, residence evidence, OSS per VAT payer, ECB rates, one method ≠ the carrier ---\n";
 
 Bootstrap::initStoreContext('/', '', 'default');
+(require TEST_CLI_DIR . '/../migrations/20261116110000_eur_exchange_rates.php')->up($pdo, Db::isSqlite());
 try {
     // 1. VIES holder.
     $pdo->exec("DELETE FROM vat_id_cache WHERE vat_id LIKE 'DE3939%' OR vat_id LIKE 'SK3939%'");

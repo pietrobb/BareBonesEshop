@@ -187,7 +187,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   residence, and the OSS threshold counts the order by the recorded evidence. The checkout shows why its VAT is
   charged (the seller's, the consumer's under OSS, reverse charge, export). The VIES holder check no longer accepts a
   company named by its legal form only or one shared word, matches "Müller" to "MUELLER", and accepts a VAT ID of
-  another member state than the billing one (art. 138). OSS is the VAT payer's: a store of an IČ DPH whose other store
+  another member state than the billing one (art. 138). OSS is the VAT payer's: a store of a VAT ID whose other store
   has OSS on charges OSS VAT too, and the setup doctor warns about a store with OSS off next to one with it on. A store's own
   pickup method (any carrier code, type "store pickup") is a domestic supply. `cli/eur-rates.php` stores the ECB
   reference rates (table of migration `20261116110000_eur_exchange_rates`) the threshold converts other currencies with (cron on working days, e.g. `35 17 * * 1-5`); the

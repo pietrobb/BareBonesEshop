@@ -44,13 +44,15 @@ try {
         ->execute([':at' => gmdate('Y-m-d H:i:s')]);
 
     // 1. Art. 44: a download for a business with a valid German VAT ID is reverse charged in Germany. R38 (review round 12,
-    // low): only for the VAT ID's holder, billed in its state; billed to Slovakia or the USA the VAT ID is not the buyer's
-    // (VatService::vatIdHolderMismatch()) and the download keeps the seller's VAT (R5: a declared non-EU country alone).
+    // low): only for the VAT ID's holder (VatService::vatIdHolderMismatch()). R39 (low): wherever it is billed, the
+    // holder is identified for VAT in Germany (art. 44, 138; R38 also required billing in the VAT ID's state); another
+    // company named with the VAT ID keeps the seller's VAT (R5: a declared non-EU country alone).
     $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1]];
-    assert_equals([['domestic', 'SK'], ['domestic', 'SK'], ['reverse_charge', 'DE']],
-        [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'SK')), $r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'US')),
-         $r34lScenario(CheckoutService::vatContext('DE', 'DE123456789', '', true, null, 'DE'))],
-        'R34 VAT: an e-book for a German business billed in Germany is reverse charged in DE; billed to Slovakia or the USA the German VAT ID is not the buyer\'s (R38)');
+    assert_equals([['reverse_charge', 'DE'], ['reverse_charge', 'DE'], ['reverse_charge', 'DE'], ['domestic', 'SK'], ['domestic', 'SK']],
+        [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'SK', 'R34L GmbH')), $r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'US', 'R34L GmbH')),
+         $r34lScenario(CheckoutService::vatContext('DE', 'DE123456789', '', true, null, 'DE', 'R34L GmbH')),
+         $r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'SK', 'Fremde Bau GmbH')), $r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'US', 'Fremde Bau GmbH'))],
+        'R34 VAT: an e-book for the German VAT ID\'s holder is reverse charged in DE billed in Germany, Slovakia or the USA (R39, art. 44/138); another company with that VAT ID pays the seller\'s VAT (R38)');
     assert_equals([['domestic', 'SK'], ['oss', 'AT']],
         [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', false, null, 'SK')), $r34lScenario(CheckoutService::vatContext('SK', '', '', false, null, 'AT'))],
         'R34 VAT: an unverified VAT ID is a consumer where it is billed; a consumer billed to Austria stays OSS AT');
@@ -100,7 +102,7 @@ try {
     assert_equals(['pass', 'warn', 'pass', 'stores.oss_threshold.default'], [$under['status'], $over['status'], $withOss['status'], $over['name']],
         'R34 VAT: cross-border consumer sales at the seller\'s VAT above 10 000 EUR in a year warn to switch OSS on (was: a manual switch only)');
     assert_true(str_contains($over['message'], '10 500.00 EUR') && str_contains($over['action'], 'Admin → Stores'),
-        'R34 VAT: the OSS threshold warning names the amount and where to switch OSS on');
+        'R34 VAT: the OSS threshold warning names the amount and where to switch OSS on (got ' . $over['message'] . ' / ' . $over['action'] . ')');
     $checklistTitle = SetupChecklist::title('stores.oss_threshold.default');
     assert_true($checklistTitle !== null && str_contains($checklistTitle, trim((string)(Bootstrap::stores()['stores']['default']['name'] ?? '')) ?: 'default') && SetupChecklist::fixPage('stores.oss_threshold.default') === 'stores',
         'R34 VAT: the dashboard checklist shows the OSS threshold warning translated, with the store settings to fix it');
