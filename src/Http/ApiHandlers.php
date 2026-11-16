@@ -703,7 +703,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // sale that passes the OSS threshold (below, thresholdVat()) only re-splits the same gross; the checkout page decides
     // it as this does, the JSON previews estimate it on the cart lines (they do not know the shipping and fee chosen).
     $declaredResidence = is_string($input['residence_country'] ?? null) ? $input['residence_country'] : '';
-    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''), (string)($buyerCompany['fields']['company'] ?? ''), $declaredResidence);
+    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''), (string)($buyerCompany['fields']['company'] ?? ''), $declaredResidence, CheckoutService::ipCountry(StoreContext::current()->config()));
     // R39 (low): billing and delivery countries contradict on where the buyer of an e-book lives; the checkout form asks
     // (CheckoutService::digitalResidence()). A client without that field (an older theme, the API) keeps the billing country.
     if ($vat['residence_required'] && array_key_exists('residence_country', $input)) return checkoutRefusal('checkout.error.residence_required', 422);

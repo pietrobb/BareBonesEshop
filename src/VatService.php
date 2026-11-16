@@ -509,7 +509,7 @@ class VatService implements TaxProvider
         // R39 (low): the evidence the downloads' country of supply rests on (CheckoutService::digitalResidence()).
         $residence = $context['digital_residence_evidence'] ?? null;
         if (is_array($residence) && $residence !== []) {
-            $snapshot['digital_residence'] = array_map('strval', array_intersect_key($residence, array_flip(['billing', 'delivery', 'declared'])));
+            $snapshot['digital_residence'] = array_map('strval', array_intersect_key($residence, array_flip(['billing', 'delivery', 'ip', 'declared'])));
         }
         $snapshot['fingerprint'] = self::snapshotFingerprint($snapshot);
         self::validateSnapshot($snapshot);

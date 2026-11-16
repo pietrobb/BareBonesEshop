@@ -63,7 +63,7 @@ class CheckoutService {
      * an e-service is taxed where the consumer lives or the business is established, not where a parcel goes.
      * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
      */
-    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = ''): array {
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = '', string $ipCountry = ''): array {
         $store = StoreContext::current()->config();
         $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
         $vatIdValid = false;
@@ -101,7 +101,7 @@ class CheckoutService {
         if ($rate !== null && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $residenceCheck = self::hasDownload($vatGoods)
-            ? self::digitalResidence($digitalOnly, $billingCountry, $country, ($rate['carrier'] ?? '') === 'pickup', $declaredResidence)
+            ? self::digitalResidence($digitalOnly, $billingCountry, $country, ($rate['carrier'] ?? '') === 'pickup', $declaredResidence, $ipCountry)
             : ['country' => strtoupper(trim(vatSupplyCountry($rate, $country, $sellerCountry))), 'choices' => [], 'required' => false, 'evidence' => []];
         $residence = $residenceCheck['country'];
         $consumerResidence = $residence;
@@ -168,19 +168,33 @@ class CheckoutService {
      * item; goods sent to an address are another, collection in the store is none. When they contradict, the country the
      * buyer declares, one of the two, decides (with the item it matches); until declared the order is refused
      * ('required') and the previews price with the billing country. Without a contradiction a declaration is not
-     * needed (nor taken): a digital-only order still has only its billing country.
+     * needed (nor taken). A digital-only order had nothing but the billing country the buyer typed: the country of the
+     * buyer's IP address ($ipCountry, art. 24f(b); ipCountry()) is a second item when the store's proxy supplies it.
      * @return array{country: string, choices: list<string>, required: bool, evidence: array<string, string>}
      */
-    public static function digitalResidence(bool $digitalOnly, string $billingCountry, string $deliveryCountry, bool $collectedInStore, string $declared): array {
+    public static function digitalResidence(bool $digitalOnly, string $billingCountry, string $deliveryCountry, bool $collectedInStore, string $declared, string $ipCountry = ''): array {
         $delivery = strtoupper(trim($deliveryCountry));
         $billing = strtoupper(trim($billingCountry)) ?: $delivery;
         $declared = strtoupper(trim($declared));
         $evidence = ['billing' => $billing];
         if (!$digitalOnly && !$collectedInStore && $delivery !== '') $evidence['delivery'] = $delivery;
+        $ipCountry = strtoupper(trim($ipCountry));
+        if (array_key_exists($ipCountry, ShippingService::billingCountries())) $evidence['ip'] = $ipCountry;
         $choices = array_values(array_unique(array_filter($evidence)));
         if (count($choices) <= 1) return ['country' => $billing, 'choices' => [], 'required' => false, 'evidence' => $evidence];
         if (!in_array($declared, $choices, true)) return ['country' => $billing, 'choices' => $choices, 'required' => true, 'evidence' => $evidence];
         return ['country' => $declared, 'choices' => $choices, 'required' => false, 'evidence' => $evidence + ['declared' => $declared]];
+    }
+
+    /**
+     * R39 (low): the country of the buyer's IP address, from the request header the store's trusted proxy sets
+     * (store setting vat_ip_country_header, e.g. "CF-IPCountry"); '' when none is configured — a client could send it.
+     */
+    public static function ipCountry(array $store): string {
+        $header = trim((string)($store['vat_ip_country_header'] ?? ''));
+        if ($header === '') return '';
+        $value = $_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $header))] ?? '';
+        return is_string($value) ? strtoupper(trim($value)) : '';
     }
 
     /**
@@ -281,7 +295,7 @@ class CheckoutService {
         $verify = $known === null && $vatId !== '' && Security::rateLimitAllows('checkout_vat_preview', 20, 600);
         if ($verify) Security::rateLimitRecord('checkout_vat_preview');
         if ($vatId !== '') self::rememberUncheckedVatId($vatId, $known === null && !$verify);
-        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry, $company, $declaredResidence);
+        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry, $company, $declaredResidence, self::ipCountry(StoreContext::current()->config()));
     }
 
     /**

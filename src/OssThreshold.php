@@ -374,6 +374,7 @@ final class OssThreshold
             'shipping_addr' => json_encode($customer['address'] ?? [], JSON_UNESCAPED_UNICODE),
             'billing_addr' => !empty($customer['billing_address']) ? json_encode($customer['billing_address'], JSON_UNESCAPED_UNICODE) : null,
             'customer_name' => (string)($customer['name'] ?? ''),
+            'financial_snapshot' => json_encode(['digital_residence' => $snapshot['digital_residence'] ?? null]),
             'shipping_method' => array_filter($cartItems, static fn(array $item): bool => empty($item['digital']) && !VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))) ? (string)($customer['shipping_method'] ?? '') : 'digital',
         ];
         $scenario = (string)($snapshot['scenario'] ?? '');
@@ -461,6 +462,11 @@ final class OssThreshold
         $method = (string)($order['shipping_method'] ?? '');
         $delivered = strtoupper(trim((string)(OrderAddress::delivery($order)['country'] ?? '')));
         if ($method !== 'digital' && $delivered !== '') $residence = self::collected($method) ? strtoupper($sellerCountry) : $delivered;
+        // R39 (low): an order placed since records the evidence its e-books were taxed on (CheckoutService::digitalResidence()):
+        // the country declared, else the billing one. An Austrian collecting in the Bratislava store was counted at home.
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $evidence = is_array($snapshot) && is_array($snapshot['digital_residence'] ?? null) ? $snapshot['digital_residence'] : null;
+        if ($evidence !== null && ($evidence['declared'] ?? $evidence['billing'] ?? '') !== '') $residence = strtoupper((string)($evidence['declared'] ?? $evidence['billing']));
         $business = trim((string)($billing['ic_dph'] ?? '')) !== '' && empty($billing['ic_dph_unverified']);
         $goods = in_array($scenario, [VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH], true);
         $digital = !$business && $residence !== '' && $residence !== strtoupper($sellerCountry) && VatService::isEuCountry($residence);

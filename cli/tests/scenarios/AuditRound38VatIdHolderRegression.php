@@ -105,7 +105,8 @@ try {
             'the holder, as registered (control)' => [['company' => 'R38H Handels GmbH', 'vat_id' => 'ATU38383839'], 'reverse_charge'],
             'the holder, shorter name without the legal form' => [['company' => 'r38h handels', 'vat_id' => 'ATU38383839'], 'reverse_charge'],
             'another company with the holder\'s ATU' => [['company' => 'Fremde Bau GmbH', 'vat_id' => 'ATU38383839'], 'oss'],
-            'a German VAT ID, billed in Austria' => [['company' => 'R38H Deutschland GmbH', 'vat_id' => 'DE383838390'], 'oss'],
+            // R39 (low): art. 138 exempts a supply to a buyer identified in any other member state, not only the billing one.
+            'a German VAT ID, billed in Austria' => [['company' => 'R38H Deutschland GmbH', 'vat_id' => 'DE383838390'], 'reverse_charge'],
             'a German VAT ID, billed in Germany, delivered to Austria' => [['company' => 'R38H Deutschland GmbH', 'vat_id' => 'DE383838390'] + $r38hBilledDe, 'reverse_charge'],
         ];
         foreach ($cases as $case => [$input, $scenario]) {

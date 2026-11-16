@@ -4,6 +4,8 @@
 // (CheckoutService::vatContext()): a Slovak buyer with goods delivered in Slovakia and a Luxembourg billing address paid
 // 17 % on the e-book instead of 23 %, and the shop declared it under OSS in Luxembourg. Next to goods the delivery
 // country, proven by the dispatch, decides; a digital-only order still goes by the billing country.
+// R39: the two countries contradict, so the buyer declares one (CheckoutService::digitalResidence()); this Slovak buyer
+// declares SK. AuditRound39VatLowRegression covers the refusal without a declaration and the Luxembourg resident.
 echo "\n--- R38 e-book VAT country in a mixed cart follows the delivery, not a typed billing country ---\n";
 $r38eRoot = test_fixture_path('ebook-country-r38');
 mkdir($r38eRoot);
@@ -128,19 +130,19 @@ try {
         };
         foreach ([true, false] as $oss) {
             $label = "R38 e-book country {$r38eDriver}/OSS " . ($oss ? 'on' : 'off');
-            $page = $do('refresh', ['oss' => $oss, 'shipping_method' => 'r38e-post', 'checkout_refresh' => '1']);
+            $page = $do('refresh', ['oss' => $oss, 'shipping_method' => 'r38e-post', 'residence_country' => 'SK', 'checkout_refresh' => '1']);
             $html = (string)($page['output'] ?? '');
             $quoted = preg_match('~name="quoted_total" value="(\d+)"~', $html, $m) ? (int)$m[1] : null;
             $consents = preg_match_all('~name="consents\[([a-z_]+)\]" value="1"~', $html, $m) ? array_fill_keys($m[1], '1') : [];
             assert_equals(12300 + 1230, $quoted, "{$label}: SK delivery billed to LU shows the Slovak gross of both lines");
-            $ordered = $do('order', ['oss' => $oss, 'shipping_method' => 'r38e-post', 'quoted_total' => (string)$quoted, 'consents' => $consents, 'checkout' => '1']);
+            $ordered = $do('order', ['oss' => $oss, 'shipping_method' => 'r38e-post', 'residence_country' => 'SK', 'quoted_total' => (string)$quoted, 'consents' => $consents, 'checkout' => '1']);
             $order = $ordered['new_orders'][0] ?? [];
             $error = preg_match('~<p id="checkout-error"[^>]*>([^<]+)</p>~', (string)($ordered['output'] ?? ''), $m) ? html_entity_decode($m[1]) : '';
             assert_true(count($ordered['new_orders'] ?? []) === 1 && ($order['scenario'] ?? '') === 'domestic' && ($order['total'] ?? -1) === $quoted,
                 "{$label}: storefront order placed domestic at the shown total (" . json_encode($order) . " {$error})");
             assert_true(($order['ebook'][0] ?? -1) === $r38eSk && !in_array($order['ebook'][2] ?? null, ['oss'], true) && ($order['oss_net'] ?? -1) === 0,
                 "{$label}: the e-book pays {$r38eSk} bp Slovak VAT, not {$r38eLu} bp Luxembourg OSS, and nothing counts abroad (" . json_encode($order['ebook'] ?? null) . ')');
-            $manual = $do('manual', ['oss' => $oss]);
+            $manual = $do('manual', ['oss' => $oss, 'residence_country' => 'SK']);
             $order = $manual['new_orders'][0] ?? [];
             assert_true(($manual['result']['ok'] ?? false) && ($order['ebook'][0] ?? -1) === $r38eSk && ($order['oss_net'] ?? -1) === 0,
                 "{$label}: a manual order billed to LU taxes the e-book at home too (" . json_encode([$manual['result']['error'] ?? 'ok', $order]) . ')');
