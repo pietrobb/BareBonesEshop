@@ -412,10 +412,10 @@ try {
     if ($r6mHasConfirm) {
         assert_equals(['amount' => 300, 'request_key' => 'r6m_partial_request'], PaymentService::unconfirmedProviderRefund(Orders::byId($r6mPartial)),
             'R6 refund: the accepted GoPay refund is offered for confirmation with its amount');
-        PaymentService::confirmProviderRefund($r6mPartial, 'r6m-admin', 'Seen paid in the GoPay portal');
+        PaymentService::confirmProviderRefund($r6mPartial, 'r6m-admin', 'Seen paid in the GoPay portal', 'r6m_partial_request', 300);
         assert_equals(['partially_refunded', 300, 700], $r6mState($r6mPartial), 'R6 refund: the confirmed partial refund is booked once (was stuck in refund_pending)');
         $r6mAgain = false;
-        try { PaymentService::confirmProviderRefund($r6mPartial, 'r6m-admin', 'twice'); } catch (LogicException $e) { $r6mAgain = true; }
+        try { PaymentService::confirmProviderRefund($r6mPartial, 'r6m-admin', 'twice', 'r6m_partial_request', 300); } catch (LogicException $e) { $r6mAgain = true; }
         assert_true($r6mAgain && $r6mState($r6mPartial)[1] === 300, 'R6 refund: a second confirmation books nothing');
         $r6mAudit = (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity = 'order_refund' AND entity_id = '{$r6mPartial}' AND note LIKE '%confirmed by r6m-admin%'")->fetchColumn();
         assert_equals(1, $r6mAudit, 'R6 refund: the confirmation is audited with the acting admin');
@@ -459,7 +459,7 @@ try {
         assert_equals(['refund_pending', 0, 1000], $r6mState($r6mCredited), 'R6 refund: an accepted GoPay credit-note refund waits; its PARTIALLY_REFUNDED report books nothing');
         assert_equals(['amount' => 250, 'request_key' => 'r6m-credit-1', 'refund_id' => $r6mCreditRefund], PaymentService::unconfirmedProviderRefund(Orders::byId($r6mCredited)),
             'R6 refund: an accepted GoPay credit-note refund is offered for confirmation too (was stuck in refund_pending)');
-        PaymentService::confirmProviderRefund($r6mCredited, 'r6m-admin', 'Credit note refund seen in the GoPay portal');
+        PaymentService::confirmProviderRefund($r6mCredited, 'r6m-admin', 'Credit note refund seen in the GoPay portal', 'r6m-credit-1', 250);
         assert_equals(['partially_refunded', 250, 750], $r6mState($r6mCredited), 'R6 refund: the confirmed credit-note refund is booked once');
         assert_equals(['succeeded', 'admin-confirmed:r6m-admin', 'pending'], [(string)Rma::refundById($r6mCreditRefund)['status'],
             (string)Rma::refundById($r6mCreditRefund)['payment_reference'], (string)Rma::refundById($r6mOtherRefund)['status']],
@@ -484,11 +484,11 @@ try {
         $r6mGoPayState = 'PARTIALLY_REFUNDED';
         PaymentService::handlePulledNotification(['id' => '3600000305'], $r6mGoPay, 'gopay');
         $r7First = PaymentService::unconfirmedProviderRefund(Orders::byId($r7Twin));
-        PaymentService::confirmProviderRefund($r7Twin, 'r7-admin', 'First credit note refund seen in the GoPay portal');
+        PaymentService::confirmProviderRefund($r7Twin, 'r7-admin', 'First credit note refund seen in the GoPay portal', (string)($r7First['request_key'] ?? ''), (int)($r7First['amount'] ?? 0));
         $r7Second = PaymentService::unconfirmedProviderRefund(Orders::byId($r7Twin));
         assert_true($r7First !== null && $r7Second !== null && $r7Second['refund_id'] !== $r7First['refund_id'],
             'R7 refund: after one of two concurrent GoPay credit-note refunds is confirmed, the other is still offered (was hidden by partially_refunded)');
-        PaymentService::confirmProviderRefund($r7Twin, 'r7-admin', 'Second credit note refund seen in the GoPay portal');
+        PaymentService::confirmProviderRefund($r7Twin, 'r7-admin', 'Second credit note refund seen in the GoPay portal', (string)($r7Second['request_key'] ?? ''), (int)($r7Second['amount'] ?? 0));
         assert_equals([550, 'succeeded', 'succeeded'], [PaymentService::refundedAmount($r7Twin),
             (string)Rma::refundById($r7TwinRefunds['r7-twin-a'])['status'], (string)Rma::refundById($r7TwinRefunds['r7-twin-b'])['status']],
             'R7 refund: both concurrent GoPay credit-note refunds are booked once each');
@@ -499,7 +499,7 @@ try {
         PaymentService::requestRefundAndQueue($r6mLater, 300, 'r6m_goodwill_request', ['reason' => 'R6M']);
         $r6mGoPayState = 'PAID';
         $r6mRunJobs($r6mLater);
-        PaymentService::confirmProviderRefund($r6mLater, 'r6m-admin', 'Goodwill refund seen in the GoPay portal');
+        PaymentService::confirmProviderRefund($r6mLater, 'r6m-admin', 'Goodwill refund seen in the GoPay portal', 'r6m_goodwill_request', 300);
         $pdo->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
             VALUES ('default', ?, 0, 0, 250, 'eur', 'pending', 'r6m-credit-after-confirm')")->execute([$r6mLater]);
         $r6mLaterRefund = (int)$pdo->lastInsertId();
@@ -512,7 +512,7 @@ try {
         assert_equals(['amount' => 250, 'request_key' => 'r6m-credit-after-confirm', 'refund_id' => $r6mLaterRefund], PaymentService::unconfirmedProviderRefund(Orders::byId($r6mLater)),
             'R6 refund: a credit note after an admin-confirmed refund is offered, not the settled request');
         assert_true(PaymentService::unexecutedRefundRequest(Orders::byId($r6mLater)) === null, 'R6 refund: the settled request is not offered for a retry either');
-        try { PaymentService::confirmProviderRefund($r6mLater, 'r6m-admin', 'Credit note refund seen in the GoPay portal'); } catch (LogicException $e) { }
+        try { PaymentService::confirmProviderRefund($r6mLater, 'r6m-admin', 'Credit note refund seen in the GoPay portal', 'r6m-credit-after-confirm', 250); } catch (LogicException $e) { }
         assert_equals(['partially_refunded', 550, 450, 'succeeded'], array_merge($r6mState($r6mLater), [(string)Rma::refundById($r6mLaterRefund)['status']]),
             'R6 refund: that credit note refund is completed after the earlier confirmed one (was stuck in refund_pending)');
 
