@@ -75,11 +75,11 @@ final class EurRates
             $db->exec('DELETE FROM eur_exchange_rates');
             $insert = $db->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)');
             foreach ($rates as $code => $rate) $insert->execute([$code, $rate, $asOf]);
-            if ($own) $db->commit();
         } catch (Throwable $e) {
-            if ($own && $db->inTransaction()) $db->rollBack();
+            if ($own) $db->rollBack();
             throw $e;
         }
+        if ($own) $db->commit();
         OssThreshold::reset();
         return ['as_of' => $asOf, 'count' => count($rates)];
     }

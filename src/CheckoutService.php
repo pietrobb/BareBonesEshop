@@ -61,7 +61,7 @@ class CheckoutService {
      * the result of an earlier check (an order being edited keeps the verification it was placed with).
      * R33: $billingCountry (the billing address, when the order is billed elsewhere) is where a download is supplied:
      * an e-service is taxed where the consumer lives or the business is established, not where a parcel goes.
-     * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
+     * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string, oss_threshold: mixed, residence_choices: array, residence_required: bool}
      */
     public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = '', string $ipCountry = ''): array {
         $store = StoreContext::current()->config();
