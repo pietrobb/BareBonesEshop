@@ -61,6 +61,7 @@ final class EurRates
         $day = $xml->xpath('//e:Cube[@time]')[0] ?? null;
         $asOf = $day === null ? '' : (string)$day['time'];
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $asOf)) throw new RuntimeException('The ECB rates feed has no date');
+        $day->registerXPathNamespace('e', 'http://www.ecb.int/vocabulary/2002-08-01/eurofxref'); // not inherited from $xml
         $rates = [];
         foreach ($day->xpath('e:Cube[@currency]') ?: [] as $cube) {
             $code = strtoupper((string)$cube['currency']);
