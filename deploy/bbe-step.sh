@@ -25,22 +25,36 @@ export PATH
 if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 
-if [ "$#" -lt 2 ]; then
-    echo "usage: bbe-step <application root> <step>.php [arguments...]" >&2
+# R38 (usability): `bbe-step php cli/update.php …` (the command it replaces, typed after it) said only "the application
+# root must be an absolute path: php". Every wrong form prints the usage with an example.
+usage() { # usage [problem]
+    [ -n "${1:-}" ] && echo "bbe-step: $1" >&2
+    cat >&2 <<'USAGE'
+usage: bbe-step <application root> <step>.php [arguments...]
+  <application root>  absolute path of the shop (the directory with cli/ and src/)
+  <step>.php          a script of its cli/ directory, by file name only
+examples:
+  bbe-step /var/www/shop update.php apply --package=/srv/releases/update-2.1.3
+  bbe-step /var/www/shop migrate.php apply
+It runs the step as the owner of the application root. Cron jobs (worker, backup, GDPR) belong in the crontab of
+the web server user that owns the private directory (crontab -u www-data -e), not in root's; see "Root" in README.md.
+USAGE
     exit 2
-fi
+}
+case ${1:-} in -h | --help | help) usage ;; esac
+[ "$#" -lt 2 ] && usage
 root=$1
 step=$2
 shift 2
 
 case $root in
     /*) ;;
-    *) echo "bbe-step: the application root must be an absolute path: $root" >&2; exit 2 ;;
+    *) usage "the application root must be an absolute path, got: $root" ;;
 esac
 case $step in
-    *[!A-Za-z0-9_.-]* | .*) echo "bbe-step: the step must be a file name in cli/ ending in .php: $step" >&2; exit 2 ;;
+    *[!A-Za-z0-9_.-]* | .*) usage "the step must be a file name in cli/ ending in .php, got: $step" ;;
     *.php) ;;
-    *) echo "bbe-step: the step must be a file name in cli/ ending in .php: $step" >&2; exit 2 ;;
+    *) usage "the step must be a file name in cli/ ending in .php, got: $step" ;;
 esac
 if [ ! -d "$root" ] || [ -L "$root" ]; then
     echo "bbe-step: $root is not a directory" >&2

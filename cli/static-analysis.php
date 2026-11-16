@@ -230,10 +230,12 @@ $architectureBudgets = [
     // +2 lines R16: a payment returned by hand offers no "Request refund" (nothing executes it) and its manual refund form names a request left in flight.
     // +9 lines R19: "Paid" with the amount 0 is refused, an amount above the order total is recorded with a warning.
     // +2 lines, +1 coupling R31: the order detail shows the billing address when it differs from the delivery one (OrderAddress).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 976, 'functions' => 17, 'max_function_lines' => 327, 'coupling' => 25],
+    // +8 lines, +2 function lines R38: "Not executed" for a refund whose provider answer was lost; release without a provider check.
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 984, 'functions' => 17, 'max_function_lines' => 329, 'coupling' => 25],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
-    'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 102, 'functions' => 5, 'max_function_lines' => 34, 'coupling' => 5],
+    // +23 lines, +1 function R38: fields that are not UTF-8 are refused with 400 naming the field (was HTTP 500).
+    'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 125, 'functions' => 6, 'max_function_lines' => 34, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
     // +1 line R11: ?shipment= prints the delivery note of one parcel.
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 91, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],

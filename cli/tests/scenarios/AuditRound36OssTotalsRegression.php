@@ -26,7 +26,8 @@ try {
     $since = sprintf('%04d-01-01', $year - 1);
     // Nothing of other tests counts this year or the last.
     $r36tStashedInvoices = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$since}'");
+    $r36tStashedInvoicesDelivery = $pdo->query("SELECT id, delivery_date FROM invoices WHERE issued_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00', delivery_date = NULL WHERE issued_at >= '{$since}'");
     $r36tStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$since}'");
     $r36tStashedTotals = $pdo->query('SELECT store_id, year, currency, net FROM oss_threshold_totals')->fetchAll(PDO::FETCH_NUM);
@@ -103,7 +104,7 @@ try {
     assert_true(OssThreshold::exceeded(), 'R36 OSS totals: past the threshold last year (stored total) the check answers at once');
 
     $r36tSources = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Orders.php') . (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/InvoiceService.php');
-    assert_true(substr_count($r36tSources, 'OssThreshold::recordOrder($db, $orderId)') === 2 && str_contains($r36tSources, 'OssThreshold::forget(Db::get(), $invoiceId)'),
+    assert_true(substr_count($r36tSources, 'OssThreshold::recordOrder($db, $orderId)') === 2 && str_contains($r36tSources, 'OssThreshold::forget($db, $invoiceId)'),
         'R36 OSS totals: placing or editing an order stores its net and cancelling an invoice takes it out of the total');
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -118,6 +119,7 @@ if (Db::tableExists('oss_threshold_totals', $pdo)) {
 }
 $restore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
 foreach ($r36tStashedInvoices ?? [] as $id => $issuedAt) $restore->execute([$issuedAt, $id]);
+foreach ($r36tStashedInvoicesDelivery ?? [] as $r38dId => $r38dDate) $pdo->prepare('UPDATE invoices SET delivery_date = ? WHERE id = ?')->execute([$r38dDate, $r38dId]);
 $restore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
 foreach ($r36tStashedOrders ?? [] as $id => $createdAt) $restore->execute([$createdAt, $id]);
 $r36tStoresProp->setValue(null, $r36tStores);

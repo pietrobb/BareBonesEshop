@@ -18,7 +18,7 @@ try {
     $db->exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id VARCHAR(64), shipping_addr TEXT, billing_addr TEXT, customer_name TEXT, currency VARCHAR(8), status VARCHAR(32), created_at VARCHAR(32), vat_scenario VARCHAR(32), net_total BIGINT, financial_snapshot TEXT)');
     $db->exec('CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER, digital INTEGER, net_amount BIGINT)');
     $db->exec('CREATE INDEX idx_order_items_order ON order_items (order_id)');
-    $db->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, order_id INTEGER, store_id VARCHAR(64), status VARCHAR(32), type VARCHAR(32), issued_at VARCHAR(32), currency VARCHAR(8), vat_scenario VARCHAR(32), total_net BIGINT, financial_snapshot TEXT, credit_snapshot TEXT, refers_to_invoice_id INTEGER, oss_net BIGINT DEFAULT NULL)');
+    $db->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, order_id INTEGER, store_id VARCHAR(64), status VARCHAR(32), type VARCHAR(32), issued_at VARCHAR(32), delivery_date VARCHAR(32), currency VARCHAR(8), vat_scenario VARCHAR(32), total_net BIGINT, financial_snapshot TEXT, credit_snapshot TEXT, refers_to_invoice_id INTEGER, oss_net BIGINT DEFAULT NULL)');
     $db->exec('CREATE INDEX idx_invoices_order ON invoices (order_id)');
     $year = (int)ShopTime::date('Y');
     $order = $db->prepare('INSERT INTO orders (id, store_id, shipping_addr, billing_addr, customer_name, currency, status, created_at, vat_scenario, net_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');

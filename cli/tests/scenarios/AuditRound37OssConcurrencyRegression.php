@@ -138,8 +138,7 @@ foreach (['sqlite', 'mysql'] as $r37cDriver) {
             if ($r37cDriver === 'mysql' && $r37cPhase === 'past') {
                 $lockDb = new PDO(getenv('TEST_MYSQL_DSN'), getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '');
                 $store = Bootstrap::stores()['stores']['default'];
-                $seller = (new ReflectionMethod(OssThreshold::class, 'sellerKey'))->invoke(null, 'default', $store);
-                $lock = 'bbe_oss_' . substr(hash('sha256', $seller), 0, 40);
+                $lock = OssThreshold::sellerLockName($lockDb, 'default', $store);
                 $stmt = $lockDb->prepare('SELECT GET_LOCK(?, 1)'); $stmt->execute([$lock]);
                 assert_equals(1, (int)$stmt->fetchColumn(), 'R37 concurrency MySQL: deliberately hold the threshold lock during destination-priced HTTP checkout');
             }

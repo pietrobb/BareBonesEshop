@@ -38,8 +38,23 @@ final class InvoiceService
 
     public const STATUS_ISSUED    = 'issued';
     public const STATUS_CANCELLED = 'cancelled';
-    /** creditBookedRefund() waits for an in-flight item refund this many times, a minute apart. */
-    private const BOOKED_REFUND_DEFERRALS = 30;
+    /** Delay before creditBookedRefund() checks an in-flight item refund again for the ($deferral + 1)-th time: 1, 2, 4 … 32 minutes, then hourly. */
+    private static function bookedRefundDelay(int $deferral): int
+    {
+        return min(3600, 60 * 2 ** min($deferral, 6));
+    }
+
+    /**
+     * R38 (low): the credit note waited 30 minutes for an in-flight item refund, whose refund job retries for about 9 hours
+     * (WorkerJobs::refundRetryWindow()): it failed while the item refund could still settle. It now waits until that job
+     * stopped retrying, plus an hour, then fails with a critical incident naming the order.
+     */
+    private static function bookedRefundWaitedOut(int $deferrals): bool
+    {
+        $waited = 0;
+        for ($i = 0; $i < $deferrals; $i++) $waited += self::bookedRefundDelay($i);
+        return $waited >= WorkerJobs::refundRetryWindow() + 3600;
+    }
 
     /** EU member states for reverse-charge detection. */
     private const EU_COUNTRIES = [
@@ -404,6 +419,26 @@ final class InvoiceService
      * The refund credit note issued under $refundKey, if any. Compared exactly on the decoded snapshot: in a LIKE
      * pattern "%" and "_" of a key matched other keys, so a refund could take another refund's credit note.
      */
+    /**
+     * R38 (usability): the credit note correcting the invoice for the refund booked under $ledgerKey, for the refund
+     * e-mail: the one issued under that key (creditBookedRefund()), else the one of the item refund (RMA) that refund
+     * settles, booked under its key or its provider refund id. Null while none is issued (or none will be).
+     */
+    public static function refundCreditNote(int $orderId, string $ledgerKey): ?array {
+        $db = Db::get();
+        $own = self::refundCreditByKey($db, $orderId, $ledgerKey);
+        if ($own !== null) return (string)($own['status'] ?? '') === self::STATUS_CANCELLED ? null : $own;
+        $stmt = $db->prepare("SELECT i.* FROM order_refunds r JOIN invoices i ON i.id = r.credit_note_id
+            WHERE r.order_id = :order AND r.store_id = :store AND r.status <> 'failed' AND i.status <> :cancelled
+            AND (r.idempotency_key = :key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND r.payment_reference =
+                (SELECT t.provider_ref FROM payment_transactions t WHERE t.order_id = :order2 AND t.store_id = :store2 AND t.idempotency_key = :key2 LIMIT 1)))
+            ORDER BY r.id DESC LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED, ':key' => $ledgerKey,
+            ':order2' => $orderId, ':store2' => StoreContext::current()->id(), ':key2' => $ledgerKey]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
     private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {
         $stmt = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' ORDER BY id");
         $stmt->execute([':store' => StoreContext::current()->id(), ':order' => $orderId]);
@@ -916,10 +951,13 @@ final class InvoiceService
             AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
         $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
         if ($inFlight->fetchColumn()) {
-            if ($deferrals >= self::BOOKED_REFUND_DEFERRALS) {
+            if (self::bookedRefundWaitedOut($deferrals)) {
+                if (!IncidentMonitor::reportedForOrder('payment.credit_note_stalled', $orderId)) {
+                    IncidentMonitor::report('payment.credit_note_stalled', 'payment', 'critical', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals]);
+                }
                 throw new RuntimeException("Refund {$ledgerKey} of order {$orderId} may belong to an item refund still without its provider refund id; no credit note issued");
             }
-            JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals + 1, 'waits' => $waits], 60);
+            JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals + 1, 'waits' => $waits], self::bookedRefundDelay($deferrals));
             return null;
         }
         return self::creditBookedOrWait($orderId, (int)$row['amount'], $ledgerKey, $itemRates, $deferrals, $waits);
@@ -979,22 +1017,35 @@ final class InvoiceService
         return $absPath;
     }
 
+    /**
+     * R38 (low): the status, the OSS year total (OssThreshold::forget()) and the audit entry change together. Were three
+     * writes: a failure after the first left a cancelled invoice still counted in oss_threshold_totals.
+     */
     public static function cancel(int $invoiceId, ?string $note = null): void
     {
-        $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
-        $stmt = Db::get()->prepare("
-            UPDATE invoices
-               SET status = :status, cancelled_at = {$now}
-             WHERE id = :id AND store_id = :store AND status = :issued
-        ");
-        $stmt->execute([
-            ':status' => self::STATUS_CANCELLED,
-            ':issued' => self::STATUS_ISSUED,
-            ':id'     => $invoiceId,
-            ':store'  => StoreContext::current()->id(),
-        ]);
-        if ($stmt->rowCount() === 1) OssThreshold::forget(Db::get(), $invoiceId);
-        AuditLog::log('invoice_cancelled', $invoiceId, self::STATUS_ISSUED, self::STATUS_CANCELLED, $note);
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
+            $stmt = $db->prepare("
+                UPDATE invoices
+                   SET status = :status, cancelled_at = {$now}
+                 WHERE id = :id AND store_id = :store AND status = :issued
+            ");
+            $stmt->execute([
+                ':status' => self::STATUS_CANCELLED,
+                ':issued' => self::STATUS_ISSUED,
+                ':id'     => $invoiceId,
+                ':store'  => StoreContext::current()->id(),
+            ]);
+            if ($stmt->rowCount() === 1) OssThreshold::forget($db, $invoiceId);
+            AuditLog::log('invoice_cancelled', $invoiceId, self::STATUS_ISSUED, self::STATUS_CANCELLED, $note);
+            if ($own) $db->commit();
+        } catch (\Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     /**

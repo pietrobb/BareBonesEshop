@@ -50,11 +50,11 @@ $catIds = []; // slug => id
 $catStmt = $db->prepare(Db::insertIgnore() . " INTO categories (slug, name, parent_id, path, depth, sort_order, translations) VALUES (:slug, :name, :pid, :path, :depth, :sort, :trans)");
 
 $translations = [
-    'oblecenie' => ['en' => ['name' => 'Clothing'], 'de' => ['name' => 'Kleidung']],
-    'elektronika' => ['en' => ['name' => 'Electronics'], 'de' => ['name' => 'Elektronik']],
-    'dom-zahrada' => ['en' => ['name' => 'Home & Garden'], 'de' => ['name' => 'Haus & Garten']],
-    'sport' => ['en' => ['name' => 'Sports'], 'de' => ['name' => 'Sport']],
-    'knihy' => ['en' => ['name' => 'Books'], 'de' => ['name' => 'Bücher']],
+    'oblecenie' => ['en' => ['name' => 'Clothing'], 'de' => ['name' => 'Kleidung'], 'cs' => ['name' => 'Oblečení']],
+    'elektronika' => ['en' => ['name' => 'Electronics'], 'de' => ['name' => 'Elektronik'], 'cs' => ['name' => 'Elektronika']],
+    'dom-zahrada' => ['en' => ['name' => 'Home & Garden'], 'de' => ['name' => 'Haus & Garten'], 'cs' => ['name' => 'Dům a zahrada']],
+    'sport' => ['en' => ['name' => 'Sports'], 'de' => ['name' => 'Sport'], 'cs' => ['name' => 'Sport']],
+    'knihy' => ['en' => ['name' => 'Books'], 'de' => ['name' => 'Bücher'], 'cs' => ['name' => 'Knihy']],
 ];
 
 $sort = 0;
@@ -62,7 +62,7 @@ foreach ($categoryTree as $rootSlug => [$rootName, $children]) {
     $catStmt->execute([
         ':slug' => $rootSlug, ':name' => $rootName, ':pid' => null,
         ':path' => $rootSlug, ':depth' => 0, ':sort' => $sort++,
-        ':trans' => json_encode($translations[$rootSlug] ?? []),
+        ':trans' => json_encode($translations[$rootSlug]),
     ]);
     $rootId = (int)$db->lastInsertId();
     $catIds[$rootSlug] = $rootId;

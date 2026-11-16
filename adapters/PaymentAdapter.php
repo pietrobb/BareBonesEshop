@@ -65,6 +65,12 @@ class PaymentNotificationUnverified extends RuntimeException {}
 class PaymentRefundDeclined extends RuntimeException {}
 
 /**
+ * R38 (medium 8): a refund attempt at a provider without idempotent refunds lost its answer and the provider's payment state
+ * does not show it executed. Retrying cannot tell either: the job ends and the admin confirms or releases it on the order.
+ */
+class PaymentRefundOutcomeUnknown extends RuntimeException {}
+
+/**
  * Providers that can void an unpaid checkout/payment, so a cancelled order can no longer be paid.
  * Payments captured anyway (provider without this capability, race) are refunded by
  * PaymentService::settleCapture().

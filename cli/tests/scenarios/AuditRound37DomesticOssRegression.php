@@ -124,7 +124,8 @@ try {
                 return $result ?? [];
             };
             $guard = $run('guard', []);
-            assert_equals(['physical' => 'allowed', 'ebook' => 'vat_changed', 'mixed' => 'vat_changed', 'digital_flag' => 'vat_changed', 'abroad_goods' => 'vat_changed'], $guard,
+            // R38 (medium 3): next to goods delivered in Slovakia the e-book is supplied there too, whatever the billing country.
+            assert_equals(['physical' => 'allowed', 'ebook' => 'vat_changed', 'mixed' => 'allowed', 'digital_flag' => 'vat_changed', 'abroad_goods' => 'vat_changed'], $guard,
                 "R37 domestic OSS {$r37dDriver}/previous={$previous}: guard exempts only baskets without an OSS supply");
             foreach (['delivery' => ['country' => 'SK', 'shipping_method' => 'gls'], 'pickup' => ['country' => 'AT', 'shipping_method' => 'pickup']] as $case => $input) {
                 $page = $run('refresh', $input + ['checkout_refresh' => '1']);

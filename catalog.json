@@ -3,13 +3,13 @@
 
     "product_types": {
         "simple": {
-            "name": {"en": "Simple Product", "sk": "Jednoduchý produkt"},
+            "name": {"en": "Simple Product", "sk": "Jednoduchý produkt", "cs": "Jednoduchý produkt", "de": "Einfaches Produkt"},
             "has_variants": false,
             "attributes": {}
         },
 
         "clothing": {
-            "name": {"en": "Clothing", "sk": "Oblečenie"},
+            "name": {"en": "Clothing", "sk": "Oblečenie", "cs": "Oblečení", "de": "Bekleidung"},
             "has_variants": true,
             "variant_dimensions": ["size", "color"],
             "attributes": {
@@ -25,22 +25,22 @@
                     "label": {"en": "Color", "sk": "Farba", "de": "Farbe", "cs": "Barva"},
                     "options_translatable": true,
                     "options": {
-                        "black":  {"en": "Black", "sk": "Čierna", "de": "Schwarz"},
-                        "white":  {"en": "White", "sk": "Biela", "de": "Weiß"},
-                        "red":    {"en": "Red", "sk": "Červená", "de": "Rot"}
+                        "black":  {"en": "Black", "sk": "Čierna", "de": "Schwarz", "cs": "Černá"},
+                        "white":  {"en": "White", "sk": "Biela", "de": "Weiß", "cs": "Bílá"},
+                        "red":    {"en": "Red", "sk": "Červená", "de": "Rot", "cs": "Červená"}
                     },
                     "filterable": true,
                     "required": true
                 },
                 "material": {
                     "type": "text",
-                    "label": {"en": "Material", "sk": "Materiál"},
+                    "label": {"en": "Material", "sk": "Materiál", "cs": "Materiál", "de": "Material"},
                     "translatable": true,
                     "filterable": true
                 },
                 "care_instructions": {
                     "type": "textarea",
-                    "label": {"en": "Care Instructions", "sk": "Údržba"},
+                    "label": {"en": "Care Instructions", "sk": "Údržba", "cs": "Údržba", "de": "Pflegehinweise"},
                     "translatable": true,
                     "filterable": false
                 }
@@ -48,31 +48,31 @@
         },
 
         "electronics": {
-            "name": {"en": "Electronics", "sk": "Elektronika"},
+            "name": {"en": "Electronics", "sk": "Elektronika", "cs": "Elektronika", "de": "Elektronik"},
             "has_variants": true,
             "variant_dimensions": ["storage", "color"],
             "attributes": {
                 "brand": {
                     "type": "select",
-                    "label": {"en": "Brand", "sk": "Značka"},
+                    "label": {"en": "Brand", "sk": "Značka", "cs": "Značka", "de": "Marke"},
                     "options": ["Apple", "Samsung", "Sony", "Xiaomi"],
                     "filterable": true
                 },
                 "warranty_months": {
                     "type": "number",
-                    "label": {"en": "Warranty (months)", "sk": "Záruka (mesiace)"},
+                    "label": {"en": "Warranty (months)", "sk": "Záruka (mesiace)", "cs": "Záruka (měsíce)", "de": "Garantie (Monate)"},
                     "filterable": true,
                     "range_filter": true
                 },
                 "storage": {
                     "type": "select",
-                    "label": {"en": "Storage", "sk": "Úložisko"},
+                    "label": {"en": "Storage", "sk": "Úložisko", "cs": "Úložiště", "de": "Speicher"},
                     "options": ["64GB", "128GB", "256GB", "512GB", "1TB"],
                     "filterable": true
                 },
                 "weight_g": {
                     "type": "number",
-                    "label": {"en": "Weight (g)", "sk": "Hmotnosť (g)"},
+                    "label": {"en": "Weight (g)", "sk": "Hmotnosť (g)", "cs": "Hmotnost (g)", "de": "Gewicht (g)"},
                     "filterable": true,
                     "range_filter": true
                 }
@@ -80,19 +80,19 @@
         },
 
         "downloadable": {
-            "name": {"en": "Digital Download", "sk": "Digitálny produkt"},
+            "name": {"en": "Digital Download", "sk": "Digitálny produkt", "cs": "Digitální produkt", "de": "Digitales Produkt"},
             "has_variants": false,
             "physical": false,
             "attributes": {
                 "file_format": {
                     "type": "select",
-                    "label": {"en": "Format", "sk": "Formát"},
+                    "label": {"en": "Format", "sk": "Formát", "cs": "Formát", "de": "Format"},
                     "options": ["PDF", "EPUB", "MP3", "ZIP"],
                     "filterable": true
                 },
                 "file_size_mb": {
                     "type": "number",
-                    "label": {"en": "File Size (MB)", "sk": "Veľkosť súboru (MB)"}
+                    "label": {"en": "File Size (MB)", "sk": "Veľkosť súboru (MB)", "cs": "Velikost souboru (MB)", "de": "Dateigröße (MB)"}
                 },
                 "download_url": {
                     "type": "text",
@@ -105,7 +105,7 @@
     "global_attributes": {
         "brand": {
             "type": "select",
-            "label": {"en": "Brand", "sk": "Značka"},
+            "label": {"en": "Brand", "sk": "Značka", "cs": "Značka", "de": "Marke"},
             "filterable": true,
             "options_from": "brands"
         }

@@ -46,6 +46,11 @@ git clone --recurse-submodules <repository-url> shop && cd shop
 #    Stripe keys are set. Doctor then reports one FAIL, stores.legal.default:
 #    the seller is still the example company. Enter yours in Admin → Stores
 #    and seller (company, address, e-mail, IBAN) before taking orders.
+#    Run it as the account that owns the checkout, not as root. As root (a
+#    container, a fresh server) every step runs as the checkout's owner, and a
+#    checkout root owns is refused while group or others can write a file in
+#    it (a clone under umask 002 has 0664 files): run `chmod -R go-w .` first.
+#    See "Root" under Admin identity, queues and operations.
 BBE_ADMIN_PASSWORD='a-strong-password' php cli/setup.php install \
   --app-url=http://localhost:8080 --admin-email=you@your-shop.com --admin-username=admin
 
@@ -62,8 +67,8 @@ php -S localhost:8080 router.php
 #    developing, run one pass by hand after an order, or keep it looping:
 php cli/worker.php --once --verbose
 while true; do php cli/worker.php --once; sleep 60; done
-#    On a server, add the crontab entries (crontab -e, as the web server user)
-#    and record the worker line as operations.worker_cron in config.php so
+#    On a server, add the crontab entries to the web server user's crontab
+#    (crontab -u www-data -e; never root's, see "Root" below) and record the worker line as operations.worker_cron in config.php so
 #    doctor stops warning:
 #      * * * * *  php /path/to/shop/cli/worker.php
 #      17 3 * * * php /path/to/shop/cli/gdpr-gc.php --apply --quiet
@@ -118,8 +123,9 @@ the hosting panel where there is no shell); it keeps `config.php` and the privat
 unpack as 0755 and files as 0644. A package built from a branch instead of a release tag records no
 version: run `php cli/update.php baseline --version=<release it was built from>` once before the first update.
 
-E-mails are only logged (to `logs/emails.log`, with a copy of each message as an `.eml` file in
-`logs/emails/`) until you enter an SMTP server: in the installer's *Sending e-mail* section or later in
+E-mails are only logged (to `logs/emails.log` in the private data folder, `bareboneseshop-private/logs/`
+under the folder chosen in the form, with a copy of each of the newest 50 messages as an `.eml` file in
+`bareboneseshop-private/logs/emails/`; never in the shop folder) until you enter an SMTP server: in the installer's *Sending e-mail* section or later in
 Admin → E-mail delivery, which also sends a test e-mail. The password is stored encrypted in the private
 data folder and never shown again. Environment variables (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
 `SMTP_ENCRYPTION`, `MAIL_FROM`, `MAIL_ADAPTER`) win over the admin values, which win over the `smtp_*` keys
@@ -583,15 +589,36 @@ state, so one that stops half-way is finished by the updater that started it. Lo
 need a file system with file locks: on one without (some NFS/SMB mounts) a step
 says so instead of reporting another step as running.
 
-**Root.** Root must never run PHP of a tree another account can write. Run every
-step as the owner of the application root (`sudo -u <owner> php cli/….php`, with
-`Defaults use_pty` in sudoers, the default from sudo 1.9.14, or the step can type
-commands into root's terminal), or install `deploy/bbe-step.sh` root-owned outside the tree,
+**Root.** Root must never run PHP of a tree another account can write. Two accounts run
+the shop's steps (one account may be both):
+
+1. **The web server user** (PHP-FPM, e.g. `www-data`) owns the private runtime directory
+   (`private_runtime_dir`: the SQLite database, jobs, invoices, backups, logs) and the
+   uploads. It runs everything that changes only that data: the cron jobs and restores.
+   Put the cron lines in its crontab (`crontab -u www-data -e`), not in root's:
+
+   ```
+   * * * * *  php /var/www/shop/cli/worker.php
+   17 3 * * * php /var/www/shop/cli/gdpr-gc.php --apply --quiet
+   40 2 * * * php /var/www/shop/cli/backup.php --gc
+   ```
+
+   and restore with `sudo -u www-data php cli/restore.php …`.
+2. **The owner of the application root** (the account that deploys the code) runs
+   `setup.php install`, `update.php` and `migrate.php`:
+   `sudo -u <owner> php cli/update.php apply --package=…`, with `Defaults use_pty` in
+   sudoers (the default from sudo 1.9.14), or the step can type commands into root's terminal.
+   `setup.php install` creates the private runtime directory as this account: where it is
+   not the web server user, hand that directory over afterwards
+   (`chown -R www-data: /var/www/bareboneseshop-private`), as the Docker `setup` service does.
+3. **From a root shell**, use the wrapper instead of `sudo php`: install `deploy/bbe-step.sh` root-owned outside the tree,
 from a release you verified (the signed package's `payload/deploy/bbe-step.sh` or the release
 tag), not from the shop's copy, which an account that can write the tree may have changed
 (`install -o root -g root -m 0755 <release>/deploy/bbe-step.sh /usr/local/sbin/bbe-step`), and run
 `bbe-step /var/www/shop update.php apply …`: it switches to the owner (never group
 root, and the tree's group only if the owner is in it) before any PHP of the shop runs.
+So `bbe-step` suits the steps of 2; use it for a restore only where the owner of the
+application root is the web server user too, else `sudo -u www-data` (step 1).
 The step gets no descriptor of root's terminal (stdin is `/dev/null`, so pass `--yes` to
 `restore.php`; its output is copied through pipes), none of root's other open files, and
 of root's environment only `BBE_*`, `BAREBONES_*`, `SMTP_*`, `MAIL_*`, `PAY_*`, `LANG`,
@@ -604,13 +631,14 @@ only (link a php installed elsewhere into `/usr/local/bin`). As a second line
 of defence, any `php cli/….php` started as root switches to the owner and group of the
 application root before it loads code of `src/`. That switch is `cli/cli-only.php`, code
 in the tree: an account that can write the tree (often the web user) can change it, and
-root would run its copy, so it is no substitute for the rule above. Run backups and
-restores as the user that owns the files they change.
+root would run its copy, so it is no substitute for the rule above. A step changes only
+what its account can write: run backups and restores as the web server user (step 1).
 
 **A tree root owns** is supported when root owns it alone: every file and directory in
 it and every directory above it belongs to root without group or other write (a POSIX
 ACL shows as group write and counts too), links stay inside the tree, and the update
-directory and private directory are root's alone as well. Then root runs every step
+directory (`update_storage_dir`) is root's alone as well, outside the private runtime
+directory, which stays the web server user's (step 1). Then root runs the owner's steps
 there, `update.php apply` included (its theme check runs the new release's checkout
 probe as root on root's copy), and `bbe-step` checks all that before any PHP runs.
 Otherwise every step started as root is refused and names the path. A release

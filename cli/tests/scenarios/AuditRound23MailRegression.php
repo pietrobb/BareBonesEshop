@@ -71,9 +71,16 @@ try {
         'R23 mail: Admin → E-mail delivery shows the saved server, never a password, and marks SMTP_PASS as set by the environment');
 
     // 5) The web installer validates the same fields (English messages) and skips them when left empty.
+    // R38: its messages follow the installer's language; install.php picks English for a browser without a supported one.
     $r23mInstall = static function (array $mail) use ($r23mDir): array {
-        return WebInstaller::validate($mail + ['shop_name' => 'R23M', 'app_url' => 'https://r23m.eu', 'private_parent' => $r23mDir, 'email' => 'owner@r23m.eu',
+        $locale = I18n::locale();
+        I18n::setLocale(WebInstaller::locale(null, ''));
+        try {
+            return WebInstaller::validate($mail + ['shop_name' => 'R23M', 'app_url' => 'https://r23m.eu', 'private_parent' => $r23mDir, 'email' => 'owner@r23m.eu',
             'admin_user' => 'owner', 'admin_password' => 'Long enough pass 1', 'admin_password_repeat' => 'Long enough pass 1'], TEST_CLI_DIR . '/..');
+        } finally {
+            I18n::setLocale($locale);
+        }
     };
     [$r23mNone] = $r23mInstall([]);
     [$r23mWith, $r23mWithErrors] = $r23mInstall(['smtp_host' => 'smtp.r23m.eu', 'smtp_user' => 'shop', 'smtp_pass' => 'pw', 'smtp_encryption' => 'none', 'mail_from' => 'shop@r23m.eu']);

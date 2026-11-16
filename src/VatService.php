@@ -781,6 +781,43 @@ class VatService implements TaxProvider
         ];
     }
 
+    /** Legal-form words a company name may carry or leave out ("ACME s.r.o." is "ACME"); single letters are dropped too. */
+    private const LEGAL_FORMS = ['gmbh', 'mbh', 'ag', 'kg', 'ohg', 'og', 'ug', 'ltd', 'limited', 'llc', 'inc', 'plc', 'sa', 'sas', 'sarl',
+        'srl', 'spa', 'bv', 'nv', 'kft', 'zrt', 'nyrt', 'bt', 'oy', 'oyj', 'ab', 'aps', 'as', 'sro', 'spol', 'zoo', 'sp', 'ks', 'vos',
+        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and'];
+
+    /**
+     * R38 (low): reverse charge rested on the VAT ID alone: any valid foreign VAT ID, whoever's, took the VAT off. The
+     * holder VIES names must be the buyer: the VAT ID's member state is the country the buyer is billed in ($buyerCountry:
+     * the billing address, or the delivery address when not billed apart), and where VIES gives the holder's name (some
+     * states withhold it: "---") the company named in the order is that holder, legal form, case, accents and
+     * punctuation aside, one name may be the other's shorter form. Null when it matches; else 'country' or 'name'.
+     */
+    public static function vatIdHolderMismatch(string $vatId, string $company, string $buyerCountry): ?string
+    {
+        $vatId = strtoupper((string)preg_replace('/\s+/', '', $vatId));
+        $idCountry = substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2);
+        $buyerCountry = strtoupper(trim($buyerCountry));
+        if ($buyerCountry !== '' && $buyerCountry !== $idCountry) return 'country';
+        if (trim($company) === '') return null; // a preview of an older page; the order takes a VAT ID only with a company
+        $stmt = Db::get()->prepare('SELECT trader_name FROM vat_id_cache WHERE vat_id = :v');
+        $stmt->execute([':v' => $vatId]);
+        $registered = trim((string)$stmt->fetchColumn());
+        if (trim($registered, '- ') === '') return null;
+        [$holder, $named] = [self::holderTokens($registered), self::holderTokens($company)];
+        return array_diff($named, $holder) === [] || array_diff($holder, $named) === [] ? null : 'name';
+    }
+
+    /** @return list<string> the significant words of a company name, lower case ASCII */
+    private static function holderTokens(string $name): array
+    {
+        $name = mb_strtolower($name, 'UTF-8');
+        $ascii = function_exists('transliterator_transliterate') ? transliterator_transliterate('Any-Latin; Latin-ASCII', $name) : false;
+        if (!is_string($ascii)) $ascii = (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name);
+        $words = preg_split('/[^a-z0-9]+/', strtolower($ascii), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return array_values(array_unique(array_filter($words, static fn(string $w): bool => strlen($w) > 1 && !in_array($w, self::LEGAL_FORMS, true))));
+    }
+
     /** R34: the status of a VAT ID while its cached VIES answer is fresh (see validateVatId()), else null. */
     public static function cachedVatIdStatus(string $vatId): ?string
     {

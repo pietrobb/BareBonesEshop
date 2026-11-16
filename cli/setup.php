@@ -6,6 +6,29 @@ $command = (string)($argv[1] ?? 'doctor');
 $json = in_array('--json', $argv, true);
 $strict = in_array('--strict', $argv, true);
 $root = dirname(__DIR__);
+$usage = 'Usage: php cli/setup.php install|doctor|apply|repair-oss-cache [--json] [--strict]; doctor --oss-cache is an explicit deep audit; repair-oss-cache --writers-stopped requires all writers stopped and drained plus a database backup. Install: --app-url=URL --admin-email=ADDRESS --admin-username=NAME --db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER (password in BBE_DB_PASSWORD).';
+
+// R38 (low): "install --help" ran a real installation (config.php, migrations) in the checkout it was asked about. Help
+// prints the usage; an install switch it does not know (a typo, --dry-run) refuses instead of installing anyway.
+if (in_array($command, ['help', '--help', '-h'], true) || array_intersect(['--help', '-h'], $argv) !== []) {
+    echo $usage . "\n";
+    exit(0);
+}
+if ($command === 'install') {
+    $valued = ['--admin-username', '--app-url', '--admin-email', '--db-driver', '--db-host', '--db-port', '--db-name', '--db-user'];
+    $unknown = [];
+    $args = array_values(array_slice($argv, 2));
+    for ($i = 0; $i < count($args); $i++) {
+        [$name] = explode('=', (string)$args[$i], 2);
+        if (in_array($name, ['--json', '--strict'], true)) continue;
+        if (!in_array($name, $valued, true)) { $unknown[] = (string)$args[$i]; continue; }
+        if (!str_contains((string)$args[$i], '=')) $i++; // "--db-host HOST" (cli_long_options)
+    }
+    if ($unknown !== []) {
+        fwrite(STDERR, 'Unknown install argument ' . implode(', ', $unknown) . "; nothing was installed.\n" . $usage . "\n");
+        exit(2);
+    }
+}
 
 // install runs before anything reads config.php or the bundled BBF forms library.
 if ($command === 'install') {
@@ -148,7 +171,7 @@ try {
     } elseif ($command === 'repair-oss-cache') {
         $result = OssThresholdCache::repair(Db::get(), in_array('--writers-stopped', $argv, true));
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n"; exit(0);
-    } else { throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply|repair-oss-cache [--json] [--strict]; doctor --oss-cache is an explicit deep audit; repair-oss-cache --writers-stopped requires all writers stopped and drained plus a database backup. Install: --app-url=URL --admin-email=ADDRESS --admin-username=NAME --db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER (password in BBE_DB_PASSWORD).'); }
+    } else { throw new InvalidArgumentException($usage); }
 
     if ($json) {
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
@@ -158,7 +181,8 @@ try {
         $doctor = $command === 'doctor' ? $result : $result['doctor'];
         foreach ($doctor['checks'] as $check) {
             echo '[' . strtoupper($check['status']) . "] {$check['name']}: {$check['message']}\n";
-            if ($check['action'] !== '') echo "  -> {$check['action']}\n";
+            // R38 (usability): a passing check needs no advice.
+            if ($check['status'] !== 'pass' && $check['action'] !== '') echo "  -> {$check['action']}\n";
         }
         echo "Result: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
     }

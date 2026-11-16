@@ -23,7 +23,8 @@ try {
     $since = sprintf('%04d-01-01', $year - 1);
     // Nothing of other tests counts this year or the last.
     $r36bStashedInvoices = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$since}'");
+    $r36bStashedInvoicesDelivery = $pdo->query("SELECT id, delivery_date FROM invoices WHERE issued_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00', delivery_date = NULL WHERE issued_at >= '{$since}'");
     $r36bStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$since}'");
     (require TEST_CLI_DIR . '/../migrations/20261113180000_invoice_oss_net.php')->up($pdo, Db::isSqlite());
@@ -134,6 +135,7 @@ if (Db::tableExists('oss_threshold_totals', $pdo)) {
 }
 $restore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
 foreach ($r36bStashedInvoices ?? [] as $id => $issuedAt) $restore->execute([$issuedAt, $id]);
+foreach ($r36bStashedInvoicesDelivery ?? [] as $r38dId => $r38dDate) $pdo->prepare('UPDATE invoices SET delivery_date = ? WHERE id = ?')->execute([$r38dDate, $r38dId]);
 $restore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
 foreach ($r36bStashedOrders ?? [] as $id => $createdAt) $restore->execute([$createdAt, $id]);
 $r36bStoresProp->setValue(null, $r36bStores);

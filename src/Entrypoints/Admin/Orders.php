@@ -319,9 +319,10 @@ function pageOrder(): void {
             <?php if ($canRefund && ($unconfirmedRefund = PaymentService::unconfirmedProviderRefund($order)) !== null): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_confirm" style="margin-top:.5rem" data-refund-confirm>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <span class="muted"><?= esc(I18n::format('admin.order.confirm_refund_hint', ['amount' => I18n::price($unconfirmedRefund['amount'], $order['currency'])])) ?></span>
+                <span class="muted"><?= esc(I18n::format(empty($unconfirmedRefund['unknown']) ? 'admin.order.confirm_refund_hint' : 'admin.order.unknown_refund_hint', ['amount' => I18n::price($unconfirmedRefund['amount'], $order['currency'])])) ?></span>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.confirm_refund')) ?></button>
+                <?php if (!empty($unconfirmedRefund['unknown'])): ?><button class="btn btn-sm" type="submit" name="outcome" value="not_executed" data-refund-not-executed><?= esc(I18n::t('admin.order.refund_not_executed')) ?></button><?php endif; ?>
             </form>
             <?php endif; ?>
             <?php if ($canRefund && ($stalledRefund = PaymentService::stalledItemRefund($order)) !== null): ?>
@@ -330,6 +331,7 @@ function pageOrder(): void {
                 <input type="hidden" name="refund_id" value="<?= (int)$stalledRefund['refund_id'] ?>">
                 <span class="muted"><?= esc(I18n::format('admin.order.release_refund_hint', ['amount' => I18n::price($stalledRefund['amount'], $order['currency'])])) ?></span>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <label class="muted"><input type="checkbox" name="without_provider_check" value="1" data-release-without-check> <?= esc(I18n::t('admin.order.release_refund_without_check')) ?></label>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.release_refund')) ?></button>
             </form>
             <?php endif; ?>
@@ -753,7 +755,7 @@ function handleOrderPaymentTransition(): void {
         if (PaymentService::recordAdminPayment($order, $newStatus, $amount, $note, Security::adminUser())) {
             setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
         } else {
-            $message = I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]);
+            $message = I18n::format('admin.order.msg.payment_changed', ['status' => OrderStatusLabels::payment($newStatus)]);
             $over = PaymentService::adminPaymentExcess($order, $newStatus, $amount);
             if ($over > 0) $message .= ' ' . I18n::format('admin.order.msg.paid_over', ['amount' => I18n::price($amount, (string)$order['currency']),
                 'total' => I18n::price((int)$order['total'], (string)$order['currency']), 'over' => I18n::price($over, (string)$order['currency'])]);
@@ -823,7 +825,7 @@ function handleOrderRefundRelease(): void {
     $orderId = Security::int($_GET['id'] ?? 0);
     $note = trim((string)($_POST['note'] ?? ''));
     try {
-        $outcome = $note !== '' ? PaymentService::releaseStalledItemRefund($orderId, Security::int($_POST['refund_id'] ?? 0), Security::adminUser(), $note) : '';
+        $outcome = $note !== '' ? PaymentService::releaseStalledItemRefund($orderId, Security::int($_POST['refund_id'] ?? 0), Security::adminUser(), $note, !empty($_POST['without_provider_check'])) : '';
         setFlash($outcome !== '' ? 'ok' : 'err', I18n::t(['released' => 'admin.order.msg.refund_released', 'already_released' => 'admin.order.msg.refund_released',
             'refunded' => 'admin.order.msg.refund_release_refunded', 'pending' => 'admin.order.msg.refund_release_pending'][$outcome] ?? 'admin.order.msg.refund_error'));
     } catch (\Throwable $e) {
@@ -840,8 +842,14 @@ function handleOrderRefundConfirm(): void {
     $note = trim((string)($_POST['note'] ?? ''));
     try {
         if ($note === '') throw new \InvalidArgumentException('A refund confirmation needs a note');
-        PaymentService::confirmProviderRefund($orderId, Security::adminUser(), $note);
-        setFlash('ok', I18n::t('admin.order.msg.refund_confirmed'));
+        // R38 (medium 8): a refund whose answer was lost, checked at the provider and found not paid out, is released.
+        if (($_POST['outcome'] ?? '') === 'not_executed') {
+            if (!PaymentService::releaseUnknownRefund($orderId, Security::adminUser(), $note)) throw new \LogicException('No refund of an unknown outcome on this order');
+            setFlash('ok', I18n::t('admin.order.msg.refund_not_executed'));
+        } else {
+            PaymentService::confirmProviderRefund($orderId, Security::adminUser(), $note);
+            setFlash('ok', I18n::t('admin.order.msg.refund_confirmed'));
+        }
     } catch (\Throwable $e) {
         Logger::phpLog("Refund confirm error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));

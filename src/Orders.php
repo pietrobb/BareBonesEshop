@@ -264,7 +264,10 @@ class Orders {
     public static function replaceItems(int $orderId, callable $price): ?string {
         $db = Db::get();
         $sqliteLock = self::acquireCheckoutLock();
+        $ossLock = null;
         try {
+            // R38 (low): the edit decides the OSS threshold as exactly as a new order (Orders::create(), guardOrder()).
+            $ossLock = OssThreshold::lockSeller($db);
             $db->beginTransaction();
             self::lockWithin($orderId);
             $order = self::byId($orderId);
@@ -282,6 +285,7 @@ class Orders {
             }
             if ($touchedSkus !== []) Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
             $db->prepare("DELETE FROM order_items WHERE order_id = :id")->execute([':id' => $orderId]);
+            OssThreshold::withoutOpenOrder($db, $orderId);
             $pricing = $price();
             if (isset($pricing['error'])) {
                 $db->rollBack();
@@ -350,6 +354,7 @@ class Orders {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         } finally {
+            OssThreshold::releaseOrderLock($db, $ossLock);
             self::releaseCheckoutLock($sqliteLock);
         }
     }

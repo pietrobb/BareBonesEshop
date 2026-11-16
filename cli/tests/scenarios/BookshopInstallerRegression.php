@@ -166,8 +166,8 @@ try {
     fclose($wiProbe);
     $wiServer = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$wiPort}", 'router.php'], [0 => ['pipe', 'r'], 1 => ['file', $wiBase . '/server.log', 'a'], 2 => ['file', $wiBase . '/server.log', 'a']], $wiPipes, $wiShop, $wiEnv);
     $wiCookie = '';
-    $wiHttp = static function (string $path, ?array $post = null) use ($wiPort, &$wiCookie): array {
-        $headers = ($wiCookie !== '' ? "Cookie: {$wiCookie}\r\n" : '') . ($post !== null ? "Content-Type: application/x-www-form-urlencoded\r\n" : '');
+    $wiHttp = static function (string $path, ?array $post = null, string $extraHeaders = '') use ($wiPort, &$wiCookie): array {
+        $headers = ($wiCookie !== '' ? "Cookie: {$wiCookie}\r\n" : '') . ($post !== null ? "Content-Type: application/x-www-form-urlencoded\r\n" : '') . $extraHeaders;
         $context = stream_context_create(['http' => ['method' => $post === null ? 'GET' : 'POST', 'header' => $headers, 'content' => $post === null ? '' : http_build_query($post),
             'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 60]]);
         $body = @file_get_contents("http://127.0.0.1:{$wiPort}{$path}", false, $context);
@@ -198,11 +198,22 @@ try {
         $wiNoKey = $wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => $wiTyped]);
         assert_true(str_contains($wiNoKey['body'], 'This is not the key in install-key.php') && !is_file($wiShop . '/config.php'), "R12 web installer: a post {$wiWhat} installs nothing");
     }
-    $wiDone = $wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => strtolower(str_replace('-', ' ', $wiKey))]);
+    // R38 UX: the installer was English only. The browser's language picks its language, the language links (?lang=,
+    // kept in the form's action) override it; validation and the result page follow.
+    $wiDe = $wiHttp('/install.php', null, "Accept-Language: de-AT,de;q=0.9,en;q=0.5\r\n");
+    assert_equals([200, true, true, true, false], [$wiDe['status'], str_contains($wiDe['body'], '<html lang="de">'), str_contains($wiDe['body'], 'Ordner für private Daten'),
+        str_contains($wiDe['body'], 'action="install.php?lang=de"'), str_contains($wiDe['body'], 'Private data folder')],
+        'R38 web installer: a German browser gets the form in German (was: English only)');
+    $wiSkKey = $wiHttp('/install.php?lang=sk', $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => 'AAAAA-BBBBB-CCCCC-DDDDD'], "Accept-Language: de\r\n");
+    $wiSkBad = $wiHttp('/install.php?lang=sk', ['email' => 'not-an-address'] + $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => $wiKey]);
+    assert_equals([true, true, true, true, false], [str_contains($wiSkKey['body'], 'Toto nie je kľúč zo súboru install-key.php'), str_contains($wiSkBad['body'], '<html lang="sk">'),
+        str_contains($wiSkBad['body'], 'Zadajte platnú e-mailovú adresu.'), str_contains($wiSkBad['body'], 'Nainštalovať obchod'), is_file($wiShop . '/config.php')],
+        'R38 web installer: the Slovak link wins over the browser; key and field errors are in Slovak, nothing installed (was: English only)');
+    $wiDone = $wiHttp('/install.php?lang=sk', $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => strtolower(str_replace('-', ' ', $wiKey))]);
     assert_true(!is_file($wiShop . '/' . WebInstaller::KEY_FILE), 'R12 web installer: the key (typed in any case and spacing) installs, and install-key.php is deleted');
-    preg_match('/(\d+) failures/', $wiDone['body'], $wiFailures);
-    assert_true(str_contains($wiDone['body'], 'Your shop is ready') && str_contains($wiDone['body'], '<svg') && preg_match('/[0-9A-F]{5}-[0-9A-F]{5}/', $wiDone['body']) === 1,
-        'Web installer: the result page shows the owner\'s TOTP QR code and recovery codes' . (str_contains($wiDone['body'], 'Your shop is ready') ? '' : ': ' . implode(' | ', preg_match_all('/<p class="error"[^>]*>(.*?)<\/p>/s', $wiDone['body'], $wiShown) ? $wiShown[1] : [$wiDone['status']])));
+    preg_match('/chyby: (\d+)\./', $wiDone['body'], $wiFailures);
+    assert_true(str_contains($wiDone['body'], 'Váš obchod je pripravený') && str_contains($wiDone['body'], 'Záchranné kódy') && str_contains($wiDone['body'], '<svg') && preg_match('/[0-9A-F]{5}-[0-9A-F]{5}/', $wiDone['body']) === 1,
+        'Web installer: the result page shows the owner\'s TOTP QR code and recovery codes, in Slovak (R38)' . (str_contains($wiDone['body'], 'Váš obchod je pripravený') ? '' : ': ' . implode(' | ', preg_match_all('/<p class="error"[^>]*>(.*?)<\/p>/s', $wiDone['body'], $wiShown) ? $wiShown[1] : [$wiDone['status']])));
     assert_equals('0', $wiFailures[1] ?? null, 'Web installer: setup doctor has no failing check right after the web install');
     $wiPrivate = $wiBase . '/http/data/bareboneseshop-private';
     $wiDb = new PDO('sqlite:' . $wiPrivate . '/db/shop.sqlite');
@@ -211,7 +222,8 @@ try {
     $wiInstalledStores = json_decode((string)file_get_contents($wiPrivate . '/stores.json'), true);
     assert_equals('WI Books Ltd', $wiInstalledStores['stores'][$wiInstalledStores['default_store']]['legal']['name'] ?? null, 'Web installer: the seller lands in the install\'s own stores.json');
     assert_equals([404, 200], [$wiHttp('/install.php')['status'], $wiHttp('/')['status']], 'Web installer: once installed, install.php answers 404 and the shop opens');
-    assert_true(!str_contains($wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? ''])['body'], 'Your shop is ready'), 'Web installer: a second install post changes nothing');
+    $wiAgain = $wiHttp('/install.php?lang=sk', $wiPost + ['token' => $wiToken[1] ?? '']);
+    assert_true(!str_contains($wiAgain['body'], 'Váš obchod je pripravený') && str_contains($wiAgain['body'], 'Tento obchod je nainštalovaný.'), 'Web installer: a second install post changes nothing');
 
     // No cron on such hosting: page requests run the worker (paid eBooks are granted, mail leaves the queue).
     $wiInstalledConfig = (static fn(string $file): array => require $file)($wiShop . '/config.php');
@@ -237,7 +249,11 @@ try {
         $wiHttp($wiPath);
         assert_true((int)file_get_contents($wiJobs . '/web-worker.last') >= time() - 60, "Web worker: a request to {$wiPath} after the interval runs a pass");
     }
-    assert_true(str_contains($wiDone['body'], 'checks passed') && !str_contains($wiDone['body'], 'Worker cron declaration not recorded'), 'Web worker: doctor accepts page-driven jobs instead of a cron declaration');
+    assert_true(str_contains($wiDone['body'], 'Kontroly v poriadku') && !str_contains($wiDone['body'], 'Worker cron declaration not recorded')
+        && !str_contains($wiDone['body'], 'Cron pre úlohy na pozadí nie je zaznamenaný'), 'Web worker: doctor accepts page-driven jobs instead of a cron declaration');
+    assert_equals(['de', 'pl', 'en', 'en', 'cs'], [WebInstaller::locale('xx', 'fr;q=1, cs;q=0.8, de-CH;q=0.9'), WebInstaller::locale('pl', 'de'), WebInstaller::locale(null, 'fr, ja'),
+        WebInstaller::locale(null, 'sk;q=0, en'), WebInstaller::locale(null, 'cs-CZ, sk')],
+        'R38 web installer: the language link wins, else the best supported Accept-Language by q, else English');
 } catch (Throwable $e) { $wiFail('over HTTP', $e); }
 finally {
     if (is_resource($wiServer)) { proc_terminate($wiServer); proc_close($wiServer); }

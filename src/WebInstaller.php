@@ -130,12 +130,10 @@ final class WebInstaller
     public static function protectionError(?array $exposed, bool $checkedByHand): ?string
     {
         if ($exposed === null) {
-            return $checkedByHand ? null : 'The installer could not check whether the web server keeps the application folders private. Open '
-                . self::PROBE_FILE . ' of this shop in the browser: it must answer "Forbidden" or "Not Found". Then tick the box below and send the form again.';
+            return $checkedByHand ? null : I18n::format('install.err.protection_unknown', ['file' => self::PROBE_FILE]);
         }
         if ($exposed === []) return null;
-        return 'The web server serves files that must stay private (' . implode(', ', $exposed) . '), so the .htaccess rules are not active. '
-            . 'Turn on mod_rewrite and AllowOverride All for this folder (ask your hosting), or use deploy/nginx.conf on nginx, then send the form again.';
+        return I18n::format('install.err.protection_exposed', ['paths' => implode(', ', $exposed)]);
     }
 
     /** The address and port this server answers on (SERVER_ADDR or loopback; the client's port, then the scheme's default). */
@@ -258,26 +256,26 @@ final class WebInstaller
         $v['pay_cod'] = !empty($input['pay_cod']);
         $v['pay_bank'] = !empty($input['pay_bank']);
         $errors = [];
-        foreach (['shop_name' => 'shop name', 'company' => 'seller name', 'street' => 'street', 'city' => 'city', 'zip' => 'postcode'] as $key => $label) {
-            if ($v[$key] === '' || mb_strlen($v[$key]) > 120) $errors[$key] = "Enter the {$label} (at most 120 characters).";
+        foreach (['shop_name', 'company', 'street', 'city', 'zip'] as $key) {
+            if ($v[$key] === '' || mb_strlen($v[$key]) > 120) $errors[$key] = I18n::t('install.err.' . $key);
         }
         if (!filter_var($v['app_url'], FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($v['app_url'], PHP_URL_SCHEME)), ['http', 'https'], true)) {
-            $errors['app_url'] = 'Enter the address of the shop, e.g. https://books.example.com';
+            $errors['app_url'] = I18n::t('install.err.app_url');
         }
-        if (!filter_var($v['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Enter a valid e-mail address.';
-        if (preg_match('/^[A-Z]{2}$/', $v['country']) !== 1) $errors['country'] = 'Enter a two-letter country code, e.g. SK or GB.';
-        if (!in_array($v['timezone'], DateTimeZone::listIdentifiers(), true)) $errors['timezone'] = 'Enter a time zone such as Europe/Bratislava.';
-        if (!$v['pay_cod'] && !$v['pay_bank'] && $v['stripe_secret_key'] === '') $errors['payments'] = 'Choose at least one payment method.';
-        if (($v['pay_bank'] || $v['iban'] !== '') && !BankTransferInstructions::validIban($v['iban'])) $errors['iban'] = 'Bank transfer needs a valid IBAN.';
+        if (!filter_var($v['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = I18n::t('install.err.email');
+        if (preg_match('/^[A-Z]{2}$/', $v['country']) !== 1) $errors['country'] = I18n::t('install.err.country');
+        if (!in_array($v['timezone'], DateTimeZone::listIdentifiers(), true)) $errors['timezone'] = I18n::t('install.err.timezone');
+        if (!$v['pay_cod'] && !$v['pay_bank'] && $v['stripe_secret_key'] === '') $errors['payments'] = I18n::t('install.err.payments');
+        if (($v['pay_bank'] || $v['iban'] !== '') && !BankTransferInstructions::validIban($v['iban'])) $errors['iban'] = I18n::t('install.err.iban');
         // R23 UX: the company and tax numbers and the BIC the invoices and the bank transfer instructions print.
-        if ($v['bic'] !== '' && !BankTransferInstructions::validBic($v['bic'])) $errors['bic'] = 'Enter a BIC of 8 or 11 characters, e.g. TATRSKBX.';
-        foreach (['ico' => 'company number', 'dic' => 'tax number'] as $key => $label) {
-            if (mb_strlen($v[$key]) > 32 || preg_match('/[\x00-\x1F\x7F]/', $v[$key])) $errors[$key] = "Enter the {$label} (at most 32 characters).";
+        if ($v['bic'] !== '' && !BankTransferInstructions::validBic($v['bic'])) $errors['bic'] = I18n::t('install.err.bic');
+        foreach (['ico', 'dic'] as $key) {
+            if (mb_strlen($v[$key]) > 32 || preg_match('/[\x00-\x1F\x7F]/', $v[$key])) $errors[$key] = I18n::t('install.err.' . $key);
         }
         $errors += self::stripeErrors($v);
-        if (preg_match('/^[a-z0-9][a-z0-9._-]{2,63}$/', $v['admin_user']) !== 1) $errors['admin_user'] = 'Use 3-64 letters, digits, dots, dashes or underscores.';
-        if (strlen($v['admin_password']) < 12 || strlen($v['admin_password']) > 1024) $errors['admin_password'] = 'The password needs at least 12 characters.';
-        elseif (!hash_equals($v['admin_password'], (string)($input['admin_password_repeat'] ?? ''))) $errors['admin_password'] = 'The two passwords differ.';
+        if (preg_match('/^[a-z0-9][a-z0-9._-]{2,63}$/', $v['admin_user']) !== 1) $errors['admin_user'] = I18n::t('install.err.admin_user');
+        if (strlen($v['admin_password']) < 12 || strlen($v['admin_password']) > 1024) $errors['admin_password'] = I18n::t('install.err.admin_password');
+        elseif (!hash_equals($v['admin_password'], (string)($input['admin_password_repeat'] ?? ''))) $errors['admin_password'] = I18n::t('install.err.password_repeat');
         $privateError = self::privateParentError($v['private_parent'], $root);
         if ($privateError !== null) $errors['private_parent'] = $privateError;
         [$v['mail'], $mailErrors] = self::mailSettings($input);
@@ -285,13 +283,8 @@ final class WebInstaller
         return [$v, $errors];
     }
 
-    /** English messages of MailSettings::validate() codes (the installer runs before any language is set up). */
-    private const MAIL_ERRORS = [
-        'host' => 'Enter the SMTP server name, e.g. smtp.example.com.', 'port' => 'Enter a port between 1 and 65535.',
-        'encryption' => 'Use tls, ssl or none.', 'plaintext_auth' => 'A login needs encryption: use tls or ssl.',
-        'username' => 'The SMTP user name is too long or contains control characters.',
-        'password' => 'The SMTP password must be one line of at most 1024 characters.', 'from' => 'Enter a sender address on a real domain.',
-    ];
+    /** MailSettings::validate() codes with an installer message (install.err.mail.<code>). */
+    private const MAIL_ERRORS = ['host', 'port', 'encryption', 'plaintext_auth', 'username', 'password', 'from'];
 
     /**
      * R23 UX: the optional "Sending e-mail" fieldset — saved like Admin → E-mail delivery once config.php exists.
@@ -310,7 +303,7 @@ final class WebInstaller
         $fields = ['host' => 'smtp_host', 'port' => 'smtp_port', 'encryption' => 'smtp_encryption', 'plaintext_auth' => 'smtp_encryption',
             'username' => 'smtp_user', 'password' => 'smtp_pass', 'from' => 'mail_from'];
         $out = [];
-        foreach ($errors as $field => $code) $out[$fields[$code] ?? $fields[$field] ?? 'smtp_host'] = self::MAIL_ERRORS[$code] ?? 'Check the e-mail settings.';
+        foreach ($errors as $field => $code) $out[$fields[$code] ?? $fields[$field] ?? 'smtp_host'] = I18n::t('install.err.mail.' . (in_array($code, self::MAIL_ERRORS, true) ? $code : 'other'));
         return [$mail, $out];
     }
 
@@ -319,10 +312,10 @@ final class WebInstaller
     {
         $given = array_filter(array_map(static fn(string $key): string => $v[$key], self::STRIPE_FIELDS), static fn(string $value): bool => $value !== '');
         if ($given === []) return [];
-        if (count($given) < 3) return ['stripe' => 'Card payments need all three Stripe values (secret key, publishable key, webhook signing secret), or none.'];
+        if (count($given) < 3) return ['stripe' => I18n::t('install.err.stripe_incomplete')];
         if (preg_match('/^(sk|rk)_test_[A-Za-z0-9]{16,}$/', $v['stripe_secret_key']) !== 1 || preg_match('/^pk_test_[A-Za-z0-9]{16,}$/', $v['stripe_publishable_key']) !== 1
             || preg_match('/^whsec_[A-Za-z0-9]{16,}$/', $v['stripe_webhook_secret']) !== 1) {
-            return ['stripe' => 'Use Stripe test-mode keys (sk_test_ or rk_test_, pk_test_) and a whsec_ webhook secret: this installer sets up a demo, live keys belong in config.php.'];
+            return ['stripe' => I18n::t('install.err.stripe_test')];
         }
         return [];
     }
@@ -332,21 +325,21 @@ final class WebInstaller
     {
         $normalize = static fn(string $path): string => strtolower(rtrim(str_replace('\\', '/', $path), '/'));
         $absolute = str_starts_with($parent, '/') || preg_match('/^[A-Za-z]:[\\\\\/]/', $parent) === 1;
-        if (!$absolute || preg_match('/[\x00-\x1F\x7F]|(?:^|[\\\\\/])\.\.(?:[\\\\\/]|$)/', $parent)) return 'Enter an absolute path without "..", e.g. /home/you/shop-data';
+        if (!$absolute || preg_match('/[\x00-\x1F\x7F]|(?:^|[\\\\\/])\.\.(?:[\\\\\/]|$)/', $parent)) return I18n::t('install.err.private_relative');
         $served = Setup::enclosingWebRoot($root) ?? $root;
         foreach ([$root, $served] as $public) {
             if ($normalize($parent) === $normalize($public) || str_starts_with($normalize($parent) . '/', $normalize($public) . '/')) {
-                return 'This folder is served by the web server: choose one outside ' . str_replace('\\', '/', $public) . ' (usually the folder above it).';
+                return I18n::format('install.err.private_served', ['path' => str_replace('\\', '/', $public)]);
             }
         }
         $private = rtrim($parent, '/\\') . '/bareboneseshop-private';
         if (is_file($private . '/db/shop.sqlite') && (int)filesize($private . '/db/shop.sqlite') > 0) {
-            return "{$private} already holds the database of another shop: choose another folder or move it away.";
+            return I18n::format('install.err.private_taken', ['path' => $private]);
         }
         // Missing folders are created (e.g. ../bareboneseshop-data/shop): the nearest existing one must be writable.
         for ($existing = $private; !file_exists($existing) && dirname($existing) !== $existing; $existing = dirname($existing));
         return is_dir($existing) && is_writable($existing) ? null
-            : "PHP cannot write to {$existing}: create {$parent} and give the web server user write access, or choose another folder.";
+            : I18n::format('install.err.private_unwritable', ['path' => $existing, 'parent' => $parent]);
     }
 
     /**
@@ -418,7 +411,7 @@ final class WebInstaller
         } catch (Throwable $e) {
             $reference = bin2hex(random_bytes(4));
             Logger::phpLog("BareBonesEshop install.php failure {$reference}: " . self::describe($e));
-            return [null, "Installation failed (reference {$reference}). Nothing was installed; the details are in the PHP error log of your hosting."];
+            return [null, I18n::format('install.err.failed', ['reference' => $reference])];
         }
     }
 
@@ -440,10 +433,42 @@ final class WebInstaller
         return implode("\n", $lines);
     }
 
+    /** R38 UX: the installer's languages (lang/<code>.php), each named in itself for the language links. */
+    public const LOCALES = ['en' => 'English', 'sk' => 'Slovenčina', 'cs' => 'Čeština', 'de' => 'Deutsch', 'pl' => 'Polski', 'hu' => 'Magyar', 'es' => 'Español'];
+
+    /**
+     * R38 UX: the installer was English only. Its language is the one picked from the language links (?lang=, kept in
+     * the form's action), else the browser's first supported Accept-Language, else English.
+     */
+    public static function locale(?string $requested, string $acceptLanguage): string
+    {
+        if ($requested !== null && isset(self::LOCALES[$requested])) return $requested;
+        $ranked = [];
+        foreach (explode(',', $acceptLanguage) as $i => $part) {
+            if (preg_match('/^\s*([A-Za-z]{2})(?:-[A-Za-z0-9]{1,8})*\s*(?:;\s*q\s*=\s*([01](?:\.\d{0,3})?))?\s*$/', $part, $m) !== 1) continue;
+            $code = strtolower($m[1]);
+            $q = isset($m[2]) ? (float)$m[2] : 1.0;
+            if ($q > 0 && isset(self::LOCALES[$code]) && !isset($ranked[$code])) $ranked[$code] = [$q, -$i];
+        }
+        arsort($ranked);
+        return (string)(array_key_first($ranked) ?? 'en');
+    }
+
+    /** The language links above the form; the current language is not a link. */
+    public static function languageLinks(): string
+    {
+        $links = [];
+        foreach (self::LOCALES as $code => $name) {
+            $links[] = $code === I18n::locale() ? '<strong>' . self::h($name) . '</strong>'
+                : '<a href="install.php?lang=' . $code . '" lang="' . $code . '" hreflang="' . $code . '">' . self::h($name) . '</a>';
+        }
+        return '<nav aria-label="' . self::h(I18n::t('install.language')) . '"><p class="hint">' . implode(' · ', $links) . '</p></nav>';
+    }
+
     /** The installer's HTML page (inline styles only: the strict CSP of install.php allows nothing else). */
     public static function page(string $title, string $body): string
     {
-        return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        return '<!doctype html><html lang="' . self::h(I18n::locale()) . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             . '<title>' . self::h($title) . '</title><style>'
             . 'body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1f1d1a;background:#faf7f2}'
             . 'h1{font-family:Georgia,serif}fieldset{border:1px solid #cfc6b8;border-radius:6px;margin:0 0 1.2rem;padding:.8rem 1rem}'
@@ -462,18 +487,37 @@ final class WebInstaller
         $rows = '';
         foreach ($doctor['checks'] as $check) {
             if ($check['status'] === 'pass') continue;
-            $rows .= '<tr><td>' . self::h(strtoupper($check['status'])) . '</td><td>' . self::h($check['message']) . ($check['action'] !== '' ? '<p class="hint">' . self::h($check['action']) . '</p>' : '') . '</td></tr>';
+            // The check in the installer's language where the admin has a text for it; the doctor's own (English)
+            // finding and remedy stay below it, as the technical detail to search for or to hand to the hosting.
+            try {
+                $title = SetupChecklist::title((string)$check['name']);
+            } catch (Throwable $e) {
+                Logger::phpLog('BareBonesEshop install.php check title ' . (string)$check['name'] . ': ' . self::describe($e));
+                $title = null;
+            }
+            $detail = trim($check['message'] . ($check['action'] !== '' ? ' ' . $check['action'] : ''));
+            $rows .= '<tr><td>' . self::h(I18n::t($check['status'] === 'fail' ? 'install.ready.status_fail' : 'install.ready.status_warn')) . '</td><td>'
+                . self::h($title ?? $check['message']) . '<p class="hint">' . self::h($title !== null ? $detail : $check['action']) . '</p></td></tr>';
         }
-        return '<p>' . ($result['starter'] !== null ? self::h($result['starter']) . ' is installed with its demo catalog.' : 'The shop is installed.') . '</p>'
-            . '<h2>Sign-in for the administration</h2><p>User name: <strong>' . self::h($admin['username']) . '</strong>. Signing in needs your password and a code from an authenticator app (Google Authenticator, Aegis, 1Password …).</p>'
-            . '<p>Scan this code with the app now. It is shown only once.</p>' . QrCode::svg((string)($admin['uri'] ?? ''), 'TOTP for ' . (string)$admin['username'])
-            . '<p class="hint">Or enter the key by hand: <code>' . self::h($admin['secret'] ?? '') . '</code></p>'
-            . '<p><strong>Recovery codes</strong> (each works once if you lose the phone; store them safely, they are not shown again):</p><p><code>' . self::h(implode('  ', (array)($admin['recovery_codes'] ?? []))) . '</code></p>'
-            . '<h2>Health check</h2><p>' . self::h($doctor['counts']['pass']) . ' checks passed, ' . self::h($doctor['counts']['warn']) . ' warnings, ' . self::h($doctor['counts']['fail']) . ' failures.</p>'
+        $leftover = $result['leftover'] !== null ? substr(str_replace('\\', '/', $result['leftover']), strlen(str_replace('\\', '/', $root)) + 1) : null;
+        return '<p>' . self::h($result['starter'] !== null ? I18n::format('install.ready.starter', ['name' => $result['starter']]) : I18n::t('install.ready.plain')) . '</p>'
+            . '<h2>' . self::h(I18n::t('install.ready.signin_heading')) . '</h2><p>'
+            . strtr(self::h(I18n::t('install.ready.signin')), ['{user}' => '<strong>' . self::h($admin['username']) . '</strong>']) . '</p>'
+            . '<p>' . self::h(I18n::t('install.ready.scan')) . '</p>' . QrCode::svg((string)($admin['uri'] ?? ''), 'TOTP ' . (string)$admin['username'])
+            . '<p class="hint">' . strtr(self::h(I18n::t('install.ready.manual_key')), ['{key}' => '<code>' . self::h($admin['secret'] ?? '') . '</code>']) . '</p>'
+            . '<p><strong>' . self::h(I18n::t('install.ready.recovery_title')) . '</strong> ' . self::h(I18n::t('install.ready.recovery_hint')) . '</p><p><code>'
+            . self::h(implode('  ', (array)($admin['recovery_codes'] ?? []))) . '</code></p>'
+            . '<h2>' . self::h(I18n::t('install.ready.health')) . '</h2><p>' . self::h(I18n::format('install.ready.counts',
+                ['pass' => $doctor['counts']['pass'], 'warn' => $doctor['counts']['warn'], 'fail' => $doctor['counts']['fail']])) . '</p>'
             . ($rows !== '' ? '<table>' . $rows . '</table>' : '')
-            . ($result['leftover'] !== null ? '<p class="error">Delete the folder ' . self::h(substr(str_replace('\\', '/', $result['leftover']), strlen(str_replace('\\', '/', $root)) + 1))
-                . ' with your FTP client: it still holds the starter database and the eBook files, which now live in the private data folder.</p>' : '')
-            . '<p><a href="./">Open the shop</a> · <a href="admin.php">Sign in to the administration</a></p>';
+            . ($leftover !== null ? '<p class="error">' . self::h(I18n::format('install.ready.leftover', ['folder' => $leftover])) . '</p>' : '')
+            . self::homeLinks();
+    }
+
+    /** "Open the shop · Sign in to the administration". */
+    public static function homeLinks(): string
+    {
+        return '<p><a href="./">' . self::h(I18n::t('install.open_shop')) . '</a> · <a href="admin.php">' . self::h(I18n::t('install.sign_in_admin')) . '</a></p>';
     }
 
     private static function h(mixed $value): string

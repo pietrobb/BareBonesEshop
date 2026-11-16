@@ -10,6 +10,27 @@ function manualOrderMessage(array $result): string {
     return ($result['detail'] ?? '') !== '' ? $message . ' (' . $result['detail'] . ')' : $message;
 }
 
+/**
+ * R38 (low): bytes that are not UTF-8 in a manual order's fields (a mistyped paste, a forged form) ended in json_encode()
+ * and the pattern matching of the lines: HTTP 500. The request is refused with 400 naming the field; nothing is saved.
+ * @param array<string, mixed> $fields
+ */
+function refuseInvalidUtf8(array $fields, string $back): void {
+    $labels = ['name' => 'admin.th.customer', 'email' => 'admin.th.email', 'phone' => 'phone', 'street' => 'street', 'city' => 'city',
+        'zip' => 'zip', 'country' => 'country', 'company' => 'checkout_company', 'ico' => 'checkout_ico', 'dic' => 'checkout_dic',
+        'vat_id' => 'checkout_vat_id', 'pickup_point' => 'pickup_point', 'lines' => 'admin.order.manual.lines', 'notes' => 'admin.order.note',
+        'billing_name' => 'checkout_billing_name', 'billing_street' => 'street', 'billing_city' => 'city', 'billing_zip' => 'zip', 'billing_country' => 'country'];
+    foreach ($fields as $name => $value) {
+        if (!is_string($value) || mb_check_encoding($value, 'UTF-8')) continue;
+        http_response_code(400);
+        header('Content-Type: text/html; charset=utf-8');
+        $field = isset($labels[$name]) ? I18n::t($labels[$name]) : (string)$name;
+        echo '<!doctype html><meta charset="utf-8"><p role="alert">' . esc(I18n::format('checkout.error.field_invalid_named', ['field' => $field]))
+            . '</p><p><a href="' . esc($back) . '">' . esc(I18n::t('admin.common.back_to_list')) . '</a></p>';
+        exit;
+    }
+}
+
 /** GET ?p=order_new — the form; a refused submission comes back filled in. */
 function pageOrderNew(): void {
     $posted = is_array($_SESSION['manual_order_form'] ?? null) ? $_SESSION['manual_order_form'] : [];
@@ -51,6 +72,7 @@ function handleOrderNew(): void {
     Security::adminRequire('orders.edit');
     $posted = [];
     foreach (MANUAL_ORDER_FIELDS as $name) $posted[$name] = is_string($_POST[$name] ?? null) ? $_POST[$name] : '';
+    refuseInvalidUtf8($posted, 'admin.php?p=order_new');
     $posted['notify'] = !empty($_POST['notify']);
     $parsed = ManualOrder::parseLines($posted['lines']);
     $result = $parsed['errors'] !== []
@@ -92,6 +114,7 @@ function renderOrderItemsEditor(array $order, array $items): void {
 function handleOrderItemsEdit(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
+    refuseInvalidUtf8(['lines' => $_POST['lines'] ?? null], 'admin.php?p=order&id=' . $orderId);
     $parsed = ManualOrder::parseLines(is_string($_POST['lines'] ?? null) ? $_POST['lines'] : '');
     $result = $parsed['errors'] !== []
         ? ['ok' => false, 'error' => 'admin.order.manual.unknown_sku', 'detail' => implode(', ', $parsed['errors'])]

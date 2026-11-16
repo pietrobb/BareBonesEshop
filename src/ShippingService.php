@@ -180,6 +180,14 @@ class ShippingService
                     $rate['provider'] = (string)$providerCode;
                     $rate['method_code'] = $rate['method_code'] ?? $rate['carrier'] ?? $adapter->carrierId();
                     $rate['key'] = $rate['key'] ?? $rate['method_code'];
+                    // R38 (low): an adapter's COD surcharge comes apart from its price (ShippingAdapter::getRates()), and
+                    // checkout bills only one carried inside the price (a database rate's base_price + cod_surcharge): the
+                    // built-in carriers' surcharge was never charged. It is carried the same way now.
+                    $surcharge = max(0, (int)($rate['cod_surcharge'] ?? 0));
+                    if ($cod && $surcharge > 0 && !array_key_exists('base_price', $rate)) {
+                        $rate['base_price'] = max(0, (int)($rate['price'] ?? 0));
+                        $rate['price'] = $rate['base_price'] + $surcharge;
+                    }
                     $rates[] = $rate;
                 }
                 $coveredCarriers[] = $adapter->carrierId();
@@ -1213,12 +1221,14 @@ class ShippingService
      * R34: whether $methodCode is collection in the seller's store, whatever the cart weighs or where the buyer lives.
      * The VAT scenario looked for a pickup quote at weight 0, which an address abroad never got (the zone's own rates
      * answered there, the pickup adapter only above their weight bands), and taxed collected goods abroad under OSS.
+     * R38 (medium 2): a carrier's pick-up point (service_type "pickup", as Packeta's) is no collection in the store: the
+     * goods are supplied where the point is (Slovak VAT, no reverse charge and no OSS count were charged for Austria).
      */
     public static function isPickupMethod(string $methodCode): bool
     {
         if ($methodCode === '') return false;
         if (self::hasDatabasePricing()) {
-            $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = :code AND (carrier = 'pickup' OR service_type = 'pickup')"
+            $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = :code AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup')"
                 . (Db::hasColumn('shipping_methods', 'store_id') ? ' AND store_id = :store' : '') . ' LIMIT 1');
             $stmt->execute([':code' => $methodCode] + (Db::hasColumn('shipping_methods', 'store_id') ? [':store' => StoreContext::current()->providerId()] : []));
             if ($stmt->fetchColumn() !== false) return true;

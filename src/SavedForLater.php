@@ -187,6 +187,15 @@ final class SavedForLater
             $item['saved_price'] = $line['saved_price'];
             $item['price_changed'] = $line['saved_price'] !== null && !empty($item['available'])
                 && $line['saved_currency'] === (string)$item['currency'] && $line['saved_price'] !== $catalogPrice;
+            // R38 (low): the saved price is a catalog price (domestic VAT included); next to a price shown under $vatContext
+            // (reverse charge: net) "was" is shown on the same basis. Was: "was 12.30 €" next to "11.00 €" for a raise.
+            $item['saved_price_shown'] = $line['saved_price'];
+            if ($item['price_changed'] && $vatContext !== null) {
+                $was = $base['items'][$index];
+                $was['price'] = (int)$line['saved_price'];
+                $was['total'] = $was['price'] * (int)$was['qty'];
+                $item['saved_price_shown'] = (int)Cart::applyVat(['items' => [$was], 'subtotal' => $was['total']] + $base, $vatContext)['items'][0]['price'];
+            }
             $item['choose_variant'] = $line['variant_id'] === null && !empty($check['has_variants'][$line['product_id']]);
             $items[] = $item;
         }
@@ -224,7 +233,7 @@ final class SavedForLater
                 'can_move' => !empty($item['available']) && !$item['choose_variant'],
                 'choose_variant' => $item['choose_variant'] ? I18n::t('saved_for_later_choose_variant_link') : '',
                 'price_changed' => $item['price_changed']
-                    ? I18n::format('saved_for_later_was', ['price' => I18n::price((int)$item['saved_price'], (string)$item['currency'])]) : '',
+                    ? I18n::format('saved_for_later_was', ['price' => I18n::price((int)$item['saved_price_shown'], (string)$item['currency'])]) : '',
                 'cart_url' => $cartUrl, 'csrf_token' => $csrfToken,
                 'quantity_label' => I18n::t('quantity'), 'price_label' => I18n::t('saved_for_later_unit_price'),
                 'to_cart_label' => I18n::t('saved_for_later_to_cart'), 'remove_label' => I18n::t('remove'),
@@ -453,8 +462,15 @@ final class SavedForLater
         $exists = $db->prepare("SELECT 1 FROM saved_for_later_items WHERE customer_id = ? AND store_id = ? AND item_key = ?");
         $exists->execute([$customerId, self::store(), $key]);
         if ($exists->fetchColumn()) return;
-        $db->prepare('INSERT INTO saved_for_later_items (customer_id, store_id, item_key, ' . implode(', ', $columns) . ')
-            VALUES (?, ?, ?' . str_repeat(', ?', count($columns)) . ')')->execute([$customerId, self::store(), $key, ...$values]);
+        try {
+            $db->prepare('INSERT INTO saved_for_later_items (customer_id, store_id, item_key, ' . implode(', ', $columns) . ')
+                VALUES (?, ?, ?' . str_repeat(', ?', count($columns)) . ')')->execute([$customerId, self::store(), $key, ...$values]);
+        } catch (PDOException $e) {
+            // R38 (low): the account's other device saved the same line in between (unique customer/store/key): this
+            // save is the newer one and replaces it. Was: an uncaught duplicate key, HTTP 500.
+            if (!in_array((string)$e->getCode(), ['23000', '23505'], true)) throw $e;
+            $update->execute([...$values, $customerId, self::store(), $key]);
+        }
     }
 
     private static function delete(string $key): void

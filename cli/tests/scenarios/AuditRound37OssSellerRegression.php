@@ -16,6 +16,8 @@ $r37sExplicit = $r37sDefault;
 $r37sExplicit['legal'] = ['seller' => 'default', 'name' => 'Same legal seller'];
 $r37sOther = $r37sDefault;
 $r37sOther['legal']['seller'] = 'other';
+// R38 (medium 5): another seller is another VAT payer; the same IČ DPH would share the threshold.
+$r37sOther['legal']['ic_dph'] = 'SK2029999999';
 $r37sRoot['default_store'] = 'default';
 $r37sRoot['stores'] = ['default' => $r37sDefault, 'outlet' => $r37sOutlet, 'explicit' => $r37sExplicit, 'other' => $r37sOther];
 $r37sProp->setValue(null, $r37sRoot);
