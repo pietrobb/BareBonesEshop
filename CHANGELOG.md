@@ -190,7 +190,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   another member state than the billing one (art. 138). OSS is the VAT payer's: a store of an IČ DPH whose other store
   has OSS on charges OSS VAT too, and the setup doctor warns about a store with OSS off next to one with it on. A store's own
   pickup method (any carrier code, type "store pickup") is a domestic supply. `cli/eur-rates.php` stores the ECB
-  reference rates the threshold converts other currencies with (cron on working days, e.g. `35 17 * * 1-5`); the
+  reference rates (table of migration `20261116110000_eur_exchange_rates`) the threshold converts other currencies with (cron on working days, e.g. `35 17 * * 1-5`); the
   rates of `config/vat-rates.json` remain the fallback. In another currency, one active method of a carrier no longer
   offers every built-in rate of that carrier. Run as root, `cli/backup.php` copies from a connection of its own whose
   file is checked to still be the one at `db_path` (a file root held open, moved there, was copied). README and
