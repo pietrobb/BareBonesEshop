@@ -61,6 +61,16 @@ if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || posix_ge
         $r39bCopy = $r39bResult['ok'] ? $r39bBase . '/backups/' . $r39bResult['meta']['remote_path'] : '';
         assert_true($r39bResult['ok'] && is_file($r39bCopy) && str_contains((string)file_get_contents($r39bCopy), 'R39-SHOP-DATA'),
             'R39 root backup race: the shop\'s own database is backed up as root (got ' . json_encode($r39bResult['error'] ?? $r39bCopy) . ')');
+        // Two backups in one process while the shop's connection reads (CustomersOperationsScenario as root in CI): SQLite
+        // reuses the descriptor a closed connection left behind the read lock, so a reopened connection adds none.
+        $r39bShop->beginTransaction();
+        $r39bShop->query('SELECT COUNT(*) FROM shop')->fetchColumn();
+        $r39bTwice = [];
+        for ($r39bI = 0; $r39bI < 2; $r39bI++) {
+            try { BackupService::create(['label' => 'manual']); $r39bTwice[] = 'ok'; } catch (Throwable $e) { $r39bTwice[] = $e->getMessage(); }
+        }
+        $r39bShop->rollBack();
+        assert_equals(['ok', 'ok'], $r39bTwice, 'R39 root backup race: a second backup in the same process during a read is made (was: "the database open is not the file")');
         $r39bShop = null;
     } finally {
         BackupService::reset();

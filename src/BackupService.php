@@ -30,6 +30,8 @@ class BackupService
     private static ?string $livePath = null;
     /** db_sqlite_path from config.php as written; SQLite reports the link-resolved file in PRAGMA database_list. */
     private static ?string $configuredPath = null;
+    /** Root's own connection to the checked database file: [path, dev, ino, PDO] (rootForeignDatabase()). */
+    private static ?array $rootConnection = null;
     /** MySQL installs: callable(string $dumpPath): array that writes a consistent dump. */
     private static ?Closure $mysqlDumper = null;
     /** MySQL installs: verified scratch-first restore of a backup dump (restore()). */
@@ -138,6 +140,7 @@ class BackupService
         self::$rootDir = null;
         self::$livePath = null;
         self::$configuredPath = null;
+        self::$rootConnection = null;
         self::$mysqlDumper = null;
         self::$mysqlDatabase = null;
         self::$mysqlDatabaseFactory = null;
@@ -278,8 +281,17 @@ class BackupService
         };
         $file = $checked();
         if (is_string($file)) return $file;
-        if (!is_dir('/proc/self/fd')) return "/proc/self/fd is not available to tell which file a connection opens";
-        $descriptors = static function (): array {
+        $inode = [(int)$file['dev'], (int)$file['ino']];
+        // The connection verified for this file before is still to it. Reopening could not be told apart: SQLite reuses
+        // the descriptor a closed connection left while another one held a lock, so the open would add none.
+        if (self::$rootConnection !== null && [self::$rootConnection[0], self::$rootConnection[1], self::$rootConnection[2]] === [$path, ...$inode]) {
+            $verified = self::$rootConnection[3];
+            return null;
+        }
+        self::$rootConnection = null;
+        $proc = is_dir('/proc/self/fd');
+        $descriptors = static function () use ($proc): array {
+            if (!$proc) return [];
             $open = [];
             foreach (scandir('/proc/self/fd') ?: [] as $fd) {
                 $s = ctype_digit((string)$fd) ? @stat('/proc/self/fd/' . $fd) : false;
@@ -293,10 +305,12 @@ class BackupService
         $added = array_filter(array_diff_key($descriptors(), $before), static fn(array $d): bool => $d[2] === 0100000);
         $after = $checked();
         if (is_string($after)) return $after;
-        $inode = [(int)$file['dev'], (int)$file['ino']];
-        $mainOpen = false;
+        // Without /proc (a container without it) which file the connection opened cannot be seen; as in R38 the checks
+        // before and after the open are what remains.
+        $mainOpen = !$proc;
         foreach ($added as [$dev, $ino]) if ([$dev, $ino] === $inode) $mainOpen = true;
         if (!$mainOpen || [(int)$after['dev'], (int)$after['ino']] !== $inode) return "the database open is not the file at {$path}";
+        self::$rootConnection = [$path, $inode[0], $inode[1], $connection];
         $verified = $connection;
         return null;
     }
