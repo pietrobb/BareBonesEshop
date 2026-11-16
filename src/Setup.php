@@ -425,6 +425,13 @@ class Setup
                 'message' => "Store {$label} sold to consumers in other EU states in " . implode(', ', $unconverted) . ', which the 10 000 EUR OSS threshold cannot convert to EUR; counted so far: ' . $amount . '.',
                 'action' => 'Add the EUR rate of ' . implode(', ', $unconverted) . ' to eur_exchange_rates in config/vat-rates.json.'];
         }
+        // R40 (low): rates dated after today (an earlier version stored the feed's date unchecked) are not used; said so.
+        $future = EurRates::futureDated();
+        if ($converted !== [] && $future !== null) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "Store {$label} counts sales in " . implode(', ', $converted) . " against the 10 000 EUR OSS threshold, but EUR rates are dated {$future}, after today; they are not used.",
+                'action' => 'Run "php cli/eur-rates.php" (it replaces stored ECB rates), or correct eur_exchange_rates_as_of in config/vat-rates.json.'];
+        }
         // R38 (low): the sales in another currency are counted at fixed rates; stale ones under- or overstate the threshold.
         $age = OssThreshold::ratesAge();
         if ($converted !== [] && ($age === null || $age > self::OSS_RATES_MAX_AGE_DAYS)) {
