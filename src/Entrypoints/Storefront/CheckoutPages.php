@@ -89,7 +89,7 @@ function renderCheckout(): string {
     $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
     $country = $state['country'];
     // Priced in the order's VAT scenario: reverse charge and export show (and reach thresholds with) the net amounts charged.
-    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($country, $state['values'], Security::clean($form('shipping_method')), $state['billing_different'] ? $state['billing_country'] : ''); // goods: what execute() orders
+    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($country, $state['values'], Security::clean($form('shipping_method')), $state['billing_different'] ? $state['billing_country'] : '', $form('residence_country')); // goods: what execute() orders
     [$price, $cart] = [storefrontCartPrice($cartData), $cartData['items']];
     $subtotal = (int)$cartData['subtotal'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
@@ -153,7 +153,7 @@ function renderCheckout(): string {
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : ($preview['coupon_applied'] ? sprintf($t('coupon_applied_free_shipping'), $couponCode) : ''),
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
-        + CheckoutService::billingView($state, $placed) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
+        + CheckoutService::billingView($state, $placed) + CheckoutService::residenceView($shownVat, $vat, $state['countries'], $form('residence_country'), $placed) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
 }
 
 /**

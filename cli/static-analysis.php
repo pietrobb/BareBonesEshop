@@ -231,7 +231,8 @@ $architectureBudgets = [
     // +9 lines R19: "Paid" with the amount 0 is refused, an amount above the order total is recorded with a warning.
     // +2 lines, +1 coupling R31: the order detail shows the billing address when it differs from the delivery one (OrderAddress).
     // +8 lines, +2 function lines R38: "Not executed" for a refund whose provider answer was lost; release without a provider check.
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 984, 'functions' => 17, 'max_function_lines' => 329, 'coupling' => 25],
+    // +4 lines R39: "Paid" is not offered for a refund the provider has, and on refund_pending it needs orders.refund.
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 988, 'functions' => 17, 'max_function_lines' => 329, 'coupling' => 25],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
     // +23 lines, +1 function R38: fields that are not UTF-8 are refused with 400 naming the field (was HTTP 500).

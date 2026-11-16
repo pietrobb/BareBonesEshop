@@ -3,7 +3,7 @@
 
 const MANUAL_ORDER_FIELDS = ['name', 'email', 'phone', 'country', 'street', 'city', 'zip', 'company', 'ico', 'dic', 'vat_id',
     'pickup_point', 'shipping_method', 'payment_method', 'lines', 'notes', 'locale',
-    'billing_different', 'billing_name', 'billing_street', 'billing_city', 'billing_zip', 'billing_country'];
+    'billing_different', 'billing_name', 'billing_street', 'billing_city', 'billing_zip', 'billing_country', 'residence_country'];
 
 function manualOrderMessage(array $result): string {
     $message = I18n::t((string)$result['error']);
@@ -19,7 +19,7 @@ function refuseInvalidUtf8(array $fields, string $back): void {
     $labels = ['name' => 'admin.th.customer', 'email' => 'admin.th.email', 'phone' => 'phone', 'street' => 'street', 'city' => 'city',
         'zip' => 'zip', 'country' => 'country', 'company' => 'checkout_company', 'ico' => 'checkout_ico', 'dic' => 'checkout_dic',
         'vat_id' => 'checkout_vat_id', 'pickup_point' => 'pickup_point', 'lines' => 'admin.order.manual.lines', 'notes' => 'admin.order.note',
-        'billing_name' => 'checkout_billing_name', 'billing_street' => 'street', 'billing_city' => 'city', 'billing_zip' => 'zip', 'billing_country' => 'country'];
+        'billing_name' => 'checkout_billing_name', 'billing_street' => 'street', 'billing_city' => 'city', 'billing_zip' => 'zip', 'billing_country' => 'country', 'residence_country' => 'checkout.residence.label'];
     foreach ($fields as $name => $value) {
         if (!is_string($value) || mb_check_encoding($value, 'UTF-8')) continue;
         http_response_code(400);
@@ -53,7 +53,7 @@ function pageOrderNew(): void {
             <?php $field('company', I18n::t('checkout_company')); $field('ico', I18n::t('checkout_ico')); $field('dic', I18n::t('checkout_dic')); $field('vat_id', I18n::t('checkout_vat_id')); ?>
             <div class="form-row" style="grid-column:1/-1" data-manual-billing><label><input type="checkbox" name="billing_different" value="1" <?= $value('billing_different') === '1' ? 'checked' : '' ?>> <?= esc(I18n::t('checkout_billing_different')) ?></label></div>
             <?php $field('billing_name', I18n::t('checkout_billing_name')); $field('billing_street', I18n::t('checkout_billing_heading') . ': ' . I18n::t('street')); $field('billing_city', I18n::t('checkout_billing_heading') . ': ' . I18n::t('city'));
-            $field('billing_zip', I18n::t('checkout_billing_heading') . ': ' . I18n::t('zip')); $field('billing_country', I18n::t('checkout_billing_heading') . ': ' . I18n::t('country')); ?>
+            $field('billing_zip', I18n::t('checkout_billing_heading') . ': ' . I18n::t('zip')); $field('billing_country', I18n::t('checkout_billing_heading') . ': ' . I18n::t('country')); $field('residence_country', I18n::t('checkout.residence.label')); ?>
             <div class="form-row"><label for="mo-shipping"><?= esc(I18n::t('admin.order.shipping')) ?></label><select id="mo-shipping" name="shipping_method"><option value=""><?= esc(I18n::t('admin.order.manual.choose')) ?></option><?php foreach ($options['shipping'] as $o): ?><option value="<?= esc($o['code']) ?>" <?= $value('shipping_method') === $o['code'] ? 'selected' : '' ?>><?= esc($o['label']) ?></option><?php endforeach; ?></select></div>
             <?php $field('pickup_point', I18n::t('pickup_point')); ?>
             <div class="form-row"><label for="mo-payment"><?= esc(I18n::t('admin.order.payment_method')) ?></label><select id="mo-payment" name="payment_method" required><option value=""><?= esc(I18n::t('admin.order.manual.choose')) ?></option><?php foreach ($options['payment'] as $o): ?><option value="<?= esc($o['code']) ?>" <?= $value('payment_method') === $o['code'] ? 'selected' : '' ?>><?= esc($o['label']) ?></option><?php endforeach; ?></select></div>

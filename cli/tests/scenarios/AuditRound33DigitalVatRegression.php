@@ -112,8 +112,10 @@ try {
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (99333, 'default', 1, 'R33V print', 'r33v-print', 'R33V-PRINT', 'simple', 1230, 'eur', 'active', 10, 'continue')");
     $_SESSION['cart'] = ['p_99331' => ['product_id' => 99331, 'variant_id' => null, 'qty' => 1], 'p_99333' => ['product_id' => 99333, 'variant_id' => null, 'qty' => 1]];
-    $r33vMixed = static function (string $delivery, string $billing): array {
-        $vat = CheckoutService::vatContext($delivery, '', '', false, null, $billing);
+    // R39 (low): the billing and delivery countries below contradict, so the buyer declares where they live (one of the
+    // two, CheckoutService::digitalResidence()); each case declares the country its R38 expectation stands for.
+    $r33vMixed = static function (string $delivery, string $billing, string $declared): array {
+        $vat = CheckoutService::vatContext($delivery, '', '', false, null, $billing, '', $declared);
         $items = array_values(array_filter(Cart::enriched($vat['context'])['items'], static fn(array $i): bool => !empty($i['available'])));
         $snapshot = VatService::buildSnapshot($items, $vat['context'], ['currency' => 'eur', 'effective_date' => ShopTime::date('Y-m-d')]);
         $byId = [];
@@ -129,25 +131,25 @@ try {
     // proves; a billing country the shopper only typed is no second, non-contradictory item of evidence (art. 24b(d),
     // 24f). R33 had taxed it by the billing country: a Slovak buyer billed in Luxembourg paid 17 % instead of 23 %.
     // Parcel to Austria under OSS, billed to Slovakia: the e-book follows the parcel (Austrian VAT, as the goods).
-    $r33vAtSk = $r33vMixed('AT', 'SK');
+    $r33vAtSk = $r33vMixed('AT', 'SK', 'AT');
     assert_equals(['oss', [$r33vRate('AT'), null, null], [$r33vRate('AT'), null, null]],
         [$r33vAtSk['snapshot']['scenario'], $r33vTag($r33vAtSk['print']), $r33vTag($r33vAtSk['ebook'])],
         'R38 mixed cart: a parcel to AT billed to SK — the e-book is supplied with the goods in Austria');
     assert_equals($r33vRate('AT'), $r33vAtSk['cart'][99331][1], 'R38 mixed cart: the cart prices the e-book at the Austrian rate too');
 
     // Parcel to Switzerland (export), billed to Austria: the e-book is exported with the goods, zero-rated.
-    $r33vChAt = $r33vMixed('CH', 'AT');
+    $r33vChAt = $r33vMixed('CH', 'AT', 'CH');
     assert_equals(['export', [0, null, null], [0, null, null]],
         [$r33vChAt['snapshot']['scenario'], $r33vTag($r33vChAt['print']), $r33vTag($r33vChAt['ebook'])],
         'R38 mixed cart: an export billed to AT — the billing country alone does not make the e-book an Austrian OSS supply');
     assert_true($r33vChAt['cart'][99333][0] < 1230 && $r33vChAt['cart'][99333][1] === 0, 'R33 mixed cart: the exported book is still charged without VAT');
 
     // Billed outside the EU next to exported goods: zero-rated like them.
-    $r33vChUs = $r33vMixed('CH', 'US');
+    $r33vChUs = $r33vMixed('CH', 'US', 'CH');
     assert_equals([0, null, null], $r33vTag($r33vChUs['ebook']), 'R33 mixed cart: an export billed to the US leaves the e-book zero-rated');
     // A domestic parcel billed to Austria (or Luxembourg): the e-book pays the Slovak VAT of the goods.
-    assert_equals([$r33vRate('SK'), null, null], $r33vTag($r33vMixed('SK', 'AT')['ebook']), 'R38 mixed cart: a parcel at home billed to AT taxes the e-book at home');
-    assert_equals([$r33vRate('SK'), null, null], $r33vTag($r33vMixed('SK', 'LU')['ebook']), 'R38 mixed cart: a parcel at home billed to LU taxes the e-book at 23 %, not 17 %');
+    assert_equals([$r33vRate('SK'), null, null], $r33vTag($r33vMixed('SK', 'AT', 'SK')['ebook']), 'R38 mixed cart: a parcel at home billed to AT taxes the e-book at home');
+    assert_equals([$r33vRate('SK'), null, null], $r33vTag($r33vMixed('SK', 'LU', 'SK')['ebook']), 'R38 mixed cart: a parcel at home billed to LU taxes the e-book at 23 %, not 17 %');
 
     // The OSS report lists both Austrian lines of the first order and nothing for the export.
     $r33vReport = static function (): array {

@@ -329,9 +329,9 @@ $r15mThrows = static function (Closure $run): string {
 try {
     Warehouse::setStock($r15mDefault, 'R15M-RL', 6, 'count');
     $r15mSteal($r15mDefault, 'R15M-RL', 3);
-    $r15mIgnored = [['warehouse_id' => null, 'qty' => 2], ['warehouse_id' => $r15mDefault, 'qty' => 1, 'status' => 'released']];
-    Warehouse::release('R15M-RL', $r15mIgnored);
-    Warehouse::restock('R15M-RL', $r15mIgnored);
+    $r15mPendingBooked = [['warehouse_id' => null, 'qty' => 2], ['warehouse_id' => $r15mDefault, 'qty' => 1, 'status' => 'released']];
+    Warehouse::release('R15M-RL', $r15mPendingBooked);
+    Warehouse::restock('R15M-RL', $r15mPendingBooked);
     assert_equals(['qty' => 6, 'reserved' => 3], $r15mRow('R15M-RL'), 'R15 mutants: release and restock skip a backorder allocation and one no longer reserved');
     Warehouse::release('R15M-RL', [['warehouse_id' => $r15mDefault, 'qty' => 1]]);
     assert_equals([['qty' => 6, 'reserved' => 2], ['quantity_delta' => 0, 'reserved_delta' => -1]], [$r15mRow('R15M-RL'), $r15mMovement('R15M-RL', 'release')],
@@ -588,11 +588,12 @@ try {
         'R15 mutants: a replayed event key books no second refund, even under another refund id');
 
     $r15mPending = $r15mBookOrder('R15M-BK-PENDING', 'pending');
-    $r15mIgnored = PaymentService::bookProviderRefund($r15mPending, 'stripe', 're_r15m_3', 300, 'refund.succeeded', 'r15m-bk-3');
+    $r15mPendingBooked = PaymentService::bookProviderRefund($r15mPending, 'stripe', 're_r15m_3', 300, 'refund.succeeded', 'r15m-bk-3');
     $r15mLogged = $r15mTxRow('r15m-bk-3');
-    assert_equals([false, 'ignored', 300, 'pending', 'pending'],
-        [$r15mIgnored, $r15mLogged[0] ?? null, $r15mLogged[1] ?? null, $r15mLogged[2]['payment_status'] ?? null, (string)$r15mMemDb->query("SELECT payment_status FROM orders WHERE id = {$r15mPending}")->fetchColumn()],
-        'R15 mutants: a refund on a payment that was never paid is logged as ignored and leaves the payment as it was');
+    // R39 (low): the provider refunded a payment the shop still held as pending (its capture was missed): booked, not ignored.
+    assert_equals([true, 'partially_refunded', 300, 'partially_refunded'],
+        [$r15mPendingBooked, $r15mLogged[0] ?? null, $r15mLogged[1] ?? null, (string)$r15mMemDb->query("SELECT payment_status FROM orders WHERE id = {$r15mPending}")->fetchColumn()],
+        'R15 mutants: a provider refund of a payment still held as pending is booked (its capture was missed)');
 } catch (Throwable $e) {
     $r15mFail('provider refund booking', $e);
 } finally {

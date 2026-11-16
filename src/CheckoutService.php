@@ -61,9 +61,9 @@ class CheckoutService {
      * the result of an earlier check (an order being edited keeps the verification it was placed with).
      * R33: $billingCountry (the billing address, when the order is billed elsewhere) is where a download is supplied:
      * an e-service is taxed where the consumer lives or the business is established, not where a parcel goes.
-     * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
+     * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string, oss_threshold: mixed, residence_choices: array, residence_required: bool}
      */
-    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = ''): array {
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = '', string $ipCountry = ''): array {
         $store = StoreContext::current()->config();
         $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
         $vatIdValid = false;
@@ -82,10 +82,10 @@ class CheckoutService {
         } elseif ($vatId !== '') {
             $vatIdStatus = 'unverified';
         }
-        // R38 (low): a foreign VAT ID reverse charges only for its holder: its state is where the buyer is billed, and the
-        // company is the one VIES names (VatService::vatIdHolderMismatch()). Otherwise the sale is charged VAT.
+        // R38 (low): a foreign VAT ID reverse charges only for its holder: the company is the one VIES names
+        // (VatService::vatIdHolderMismatch()). Otherwise the sale is charged VAT. R39: registered in any other state (art. 138).
         $foreignVatId = (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry;
-        $vatIdMismatch = $vatIdValid && $foreignVatId ? VatService::vatIdHolderMismatch($vatId, $company, trim($billingCountry) !== '' ? $billingCountry : $country) : null;
+        $vatIdMismatch = $vatIdValid && $foreignVatId ? VatService::vatIdHolderMismatch($vatId, $company) : null;
         if ($vatIdMismatch !== null) [$vatIdValid, $vatIdStatus] = [false, 'mismatch_' . $vatIdMismatch];
         $vatCart = Cart::enriched();
         $vatGoods = self::availableItems($vatCart['items'] ?? []);
@@ -100,12 +100,11 @@ class CheckoutService {
         $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, $vatWeight, 0, false, 0, ShippingService::physicalQuantity($vatGoods), isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
         if ($rate !== null && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
-        $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
-        // R38 (medium 3): next to goods, a billing country the shopper only typed is no evidence of residence when the
-        // goods go to another one (art. 24b(d), 24f: two non-contradictory items): a Slovak buyer billed in Luxembourg
-        // paid 17 % on the e-book instead of 23 %. The country the goods are supplied in decides then: the delivery
-        // country, proven by the dispatch, or the store's when they are collected there (nothing proves the address).
-        if (!$digitalOnly && trim($country) !== '') $residence = strtoupper(trim(vatSupplyCountry($rate, $country, $sellerCountry)));
+        // A business with a valid VAT ID gets downloads where it is established (below), so no residence is asked.
+        $residenceCheck = self::hasDownload($vatGoods) && !$vatIdValid
+            ? self::digitalResidence($digitalOnly, $billingCountry, $country, ($rate['carrier'] ?? '') === 'pickup', $declaredResidence, $ipCountry)
+            : ['country' => strtoupper(trim(vatSupplyCountry($rate, $country, $sellerCountry))), 'choices' => [], 'required' => false, 'evidence' => []];
+        $residence = $residenceCheck['country'];
         $consumerResidence = $residence;
         // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
         $vatIdCountry = substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2);
@@ -119,7 +118,8 @@ class CheckoutService {
         $context = [
             'seller_country'        => $sellerCountry,
             'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
-            'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false),
+            // R39 (low): the VAT payer's OSS registration, whichever of its stores it was switched on in.
+            'seller_oss_enabled'    => OssThreshold::sellerOssEnabled(StoreContext::current()->id(), $store),
             // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).
             'customer_country'      => $digitalOnly ? $residence : vatSupplyCountry($rate, $country, $sellerCountry),
             'customer_vat_id_valid' => $vatIdValid && !$vatIdOfSeller,
@@ -128,8 +128,9 @@ class CheckoutService {
             'is_b2b'                => $vatId !== '',
             // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
             'customer_country_verified' => !$digitalOnly,
-            // Downloads next to goods are supplied where the goods are (R38), unless a valid VAT ID says otherwise.
+            // Downloads next to goods are supplied where the buyer lives (R39: digitalResidence()), unless a valid VAT ID says otherwise.
             'digital_customer_country' => $digitalOnly ? '' : $residence,
+            'digital_residence_evidence' => $residenceCheck['evidence'],
             'tax_provider'          => $taxProviderCode,
         ];
         // R35 (low): past the 10 000 EUR threshold a consumer of another member state pays their own VAT, OSS on or not.
@@ -147,6 +148,7 @@ class CheckoutService {
                 $saleNet = OssThreshold::saleNet($lines, $goodsAbroad, $downloadsAbroad, $sellerCountry);
                 try {
                     $context['seller_oss_enabled'] = OssThreshold::exceeded($saleNet, (string)($vatCart['currency'] ?? 'eur'));
+                    if ($context['seller_oss_enabled']) $context['oss_threshold_reason'] = OssThreshold::lastReason();
                 } catch (OssThresholdUnavailableException $e) {
                     // R38 (low): the page is shown at home VAT; placing the order decides again and refuses (thresholdVat()).
                     $threshold['unavailable'] = true;
@@ -156,7 +158,76 @@ class CheckoutService {
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
         return ['context' => $context, 'scenario' => $scenario, 'net' => Cart::chargesNetOfDomesticVat($scenario),
             'vat_id_valid' => $vatIdValid, 'vat_id_status' => $vatIdStatus, 'seller_country' => $sellerCountry, 'tax_provider' => $taxProviderCode,
-            'oss_threshold' => $threshold];
+            'oss_threshold' => $threshold, 'residence_choices' => $residenceCheck['choices'], 'residence_required' => $residenceCheck['required']];
+    }
+
+    /**
+     * R39 (low): where a buyer of downloads lives (art. 24b, 24f Reg. 282/2011: two non-contradictory items of evidence).
+     * R38 took the delivery country next to goods, a rule and no evidence: a gift billed in Luxembourg and sent to
+     * Slovakia paid Slovak VAT on the e-book, and an Austrian collecting the goods in the Bratislava store too (and it
+     * was not counted toward the OSS threshold). The billing address (the delivery one when not billed apart) is one
+     * item; goods sent to an address are another, collection in the store is none. When they contradict, the country the
+     * buyer declares, one of the two, decides (with the item it matches); until declared the order is refused
+     * ('required') and the previews price with the billing country. Without a contradiction a declaration is not
+     * needed (nor taken). A digital-only order had nothing but the billing country the buyer typed: the country of the
+     * buyer's IP address ($ipCountry, art. 24f(b); ipCountry()) is a second item when the store's proxy supplies it.
+     * @return array{country: string, choices: list<string>, required: bool, evidence: array<string, string>}
+     */
+    public static function digitalResidence(bool $digitalOnly, string $billingCountry, string $deliveryCountry, bool $collectedInStore, string $declared, string $ipCountry = ''): array {
+        $delivery = strtoupper(trim($deliveryCountry));
+        $billing = strtoupper(trim($billingCountry)) ?: $delivery;
+        $declared = strtoupper(trim($declared));
+        $evidence = ['billing' => $billing];
+        if (!$digitalOnly && !$collectedInStore && $delivery !== '') $evidence['delivery'] = $delivery;
+        $ipCountry = strtoupper(trim($ipCountry));
+        if (array_key_exists($ipCountry, ShippingService::billingCountries())) $evidence['ip'] = $ipCountry;
+        $choices = array_values(array_unique(array_filter($evidence)));
+        if (count($choices) <= 1) return ['country' => $billing, 'choices' => [], 'required' => false, 'evidence' => $evidence];
+        if (!in_array($declared, $choices, true)) return ['country' => $billing, 'choices' => $choices, 'required' => true, 'evidence' => $evidence];
+        return ['country' => $declared, 'choices' => $choices, 'required' => false, 'evidence' => $evidence + ['declared' => $declared]];
+    }
+
+    /**
+     * R39 (low): the country of the buyer's IP address, from the request header the store's trusted proxy sets
+     * (store setting vat_ip_country_header, e.g. "CF-IPCountry"); '' when none is configured — a client could send it.
+     */
+    public static function ipCountry(array $store): string {
+        $header = trim((string)($store['vat_ip_country_header'] ?? ''));
+        if ($header === '') return '';
+        $value = $_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $header))] ?? '';
+        return is_string($value) ? strtoupper(trim($value)) : '';
+    }
+
+    /**
+     * R39 (low): the checkout form's declaration of residence (offered when the evidence contradicts, digitalResidence())
+     * and why the order is charged the VAT it is ($shownVat: the scenario the order is placed in, thresholdVat()). The
+     * buyer saw the amounts only: foreign VAT on an e-book, or none on a business order, came without a word.
+     */
+    public static function residenceView(array $shownVat, array $vat, array $countries, string $declared, array $placed = []): array {
+        $countries += ShippingService::billingCountries();
+        $name = static fn(string $code): string => (string)($countries[strtoupper($code)] ?? strtoupper($code));
+        $declared = strtoupper(trim($declared));
+        $context = (array)($shownVat['context'] ?? []);
+        $scenario = (string)($shownVat['scenario']['scenario'] ?? '');
+        $reason = match ($scenario) {
+            VatService::SCENARIO_OSS => sprintf(I18n::t('checkout.vat_reason.oss'), $name((string)($shownVat['scenario']['rate_country'] ?? ''))),
+            VatService::SCENARIO_REVERSE_CHARGE => I18n::t('checkout.vat_reason.reverse_charge'),
+            VatService::SCENARIO_EXPORT => I18n::t('checkout.vat_reason.export'),
+            VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_DOMESTIC_SUBTHRESH => sprintf(I18n::t('checkout.vat_reason.domestic'), $name((string)($context['seller_country'] ?? ''))),
+            default => '',
+        };
+        $evidence = (array)($context['digital_residence_evidence'] ?? []);
+        $residence = (string)($evidence['declared'] ?? $evidence['billing'] ?? '');
+        if ($reason !== '' && $residence !== '' && !in_array($scenario, [VatService::SCENARIO_REVERSE_CHARGE, VatService::SCENARIO_EXPORT], true)) {
+            $reason .= ' ' . sprintf(I18n::t('checkout.vat_reason.digital'), $name($residence));
+        }
+        return [
+            'vat_reason' => $reason,
+            'residence_label' => I18n::t('checkout.residence.label'), 'residence_hint' => I18n::t('checkout.residence.hint'),
+            'residence_invalid' => ($placed['error_code'] ?? '') === 'checkout.error.residence_required',
+            'residence_options' => array_map(static fn(string $code): array => ['code' => $code, 'name' => $name($code), 'selected' => $code === $declared],
+                (array)($vat['residence_choices'] ?? [])),
+        ];
     }
 
     /**
@@ -182,8 +253,12 @@ class CheckoutService {
         }
         $snapshot = $taxProvider::buildSnapshot($homeItems, $home, $amounts);
         $abroad = OssThreshold::exceeded(OssThreshold::snapshotNet($snapshot, $homeItems, (bool)$check['goods'], (bool)$check['digital']), (string)($snapshot['currency'] ?? 'eur'));
-        if ($abroad === (bool)$vat['context']['seller_oss_enabled']) return [$vat, $items];
-        $context = ['seller_oss_enabled' => $abroad] + $home;
+        $reason = $abroad ? OssThreshold::lastReason() : null;
+        if ($abroad === (bool)$vat['context']['seller_oss_enabled']) {
+            if ($abroad) $vat['context']['oss_threshold_reason'] = $reason;
+            return [$vat, $items];
+        }
+        $context = ['seller_oss_enabled' => $abroad] + ($abroad ? ['oss_threshold_reason' => $reason] : []) + $home;
         $scenario = $taxProvider::resolveScenario($context);
         $priced = array_column(Cart::enriched($context)['items'] ?? [], null, 'key');
         $items = array_map(static fn(array $item): array => $priced[$item['key'] ?? ''] ?? $item, $items);
@@ -216,12 +291,12 @@ class CheckoutService {
      * never answers the preview with HTTP 429: the shipping and payment previews of a business behind one office IP
      * kept failing after ~10 changes, and checkout could not be finished.
      */
-    public static function previewVatContext(string $country, string $vatId, string $shippingMethod, string $billingCountry = '', string $company = ''): array {
+    public static function previewVatContext(string $country, string $vatId, string $shippingMethod, string $billingCountry = '', string $company = '', string $declaredResidence = ''): array {
         $known = $vatId !== '' ? VatService::cachedVatIdStatus($vatId) : null;
         $verify = $known === null && $vatId !== '' && Security::rateLimitAllows('checkout_vat_preview', 20, 600);
         if ($verify) Security::rateLimitRecord('checkout_vat_preview');
         if ($vatId !== '') self::rememberUncheckedVatId($vatId, $known === null && !$verify);
-        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry, $company);
+        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry, $company, $declaredResidence, self::ipCountry(StoreContext::current()->config()));
     }
 
     /**
@@ -249,9 +324,9 @@ class CheckoutService {
      * $billingCountry: the billing address's country when the order is billed elsewhere (formState()), else ''.
      * @return array{vat: array, cart: array, goods: list<array>}
      */
-    public static function previewCart(string $country, array $values, string $shippingMethod, string $billingCountry = ''): array {
+    public static function previewCart(string $country, array $values, string $shippingMethod, string $billingCountry = '', string $declaredResidence = ''): array {
         $buyer = self::buyerCompany($values);
-        $vat = self::previewVatContext($country, $buyer['vat_id'], $shippingMethod, $billingCountry, (string)($buyer['fields']['company'] ?? ''));
+        $vat = self::previewVatContext($country, $buyer['vat_id'], $shippingMethod, $billingCountry, (string)($buyer['fields']['company'] ?? ''), $declaredResidence);
         $cart = Cart::enriched($vat['context']);
         return ['vat' => $vat, 'cart' => $cart, 'goods' => self::availableItems($cart['items'])];
     }

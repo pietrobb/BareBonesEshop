@@ -136,8 +136,10 @@ try {
             assert_equals(['refunded', 'paid', 1000], $a061State('P1'), "{$a061Tag}: cumulative refund reaching the total is refunded");
             assert_equals($a061Ok, $a061Send($a061Refund('P2', 'R-WORKER', '400')), "{$a061Tag}: notification for a worker-executed refund accepted");
             assert_equals(['partially_refunded', 'paid', 400], $a061State('P2'), "{$a061Tag}: worker-executed refund is not counted twice");
+            // R39 (low): a provider refund of a payment the shop still holds as pending is a capture it missed: the money
+            // went out, so the ledger books it (was: ignored, the ledger held 0).
             assert_equals($a061Ok, $a061Send($a061Refund('P5', 'R-UNPAID', '1000')), "{$a061Tag}: refund for an unpaid order acknowledged");
-            assert_equals(['pending', 'pending', 0], $a061State('P5'), "{$a061Tag}: refund for an unpaid order changes nothing");
+            assert_equals(['refunded', 'pending', 1000], $a061State('P5'), "{$a061Tag}: refund for a payment still held as pending is booked (its capture was missed)");
 
             // Disputes and duplicate captures go through the same state machine.
             assert_equals($a061Ok, $a061Send($a061Order('P4', 'COMPLETED')), "{$a061Tag}: second COMPLETED for a paid order acknowledged");

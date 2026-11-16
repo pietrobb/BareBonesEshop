@@ -73,6 +73,7 @@ while true; do php cli/worker.php --once; sleep 60; done
 #      * * * * *  php /path/to/shop/cli/worker.php
 #      17 3 * * * php /path/to/shop/cli/gdpr-gc.php --apply --quiet
 #      40 2 * * * php /path/to/shop/cli/backup.php --gc
+#      30 16 * * * php /path/to/shop/cli/eur-rates.php   (ECB EUR rates for the OSS threshold)
 #    Hosting without cron: set 'operations' => ['web_worker' => true] instead
 #    (page requests then run one worker pass at most every 60 seconds).
 ```
@@ -179,6 +180,16 @@ Never commit real secrets (Stripe keys, admin password hash for production) —
 keep them in an untracked local override or environment-specific config. The
 machine-readable deployment contract is `config/config.schema.json`; fields marked
 `x-secret` must be injected from deployment secret storage.
+
+E-books and other downloads are taxed where the buyer lives. Checkout weighs the
+evidence: the billing address, goods sent to an address (not collection in the store),
+and, when a store entry in `stores.json` sets `vat_ip_country_header` (for example
+`"CF-IPCountry"`, only behind a proxy that sets and overwrites it), the IP address's
+country. When they disagree, the buyer (or the admin, for a manual order) states the
+country of residence; the order records the evidence in its financial snapshot.
+A store's own pick-up desk under any carrier code is set up as a shipping method of
+type "Pick-up in store". OSS is the VAT payer's registration: switched on in one store, it
+applies to every store with the same VAT ID (`legal.ic_dph`).
 
 ### Merchant setup and operations
 
@@ -611,6 +622,16 @@ the shop's steps (one account may be both):
    `setup.php install` creates the private runtime directory as this account: where it is
    not the web server user, hand that directory over afterwards
    (`chown -R www-data: /var/www/bareboneseshop-private`), as the Docker `setup` service does.
+   `update.php` and `migrate.php` still write the database (and its `-wal`/`-journal`
+   files) in that directory, so when the owner is not the web server user both write it
+   through a shared group, not by being its owner: put the owner in the web server user's
+   group (`usermod -aG www-data deploy`), make the directory group-writable with setgid on
+   every directory so new files inherit the group
+   (`chgrp -R www-data /var/www/bareboneseshop-private && chmod -R g+rwX /var/www/bareboneseshop-private && find /var/www/bareboneseshop-private -type d -exec chmod g+s {} +`),
+   and run both accounts' steps with `umask 002` (PHP-FPM's `UMask = 0002` in its systemd
+   unit, `umask 002` before the cron lines and the update), so a file one creates stays
+   writable by the other. Backups and restores stay with the web server user (step 1;
+   docs/OPERATIONS_RUNBOOK.md describes the same layout).
 3. **From a root shell**, use the wrapper instead of `sudo php`: install `deploy/bbe-step.sh` root-owned outside the tree,
 from a release you verified (the signed package's `payload/deploy/bbe-step.sh` or the release
 tag), not from the shop's copy, which an account that can write the tree may have changed

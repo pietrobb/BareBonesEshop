@@ -146,19 +146,21 @@ final class ManualOrder {
                 + array_intersect_key($billing, array_flip(OrderAddress::COMPANY_KEYS))
                 + ['billing_different' => true, 'billing_country' => (string)($billing['country'] ?? '')];
         }
+        $stored = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $stored = is_array($stored) ? $stored : [];
         $buyer = $address + [
             'vat_id' => (string)($address['ic_dph'] ?? ''),
             'shipping_method' => (string)($order['shipping_method'] ?? ''),
             'payment_method' => (string)$order['payment_method'],
             'pickup_point' => (string)($rate['pickup_point']['id'] ?? ''),
+            // R39: the residence stated when the order was placed still decides where its downloads are supplied.
+            'residence_country' => (string)($stored['digital_residence']['declared'] ?? ''),
         ];
         $customerId = !empty($order['customer_id']) ? (int)$order['customer_id'] : null;
         // The VAT ID was checked when the order was placed. The edit keeps that verification instead of asking VIES again
         // inside the stock transaction. R34: a line reverse charged next to goods taxed at home (an e-book for a German
         // business) proves it valid too, and so does the check on record; the whole order's scenario alone did not.
         $storedScenario = (string)($order['vat_scenario'] ?? '');
-        $stored = json_decode((string)($order['financial_snapshot'] ?? ''), true);
-        $stored = is_array($stored) ? $stored : [];
         $placedStatus = self::placedVatIdStatus($order, $stored, (string)$buyer['vat_id']);
         $statuses = $buyer['vat_id'] === '' ? [$placedStatus] : array_values(array_unique([$placedStatus, 'valid', 'unverified']));
         $detail = '';
@@ -167,6 +169,8 @@ final class ManualOrder {
             foreach ($statuses as $vatIdStatus) {
                 $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus, $locale);
                 if (isset($priced['error'])) {
+                    // R39: a VAT ID status the order was not placed under that needs a residence cannot reproduce it.
+                    if ($priced['error'] === 'checkout.error.residence_required' && $vatIdStatus !== $statuses[0]) continue;
                     $detail = (string)($priced['detail'] ?? '');
                     return $priced;
                 }
@@ -301,7 +305,11 @@ final class ManualOrder {
             $vatId = $company['vat_id'];
             // R33: a download is supplied in the billing country (billed elsewhere), goods where they are delivered.
             $billingCountry = OrderAddress::billingRequested($buyer) ? strtoupper(trim(Security::str($buyer['billing_country'] ?? ''))) : '';
-            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry, (string)($company['fields']['company'] ?? ''));
+            // R39 (low): when billing and delivery countries contradict on where the buyer of a download lives, the admin
+            // states it (residence_country, CheckoutService::digitalResidence()); the billing country is no default.
+            $declared = strtoupper(trim(Security::str($buyer['residence_country'] ?? '')));
+            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry, (string)($company['fields']['company'] ?? ''), $declared);
+            if ($vat['residence_required']) return ['error' => 'checkout.error.residence_required', 'detail' => implode(' / ', $vat['residence_choices'])];
             $company['fields'] = CheckoutService::withoutInvalidVatId($company['fields'], $vat['vat_id_status']);
             $cart = Cart::enriched($vat['context']);
             $requested = [];

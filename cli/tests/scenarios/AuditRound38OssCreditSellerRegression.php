@@ -112,6 +112,11 @@ try {
         $db->exec('DELETE FROM invoices');
         $db->exec('DELETE FROM orders');
         $db->exec('DELETE FROM oss_threshold_totals');
+        // R39 (medium 1): the migrations keep only the activations the documents and orders explain. The evidence for
+        // Y-1: store A's sale whose snapshot recorded the crossing (charged the consumer VAT, 50 EUR: the sums stay under).
+        $db->prepare("INSERT INTO orders (order_number, customer_name, customer_email, shipping_addr, subtotal, total, net_total, currency, status, payment_status, payment_method, store_id, vat_scenario, financial_snapshot, oss_net, created_at)
+            VALUES ('R38C-CROSS', 'R38C', 'r38c@example.test', '{\"country\":\"AT\"}', 5000, 5000, 5000, 'eur', 'delivered', 'paid', 'bank_transfer', 'default', 'oss', ?, 5000, ?)")
+            ->execute([json_encode(['version' => 1, 'scenario' => 'oss', 'oss_threshold' => 'current_year', 'components' => [], 'totals' => ['net' => 5000]]), ($year - 1) . '-06-01 10:00:00']);
         $checks[] = ['before the migration store B does not see store A’s previous-year activation', !$abroad('r38c2', $year . '-07-01')];
         $checks[] = ['after the migration store B charges the consumer VAT (Y-1 activated for the VAT payer)', $migrate() && $abroad('r38c2', $year . '-07-01')];
         $checks[] = ['the third company is not activated', !$abroad('r38c3', $year . '-07-01')];

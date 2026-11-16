@@ -145,10 +145,15 @@ class ShippingService
         // R35: the merchant's method settings (active, weight limit, zones, COD) hold in every charge currency. In the price
         // lists' currency the store's own rates are the offer; in another one the carrier's built-in tiers apply (R8),
         // but only where one of its methods allows this country, weight, volume and cash on delivery.
+        $refusedMethods = [];
         if (self::hasDatabasePricing()) {
             $configured = self::configuredCarriers();
             if (!StoreContext::current()->usesProviderPrices($currency)) {
                 $configured = array_values(array_diff($configured, self::allowedCarriers($country, $weightG, $volumeCm3, $cod)));
+                // R39 (low): one allowed method let in its carrier's every built-in rate: with "packeta_box" active, the
+                // inactive "packeta" (home delivery) was offered at Packeta's built-in price. A built-in rate under the
+                // code of a method set up here passes only when that method itself is allowed (not its carrier).
+                $refusedMethods = array_values(array_diff(self::configuredMethodCodes(), self::allowedCarriers($country, $weightG, $volumeCm3, $cod, true)));
             }
         }
 
@@ -180,6 +185,7 @@ class ShippingService
                     $rate['provider'] = (string)$providerCode;
                     $rate['method_code'] = $rate['method_code'] ?? $rate['carrier'] ?? $adapter->carrierId();
                     $rate['key'] = $rate['key'] ?? $rate['method_code'];
+                    if (in_array((string)$rate['method_code'], $refusedMethods, true)) continue;
                     // R38 (low): an adapter's COD surcharge comes apart from its price (ShippingAdapter::getRates()), and
                     // checkout bills only one carried inside the price (a database rate's base_price + cod_surcharge): the
                     // built-in carriers' surcharge was never charged. It is carried the same way now.
@@ -1223,12 +1229,14 @@ class ShippingService
      * answered there, the pickup adapter only above their weight bands), and taxed collected goods abroad under OSS.
      * R38 (medium 2): a carrier's pick-up point (service_type "pickup", as Packeta's) is no collection in the store: the
      * goods are supplied where the point is (Slovak VAT, no reverse charge and no OSS count were charged for Austria).
+     * R39 (low): a method of the store's own ("pick-up in store 2", any carrier code) is one when its type says so
+     * (service_type "store_pickup"); it was taxed as a parcel to the buyer's address.
      */
     public static function isPickupMethod(string $methodCode): bool
     {
         if ($methodCode === '') return false;
         if (self::hasDatabasePricing()) {
-            $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = :code AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup')"
+            $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = :code AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup' OR service_type = 'store_pickup')"
                 . (Db::hasColumn('shipping_methods', 'store_id') ? ' AND store_id = :store' : '') . ' LIMIT 1');
             $stmt->execute([':code' => $methodCode] + (Db::hasColumn('shipping_methods', 'store_id') ? [':store' => StoreContext::current()->providerId()] : []));
             if ($stmt->fetchColumn() !== false) return true;
@@ -1237,6 +1245,14 @@ class ShippingService
             if ($adapter->carrierId() === 'pickup' && $methodCode === 'pickup') return true;
         }
         return false;
+    }
+
+    /** @return list<string> codes of the shipping methods the store set up, active or not */
+    private static function configuredMethodCodes(): array
+    {
+        $stmt = Db::get()->prepare("SELECT code FROM shipping_methods WHERE store_id = :store AND code <> ''");
+        $stmt->execute([':store' => StoreContext::current()->providerId()]);
+        return array_map('strval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 
     /** Carriers (and method codes) the store set up as shipping methods, active or not. */
@@ -1256,7 +1272,7 @@ class ShippingService
      * limits and the rate's weight and volume band (and taking COD when $cod). R36: only the method's maximum weight was
      * checked, so in another currency GLS was offered for 8 kg to Austria where its rates end at 5 kg.
      */
-    private static function allowedCarriers(string $country, int $weightG, int $volumeCm3, bool $cod): array
+    private static function allowedCarriers(string $country, int $weightG, int $volumeCm3, bool $cod, bool $codesOnly = false): array
     {
         $stmt = Db::get()->prepare("
             SELECT DISTINCT m.carrier, m.code
@@ -1276,7 +1292,7 @@ class ShippingService
             ':wfrom' => $weightG, ':wto' => $weightG, ':rvolume' => $volumeCm3, ':weight' => $weightG, ':volume' => $volumeCm3]);
         $carriers = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            foreach ([(string)$row['carrier'], (string)$row['code']] as $id) if ($id !== '') $carriers[$id] = true;
+            foreach ($codesOnly ? [(string)$row['code']] : [(string)$row['carrier'], (string)$row['code']] as $id) if ($id !== '') $carriers[$id] = true;
         }
         return array_map('strval', array_keys($carriers));
     }

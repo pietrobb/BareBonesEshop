@@ -448,7 +448,7 @@ function apiShippingRates(): array {
     $subtotalGiven = isset($_GET['subtotal']) && $_GET['subtotal'] !== '';
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
     // Priced in the order's VAT scenario (country + optional buyer VAT ID): reverse charge and export are charged net.
-    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '', apiPreviewBillingCountry(), apiPreviewCompany());
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '', apiPreviewBillingCountry(), apiPreviewCompany(), apiPreviewResidence());
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []); // weight, units and promotions of what checkout orders
     if (cartIsDigitalOnly($cart['items'])) {
@@ -516,6 +516,12 @@ function apiPreviewBillingCountry(): string {
     return array_key_exists($country, ShippingService::billingCountries()) ? $country : '';
 }
 
+/** R39: country of residence declared in a preview request (?residence_country=, CheckoutService::digitalResidence()). */
+function apiPreviewResidence(): string {
+    $country = is_string($_GET['residence_country'] ?? null) ? strtoupper(trim($_GET['residence_country'])) : '';
+    return preg_match('/^[A-Z]{2}$/', $country) ? $country : '';
+}
+
 /** Rates with their localized delivery time (delivery_label) next to the raw delivery_days. */
 function shippingMethodsWithDeliveryLabel(array $methods): array {
     return array_map(static fn(array $method): array => $method + ['delivery_label' => ShippingService::deliveryLabel($method['delivery_days'] ?? '')], $methods);
@@ -538,7 +544,7 @@ function apiPaymentMethods(): array {
     $amount = Security::int($_GET['amount'] ?? 0);
     $shippingMethod = Security::slug($_GET['shipping_method'] ?? '');
     // Fees as the order charges them in its VAT scenario (country + optional buyer VAT ID).
-    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod, apiPreviewBillingCountry(), apiPreviewCompany());
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod, apiPreviewBillingCountry(), apiPreviewCompany(), apiPreviewResidence());
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []);
     $digitalOnly = cartIsDigitalOnly($cart['items']);
@@ -696,7 +702,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges. R36: the
     // sale that passes the OSS threshold (below, thresholdVat()) only re-splits the same gross; the checkout page decides
     // it as this does, the JSON previews estimate it on the cart lines (they do not know the shipping and fee chosen).
-    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''), (string)($buyerCompany['fields']['company'] ?? ''));
+    $declaredResidence = is_string($input['residence_country'] ?? null) ? $input['residence_country'] : '';
+    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''), (string)($buyerCompany['fields']['company'] ?? ''), $declaredResidence, CheckoutService::ipCountry(StoreContext::current()->config()));
+    // R39 (low): billing and delivery countries contradict on where the buyer of an e-book lives; the checkout form asks
+    // (CheckoutService::digitalResidence()). A client without that field (an older theme, the API) keeps the billing country.
+    if ($vat['residence_required'] && array_key_exists('residence_country', $input)) return checkoutRefusal('checkout.error.residence_required', 422);
     [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
     [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];
     // R33 (low): an IČ DPH VIES answered is not valid is not printed on the invoice as the buyer's VAT registration.
@@ -1258,6 +1268,9 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
     // three days); refund.updated and the refund worker book each refund by its id meanwhile. Was: the summed amount was
     // booked provisionally against the shop's refunds in flight and corrected later, which left the ledger off Stripe.
     $refunds = stripeChargeRefunds($charge);
+    // R39 (low): every refund the charge reports is booked already (by its id: refund.created, the refund worker): nothing
+    // waits for the list. Was: deferred until dead, then a critical incident on every redelivery for booked money.
+    if ($refunds === null && $refundedAmount > 0 && PaymentService::refundedAmount($orderId) >= $refundedAmount) $refunds = [];
     if ($refunds === null) throw new PaymentWebhookDeferred("Refunds of Stripe charge {$chargeId} cannot be listed");
 
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
