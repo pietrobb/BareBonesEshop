@@ -222,5 +222,7 @@
     "eur_exchange_rates": {
         "BGN": 0.51129, "CZK": 0.040, "DKK": 0.134, "HUF": 0.0025, "PLN": 0.235, "RON": 0.197, "SEK": 0.090,
         "CHF": 1.06, "GBP": 1.15, "USD": 0.87
-    }
+    },
+    "_eur_exchange_rates_as_of": "Date (YYYY-MM-DD) of the eur_exchange_rates above. The setup doctor warns when sales in another currency are counted at rates older than 92 days.",
+    "eur_exchange_rates_as_of": "2026-11-01"
 }

@@ -11,6 +11,8 @@ class IncidentMonitor {
             foreach (['order_id', 'attempts', 'http_status', 'count'] as $key) {
                 if (isset($context[$key]) && is_int($context[$key])) $safe[$key] = $context[$key];
             }
+            // R38 (medium 6): the order number the merchant looks up (a shop-generated reference, no personal data).
+            if (isset($context['order_number']) && is_string($context['order_number']) && preg_match('/^[A-Za-z0-9._\/-]{1,64}$/D', $context['order_number'])) $safe['order_number'] = $context['order_number'];
             if (($context['exception'] ?? null) instanceof Throwable) $safe['exception_type'] = get_debug_type($context['exception']);
             Logger::safeWrite($severity, $code, ['phase' => $phase] + $safe);
             $db = Db::get();

@@ -125,29 +125,31 @@ try {
     $r33vRate = static fn(string $country): int => (int)round(VatService::rate($country, 'standard') * 100);
     $r33vTag = static fn(array $c): array => [(int)$c['rate_basis_points'], $c['rate_country'] ?? null, $c['supply'] ?? null];
 
-    // Parcel to Austria under OSS, billed to a Slovak consumer: the printed book pays Austrian VAT, the e-book Slovak.
+    // R38 (review round 12, medium 3): next to goods the e-book is supplied in the delivery country, which the dispatch
+    // proves; a billing country the shopper only typed is no second, non-contradictory item of evidence (art. 24b(d),
+    // 24f). R33 had taxed it by the billing country: a Slovak buyer billed in Luxembourg paid 17 % instead of 23 %.
+    // Parcel to Austria under OSS, billed to Slovakia: the e-book follows the parcel (Austrian VAT, as the goods).
     $r33vAtSk = $r33vMixed('AT', 'SK');
-    assert_equals(['oss', [$r33vRate('AT'), null, null], [$r33vRate('SK'), 'SK', 'domestic']],
+    assert_equals(['oss', [$r33vRate('AT'), null, null], [$r33vRate('AT'), null, null]],
         [$r33vAtSk['snapshot']['scenario'], $r33vTag($r33vAtSk['print']), $r33vTag($r33vAtSk['ebook'])],
-        'R33 mixed cart: a parcel to AT billed to an SK consumer — the e-book pays Slovak VAT, tagged domestic (was the Austrian rate, untagged)');
-    assert_equals([1230, $r33vRate('SK')], $r33vAtSk['cart'][99331], 'R33 mixed cart: the cart prices the e-book at the Slovak rate too');
+        'R38 mixed cart: a parcel to AT billed to SK — the e-book is supplied with the goods in Austria');
+    assert_equals($r33vRate('AT'), $r33vAtSk['cart'][99331][1], 'R38 mixed cart: the cart prices the e-book at the Austrian rate too');
 
-    // Parcel to Switzerland (export), billed to an Austrian consumer: goods zero-rated, the e-book Austrian VAT via OSS.
+    // Parcel to Switzerland (export), billed to Austria: the e-book is exported with the goods, zero-rated.
     $r33vChAt = $r33vMixed('CH', 'AT');
-    assert_equals(['export', [0, null, null], [$r33vRate('AT'), 'AT', 'oss']],
+    assert_equals(['export', [0, null, null], [0, null, null]],
         [$r33vChAt['snapshot']['scenario'], $r33vTag($r33vChAt['print']), $r33vTag($r33vChAt['ebook'])],
-        'R33 mixed cart: an export billed to an AT consumer — the e-book is an Austrian OSS supply (was zero-rated)');
-    // R37: by default (cross_border_pricing "net") the e-book keeps its 10 € net and is charged Austrian VAT on it.
-    assert_equals([(int)round(1000 * (1 + VatService::rate('AT', 'standard') / 100)), $r33vRate('AT')], $r33vChAt['cart'][99331], 'R33 mixed cart: the e-book next to exported goods keeps its net price and pays Austrian VAT');
+        'R38 mixed cart: an export billed to AT — the billing country alone does not make the e-book an Austrian OSS supply');
     assert_true($r33vChAt['cart'][99333][0] < 1230 && $r33vChAt['cart'][99333][1] === 0, 'R33 mixed cart: the exported book is still charged without VAT');
 
-    // Billed outside the EU next to exported goods: nothing backs an EU residence, the e-book is zero-rated like them.
+    // Billed outside the EU next to exported goods: zero-rated like them.
     $r33vChUs = $r33vMixed('CH', 'US');
     assert_equals([0, null, null], $r33vTag($r33vChUs['ebook']), 'R33 mixed cart: an export billed to the US leaves the e-book zero-rated');
-    // The handled direction is unchanged: a domestic parcel billed to Austria taxes the e-book under OSS.
-    assert_equals([$r33vRate('AT'), 'AT', 'oss'], $r33vTag($r33vMixed('SK', 'AT')['ebook']), 'R33 mixed cart: a parcel at home billed to AT keeps the e-book under OSS');
+    // A domestic parcel billed to Austria (or Luxembourg): the e-book pays the Slovak VAT of the goods.
+    assert_equals([$r33vRate('SK'), null, null], $r33vTag($r33vMixed('SK', 'AT')['ebook']), 'R38 mixed cart: a parcel at home billed to AT taxes the e-book at home');
+    assert_equals([$r33vRate('SK'), null, null], $r33vTag($r33vMixed('SK', 'LU')['ebook']), 'R38 mixed cart: a parcel at home billed to LU taxes the e-book at 23 %, not 17 %');
 
-    // The OSS report lists the Austrian goods alone for the first order, and the Austrian e-book for the export.
+    // The OSS report lists both Austrian lines of the first order and nothing for the export.
     $r33vReport = static function (): array {
         $rows = [];
         $day = ShopTime::date('Y-m-d');
@@ -175,12 +177,11 @@ try {
     $r33vAt = (string)((float)$r33vRate('AT') / 100);
     $r33vBefore = $r33vReport();
     $r33vIssue('R33V-MIX-1', $r33vAtSk['snapshot'], 'AT', 'SK');
-    assert_equals(["AT|{$r33vAt}" => [(int)$r33vAtSk['print']['net'], (int)$r33vAtSk['print']['vat']]], $r33vDelta($r33vBefore, $r33vReport()),
-        'R33 mixed cart: the OSS report counts only the Austrian goods; the Slovak e-book is no OSS supply (was in the AT bucket)');
+    assert_equals(["AT|{$r33vAt}" => [(int)$r33vAtSk['print']['net'] + (int)$r33vAtSk['ebook']['net'], (int)$r33vAtSk['print']['vat'] + (int)$r33vAtSk['ebook']['vat']]], $r33vDelta($r33vBefore, $r33vReport()),
+        'R38 mixed cart: the OSS report counts the Austrian goods and the e-book delivered with them');
     $r33vBefore = $r33vReport();
     $r33vIssue('R33V-MIX-2', $r33vChAt['snapshot'], 'CH', 'AT');
-    assert_equals(["AT|{$r33vAt}" => [(int)$r33vChAt['ebook']['net'], (int)$r33vChAt['ebook']['vat']]], $r33vDelta($r33vBefore, $r33vReport()),
-        'R33 mixed cart: the e-book next to an export is reported as an Austrian OSS supply');
+    assert_equals([], $r33vDelta($r33vBefore, $r33vReport()), 'R38 mixed cart: the export billed to AT adds nothing to the OSS report');
 } catch (Throwable $e) { $r33vFail('mixed cart', $e); }
 
 $r33vStoresProp->setValue(null, $r33vStores);

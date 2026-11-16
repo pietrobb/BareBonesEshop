@@ -191,7 +191,7 @@
     const params = {
       country: country.value, currency: config.currency,
       amount: String(checkoutGoods(subtotal) + shippingPrice), shipping: String(shippingPrice),
-      shipping_method: selectedShipping, vat_id: checkoutVatId(), billing_country: checkoutBillingCountry()
+      shipping_method: selectedShipping, vat_id: checkoutVatId(), company: checkoutCompany(), billing_country: checkoutBillingCountry()
     };
     let result;
     try {
@@ -232,6 +232,12 @@
     const vatId = document.getElementById('checkout-vat-id');
     const company = document.getElementById('checkout-company');
     return vatId && (!company || company.value.trim() !== '') ? vatId.value.trim() : '';
+  }
+
+  // Company the VAT ID is checked against (VIES holder name), as the order sends it.
+  function checkoutCompany() {
+    const company = document.getElementById('checkout-company');
+    return company ? company.value.trim() : '';
   }
 
   // Billing country the order would use (a download is taxed there): only when billed to another address.
@@ -293,7 +299,7 @@
     // The rendered options stay until new rates arrive: a failed request only adds a notice above them.
     box.querySelectorAll('.shipping-loading, .shipping-error').forEach((node) => node.remove());
     box.insertAdjacentHTML('afterbegin', `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`);
-    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId(), billing_country: checkoutBillingCountry()};
+    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId(), company: checkoutCompany(), billing_country: checkoutBillingCountry()};
     let result;
     try {
       result = await fetchCheckoutJson('shipping_rates', params);

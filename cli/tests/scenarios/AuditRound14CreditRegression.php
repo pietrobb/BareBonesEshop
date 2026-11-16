@@ -48,7 +48,7 @@ try {
     assert_equals([0, 1, 1], [$r14cNotes(), count($r14cDeferred), (int)($r14cDeferred[0]['payload']['deferrals'] ?? 0)],
         'R14 #2: while an item refund of that amount waits for its provider refund id, the credit note job waits a minute (was: a second credit note at once)');
     assert_true(str_contains($r14cError(static fn() => InvoiceService::creditBookedRefund($r14cOrder, 'r14c-ledger', 30)), 'no credit note issued') && $r14cNotes() === 0,
-        'R14 #2: after half an hour of waiting the job fails visibly instead of guessing');
+        'R14 #2: after waiting out the item refund\'s retries the job fails visibly instead of guessing');
     $pdo->prepare("UPDATE order_refunds SET payment_reference = 're_r14c_webhook' WHERE order_id = ?")->execute([$r14cOrder]);
     assert_true(InvoiceService::creditBookedRefund($r14cOrder, 'r14c-ledger', 1) === null && $r14cNotes() === 0, 'R14 #2: once the id is noted the refund is recognised as the item refund');
     $pdo->prepare('DELETE FROM order_refunds WHERE order_id = ?')->execute([$r14cOrder]);

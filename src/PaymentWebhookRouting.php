@@ -76,13 +76,13 @@ final class PaymentWebhookRouting {
      * Persist an unresolved signed event. Returns ['status' => 'retry'|'dead', 'attempts' => int].
      * 'retry' must be answered with a non-2xx status so the provider redelivers.
      */
-    public static function park(string $provider, string $eventId, string $eventType, PaymentWebhookUnresolved $e): array {
+    public static function park(string $provider, string $eventId, string $eventType, PaymentWebhookUnresolved $e, ?string $storeId = null): array {
         $db = Db::get();
         $key = [':provider' => $provider, ':event' => $eventId];
         $db->prepare(Db::insertIgnore() . " INTO payment_webhook_inbox (store_id, provider, event_id, event_type, refs, status, attempts)
             VALUES (:store, :provider, :event, :type, :refs, 'retry', 0)")
             ->execute($key + [
-                ':store' => StoreContext::current()->id(),
+                ':store' => $storeId ?? StoreContext::current()->id(),
                 ':type' => substr($eventType, 0, 80),
                 ':refs' => json_encode($e->refs, JSON_UNESCAPED_UNICODE),
             ]);
@@ -100,6 +100,18 @@ final class PaymentWebhookRouting {
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['status' => 'retry', 'attempts' => 1];
         Logger::phpLog("payment webhook [{$provider}] {$eventType} {$eventId} unresolved ({$row['status']} #{$row['attempts']}): " . $e->getMessage());
         return ['status' => (string)$row['status'], 'attempts' => (int)$row['attempts']];
+    }
+
+    /**
+     * R38 (medium 6): count a deferred event (PaymentWebhookDeferred) in the same inbox, under its order's store. After
+     * MAX_ATTEMPTS it is 'dead': the merchant gets a critical incident naming the order before the provider stops
+     * redelivering (Stripe: three days); a later redelivery that books it still closes it (resolved()).
+     * @return array{status: string, attempts: int}
+     */
+    public static function defer(string $provider, string $eventId, string $eventType, PaymentWebhookDeferred $e): array {
+        return self::park($provider, $eventId, $eventType, new PaymentWebhookUnresolved(
+            array_filter(['order_id' => $e->orderId ?: null, 'order_number' => $e->orderNumber ?: null, 'deferred' => true]),
+            ($e->orderNumber !== '' ? "Order {$e->orderNumber}: " : '') . $e->getMessage()), $e->storeId ?: null);
     }
 
     /** Close a previously parked event once a redelivery was processed. */

@@ -448,7 +448,7 @@ function apiShippingRates(): array {
     $subtotalGiven = isset($_GET['subtotal']) && $_GET['subtotal'] !== '';
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
     // Priced in the order's VAT scenario (country + optional buyer VAT ID): reverse charge and export are charged net.
-    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '', apiPreviewBillingCountry());
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '', apiPreviewBillingCountry(), apiPreviewCompany());
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []); // weight, units and promotions of what checkout orders
     if (cartIsDigitalOnly($cart['items'])) {
@@ -504,6 +504,12 @@ function apiPreviewVatId(): string {
     return preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId) ? $vatId : '';
 }
 
+/** R38 (low): buyer company of a preview request (?company=), checked against the VAT ID holder VIES names. */
+function apiPreviewCompany(): string {
+    $raw = is_string($_GET['company'] ?? null) ? mb_substr($_GET['company'], 0, 191) : '';
+    return mb_check_encoding($raw, 'UTF-8') ? trim($raw) : '';
+}
+
 /** R33: billing country of a preview request (?billing_country=, a download is taxed there); '' when absent or not offered. */
 function apiPreviewBillingCountry(): string {
     $country = is_string($_GET['billing_country'] ?? null) ? strtoupper(trim($_GET['billing_country'])) : '';
@@ -532,7 +538,7 @@ function apiPaymentMethods(): array {
     $amount = Security::int($_GET['amount'] ?? 0);
     $shippingMethod = Security::slug($_GET['shipping_method'] ?? '');
     // Fees as the order charges them in its VAT scenario (country + optional buyer VAT ID).
-    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod, apiPreviewBillingCountry());
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod, apiPreviewBillingCountry(), apiPreviewCompany());
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []);
     $digitalOnly = cartIsDigitalOnly($cart['items']);
@@ -690,7 +696,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges. R36: the
     // sale that passes the OSS threshold (below, thresholdVat()) only re-splits the same gross; the checkout page decides
     // it as this does, the JSON previews estimate it on the cart lines (they do not know the shipping and fee chosen).
-    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''));
+    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, CheckoutService::orderVatIdStatus($vatId), (string)($billing['address']['country'] ?? ''), (string)($buyerCompany['fields']['company'] ?? ''));
     [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
     [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];
     // R33 (low): an IČ DPH VIES answered is not valid is not printed on the invoice as the buyer's VAT registration.
@@ -837,7 +843,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'providers' => $providerCodes,
     ];
     // R36: the sale that passes the OSS threshold is decided on all it is invoiced at, shipping and fee included.
-    [$vat, $availableItems] = CheckoutService::thresholdVat($vat, $availableItems, $snapshotAmounts);
+    try {
+        [$vat, $availableItems] = CheckoutService::thresholdVat($vat, $availableItems, $snapshotAmounts);
+    } catch (OssThresholdUnavailableException $e) {
+        // R38 (low): no order on an unknown VAT (was: the seller's VAT, silently); the count failure is a critical incident.
+        return checkoutRefusal('checkout.error.vat_unavailable');
+    }
     [$vatContext, $vatScenario] = [$vat['context'], $vat['scenario']];
     $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, $snapshotAmounts);
     // R34: the no-JS form posts the total it showed. Another shipping, payment or country picked without "Recalculate"
@@ -995,6 +1006,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         // R36 (low): another order passed the OSS threshold meanwhile; the buyer sees the new total before confirming.
         VatService::reset();
         return checkoutRefusal('checkout.error.vat_changed');
+    } catch (OssThresholdUnavailableException $e) {
+        // R38 (low): the VAT of this sale is unknown (the OSS threshold count failed; a critical incident is open).
+        VatService::reset();
+        return checkoutRefusal('checkout.error.vat_unavailable');
     } catch (CouponRejectedException $e) {
         // Same refusal as a used-up code at pricing time (no oracle): a concurrent order took the last use.
         return ['success' => false, 'error' => sprintf(I18n::t('coupon_invalid'), $couponCode), 'error_code' => 'coupon_invalid'];
@@ -1110,6 +1125,9 @@ function apiWebhookStripe(): array {
             'checkout.session.async_payment_succeeded' => onPaymentCompleted($event['data']['object'] ?? []),
             'checkout.session.async_payment_failed' => onAsyncPaymentFailed($event['data']['object'] ?? []),
             'charge.refunded'            => onChargeRefunded($event['data']['object'] ?? []),
+            // R38 (medium 6): a dashboard refund is booked by its id from refund.created — the charge.refunded that also
+            // reports it waits for the refund list, which may stay unavailable until Stripe stops redelivering it.
+            'refund.created',
             'refund.updated',
             'charge.refund.updated'      => onRefundUpdated($event['data']['object'] ?? [], (string)$event['id']),
             'charge.dispute.created'     => onDisputeCreated($event['data']['object'] ?? []),
@@ -1121,7 +1139,13 @@ function apiWebhookStripe(): array {
         return paymentWebhookParkedResponse(PaymentWebhookRouting::park('stripe', (string)$event['id'], (string)$event['type'], $e));
     } catch (PaymentWebhookDeferred $e) {
         Idempotency::unmark($eventKey);
-        IncidentMonitor::report('payment.webhook_deferred', 'webhook', 'warning', ['event' => (string)$event['id'], 'type' => (string)$event['type'], 'reason' => $e->getMessage()]);
+        $deferred = PaymentWebhookRouting::defer('stripe', (string)$event['id'], (string)$event['type'], $e);
+        $dead = $deferred['status'] === 'dead';
+        $report = static fn() => IncidentMonitor::report($dead ? 'payment.webhook_deferred_dead' : 'payment.webhook_deferred', 'webhook', $dead ? 'critical' : 'warning', [
+            'event' => (string)$event['id'], 'type' => (string)$event['type'], 'reason' => $e->getMessage(),
+            'order_id' => $e->orderId, 'order_number' => $e->orderNumber, 'attempts' => $deferred['attempts']]);
+        $e->storeId !== '' ? PaymentWebhookRouting::within($e->storeId, $report) : $report();
+        // Still 503 when dead: a later redelivery that can book the refund closes the event (PaymentWebhookRouting::resolved()).
         http_response_code(503);
         return ['error' => 'Event deferred', 'retry' => true];
     } catch (\Throwable $e) {
@@ -1215,7 +1239,11 @@ function onChargeRefunded(array $charge): ?string {
     $paymentIntent = (string)($charge['payment_intent'] ?? '');
     if ($paymentIntent === '') return null;
     $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
-    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeChargeRefunded($charge, $paymentIntent, $target['id']));
+    try {
+        PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeChargeRefunded($charge, $paymentIntent, $target['id']));
+    } catch (PaymentWebhookDeferred $e) {
+        throw $e->forOrder($target['id']);
+    }
     return $target['store_id'];
 }
 
@@ -1312,13 +1340,17 @@ function stripeRefundKey(array $refund): array {
     return (is_string($key) && $key !== '' ? ['refund_key' => $key] : []) + ($created > 0 ? ['refund_created' => $created] : []);
 }
 
-/** A Stripe refund changed state (refund.updated / charge.refund.updated): book it once it succeeded, release it when it failed. */
+/** A Stripe refund was created or changed state (refund.created, refund.updated / charge.refund.updated): book it once it succeeded, release it when it failed. */
 function onRefundUpdated(array $refund, string $eventId): ?string {
     $paymentIntent = (string)($refund['payment_intent'] ?? '');
     $status = (string)($refund['status'] ?? '');
     if ($paymentIntent === '' || !in_array($status, ['succeeded', 'failed', 'canceled'], true)) return null;
     $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
-    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeRefundUpdated($refund, $eventId, $target['id']));
+    try {
+        PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeRefundUpdated($refund, $eventId, $target['id']));
+    } catch (PaymentWebhookDeferred $e) {
+        throw $e->forOrder($target['id']);
+    }
     return $target['store_id'];
 }
 

@@ -24,7 +24,8 @@ try {
     $since = sprintf('%04d-01-01', $year - 1);
     // Nothing of other tests counts this year or the last.
     $r36oStashedInvoices = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$since}'");
+    $r36oStashedInvoicesDelivery = $pdo->query("SELECT id, delivery_date FROM invoices WHERE issued_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00', delivery_date = NULL WHERE issued_at >= '{$since}'");
     $r36oStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$since}'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$since}'");
     // Run alone, the stored year totals (R36 oss-perf migration) already exist and would keep counting other documents.
@@ -102,15 +103,16 @@ try {
     assert_equals([VatService::SCENARIO_OSS, 'AT'], $r36oAustria(), 'R36 OSS: after one credit note during the year the consumer still pays Austrian VAT');
     $r36oClean();
 
-    // 3. E-books count where the consumer lives, not by the invoice's scenario.
-    $r36oC = $r36oOrder('R36O-C', 'domestic_subthreshold', $r36oAt, ['name' => 'R36O', 'country' => 'SK'], 500000, 'delivered', 100000); // goods to AT, e-book billed in SK
-    $r36oDoc($r36oC, 'R36O-C', 500000, 'domestic_subthreshold', $year);
-    $r36oD = $r36oOrder('R36O-D', 'export', ['country' => 'US'], ['name' => 'R36O', 'country' => 'AT'], 300000, 'delivered', 70000); // goods to the USA, e-book to an Austrian consumer
-    $r36oDInvoice = $r36oDoc($r36oD, 'R36O-D', 300000, 'export', $year);
-    assert_equals(400000 + 70000, $r36oSum()['sum'], 'R36 OSS: an e-book of a consumer at home is not counted with goods sent abroad, one billed to Austria on an export invoice is');
+    // 3. E-books count where they are supplied, not by the invoice's scenario. R38 (medium 3): next to goods that is
+    // where the goods go, whatever country the buyer typed as billing address.
+    $r36oC = $r36oOrder('R36O-C', 'domestic_subthreshold', $r36oAt, ['name' => 'R36O', 'country' => 'SK'], 500000, 'delivered', 100000); // goods and e-book to AT, billed in SK
+    $r36oCInvoice = $r36oDoc($r36oC, 'R36O-C', 500000, 'domestic_subthreshold', $year);
+    $r36oD = $r36oOrder('R36O-D', 'export', ['country' => 'US'], ['name' => 'R36O', 'country' => 'AT'], 300000, 'delivered', 70000); // goods and e-book to the USA, billed in AT
+    $r36oDoc($r36oD, 'R36O-D', 300000, 'export', $year);
+    assert_equals(400000 + 100000, $r36oSum()['sum'], 'R36 OSS (R38): an e-book next to goods sent to Austria counts with them, one next to goods exported to the USA does not');
     // ... and an item credit note of that e-book takes it out again.
-    $r36oDoc($r36oD, 'R36O-D-CN', -70000, 'export', $year, 'credit_note', $r36oDInvoice,
-        ['version' => 1, 'lines' => [['order_item_id' => $r36oD['items']['ebook'], 'net' => 70000, 'gross' => 70000]], 'totals' => ['net' => 70000]]);
+    $r36oDoc($r36oC, 'R36O-C-CN', -100000, 'domestic_subthreshold', $year, 'credit_note', $r36oCInvoice,
+        ['version' => 1, 'lines' => [['order_item_id' => $r36oC['items']['ebook'], 'net' => 100000, 'gross' => 100000]], 'totals' => ['net' => 100000]]);
     assert_equals(400000, $r36oSum()['sum'], 'R36 OSS: an item credit note of the counted e-book takes it out');
     // The stored net (written when InvoiceService issues a document) equals the count from the lines.
     foreach ($pdo->query("SELECT id FROM invoices WHERE number LIKE 'R36O-%'")->fetchAll(PDO::FETCH_COLUMN) as $id) OssThreshold::record($pdo, (int)$id);
@@ -165,6 +167,7 @@ $pdo->exec("DELETE FROM orders WHERE order_number LIKE 'R36O-%'");
 $pdo->exec('DELETE FROM products WHERE id = 99391');
 $restore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
 foreach ($r36oStashedInvoices ?? [] as $id => $issuedAt) $restore->execute([$issuedAt, $id]);
+foreach ($r36oStashedInvoicesDelivery ?? [] as $r38dId => $r38dDate) $pdo->prepare('UPDATE invoices SET delivery_date = ? WHERE id = ?')->execute([$r38dDate, $r38dId]);
 $restore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
 foreach ($r36oStashedOrders ?? [] as $id => $createdAt) $restore->execute([$createdAt, $id]);
 if ($r36oTotals ?? false) {

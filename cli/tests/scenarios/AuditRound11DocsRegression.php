@@ -98,7 +98,8 @@ try {
     assert_equals([400], array_map(static fn(array $p): int => (int)$p['refund_amount'], $r11dMails),
         'R11 refund mail: a partial provider refund queues one refund mail with its amount');
     $r11dMailer->sent = [];
-    if ($r11dMails) WorkerJobs::handleEmailSend($r11dMails[0], []);
+    // R38: the mail waits for its credit note job (AuditRound38RefundMailRegression); here it goes after the waits.
+    if ($r11dMails) WorkerJobs::handleEmailSend(['credit_note_waits' => 3] + $r11dMails[0], []);
     $r11dRefundHtml = (string)($r11dMailer->sent[0]['html'] ?? '');
     assert_true(str_contains($r11dRefundHtml, I18n::price(400, 'eur')) && !str_contains($r11dRefundHtml, I18n::price(1490, 'eur')),
         'R11 refund mail: the customer reads the refunded 4,00 €, not the order total');
@@ -125,7 +126,7 @@ try {
     $pdo->rollBack();
     PaymentService::bookProviderRefund(98985, 'stripe', 're_r11d_kept', 200, 'charge.refunded', 'r11d_refund_kept');
     $r11dMailer->sent = [];
-    foreach ($r11dRefundMails(98985) as $r11dPayload) WorkerJobs::handleEmailSend($r11dPayload, []);
+    foreach ($r11dRefundMails(98985) as $r11dPayload) WorkerJobs::handleEmailSend(['credit_note_waits' => 3] + $r11dPayload, []);
     $r11dSentHtml = implode("\n", array_map(static fn(array $m): string => (string)($m['html'] ?? ''), $r11dMailer->sent));
     assert_true(count($r11dMailer->sent) === 1 && str_contains($r11dSentHtml, I18n::price(200, 'eur')) && !str_contains($r11dSentHtml, I18n::price(500, 'eur')),
         'R11 refund mail: a refund rolled back with its transaction is never announced; the booked one is');

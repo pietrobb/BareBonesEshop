@@ -21,17 +21,21 @@ try {
     // Nothing of other tests counts this year or the last.
     $year = (int)ShopTime::date('Y');
     $r35oStashed = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '" . sprintf('%04d-01-01', $year - 1) . "'")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '" . sprintf('%04d-01-01', $year - 1) . "'");
+    $r35oStashedDelivery = $pdo->query("SELECT id, delivery_date FROM invoices WHERE issued_at >= '" . sprintf('%04d-01-01', $year - 1) . "'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00', delivery_date = NULL WHERE issued_at >= '" . sprintf('%04d-01-01', $year - 1) . "'");
     // R36: orders not invoiced yet count too.
     $r35oStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '" . sprintf('%04d-01-01', $year - 1) . "'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '" . sprintf('%04d-01-01', $year - 1) . "'");
+    // The stored year totals of earlier scenarios' documents (R36) are set aside too.
+    $r35oStashedTotals = Db::tableExists('oss_threshold_totals', $pdo) ? $pdo->query('SELECT store_id, year, currency, net FROM oss_threshold_totals')->fetchAll(PDO::FETCH_NUM) : [];
+    if ($r35oStashedTotals !== []) $pdo->exec('DELETE FROM oss_threshold_totals');
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (99381, 'default', 1, 'R35O lamp', 'r35o-lamp', 'R35O-LAMP', 'simple', 12300, 'eur', 'active', 10, 'continue')");
-    $r35oInvoice = static function (string $number, int $net, string $scenario, string $currency, array $billing = [], int $digitalNet = 0) use ($pdo, $year, &$r35oOrders): void {
+    $r35oInvoice = static function (string $number, int $net, string $scenario, string $currency, array $billing = [], int $digitalNet = 0, string $method = 'pickup') use ($pdo, $year, &$r35oOrders): void {
         $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, billing_addr, subtotal, shipping_cost, tax_amount, discount_amount,
                 total, currency, status, payment_status, payment_method, shipping_method, store_id, created_at)
-            VALUES (?, 'R35O', 'r35o@example.test', '', '{\"country\":\"SK\"}', ?, ?, 0, 0, 0, ?, ?, 'delivered', 'paid', 'bank_transfer', 'pickup', 'default', " . Db::now() . ")")
-            ->execute([$number, $billing !== [] ? json_encode($billing) : null, $net, $net, $currency]);
+            VALUES (?, 'R35O', 'r35o@example.test', '', '{\"country\":\"SK\"}', ?, ?, 0, 0, 0, ?, ?, 'delivered', 'paid', 'bank_transfer', ?, 'default', " . Db::now() . ")")
+            ->execute([$number, $billing !== [] ? json_encode($billing) : null, $net, $net, $currency, $method]);
         $orderId = $r35oOrders[] = (int)$pdo->lastInsertId();
         if ($digitalNet > 0) {
             $pdo->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, net_amount, digital) VALUES (?, 99381, 'R35O-EBOOK', 'R35O e-book', 1, ?, ?, ?, 1)")
@@ -55,8 +59,12 @@ try {
     VatService::reset();
     assert_true(!OssThreshold::exceeded(), 'R35 OSS: under 10 000 EUR the threshold is not exceeded');
 
-    // An e-book billed to a consumer in Austria next to goods collected in the shop (invoice scenario "domestic").
-    $r35oInvoice('R35O-5', 400000, 'domestic', 'eur', ['name' => 'R35O Konsument', 'country' => 'AT'], 250000);
+    // R38 (medium 3): an e-book billed to a consumer in Austria next to goods collected in the shop is supplied at home
+    // (the billing address alone proves no residence; the goods' country decides).
+    $r35oInvoice('R35O-5P', 400000, 'domestic', 'eur', ['name' => 'R35O Konsument', 'country' => 'AT'], 250000);
+    assert_equals(600000 + (int)round(5000000 * $czk), $r35oCount()['sum'], 'R35 OSS (R38): an e-book billed to Austria next to goods collected in the shop does not count');
+    // A download-only order of a consumer billed to Austria (invoice scenario "domestic").
+    $r35oInvoice('R35O-5', 250000, 'domestic', 'eur', ['name' => 'R35O Konsument', 'country' => 'AT'], 250000, 'digital');
     $r35oSum = $r35oCount()['sum'];
     assert_equals(600000 + (int)round(5000000 * $czk) + 250000, $r35oSum, 'R35 OSS: the e-book of a consumer billed to Austria on a "domestic" invoice counts (was left out)');
     $r35oWarn = $r35oCheck();
@@ -84,8 +92,14 @@ try {
     $pdo->prepare("DELETE FROM invoices WHERE number LIKE 'R35O-%'")->execute();
     $restore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
     foreach ($r35oStashed as $id => $issuedAt) $restore->execute([$issuedAt, $id]);
+    foreach ($r35oStashedDelivery ?? [] as $r38dId => $r38dDate) $pdo->prepare('UPDATE invoices SET delivery_date = ? WHERE id = ?')->execute([$r38dDate, $r38dId]);
     $restore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
     foreach ($r35oStashedOrders as $id => $createdAt) $restore->execute([$createdAt, $id]);
+    if ($r35oStashedTotals !== []) {
+        $pdo->exec('DELETE FROM oss_threshold_totals');
+        $restore = $pdo->prepare('INSERT INTO oss_threshold_totals (store_id, year, currency, net) VALUES (?, ?, ?, ?)');
+        foreach ($r35oStashedTotals as $row) $restore->execute($row);
+    }
 } catch (Throwable $e) {
     assert_true(false, 'R35 OSS (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 }

@@ -43,21 +43,24 @@ try {
     $pdo->prepare("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, checked_at, ttl_seconds) VALUES ('DE123456789', 'DE', 'valid', 'R34L GmbH', :at, 86400)")
         ->execute([':at' => gmdate('Y-m-d H:i:s')]);
 
-    // 1. Art. 44: a download for a business with a valid German VAT ID is reverse charged in Germany, billed anywhere.
+    // 1. Art. 44: a download for a business with a valid German VAT ID is reverse charged in Germany. R38 (review round 12,
+    // low): only for the VAT ID's holder, billed in its state; billed to Slovakia or the USA the VAT ID is not the buyer's
+    // (VatService::vatIdHolderMismatch()) and the download keeps the seller's VAT (R5: a declared non-EU country alone).
     $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1]];
-    assert_equals([['reverse_charge', 'DE'], ['reverse_charge', 'DE'], ['reverse_charge', 'DE']],
+    assert_equals([['domestic', 'SK'], ['domestic', 'SK'], ['reverse_charge', 'DE']],
         [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'SK')), $r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', true, null, 'US')),
          $r34lScenario(CheckoutService::vatContext('DE', 'DE123456789', '', true, null, 'DE'))],
-        'R34 VAT: an e-book for a German business billed to Slovakia or the USA is reverse charged in DE (was 23 % Slovak VAT)');
+        'R34 VAT: an e-book for a German business billed in Germany is reverse charged in DE; billed to Slovakia or the USA the German VAT ID is not the buyer\'s (R38)');
     assert_equals([['domestic', 'SK'], ['oss', 'AT']],
         [$r34lScenario(CheckoutService::vatContext('SK', 'DE123456789', '', false, null, 'SK')), $r34lScenario(CheckoutService::vatContext('SK', '', '', false, null, 'AT'))],
         'R34 VAT: an unverified VAT ID is a consumer where it is billed; a consumer billed to Austria stays OSS AT');
-    // Mixed cart: goods supplied at home, the download reverse charged in the VAT ID's state and grouped under it.
+    // Mixed cart delivered to Slovakia, billed in Germany: goods supplied at home, the download reverse charged in the VAT
+    // ID's state and grouped under it.
     $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1], 'p_99362' => ['product_id' => 99362, 'variant_id' => null, 'qty' => 1]];
-    $r34lMixed = CheckoutService::vatContext('SK', 'DE123456789', 'packeta', true, null, 'SK');
+    $r34lMixed = CheckoutService::vatContext('SK', 'DE123456789', 'packeta', true, null, 'DE');
     assert_equals(['DE', ['country' => 'DE', 'scheme' => 'reverse_charge'], '0 DE RC'],
         [(string)$r34lMixed['context']['digital_customer_country'], VatService::digitalSupply($r34lMixed['context']), VatService::breakdownKey(0, 'DE', 'reverse_charge')],
-        'R34 VAT: next to goods, the e-book of a German VAT ID billed to Slovakia is reverse charged under DE, not the billing country');
+        'R34 VAT: next to goods delivered to Slovakia, the e-book of a German VAT ID is reverse charged under DE, not the delivery country');
     // Art. 58 stays as agreed in round 5: a declared non-EU country alone is no evidence, the download keeps Slovak VAT.
     $_SESSION['cart'] = ['p_99361' => ['product_id' => 99361, 'variant_id' => null, 'qty' => 1]];
     assert_equals(['domestic', 'SK'], $r34lScenario(CheckoutService::vatContext('SK', '', '', false, null, 'US')),
@@ -70,7 +73,8 @@ try {
     // R36: every distance sale of other tests counts now (OSS invoices, open orders); set them aside meanwhile.
     $r34lSince = sprintf('%04d-01-01', $year - 1);
     $r34lStashedInvoices = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '{$r34lSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
-    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$r34lSince}'");
+    $r34lStashedInvoicesDelivery = $pdo->query("SELECT id, delivery_date FROM invoices WHERE issued_at >= '{$r34lSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00', delivery_date = NULL WHERE issued_at >= '{$r34lSince}'");
     $r34lStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$r34lSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$r34lSince}'");
     $r34lInvoice = static function (string $number, int $net, string $scenario, int $year, string $currency = 'eur') use ($pdo, &$r34lOrders): void {
@@ -103,6 +107,7 @@ try {
 } catch (Throwable $e) { $r34lFail('OSS threshold', $e); }
 $r34lRestore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
 foreach ($r34lStashedInvoices ?? [] as $r34lId => $r34lAt) $r34lRestore->execute([$r34lAt, $r34lId]);
+foreach ($r34lStashedInvoicesDelivery ?? [] as $r38dId => $r38dDate) $pdo->prepare('UPDATE invoices SET delivery_date = ? WHERE id = ?')->execute([$r38dDate, $r38dId]);
 $r34lRestore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
 foreach ($r34lStashedOrders ?? [] as $r34lId => $r34lAt) $r34lRestore->execute([$r34lAt, $r34lId]);
 

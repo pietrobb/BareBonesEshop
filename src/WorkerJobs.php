@@ -93,6 +93,18 @@ final class WorkerJobs
                     // The refund just booked (partial, RMA credit note, by hand), not the order total; a legacy job names none.
                     $refundKey = (string)($payload['refund_key'] ?? '');
                     if ($refundKey !== '' && !PaymentService::refundBooked((int)$orderId, $refundKey)) return;
+                    // R38 (usability): the credit note travels with the e-mail. Its job was queued with this one; while it
+                    // is still open the mail waits for it (5 minutes, three times), then goes without it.
+                    $refundCreditNote = $refundKey !== '' ? InvoiceService::refundCreditNote((int)$orderId, $refundKey) : null;
+                    $creditWaits = (int)($payload['credit_note_waits'] ?? 0);
+                    if ($refundKey !== '' && $refundCreditNote === null && $creditWaits < 3) {
+                        $open = JobQueue::openJobs('refund_credit_note');
+                        $pending = $open !== null && array_filter($open, static fn(array $p): bool => (int)($p['order_id'] ?? 0) === (int)$orderId && (string)($p['refund_key'] ?? '') === $refundKey) !== [];
+                        if ($pending) {
+                            JobQueue::pushDelayed('email_send', ['credit_note_waits' => $creditWaits + 1] + $payload, 300);
+                            return;
+                        }
+                    }
                     $refundAmount = (int)($payload['refund_amount'] ?? 0);
                     $vars['refund_amount'] = I18n::price($refundAmount > 0 ? $refundAmount : PaymentService::refundedAmount((int)$orderId), $currency);
                 }
@@ -126,6 +138,8 @@ final class WorkerJobs
         // R23: the payment QR travels as a PNG (mail clients show no inline SVG) with the transfer instructions.
         $qr = in_array($template, ['order_confirmation', 'bank_transfer_reminder'], true) && $order ? BankTransferInstructions::qrAttachment($order) : null;
         if ($qr !== null) $attachments[] = $qr;
+        $creditPdf = isset($refundCreditNote) ? InvoiceService::pdfFile($refundCreditNote) : null;
+        if ($creditPdf !== null) $attachments[] = ['filename' => $refundCreditNote['number'] . '.pdf', 'path' => $creditPdf, 'content_type' => 'application/pdf'];
         $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, $attachments, $providerCode);
         if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
         // Rate-limited order mail is queued again after the limit window instead of being dropped.
@@ -325,6 +339,11 @@ final class WorkerJobs
                     PaymentService::declinedRefundRequest($orderId, $idempotencyKey, $e->getMessage());
                 }
                 return;
+            } catch (\PaymentRefundOutcomeUnknown $e) {
+                // R38 (medium 8): only the admin, checking the provider, can tell (PaymentService::unconfirmedProviderRefund()).
+                Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => ['status' => 'unknown', 'message' => $e->getMessage()]]);
+                IncidentMonitor::report('payment.refund_outcome_unknown', 'payment', 'critical', ['order_id' => $orderId, 'amount' => $amount, 'item_refund_id' => $itemRefundId]);
+                return;
             } catch (\Throwable $e) {
                 $result = ['status' => 'error', 'message' => $e->getMessage()];
             }
@@ -365,6 +384,17 @@ final class WorkerJobs
     /** Re-queues after the last attempt failed, at most this many times (5, 10, 20, 40 minutes, then hourly: about 9 hours). */
     private const REFUND_ERROR_REQUEUES = 12;
 
+    /** Seconds a refund job keeps being requeued after errors (requeueRefundAfterError()), about 9 hours. */
+    public static function refundRetryWindow(): int {
+        $seconds = 0;
+        for ($i = 0; $i < self::REFUND_ERROR_REQUEUES; $i++) $seconds += self::refundRequeueDelay($i);
+        return $seconds;
+    }
+
+    private static function refundRequeueDelay(int $requeued): int {
+        return min(3600, 300 * 2 ** $requeued);
+    }
+
     /**
      * R32 (low): three network errors in a row (about a minute and a half) killed a refund job for good, and nothing
      * offered to send the credit note's refund again: it stayed pending. A provider refund with an idempotency key may be
@@ -379,7 +409,7 @@ final class WorkerJobs
             || !self::orderPaymentGateway($payload, $order) instanceof IdempotentRefundAdapter) {
             return false;
         }
-        JobQueue::pushDelayed('payment_refund', ['error_requeues' => $requeued + 1] + $payload, min(3600, 300 * 2 ** $requeued), 1);
+        JobQueue::pushDelayed('payment_refund', ['error_requeues' => $requeued + 1] + $payload, self::refundRequeueDelay($requeued), 1);
         Logger::warning('refund.requeued_after_error', ['order_id' => (int)($payload['order_id'] ?? 0), 'requeues' => $requeued + 1]);
         return true;
     }

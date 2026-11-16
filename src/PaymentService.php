@@ -10,7 +10,8 @@ class PaymentService {
         'pending' => ['authorized', 'paid', 'failed', 'cancelled'],
         'authorized' => ['paid', 'failed', 'cancelled'],
         'paid' => ['refund_pending', 'partially_refunded', 'refunded', 'disputed'],
-        'refund_pending' => ['paid', 'partially_refunded', 'refunded', 'failed'],
+        // R38 (low): no 'failed': the money was captured (only a refund of it is in flight).
+        'refund_pending' => ['paid', 'partially_refunded', 'refunded'],
         'partially_refunded' => ['refund_pending', 'refunded', 'disputed'],
         'disputed' => ['paid', 'refund_pending', 'refunded'],
         // Money captured after a failure, a cancellation or an expiry is a fact the ledger records;
@@ -18,6 +19,15 @@ class PaymentService {
         'failed' => ['paid', 'cancelled'],
         'cancelled' => ['paid'],
         'refunded' => [],
+    ];
+    /**
+     * R38 (medium 7): a refund the provider executed is a fact the ledger records, as a capture after a failure is. During
+     * a dispute or after a failed payment (whose capture the shop missed) it was logged 'ignored' and the ledger held 0.
+     * Only provider refunds take these steps (bookRefundWithin()); the admin's manual status change does not offer them.
+     */
+    private const PROVIDER_REFUND_TRANSITIONS = [
+        'disputed' => ['partially_refunded'],
+        'failed' => ['partially_refunded', 'refunded'],
     ];
 
     /**
@@ -158,6 +168,10 @@ class PaymentService {
         return in_array($to, self::PAYMENT_TRANSITIONS[$from] ?? [], true);
     }
 
+    private static function canProviderRefundTransition(string $from, string $to): bool {
+        return in_array($to, self::PROVIDER_REFUND_TRANSITIONS[$from] ?? [], true);
+    }
+
     public static function allowedPaymentTransitions(string $from): array {
         return self::PAYMENT_TRANSITIONS[$from] ?? [];
     }
@@ -190,11 +204,11 @@ class PaymentService {
     }
 
     /** Guarded state-machine transition; $amount is recorded exactly (0 = no money moved). */
-    private static function applyTransition(array $order, string $to, string $eventType, int $amount, string $idempotencyKey, array $payload, string $providerRef = ''): bool {
+    private static function applyTransition(array $order, string $to, string $eventType, int $amount, string $idempotencyKey, array $payload, string $providerRef = '', bool $providerRefund = false): bool {
         $orderId = (int)$order['id'];
         $from = (string)($order['payment_status'] ?? 'pending');
         if ($from === $to) return false;
-        if (!self::canPaymentTransition($from, $to)) {
+        if (!self::canPaymentTransition($from, $to) && !($providerRefund && self::canProviderRefundTransition($from, $to))) {
             throw new \LogicException("Cannot transition payment for order #{$orderId} from '{$from}' to '{$to}'");
         }
 
@@ -369,21 +383,28 @@ class PaymentService {
             // Without provider idempotency a retry after an unknown outcome could refund twice:
             // the key allows one provider call, any further attempt is for a human to reconcile.
             $attemptKey = 'refund_attempt_' . $idempotencyKey;
-            if (self::transactionExists($attemptKey)) {
+            if (self::transactionExists($attemptKey) && self::transactionExists($idempotencyKey)) {
+                // The provider answered the attempt (failed): asking it again could refund twice.
                 throw new RuntimeException('Refund was already attempted at a provider without idempotent refunds; reconcile manually');
+            } elseif (self::transactionExists($attemptKey)) {
+                // R38 (medium 8): the attempt's answer was lost (a timeout after GoPay/ThePay executed it). The provider's
+                // payment state settles it when it can (refunded in full); else the admin confirms or releases it on the order.
+                $result = self::recoverUnknownRefund($orderId, $paymentId, $amount, $gateway)
+                    ?? throw new PaymentRefundOutcomeUnknown('Refund was already attempted at a provider without idempotent refunds; confirm or release it on the order');
+            } else {
+                self::logTransaction(
+                    orderId: $orderId,
+                    provider: self::providerName($gateway),
+                    providerRef: $paymentId,
+                    status: 'refund_attempted',
+                    amount: $amount,
+                    currency: strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')),
+                    idempotencyKey: $attemptKey,
+                    rawResponse: ['payment_id' => $paymentId],
+                    failClosed: true,
+                );
+                $result = $gateway->refund($paymentId, $amount);
             }
-            self::logTransaction(
-                orderId: $orderId,
-                provider: self::providerName($gateway),
-                providerRef: $paymentId,
-                status: 'refund_attempted',
-                amount: $amount,
-                currency: strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')),
-                idempotencyKey: $attemptKey,
-                rawResponse: ['payment_id' => $paymentId],
-                failClosed: true,
-            );
-            $result = $gateway->refund($paymentId, $amount);
         } else {
             $result = $gateway->refund($paymentId, $amount);
         }
@@ -585,6 +606,22 @@ class PaymentService {
     }
 
     /**
+     * R38 (medium 8): the outcome of a refund attempt at a provider without idempotent refunds was lost (a timeout after the
+     * provider executed it). Its payment state answers it when the attempt was the whole remaining balance and the provider
+     * reports the payment refunded in full (GoPay REFUNDED, ThePay refunded): that refund was executed. A partial refund
+     * (reported without its amount) or a provider without refund states (Comgate) stays for the admin (unconfirmedProviderRefund()).
+     *
+     * @return array{refund_id:string, status:string, recovered_state:string}|null
+     */
+    private static function recoverUnknownRefund(int $orderId, string $paymentId, int $amount, PaymentAdapter $gateway): ?array {
+        if (!$gateway instanceof PaymentStatusEventAdapter || $paymentId === '' || $amount !== self::refundableBalance($orderId)) return null;
+        $state = (string)($gateway->statusEvent($paymentId)['data']['state'] ?? '');
+        if (strtoupper($state) !== 'REFUNDED') return null;
+        AuditLog::log('order_refund', $orderId, 'refund_pending', 'refund_pending', self::providerName($gateway) . " reports payment {$paymentId} refunded: the attempt whose answer was lost was executed");
+        return ['refund_id' => '', 'status' => 'succeeded', 'recovered_state' => $state];
+    }
+
+    /**
      * The latest refund request no payment_refund job ever executed (e.g. requested before requestRefundAndQueue()
      * queued one): the payment is refund_pending at a provider with a refund API, nothing was booked after the
      * request and its execute key never reached the ledger.
@@ -665,6 +702,7 @@ class PaymentService {
                 // Still read as in flight once a later credit note made the payment refund_pending again, it kept it there
                 // for good, hid the refund form and offered to retry the declined refund.
                 if (is_array($bookedRaw) && ($bookedRaw['event_type'] ?? null) === 'refund.failed' && (int)$booked['amount'] === 0) return null;
+                if (self::releasesRefundRequest((string)$booked['status'], is_array($bookedRaw) ? $bookedRaw : [])) return null;
                 if ((string)$booked['status'] === 'paid') {
                     // R32 (low): "paid" set by hand on the refund_pending payment released the request as a declined refund
                     // does; it counted as in flight again once a later credit note made the payment refund_pending.
@@ -681,9 +719,12 @@ class PaymentService {
         return null;
     }
 
-    /** R32: a ledger row (status, payload) that released the refund request before it: "paid" set by hand on the order. */
+    /**
+     * R32: a ledger row (status, payload) that released the refund request before it: "paid" set by hand on the order.
+     * R38: with refunds booked before, that release returns the payment to partially_refunded / refunded.
+     */
     private static function releasesRefundRequest(string $status, array $payload): bool {
-        return $status === 'paid' && ($payload['event_type'] ?? null) === 'admin.paid';
+        return in_array($status, ['paid', 'partially_refunded', 'refunded'], true) && ($payload['event_type'] ?? null) === 'admin.paid';
     }
 
     /**
@@ -701,7 +742,7 @@ class PaymentService {
         $ownId = $own->fetchColumn();
         if ($ownId === false) return false;
         $later = Db::get()->prepare("SELECT status, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id
-            AND status IN ('refund_pending', 'paid')");
+            AND status IN ('refund_pending', 'paid', 'partially_refunded', 'refunded')");
         $later->execute($params + [':id' => (int)$ownId]);
         foreach ($later->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $raw = json_decode((string)($row['raw_response'] ?? ''), true);
@@ -742,16 +783,57 @@ class PaymentService {
      * would stay refund_pending forever. The admin who saw it paid out completes it (confirmProviderRefund()).
      * Item refunds (credit notes, RMA) are executed under their own key and carry their order_refunds id.
      *
-     * @return array{amount:int, request_key:string, refund_id?:int}|null
+     * @return array{amount:int, request_key:string, refund_id?:int, unknown?:true}|null
      */
     public static function unconfirmedProviderRefund(array $order): ?array {
         $request = self::latestRefundRequestRow($order);
         if ($request === null) return self::unconfirmedItemRefund($order);
         $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
             AND idempotency_key = :execute AND status = 'refund_pending' AND (provider_ref IS NULL OR provider_ref = '') LIMIT 1");
-        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(),
-            ':execute' => self::refundExecuteKey((string)$request['idempotency_key'])]);
-        return $stmt->fetchColumn() ? ['amount' => (int)$request['amount'], 'request_key' => (string)$request['idempotency_key']] : null;
+        $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':execute' => $executeKey]);
+        if ($stmt->fetchColumn()) return ['amount' => (int)$request['amount'], 'request_key' => (string)$request['idempotency_key']];
+        return self::unknownRefundOutcome($order, $executeKey)
+            ? ['amount' => (int)$request['amount'], 'request_key' => (string)$request['idempotency_key'], 'unknown' => true] : null;
+    }
+
+    /**
+     * R38 (medium 8): a provider without idempotent refunds (GoPay, Comgate, ThePay) was asked for the request's refund and
+     * its answer never came (the attempt row, no result under the execute key), and no job of it waits: only the admin, who
+     * checks the provider, knows whether it was executed. Was: the payment stayed refund_pending, and "paid" set by hand
+     * dropped the refunded money from the ledger.
+     */
+    private static function unknownRefundOutcome(array $order, string $executeKey): bool {
+        $stmt = Db::get()->prepare("SELECT idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key IN (:execute, :attempt)");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':execute' => $executeKey, ':attempt' => 'refund_attempt_' . $executeKey]);
+        $keys = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        if ($keys !== ['refund_attempt_' . $executeKey]) return false;
+        $open = JobQueue::openJobs('payment_refund');
+        if ($open === null) return false;
+        foreach ($open as $job) {
+            if ((int)($job['order_id'] ?? 0) === (int)$order['id'] && (string)($job['idempotency_key'] ?? '') === $executeKey) return false;
+        }
+        return true;
+    }
+
+    /**
+     * R38 (medium 8): the admin checked the provider and the refund whose answer was lost was not executed: the request is
+     * released as a declined one (declinedRefundRequest()), the payment returns to paid / partially_refunded, audited.
+     */
+    public static function releaseUnknownRefund(int $orderId, string $actor, string $note): bool {
+        if (trim($note) === '') throw new \InvalidArgumentException('A refund release needs a note');
+        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note): bool {
+            $pending = self::unconfirmedProviderRefund($order);
+            if ($pending === null || empty($pending['unknown'])) return false;
+            $to = self::statusAfterRelease($order);
+            if (!self::canPaymentTransition('refund_pending', $to)) return false;
+            $executeKey = self::refundExecuteKey($pending['request_key']);
+            // No money moves: amount 0, read as the request's release (latestRefundRequestRow()).
+            if (!self::applyTransition($order, $to, 'refund.failed', 0, 'refund-not-executed:' . $executeKey, ['amount' => $pending['amount'], 'actor' => $actor, 'note' => $note])) return false;
+            AuditLog::log('order_refund', $orderId, 'refund_pending', $to, 'Refund of ' . AuditLogLabels::amount((int)$pending['amount'], (string)($order['currency'] ?? 'eur'))
+                . " not executed at the provider, released by {$actor}: {$note}");
+            return true;
+        });
     }
 
     /**
@@ -814,7 +896,7 @@ class PaymentService {
      * note. A provider that cannot be reached refuses the release (throws). Returns 'released', or '' when it is no longer
      * stalled (its job came back, or it settled meanwhile).
      */
-    public static function releaseStalledItemRefund(int $orderId, int $itemRefundId, string $actor, string $note): string {
+    public static function releaseStalledItemRefund(int $orderId, int $itemRefundId, string $actor, string $note, bool $withoutProviderCheck = false): string {
         if (Db::get()->inTransaction()) throw new \LogicException('Release a stalled item refund outside a transaction');
         $order = Orders::byId($orderId);
         $stalled = $order ? self::stalledItemRefund($order) : null;
@@ -835,8 +917,17 @@ class PaymentService {
         if ($order === null || $stalled === null || $stalled['refund_id'] !== $itemRefundId) return '';
         $key = (string)($refund['idempotency_key'] ?? '');
         $gateway = WorkerJobs::orderPaymentGateway([], $order);
-        $found = $gateway instanceof RefundLookupAdapter ? $gateway->refundByKey((string)($order['payment_id'] ?? ''), $key) : null;
         $provider = self::providerName($gateway);
+        try {
+            $found = $gateway instanceof RefundLookupAdapter ? $gateway->refundByKey((string)($order['payment_id'] ?? ''), $key) : null;
+        } catch (\Throwable $e) {
+            // R38 (low): a provider whose refund lookup keeps failing (an outage, a key that may not read refunds) left the
+            // item refund stuck for good. The admin who checked the provider's dashboard may release it without the check;
+            // a refund that was executed after all then gets its own credit note when its webhook books it.
+            if (!$withoutProviderCheck) throw $e;
+            $found = null;
+            $note .= " (not checked with {$provider}: " . mb_substr($e->getMessage(), 0, 200) . ')';
+        }
         $providerRefundId = (string)($found['refund_id'] ?? '');
         if (($found['status'] ?? '') === 'succeeded' && $providerRefundId !== '') {
             self::bookProviderRefund($orderId, $provider, $providerRefundId, (int)$found['amount'], 'refund.verified', $provider . '_refund_' . $providerRefundId, ['refund_key' => $key]);
@@ -1012,6 +1103,13 @@ class PaymentService {
         }
         $orderId = (int)$order['id'];
         $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
+        // R38 (low): "paid" on a refund_pending payment releases the refund in flight (R32). Refunds booked before it stay
+        // refunded: was "paid", although part of the money was returned. No money moves (amount 0).
+        if ($newStatus === 'paid' && (string)($order['payment_status'] ?? '') === 'refund_pending' && self::statusAfterRelease($order) !== 'paid') {
+            self::withLockedOrder($orderId, static fn(array $current): bool => (string)($current['payment_status'] ?? '') === 'refund_pending'
+                && self::applyTransition($current, self::statusAfterRelease($current), 'admin.paid', 0, $key, ['actor' => $actor, 'note' => $note]));
+            return false;
+        }
         self::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
             'actor' => $actor,
             'note' => $note,
@@ -1762,8 +1860,13 @@ class PaymentService {
             else self::completeItemRefundWithin($orderId, $refundId);
             return true;
         }
-        if ($to !== $from && self::canPaymentTransition($from, $to)) {
-            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload, $ref);
+        if ($to !== $from && (self::canPaymentTransition($from, $to) || self::canProviderRefundTransition($from, $to))) {
+            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload, $ref, true);
+            if ($from === 'failed') {
+                // The shop recorded the payment as failed, yet the provider captured it: its refund is the first sign.
+                AuditLog::log('order_refund', $orderId, $from, $to, "{$provider} refund {$ref} of a payment recorded as failed");
+                IncidentMonitor::report('payment.refund_after_failed', 'payment', 'critical', ['order_id' => $orderId, 'refund_id' => $ref, 'amount' => $amount]);
+            }
         } elseif ($to === 'partially_refunded' && $from === $to) {
             self::recordEvent($orderId, $eventType, $to, $amount, $currency, $eventKey, $payload, $provider, $ref);
         } else {

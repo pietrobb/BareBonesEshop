@@ -118,8 +118,61 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   gross. With OSS off, the sale that passes the threshold at the seller's own VAT activates OSS for the year even when
   its net at the consumer's rate stays under it (9 990 € + 12,50 € at HU 27 % = 9 999,84 €); the next sale no longer
   falls back to Slovak VAT, and `doctor` rebuilds that activation.
+- **OSS threshold, VAT place and refunds (review round 38, medium).** Only the sale that passes the threshold records
+  OSS as activated for the year (every later order of the year did, so a credit under the threshold could not show the
+  real crossing). Goods handed over at a carrier's pick-up point (Packeta, Z-BOX) are supplied where the point is: only
+  pickup in the seller's store is a domestic sale (was: Slovak VAT, no reverse charge and no OSS count for a point in
+  Austria). An e-book next to goods is taxed where the goods are supplied, not in a billing country only typed. A credit
+  note counts in the year of the sale it credits, and the threshold is counted per VAT payer (stores of one VAT ID
+  share it). Migration `20261115120000_oss_credit_year_vat_payer` recounts the cached totals and rebuilds the
+  activations. Stripe's `refund.created` books a refund by its refund ID (once, also next to `charge.refunded`); a
+  refund of a disputed or failed payment is booked, not ignored. A GoPay, Comgate or ThePay refund whose answer was
+  lost (a timeout) is not repeated: the order shows it as of unknown outcome until the admin, having checked the
+  provider, confirms or releases it.
+- **OSS threshold count (review round 38, low).** A sale counts in the year of its date of supply (the invoice's
+  "Dátum dodania"), not of the invoice; an order not invoiced yet in the store's calendar year, not UTC's (an order at
+  00:30 on 1 January belongs to the new year). The count reads its totals, documents and open orders in one snapshot,
+  and an admin edit of a pending order's lines is decided like a new order (under the seller's lock, its old lines no
+  longer counted next to the new ones). On MySQL the seller's lock is named after the database too, so shops sharing
+  one MySQL server no longer wait for each other's orders. When the count fails, the checkout and a manual order now refuse with "The
+  VAT of this order cannot be determined right now" and a critical incident `tax.oss_threshold_failed` (was: the
+  seller's VAT, a warning). Migration `20261115120000_oss_credit_year_vat_payer` recounts the cached totals by the date of supply. The setup
+  doctor warns when sales in another currency are counted at conversion rates older than 92 days: update
+  `eur_exchange_rates` in `config/vat-rates.json` and set the new `eur_exchange_rates_as_of` (a `config/vat-rates.json`
+  you replaced has no date and warns until you add it). Cancelling an invoice changes its status, its OSS year total and
+  the audit entry in one transaction.
+- **Checkout, "Buy later", manual orders and operations (review round 38, low).** A foreign VAT ID removes the VAT
+  only for its holder: its member state must be the one the buyer is billed in (the delivery country when not billed
+  apart), and where VIES gives the holder's name, the company of the order must be that name (legal form, case and a
+  shorter form aside); otherwise the order is charged VAT and the invoice marks the VAT ID unverified. This narrows
+  the review round 34 rule above, which reverse charged an e-book for a valid foreign VAT ID billed anywhere: a German
+  VAT ID billed to Slovakia or the USA pays the seller's VAT. Cash on delivery
+  of a cart charged in another currency than the store's price lists adds the carrier's COD surcharge (was: none).
+  "Buy later" saved on two devices at once no longer ends in an error page, and the "was" price of a saved line is
+  compared on the same net basis under reverse charge. A manual order whose fields are not UTF-8 is refused with 400
+  naming the field (was: HTTP 500). Run as root, `cli/backup.php` refuses a `db_sqlite_path` that is a symbolic link or
+  a second hard link (it copied whatever database root could read there); run the backup as the owner of the database.
+  `php cli/setup.php install --help` (`-h`, `help`) prints the usage, and an unknown install switch is refused with
+  exit 2: both installed the shop until now.
+- **Refunds (review round 38, low).** The credit note of a return waits as long as the item refund's job retries
+  (it gave up after 30 minutes while the refund retried for about 9 hours). A stalled item refund whose provider lookup
+  keeps failing can be released on the order with "released without the provider check", after checking the provider's
+  dashboard; it stayed stuck for good. "Mark as paid" on a refund-pending payment keeps the refunds booked before
+  (partially refunded / refunded), not "paid".
+- **Usability and documentation (review round 38).** The web installer speaks English, Slovak, Czech, German, Polish,
+  Hungarian and Spanish: the browser's language picks it and the language links above the form change it; the form,
+  its errors and the result page follow (was: English only). The refund e-mail carries the refund's credit note as a
+  PDF. The order-done page says the confirmation will be e-mailed, not that it was sent (the worker sends it).
+  `php cli/setup.php doctor` shows a fix only under a WARN or FAIL. The admin checklist names the worker cron check,
+  the manual payment change names the status in the admin's language ("Zaplatené", not 'paid'), Slovak and Czech
+  translate "Low stock" and "Stock", and `catalog.json` and `cli/seed.php` have Czech and German attribute texts.
+  `deploy/bbe-step.sh` prints its usage on missing or wrong arguments. README: the quick start says to run
+  `setup.php install` as the checkout's owner (`chmod -R go-w .` for a tree root owns), the e-mail log is in
+  `<private_runtime_dir>/logs/`, and "Root" lists the two accounts as numbered steps with the crontab of the web
+  server user; README and runbook name that account for cron, backups, monitoring and restores, and as the owner of
+  the private runtime directory.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
-- **Theme assets:** the default theme is version 2.3.14 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.15 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the

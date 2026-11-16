@@ -63,7 +63,7 @@ class CheckoutService {
      * an e-service is taxed where the consumer lives or the business is established, not where a parcel goes.
      * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
      */
-    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = ''): array {
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = ''): array {
         $store = StoreContext::current()->config();
         $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
         $vatIdValid = false;
@@ -82,6 +82,11 @@ class CheckoutService {
         } elseif ($vatId !== '') {
             $vatIdStatus = 'unverified';
         }
+        // R38 (low): a foreign VAT ID reverse charges only for its holder: its state is where the buyer is billed, and the
+        // company is the one VIES names (VatService::vatIdHolderMismatch()). Otherwise the sale is charged VAT.
+        $foreignVatId = (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry;
+        $vatIdMismatch = $vatIdValid && $foreignVatId ? VatService::vatIdHolderMismatch($vatId, $company, trim($billingCountry) !== '' ? $billingCountry : $country) : null;
+        if ($vatIdMismatch !== null) [$vatIdValid, $vatIdStatus] = [false, 'mismatch_' . $vatIdMismatch];
         $vatCart = Cart::enriched();
         $vatGoods = self::availableItems($vatCart['items'] ?? []);
         $digitalOnly = self::isDigitalOnly($vatGoods);
@@ -96,6 +101,11 @@ class CheckoutService {
         if ($rate !== null && ($rate['carrier'] ?? '') !== 'pickup' && ShippingService::isPickupMethod($shippingMethod)) $rate = ['carrier' => 'pickup'];
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $residence = strtoupper(trim($billingCountry)) ?: strtoupper($country);
+        // R38 (medium 3): next to goods, a billing country the shopper only typed is no evidence of residence when the
+        // goods go to another one (art. 24b(d), 24f: two non-contradictory items): a Slovak buyer billed in Luxembourg
+        // paid 17 % on the e-book instead of 23 %. The country the goods are supplied in decides then: the delivery
+        // country, proven by the dispatch, or the store's when they are collected there (nothing proves the address).
+        if (!$digitalOnly && trim($country) !== '') $residence = strtoupper(trim(vatSupplyCountry($rate, $country, $sellerCountry)));
         $consumerResidence = $residence;
         // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
         $vatIdCountry = substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2);
@@ -118,7 +128,7 @@ class CheckoutService {
             'is_b2b'                => $vatId !== '',
             // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
             'customer_country_verified' => !$digitalOnly,
-            // Downloads next to goods are supplied where the buyer lives: the billing country, else the delivery one.
+            // Downloads next to goods are supplied where the goods are (R38), unless a valid VAT ID says otherwise.
             'digital_customer_country' => $digitalOnly ? '' : $residence,
             'tax_provider'          => $taxProviderCode,
         ];
@@ -135,7 +145,12 @@ class CheckoutService {
                 $lines = array_map(static fn(array $item): array => ['gross' => (int)($item['total'] ?? 0), 'vat_class' => (string)($item['vat_class'] ?? 'standard'),
                     'digital' => VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))], array_values(self::availableItems($vatCart['items'] ?? [])));
                 $saleNet = OssThreshold::saleNet($lines, $goodsAbroad, $downloadsAbroad, $sellerCountry);
-                $context['seller_oss_enabled'] = OssThreshold::exceeded($saleNet, (string)($vatCart['currency'] ?? 'eur'));
+                try {
+                    $context['seller_oss_enabled'] = OssThreshold::exceeded($saleNet, (string)($vatCart['currency'] ?? 'eur'));
+                } catch (OssThresholdUnavailableException $e) {
+                    // R38 (low): the page is shown at home VAT; placing the order decides again and refuses (thresholdVat()).
+                    $threshold['unavailable'] = true;
+                }
             }
         }
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
@@ -187,8 +202,12 @@ class CheckoutService {
         $currency = strtolower((string)($goods[0]['currency'] ?? 'eur'));
         $promotion = (int)$preview['promotion_discount'];
         $lineDiscounts = $promotion > 0 && class_exists('Promotions') ? Promotions::lineDiscounts(Pricing::autoCartRules($subtotal, $goods, $customerId, $currency), $goods) : [];
-        return self::thresholdVat($vat, $goods, ['discount' => min($subtotal, (int)$preview['coupon_discount'] + $promotion), 'line_discounts' => $lineDiscounts,
-            'shipping' => $shipping, 'payment_fee' => $paymentFee, 'currency' => $currency, 'effective_date' => ShopTime::date('Y-m-d')])[0];
+        try {
+            return self::thresholdVat($vat, $goods, ['discount' => min($subtotal, (int)$preview['coupon_discount'] + $promotion), 'line_discounts' => $lineDiscounts,
+                'shipping' => $shipping, 'payment_fee' => $paymentFee, 'currency' => $currency, 'effective_date' => ShopTime::date('Y-m-d')])[0];
+        } catch (OssThresholdUnavailableException $e) {
+            return $vat; // R38 (low): shown at home VAT; placing the order refuses until the count works again
+        }
     }
 
     /**
@@ -197,12 +216,12 @@ class CheckoutService {
      * never answers the preview with HTTP 429: the shipping and payment previews of a business behind one office IP
      * kept failing after ~10 changes, and checkout could not be finished.
      */
-    public static function previewVatContext(string $country, string $vatId, string $shippingMethod, string $billingCountry = ''): array {
+    public static function previewVatContext(string $country, string $vatId, string $shippingMethod, string $billingCountry = '', string $company = ''): array {
         $known = $vatId !== '' ? VatService::cachedVatIdStatus($vatId) : null;
         $verify = $known === null && $vatId !== '' && Security::rateLimitAllows('checkout_vat_preview', 20, 600);
         if ($verify) Security::rateLimitRecord('checkout_vat_preview');
         if ($vatId !== '') self::rememberUncheckedVatId($vatId, $known === null && !$verify);
-        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry);
+        return self::vatContext($country, $vatId, $shippingMethod, $verify, $known, $billingCountry, $company);
     }
 
     /**
@@ -231,7 +250,8 @@ class CheckoutService {
      * @return array{vat: array, cart: array, goods: list<array>}
      */
     public static function previewCart(string $country, array $values, string $shippingMethod, string $billingCountry = ''): array {
-        $vat = self::previewVatContext($country, self::buyerCompany($values)['vat_id'], $shippingMethod, $billingCountry);
+        $buyer = self::buyerCompany($values);
+        $vat = self::previewVatContext($country, $buyer['vat_id'], $shippingMethod, $billingCountry, (string)($buyer['fields']['company'] ?? ''));
         $cart = Cart::enriched($vat['context']);
         return ['vat' => $vat, 'cart' => $cart, 'goods' => self::availableItems($cart['items'])];
     }
@@ -415,7 +435,8 @@ class CheckoutService {
      */
     public static function withoutInvalidVatId(array $fields, ?string $vatIdStatus): array {
         if ($vatIdStatus === 'invalid') unset($fields['ic_dph']);
-        if ($vatIdStatus === 'unverified' && isset($fields['ic_dph'])) $fields['ic_dph_unverified'] = '1';
+        // R38 (low): nor as the registration of a buyer VIES does not name (mismatch_country / mismatch_name).
+        if (($vatIdStatus === 'unverified' || str_starts_with((string)$vatIdStatus, 'mismatch_')) && isset($fields['ic_dph'])) $fields['ic_dph_unverified'] = '1';
         return $fields;
     }
 

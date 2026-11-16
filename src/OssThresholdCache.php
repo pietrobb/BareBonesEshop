@@ -5,10 +5,11 @@ final class OssThresholdCache
 {
     private static function source(PDO $db): string
     {
-        $year = $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
-            ? 'CAST(substr(invoices.issued_at, 1, 4) AS INTEGER)' : 'YEAR(invoices.issued_at)';
+        // R38 (medium 4): a credit note in the year of the invoice it corrects (OssThreshold::documentYear()).
+        $at = OssThreshold::documentDateSql('invoices', 'source_invoice');
+        $year = $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? "CAST(substr({$at}, 1, 4) AS INTEGER)" : "YEAR({$at})";
         return "SELECT orders.store_id, {$year} AS year, LOWER(invoices.currency) AS currency, SUM(invoices.oss_net) AS net
-            FROM invoices JOIN orders ON orders.id = invoices.order_id
+            FROM invoices JOIN orders ON orders.id = invoices.order_id LEFT JOIN invoices AS source_invoice ON source_invoice.id = invoices.refers_to_invoice_id
             WHERE invoices.status = 'issued' AND invoices.type IN ('invoice', 'credit_note')
               AND invoices.oss_net IS NOT NULL AND invoices.oss_net <> 0
             GROUP BY orders.store_id, {$year}, LOWER(invoices.currency)";
@@ -72,7 +73,7 @@ final class OssThresholdCache
                 if (count($engines) !== 3 || array_filter($engines, static fn($engine): bool => strcasecmp((string)$engine, 'InnoDB') !== 0)) throw new RuntimeException('Repair requires all three tables to use InnoDB.');
                 $db->exec('SET autocommit = 0');
                 $autocommitChanged = true;
-                $db->exec('LOCK TABLES invoices READ, orders READ, invoices AS fallback_invoice READ, orders AS fallback_order READ, oss_threshold_totals WRITE');
+                $db->exec('LOCK TABLES invoices READ, invoices AS source_invoice READ, orders READ, invoices AS fallback_invoice READ, orders AS fallback_order READ, oss_threshold_totals WRITE');
                 $locked = true;
                 $started = true;
             } else {

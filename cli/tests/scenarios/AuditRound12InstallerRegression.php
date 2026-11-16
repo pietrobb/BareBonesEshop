@@ -78,7 +78,10 @@ try {
     assert_true(str_contains($r12iInstall, "\$errors['protection']") && !str_contains($r12iInstall, 'until then anyone') && !str_contains($r12iInstall, "'Installation failed: ' . \$e->getMessage()"),
         'R12 installer: install.php refuses an exposed server and shows no exception text before anyone signed in');
     file_put_contents($r12iWeb . '/config.php', '<?php return [];');
+    $r12iLocale = I18n::locale();
+    I18n::setLocale(WebInstaller::locale(null, '')); // R38: the message is in the installer's language, English by default
     [$r12iNone, $r12iFailure] = WebInstaller::installLocked([], $r12iWeb, false);
+    I18n::setLocale($r12iLocale);
     @unlink($r12iWeb . '/config.php');
     assert_true($r12iNone === null && preg_match('/^Installation failed \(reference [0-9a-f]{8}\)\./', (string)$r12iFailure) === 1 && !str_contains((string)$r12iFailure, 'another request'),
         'R12 installer: a failed install shows only a reference; the exception text goes to the PHP log');

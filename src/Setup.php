@@ -380,6 +380,8 @@ class Setup
 
     /** EU-wide threshold of cross-border B2C sales (goods dispatched, e-services) above which OSS VAT applies (art. 59c). */
     public const OSS_THRESHOLD_EUR_CENTS = OssThreshold::EUR_CENTS;
+    /** R38 (low): conversion rates older than this (a quarter) make the OSS threshold check warn. */
+    public const OSS_RATES_MAX_AGE_DAYS = 92;
 
     /**
      * R34 (low): with OSS off, a consumer in another member state pays the seller's VAT only while the seller's EU
@@ -397,7 +399,7 @@ class Setup
         if (!empty($store['oss_enabled'])) {
             return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} charges consumers in other EU states their own VAT (OSS).", 'action' => ''];
         }
-        ['sum' => $sum, 'year' => $y, 'unconverted' => $unconverted] = OssThreshold::worstYear($db, $storeId, $store, $stores);
+        ['sum' => $sum, 'year' => $y, 'unconverted' => $unconverted, 'converted' => $converted] = OssThreshold::worstYear($db, $storeId, $store, $stores);
         $amount = number_format($sum / 100, 2, '.', ' ') . ' EUR';
         // R36: every distance sale counts, whatever VAT it was invoiced with; above the threshold (art. 59c) the VAT of the
         // consumer's state applies for the rest of that year and the whole next one.
@@ -415,6 +417,14 @@ class Setup
             return ['status' => 'warn', 'name' => $name,
                 'message' => "Store {$label} sold to consumers in other EU states in " . implode(', ', $unconverted) . ', which the 10 000 EUR OSS threshold cannot convert to EUR; counted so far: ' . $amount . '.',
                 'action' => 'Add the EUR rate of ' . implode(', ', $unconverted) . ' to eur_exchange_rates in config/vat-rates.json.'];
+        }
+        // R38 (low): the sales in another currency are counted at fixed rates; stale ones under- or overstate the threshold.
+        $age = OssThreshold::ratesAge();
+        if ($converted !== [] && ($age === null || $age > self::OSS_RATES_MAX_AGE_DAYS)) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "Store {$label} sold to consumers in other EU states in " . implode(', ', $converted) . ', counted against the 10 000 EUR OSS threshold at the fixed rates of config/vat-rates.json'
+                    . ($age === null ? ' (their date, eur_exchange_rates_as_of, is not set)' : " of {$age} days ago") . '; counted so far: ' . $amount . '.',
+                'action' => 'Update eur_exchange_rates in config/vat-rates.json to the ECB reference rates your accountant uses and set eur_exchange_rates_as_of to their date (YYYY-MM-DD).'];
         }
         return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
     }

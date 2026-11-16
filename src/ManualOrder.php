@@ -114,6 +114,8 @@ final class ManualOrder {
             return self::refusal('admin.order.edit.out_of_stock');
         } catch (VatChangedException $e) {
             return self::refusal('checkout.error.vat_changed');
+        } catch (OssThresholdUnavailableException $e) {
+            return self::refusal('checkout.error.vat_unavailable');
         }
         AuditLog::log('order', $orderId, null, ['source' => 'admin', 'admin' => Security::adminUser()], 'Manual order entered in the admin');
         if ($priced['payment_code'] === 'free') {
@@ -299,7 +301,7 @@ final class ManualOrder {
             $vatId = $company['vat_id'];
             // R33: a download is supplied in the billing country (billed elsewhere), goods where they are delivered.
             $billingCountry = OrderAddress::billingRequested($buyer) ? strtoupper(trim(Security::str($buyer['billing_country'] ?? ''))) : '';
-            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry);
+            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry, (string)($company['fields']['company'] ?? ''));
             $company['fields'] = CheckoutService::withoutInvalidVatId($company['fields'], $vat['vat_id_status']);
             $cart = Cart::enriched($vat['context']);
             $requested = [];
@@ -384,7 +386,11 @@ final class ManualOrder {
                 'providers' => $providers,
             ];
             // R36: the sale that passes the OSS threshold is decided on all it is invoiced at (as checkout).
-            [$vat, $items] = CheckoutService::thresholdVat($vat, $items, $amounts);
+            try {
+                [$vat, $items] = CheckoutService::thresholdVat($vat, $items, $amounts);
+            } catch (OssThresholdUnavailableException $e) {
+                return ['error' => 'checkout.error.vat_unavailable']; // R38 (low): never the seller's VAT by default
+            }
             $snapshot = Adapters::tax($vat['tax_provider'])::buildSnapshot($items, $vat['context'], $amounts);
             $text = static fn(string $field): string => $digitalOnly ? '' : mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', Security::str($buyer[$field] ?? ''))), 0, 255);
             return [

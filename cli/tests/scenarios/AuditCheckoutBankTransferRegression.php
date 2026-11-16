@@ -190,6 +190,9 @@ try {
             && str_contains($a136Html, I18n::date($a136Due, 'sk')), "{$l}: order-done shows beneficiary, IBAN, BIC, exact amount, variable symbol = order ID, message and due date");
         assert_true(preg_match('~<svg [^>]*role="img" aria-label="QR kód PAY by square pre platbu objednávky"><rect [^>]*/><path d="(M\d+,\d+h1v1h-1z)+" fill="#000"/></svg>~', $a136Html) === 1,
             "{$l}: order-done embeds the PAY by square QR as an inline, labelled SVG (no external image, CSP-safe)");
+        // R38 (usability): the confirmation e-mail is only queued for the worker when the page renders.
+        assert_true(!str_contains($html, 'Potvrdenie sme vám poslali') && str_contains($html, 'Potvrdenie objednávky vám pošleme e-mailom'),
+            "{$l}: order-done says the confirmation will be e-mailed, not that it was sent (was: \"Potvrdenie sme vám poslali\")");
 
         [$l, $r] = $a136Do('api', $a136Shipping);
         $a136Api = json_decode((string)$r['output'], true) ?: [];

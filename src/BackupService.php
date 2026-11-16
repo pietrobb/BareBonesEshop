@@ -28,6 +28,8 @@ class BackupService
     private static ?string $rootDir = null;
     /** Path to the live SQLite file backing the configured PDO; null if unknown / not local. */
     private static ?string $livePath = null;
+    /** db_sqlite_path from config.php as written; SQLite reports the link-resolved file in PRAGMA database_list. */
+    private static ?string $configuredPath = null;
     /** MySQL installs: callable(string $dumpPath): array that writes a consistent dump. */
     private static ?Closure $mysqlDumper = null;
     /** MySQL installs: verified scratch-first restore of a backup dump (restore()). */
@@ -55,6 +57,7 @@ class BackupService
         self::$mysqlDatabaseFactory = null;
         self::$mysqlScratchDatabase = '';
         self::$fileSources = [];
+        self::$configuredPath = null;
         if ($config !== null) {
             $storageRoot = (string)($config['storage_dir'] ?? self::$rootDir . '/storage/backups');
             $storageClass = (string)($config['storage_adapter'] ?? 'LocalBackupStorage');
@@ -65,6 +68,7 @@ class BackupService
             $storageRoot = (string)($appCfg['backup_storage_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/backups');
             $storageClass = (string)($appCfg['backup_storage_adapter'] ?? 'LocalBackupStorage');
             self::$cfg['log_file'] = (string)($appCfg['backup_log_file'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/logs/backup.log');
+            self::$configuredPath = (string)($appCfg['db_sqlite_path'] ?? '') ?: null;
             if (self::$cfg['include_files'] ?? true) {
                 self::$fileSources = self::defaultFileSources($appCfg, self::$rootDir);
             }
@@ -133,6 +137,7 @@ class BackupService
         self::$storage = null;
         self::$rootDir = null;
         self::$livePath = null;
+        self::$configuredPath = null;
         self::$mysqlDumper = null;
         self::$mysqlDatabase = null;
         self::$mysqlDatabaseFactory = null;
@@ -242,6 +247,34 @@ class BackupService
             $merged['retention'] = array_replace($defaults['retention'], $raw['retention']);
         }
         return $merged;
+    }
+
+    /**
+     * R38 (low): root keeps root for a tree only root can change (cli_drop_root), but the SQLite file is in the private
+     * directory the web user writes. A symbolic link put at db_path there made root's VACUUM INTO copy any SQLite database
+     * root can read into a backup. As root, the file the connection has open must be the regular, singly linked file at
+     * $path (same inode through /proc/self/fd, so a link swapped back after connecting does not pass), reached through no
+     * symbolic link another account owns. Null when fine or not root.
+     */
+    private static function rootForeignDatabase(string $path): ?string
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) return null;
+        self::$db->query('SELECT COUNT(*) FROM sqlite_master')->fetchColumn(); // the file is open from here on
+        clearstatcache();
+        $file = @lstat($path);
+        if (!is_array($file)) return "the database {$path} cannot be read";
+        if (is_link($path)) return "the database {$path} is a symbolic link";
+        if (((int)$file['mode'] & 0170000) !== 0100000 || (int)$file['nlink'] !== 1) return "the database {$path} is not a regular file with a single link";
+        for ($dir = dirname($path); $dir !== dirname($dir); $dir = dirname($dir)) {
+            $s = @lstat($dir);
+            if (is_array($s) && is_link($dir) && (int)$s['uid'] !== 0) return "{$dir} is a symbolic link of another account";
+        }
+        if (!is_dir('/proc/self/fd')) return null;
+        foreach (scandir('/proc/self/fd') ?: [] as $fd) {
+            $open = ctype_digit((string)$fd) ? @stat('/proc/self/fd/' . $fd) : false;
+            if (is_array($open) && $open['dev'] === $file['dev'] && $open['ino'] === $file['ino']) return null;
+        }
+        return "the database open is not the file at {$path}";
     }
 
     /**
@@ -412,6 +445,8 @@ class BackupService
                 if ($driver === 'mysql') {
                     $dumpInfo = (self::$mysqlDumper)($absPath);
                 } else {
+                    $foreign = self::rootForeignDatabase(self::$configuredPath ?? (string)self::$livePath);
+                    if ($foreign !== null) throw new RuntimeException("refused as root: {$foreign}. Run the backup as the account that owns the database");
                     $sqlPath = str_replace("'", "''", $absPath);
                     self::$db->exec("VACUUM INTO '{$sqlPath}'");
                 }
