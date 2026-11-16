@@ -201,7 +201,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   page opened before another refund no longer books a refund that was not executed. Run as root, `cli/backup.php`
   opens `db_path` component by component and accepts the copy only when every file its connection opened is that path
   or its `-wal`/`-shm` by the kernel's name, checkpointing the WAL only after that check (a `db/` directory swapped
-  with a link to another database during the backup no longer copies that database).
+  with a link to another database during the backup no longer copies that database). Without `/proc` that check cannot
+  be made, so root refuses a database reached through a directory another account owns or can write.
 - **ECB rates, VAT and refunds (review round 40, low).** `cli/eur-rates.php` refuses a feed dated after today or before
   the stored rates, one lacking a stored currency (or naming fewer than 20 at first) and a rate more than 50 % away from
   the one it replaces; the stored rates stay. `--force` stores a checked feed anyway, never one dated after today.
