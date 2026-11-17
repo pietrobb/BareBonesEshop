@@ -66,7 +66,17 @@ final class MaintenanceMode
     /** The marker's content ([] when there is none or it cannot be read). */
     public static function marker(string $root): array
     {
-        $marker = json_decode((string)@file_get_contents(self::path($root)), true);
+        $path = self::path($root);
+        $raw = @file_get_contents($path);
+        // Ideas #54-#56: Windows locks are mandatory, so the marker this process holds locked cannot be read by its name;
+        // (the open succeeds, the read returns ''); owned() found no marker and a successful migrate.php left its armed
+        // window failed (503). Read it through the
+        // locked handle instead: a file that is open cannot be replaced on Windows, so it is the marker on disk.
+        if (($raw === false || $raw === '') && isset(self::$held[$path])) {
+            rewind(self::$held[$path]);
+            $raw = stream_get_contents(self::$held[$path]);
+        }
+        $marker = json_decode((string)$raw, true);
         return is_array($marker) ? $marker : [];
     }
 

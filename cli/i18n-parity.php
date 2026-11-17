@@ -16,6 +16,36 @@ if (!$files) {
     exit(1);
 }
 
+/**
+ * Idea #46: a key written twice in one array literal is silently won by the later value; list them per file.
+ * @return list<string>
+ */
+function i18nDuplicateKeys(string $file): array
+{
+    $tokens = token_get_all((string)file_get_contents($file));
+    $stack = [];
+    $duplicates = [];
+    foreach ($tokens as $i => $token) {
+        if ($token === '[') { $stack[] = []; continue; }
+        if ($token === ']') { array_pop($stack); continue; }
+        if (!is_array($token) || $token[0] !== T_CONSTANT_ENCAPSED_STRING || $stack === []) continue;
+        $next = $i + 1;
+        while (is_array($tokens[$next] ?? null) && in_array($tokens[$next][0], [T_WHITESPACE, T_COMMENT], true)) $next++;
+        if (!is_array($tokens[$next] ?? null) || $tokens[$next][0] !== T_DOUBLE_ARROW) continue;
+        $key = stripcslashes(substr($token[1], 1, -1));
+        $top = array_key_last($stack);
+        if (isset($stack[$top][$key])) $duplicates[] = "'{$key}' (lines {$stack[$top][$key]} and {$token[2]})";
+        $stack[$top][$key] = $token[2];
+    }
+    return $duplicates;
+}
+
+$duplicateFailures = [];
+foreach ($files as $f) {
+    $duplicates = i18nDuplicateKeys($f);
+    if ($duplicates !== []) $duplicateFailures[] = basename($f) . ': ' . implode(', ', $duplicates);
+}
+
 $locales = [];
 $catalogs = [];
 foreach ($files as $f) {
@@ -81,6 +111,11 @@ foreach ($untranslated as $code => $same) {
     $ok = $share <= I18N_ENGLISH_FALLBACK_BUDGET;
     if (!$ok) $failed = true;
     echo sprintf("  [%s] %s: %d values still English (%.1f%%, budget %d%%)\n", $ok ? 'OK' : 'FAIL', $code, $same, $share * 100, I18N_ENGLISH_FALLBACK_BUDGET * 100);
+}
+
+foreach ($duplicateFailures as $line) {
+    $failed = true;
+    echo "  [FAIL] duplicate keys in {$line}\n";
 }
 
 if ($failed) {

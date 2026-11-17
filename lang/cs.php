@@ -1997,7 +1997,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'variant_invalid' => 'Vybraná varianta není platná.', 'product_invalid' => 'Produkt není dostupný.', 'product_unavailable' => 'Tento výběr není dostupný.',
     'cart_full' => 'Košík může obsahovat nejvýše 100 různých položek.',
     'shipping_loading' => 'Načítám možnosti dopravy…', 'shipping_unavailable' => 'Doručení není dostupné.', 'select_shipping_first' => 'Nejprve vyberte dopravu.',
-    'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.
     'wishlist.title' => 'Oblíbené',
     'wishlist.remove' => 'Odebrat z oblíbených',

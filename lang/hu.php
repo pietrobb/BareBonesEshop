@@ -1997,7 +1997,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'variant_invalid' => 'A kiválasztott változat érvénytelen.', 'product_invalid' => 'A termék nem érhető el.', 'product_unavailable' => 'Ez a választás nem érhető el.',
     'cart_full' => 'A kosárban legfeljebb 100 különböző tétel lehet.',
     'shipping_loading' => 'Szállítási módok betöltése…', 'shipping_unavailable' => 'A szállítás nem érhető el.', 'select_shipping_first' => 'Először válasszon szállítást.',
-    'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.
     'wishlist.title' => 'Kívánságlista',
     'wishlist.remove' => 'Eltávolítás a kívánságlistáról',

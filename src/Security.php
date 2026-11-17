@@ -467,13 +467,31 @@ class Security {
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true, bool $failClosed = false): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $key = self::rateKey($action, $bindIp);
+        // Idea #9: only an allowed attempt is recorded. Recording refused ones too let a third party that keeps sending
+        // hold a limit not bound to its address (bindIp=false, e.g. a customer's e-mail) closed for as long as it liked.
+        // The hit is inserted first and taken back when it is one too many, in one transaction: the insert takes SQLite's
+        // write lock before the count, so concurrent requests cannot both take the last slot.
         $allowed = self::withRateDb(static function (PDO $db) use ($key, $windowSeconds, $maxHits): bool {
             $now = time();
-            $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
-               ->execute([':key' => $key, ':ts' => $now]);
-            $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
-            $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
-            return (int)$stmt->fetchColumn() <= max(0, $maxHits);
+            $own = !$db->inTransaction();
+            if ($own) $db->beginTransaction();
+            try {
+                $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")->execute([':key' => $key, ':ts' => $now]);
+                $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+                $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
+                $allowed = (int)$stmt->fetchColumn() <= max(0, $maxHits);
+                if ($own && $allowed) {
+                    $db->commit();
+                } elseif ($own) {
+                    $db->rollBack();
+                } elseif (!$allowed) {
+                    $db->prepare("DELETE FROM hits WHERE rowid = (SELECT MAX(rowid) FROM hits WHERE key = :key)")->execute([':key' => $key]);
+                }
+                return $allowed;
+            } catch (Throwable $e) {
+                if ($own && $db->inTransaction()) $db->rollBack();
+                throw $e;
+            }
         }, $failClosed);
 
         if (!$allowed) {

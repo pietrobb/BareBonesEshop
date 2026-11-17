@@ -711,6 +711,11 @@ $g4FacetCounter->resetQueryCount();
 $g4UnfilteredFacets = Products::specFilterValues($specCatId, 'sk');
 assert_equals($filterValues, $g4UnfilteredFacets, 'G4 facets: batched unfiltered payload preserves behavior');
 assert_true($g4FacetCounter->queryCount() <= 1, 'G4 facets: unfiltered values use one aggregate query');
+// Ideas #30/#48: numeric is a float (or null) on every path; the cached payload is identical to the fresh one.
+$g4Numerics = array_merge(...array_map(static fn(array $values): array => array_column($values, 'numeric'), array_values($g4UnfilteredFacets)));
+assert_true($g4Numerics !== [] && array_filter($g4Numerics, static fn($n): bool => $n !== null && !is_float($n)) === [],
+    'G4 facets: numeric values are floats (' . json_encode($g4Numerics) . ')');
+assert_true(Products::specFilterValues($specCatId, 'sk') === $g4UnfilteredFacets, 'G4 facets: the cached payload is identical to the fresh one');
 $g4FacetCounter->resetQueryCount();
 $g4ActiveFacets = Products::specFilterValues($specCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
 assert_equals($filterValues2, $g4ActiveFacets, 'G4 facets: active self-exclusion payload preserves behavior');
