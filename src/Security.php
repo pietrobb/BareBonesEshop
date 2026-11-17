@@ -474,22 +474,25 @@ class Security {
         $allowed = self::withRateDb(static function (PDO $db) use ($key, $windowSeconds, $maxHits): bool {
             $now = time();
             $own = !$db->inTransaction();
-            if ($own) $db->beginTransaction();
+            $open = false;
+            if ($own) $open = $db->beginTransaction();
             try {
                 $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")->execute([':key' => $key, ':ts' => $now]);
                 $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
                 $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
                 $allowed = (int)$stmt->fetchColumn() <= max(0, $maxHits);
-                if ($own && $allowed) {
+                if ($open && $allowed) {
                     $db->commit();
-                } elseif ($own) {
+                    $open = false;
+                } elseif ($open) {
                     $db->rollBack();
+                    $open = false;
                 } elseif (!$allowed) {
                     $db->prepare("DELETE FROM hits WHERE rowid = (SELECT MAX(rowid) FROM hits WHERE key = :key)")->execute([':key' => $key]);
                 }
                 return $allowed;
             } catch (Throwable $e) {
-                if ($own && $db->inTransaction()) $db->rollBack();
+                if ($open) $db->rollBack();
                 throw $e;
             }
         }, $failClosed);
