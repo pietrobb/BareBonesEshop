@@ -379,7 +379,12 @@ class PaymentService {
             $item->execute([$orderId, StoreContext::current()->id(), $idempotencyKey]);
             $status = $item->fetchColumn(); $item->closeCursor();
             if ($status !== false && $status !== 'pending') return false;
-            // R42 (low 8): a refund request's job marks its dispatch too (requestedRefundAtProvider()).
+            // R42 (low 8): the job of the order's open refund request marks its dispatch too (requestedRefundAtProvider());
+            // a direct refund that executes no request leaves the ledger as it was.
+            if ($status === false) {
+                $request = self::latestRefundRequestRow($order, true);
+                if ($request === null || self::refundRequestKey($idempotencyKey) !== (string)$request['idempotency_key']) return true;
+            }
             self::logTransaction($orderId, self::providerName($gateway), '', 'refund_attempted', 0, (string)$order['currency'], 'refund_dispatch_' . $idempotencyKey,
                 [$status === false ? 'dispatch_started' : 'item_dispatch_started' => true], true);
             return true;
