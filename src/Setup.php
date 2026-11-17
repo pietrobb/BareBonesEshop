@@ -475,7 +475,7 @@ class Setup
         if ($pending['oldest'] !== null && strcmp($pending['oldest'], $window) < 0) {
             return ['status' => 'warn', 'name' => $name,
                 'message' => "{$pending['pending']} invoices or credit notes in " . implode(', ', $pending['currencies']) . " issued since {$pending['oldest']} are counted against the 10 000 EUR OSS threshold at today's EUR rate: the ECB rate of their day is not stored; counted so far: {$amount}.",
-                'action' => 'Run "php cli/eur-rates.php" (it converts them at the ECB rate of their day, from the ECB history) and keep it as a daily cron line.'];
+                'action' => 'Run "php cli/eur-rates.php" (it converts them at the ECB rate of their day, from the ECB history, even when it refuses today\'s feed) and keep it as a daily cron line; if it reports "ECB rates not updated", check the feed with the ECB and run it with --force.'];
         }
         return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
     }

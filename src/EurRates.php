@@ -258,6 +258,38 @@ final class EurRates
         return ['days' => count($days), 'refused' => $refused];
     }
 
+    /**
+     * cli/eur-rates.php: store today's rates (refresh()), then convert documents waiting for the rate of their day
+     * (OssThreshold::convertPending(), from the ECB history). Review round 15 (R41): a refused daily feed (a currency
+     * missing, a move of more than 50 %) no longer skips the conversion; it reads the separate history feed. Exit code 1
+     * when either step failed.
+     * @return array{exit: int, out: list<string>, err: list<string>}
+     */
+    public static function daily(PDO $db, bool $force = false): array
+    {
+        $out = [];
+        $err = [];
+        try {
+            $result = self::refresh($db, $force);
+            $out[] = "ECB rates of {$result['as_of']}: {$result['count']} currencies stored";
+        } catch (Throwable $e) {
+            $err[] = 'ECB rates not updated: ' . $e->getMessage();
+        }
+        try {
+            $converted = OssThreshold::convertPending($db);
+            if ($converted['pending'] > 0) {
+                $history = self::fetchHistory($db, (string)$converted['oldest'], $converted['currencies']);
+                if ($history['refused'] !== []) $err[] = 'ECB history rates refused (more than 50 % from today\'s): ' . implode(', ', array_slice($history['refused'], 0, 10));
+                $converted = ['converted' => $converted['converted'] + OssThreshold::convertPending($db)['converted']] + OssThreshold::pending($db);
+            }
+            $out[] = "OSS documents converted to EUR at the rate of their day: {$converted['converted']}; still counted at today's rate: {$converted['pending']}";
+        } catch (Throwable $e) {
+            $err[] = 'OSS documents not converted: ' . $e->getMessage();
+        }
+        $failed = array_filter($err, static fn(string $line): bool => !str_starts_with($line, 'ECB history rates refused'));
+        return ['exit' => $failed === [] ? 0 : 1, 'out' => $out, 'err' => $err];
+    }
+
     /** @param array<string, array<string, float>> $days date => EUR per unit by upper-case currency */
     private static function remember(PDO $db, array $days): void
     {

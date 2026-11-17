@@ -220,7 +220,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   methods, so goods collected in the shop are no longer counted as distance sales. A document is fixed in EUR only at
   the ECB rate of its day (or of the 7 days before); with a stale or only a configured rate it stays unfixed and is
   counted at today's rate. `cli/eur-rates.php` keeps the ECB rate history (migration `20261117100000_eur_rate_history`)
-  and converts such documents, also those issued before round 40, at the rate of their day; `php cli/setup.php doctor`
+  and converts such documents, also those issued before round 40, at the rate of their day, even on a day it refuses
+  the daily feed (it then exits 1 after converting); `php cli/setup.php doctor`
   warns again about stale rates and names documents still waiting for that conversion. Run `php cli/eur-rates.php`
   once after the update.
 - **Refunds, VAT evidence, ECB rates and root backups (review round 41, low).** An invoice issued after refunds were

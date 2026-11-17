@@ -85,6 +85,33 @@ try {
     $pdo->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)')->execute(['CZK', 0.08, $r41rDay(0)]);
     EurRates::reset();
     assert_equals(0, OssThreshold::convertPending($pdo)['converted'], 'R41 rate: converted documents are not converted again');
+
+    // Capability review (run 537): cli/eur-rates.php (EurRates::daily()) exited when today's feed was refused, before
+    // converting anything; the doctor kept recommending it. A refused daily feed now still converts from the history.
+    $pdo->exec('DELETE FROM eur_exchange_rates');
+    $r41rStore = $pdo->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)');
+    $r41rStore->execute(['CZK', 0.04, $r41rDay(1)]);
+    $r41rStore->execute(['ISK', 0.0066, $r41rDay(1)]);
+    EurRates::reset();
+    $r41rRefusedDay = $r41rIssue('R41R-REFUSED', $r41rDay(10) . ' 09:00:00');
+    assert_equals([100000, null], $r41rStored($r41rRefusedDay), 'R41 rate (run 537): an invoice of 10 days ago without the ECB rate of its day waits');
+    $r41rDoctor = Setup::ossThresholdCheck($pdo, 'default', (array)(Bootstrap::stores()['stores']['default'] ?? []), (array)(Bootstrap::stores()['stores'] ?? []));
+    assert_true(str_contains($r41rDoctor['message'], 'ECB rate of their day is not stored') && str_contains($r41rDoctor['action'], '--force'),
+        'R41 rate (run 537): the doctor names the waiting invoice and the refused-feed way out (got ' . json_encode($r41rDoctor) . ')');
+    EurRates::setFixtureTransport(static function (string $url) use ($r41rFeed, $r41rDay): string {
+        if ($url === EurRates::FEED) return $r41rFeed([$r41rDay(0) => ['CZK' => '25.000']]);
+        if ($url === EurRates::HISTORY_90D) return $r41rFeed([$r41rDay(10) => ['CZK' => '20.000']]);
+        throw new RuntimeException('R41R: unexpected feed ' . $url);
+    });
+    $r41rRun = EurRates::daily($pdo);
+    assert_true($r41rRun['exit'] === 1 && str_contains(implode("\n", $r41rRun['err']), 'ECB rates not updated: The ECB rates feed lacks ISK'),
+        'R41 rate (run 537): today\'s feed without ISK is refused and the run exits 1 (got ' . json_encode($r41rRun) . ')');
+    EurRates::reset();
+    assert_equals([[100000, 5000], $r41rDay(1)], [$r41rStored($r41rRefusedDay), (string)$pdo->query("SELECT as_of FROM eur_exchange_rates WHERE currency = 'CZK'")->fetchColumn()],
+        'R41 rate (run 537): the waiting invoice is converted at the ECB history rate of its day (20 CZK/EUR) although today\'s feed was refused and not stored');
+    $r41rDoctor = Setup::ossThresholdCheck($pdo, 'default', (array)(Bootstrap::stores()['stores']['default'] ?? []), (array)(Bootstrap::stores()['stores'] ?? []));
+    assert_true(!str_contains($r41rDoctor['message'], 'ECB rate of their day is not stored'),
+        'R41 rate (run 537): the doctor no longer reports waiting documents after the run (got ' . $r41rDoctor['message'] . ')');
 } catch (Throwable $r41rE) {
     assert_true(false, 'R41 OSS rate (' . get_class($r41rE) . ': ' . $r41rE->getMessage() . ' @ ' . basename($r41rE->getFile()) . ':' . $r41rE->getLine() . ')');
 } finally {
