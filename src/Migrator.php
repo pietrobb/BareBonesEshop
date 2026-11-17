@@ -461,7 +461,10 @@ PHP;
     }
 
     private function lock(): void {
-        $this->lockHandle = fopen($this->lockFile, 'c');
+        // R42 (review round 16, findings 1, 7): root no longer creates the lock (it runs as the private directory's owner),
+        // but one root left (0644 root:root) stopped every migration of the web user at "Cannot open lock file". A lock is
+        // only flocked, never written: a read-only descriptor holds it as well.
+        $this->lockHandle = @fopen($this->lockFile, 'c') ?: (is_file($this->lockFile) ? @fopen($this->lockFile, 'r') : false);
         if (!$this->lockHandle) {
             throw new \RuntimeException("Cannot open lock file: {$this->lockFile}");
         }

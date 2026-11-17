@@ -11,7 +11,7 @@ $r27oRoot = dirname(TEST_CLI_DIR);
 $r27oBackup = (string)file_get_contents($r27oRoot . '/src/BackupService.php');
 $r27oUpdater = (string)file_get_contents($r27oRoot . '/src/Updater.php');
 assert_true(!str_contains($r27oBackup, "posix_geteuid() !== 0) return;") && substr_count($r27oBackup, 'FileOwnership::cannotKeep(') >= 3
-    && str_contains($r27oUpdater, 'FileOwnership::cannotKeep(') && str_contains($r27oUpdater, 'installAbsoluteFile($sqliteSource, $livePath, true)'),
+    && str_contains($r27oUpdater, 'FileOwnership::cannotKeep(') && str_contains($r27oUpdater, 'installAbsoluteFile($source, $livePath, true)'),
     'R27 restore owner: restore, files restore and the SQLite rollback check the owner before writing; the owner is not set only as root');
 
 if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid')) {

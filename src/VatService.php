@@ -841,8 +841,11 @@ class VatService implements TaxProvider
     private static function holderTokens(string $name): array
     {
         $name = mb_strtolower($name, 'UTF-8');
+        // R42 (low 6): a title before the name is followed by a space or a hyphen ("Dipl.-Ing."): "Dr.Max s.r.o." is the
+        // company Dr.Max (was: "Max", the leading word of "Max Mustermann"). Two-word titles go whole ("Ing. arch.",
+        // "Mgr. art."; "arch" and "art" stayed as words of the name and the holder did not match).
         $name = (string)preg_replace(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u',
-            '/(?<![\p{L}\p{N}])(?:' . implode('|', self::TITLES_BEFORE) . ')\./u'], ' ', $name);
+            '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|' . implode('|', self::TITLES_BEFORE) . ')\.(?=[\s\-]|$)/u'], ' ', $name);
         $name = (string)preg_replace('/,\s*(?:' . implode('|', self::TITLES_AFTER) . ')(?![\p{L}\p{N}])\.?/u', ' ', $name);
         $ascii = function_exists('transliterator_transliterate') ? transliterator_transliterate('Any-Latin; Latin-ASCII', $name) : false;
         if (!is_string($ascii)) $ascii = (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name);

@@ -60,14 +60,16 @@ $emit = static function (string $s) use ($quiet) { if (!$quiet) echo $s . "\n"; 
 try {
     // No local reference: restore() must be able to close every connection of this process
     // before the maintenance gate proves no other process holds the SQLite file.
-    BackupService::init(Db::get());
+    // R42 (review round 16): started as root in a tree root owns, the backups, the database and the restored files are the
+    // private directory owner's work (PrivateOwner::run()); the maintenance window in the application root stays root's.
+    PrivateOwner::run(static fn() => BackupService::init(Db::get()));
 } catch (\Throwable $e) {
     fwrite(STDERR, 'Init failed: ' . $e->getMessage() . "\n");
     exit(3);
 }
 
 if (isset($flags['list'])) {
-    $rows = BackupService::list();
+    $rows = PrivateOwner::run(static fn(): array => BackupService::list());
     if (!$rows) { $emit('No backups found.'); exit(0); }
     foreach ($rows as $r) {
         $label = (string)($r['meta']['label'] ?? '?');
@@ -82,7 +84,7 @@ if (isset($flags['list'])) {
 $remotePath = null;
 if (isset($flags['latest'])) {
     // The newest restore point: never a .gz companion and never a pre-restore snapshot (a copy of an earlier live).
-    $latest = BackupService::latestRestorePoint();
+    $latest = PrivateOwner::run(static fn(): ?array => BackupService::latestRestorePoint());
     if ($latest === null) { fwrite(STDERR, "No backups available (pre-restore snapshots are restored only by explicit path).\n"); exit(2); }
     $remotePath = (string)$latest['path'];
 } else {
@@ -94,7 +96,7 @@ if (!$remotePath) {
     exit(1);
 }
 try {
-    $remotePath = BackupService::storagePath($remotePath);
+    $remotePath = PrivateOwner::run(static fn(): string => BackupService::storagePath($remotePath));
 } catch (\Throwable $e) {
     fwrite(STDERR, 'REFUSED: ' . $e->getMessage() . "\n");
     exit(1);
@@ -113,7 +115,7 @@ if (!$filesOnly && $isMysqlDump && $skipSnapshot) {
 
 $emit("Restoring from: {$remotePath}" . ($filesOnly ? ' (files archive only)' : ($withFiles ? ' (database + files archive)' : '')));
 if (!$filesOnly) {
-    $emit('Live DB: ' . ($isMysqlDump ? '(MySQL/MariaDB db_name, verified in the scratch database first)' : (BackupService::livePath() ?: '(unknown)')));
+    $emit('Live DB: ' . ($isMysqlDump ? '(MySQL/MariaDB db_name, verified in the scratch database first)' : (PrivateOwner::run(static fn() => BackupService::livePath()) ?: '(unknown)')));
 }
 if ($skipSnapshot && !$filesOnly) {
     $emit('WARNING: --skip-snapshot — pre-restore-snapshot will NOT be taken.');
@@ -212,10 +214,10 @@ $leftHalfDone = static fn(Throwable $e): bool => $e->getCode() === MysqlUpdateDa
 
 if (!$filesOnly) {
     try {
-        $res = BackupService::restore($remotePath, [
+        $res = PrivateOwner::run(static fn(): array => BackupService::restore($remotePath, [
             'skip_snapshot'   => $skipSnapshot,
             'writers_stopped' => $writersStopped,
-        ]);
+        ]));
     } catch (\Throwable $e) {
         fwrite(STDERR, 'RESTORE FAILED: ' . $e->getMessage() . "\n");
         $endWindow(null, $leftHalfDone($e) ? "cli/restore.php {$remotePath} failed half-way ({$e->getMessage()}); fix the cause and run {$restoreCommand} again" : null);
@@ -234,7 +236,7 @@ if (!$filesOnly) {
 
 if ($withFiles) {
     try {
-        $files = BackupService::restoreFiles($remotePath, ['force' => $force]);
+        $files = PrivateOwner::run(static fn(): array => BackupService::restoreFiles($remotePath, ['force' => $force]));
     } catch (\Throwable $e) {
         fwrite(STDERR, 'FILES RESTORE FAILED: ' . $e->getMessage() . "\n");
         // The database of a database + files run is replaced already: what it completes is lifted, the files are not.

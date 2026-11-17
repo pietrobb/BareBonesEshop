@@ -51,6 +51,11 @@ class Db {
             // connection does not switch the database to WAL: that write reached another account's database before the
             // backup refused it. The web user's own connection switches it.
             $asRoot = function_exists('posix_geteuid') && posix_geteuid() === 0;
+            // R42 (review round 16, finding 2): the check below and the open are two steps the owner of the directory can
+            // get between. cli/update.php, which keeps root for the tree, opens the database as that owner (PrivateOwner).
+            if (class_exists('PrivateOwner', false) && PrivateOwner::rootOutside()) {
+                throw new RuntimeException('SQLite database refused as root: open it as the owner of the private directory (PrivateOwner::run)');
+            }
             if ($asRoot && ($refused = BackupService::rootOpenRefusal($sqlitePath)) !== null) {
                 throw new RuntimeException("SQLite database refused as root: {$refused}");
             }

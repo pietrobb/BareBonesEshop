@@ -424,9 +424,13 @@ final class OssThreshold
     private static function pendingDocuments(PDO $db): array
     {
         if (!self::hasColumn('invoices', 'oss_net_eur', $db)) return [];
-        $stmt = $db->prepare("SELECT * FROM invoices WHERE status = 'issued' AND oss_net IS NOT NULL AND oss_net <> 0 AND oss_net_eur IS NULL
-            AND LOWER(currency) <> 'eur' AND issued_at >= ? ORDER BY id");
-        $stmt->execute([sprintf('%04d-01-01 00:00:00', (int)ShopTime::date('Y') - 1)]);
+        // R42 (low 4): by the year the document counts in (documentDateSql()): a credit note of an invoice of an older year
+        // never converts (its invoice is not converted; issueEur()) and kept the doctor warning and the history download.
+        $stmt = $db->prepare("SELECT i.* FROM invoices i LEFT JOIN invoices s ON s.id = i.refers_to_invoice_id
+            WHERE i.status = 'issued' AND i.oss_net IS NOT NULL AND i.oss_net <> 0 AND i.oss_net_eur IS NULL
+            AND LOWER(i.currency) <> 'eur' AND i.issued_at >= ? AND " . self::documentDateSql('i', 's') . ' >= ? ORDER BY i.id');
+        $since = sprintf('%04d-01-01 00:00:00', (int)ShopTime::date('Y') - 1);
+        $stmt->execute([$since, substr($since, 0, 10)]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

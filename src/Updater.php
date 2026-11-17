@@ -696,7 +696,7 @@ final class Updater
             $add('fail', 'database', 'No database connection is available for readiness verification');
         } else {
             try {
-                $this->database->query('SELECT 1')->fetchColumn();
+                PrivateOwner::run(fn() => $this->database->query('SELECT 1')->fetchColumn());
                 $driver = (string)$this->database->getAttribute(PDO::ATTR_DRIVER_NAME);
                 $add(in_array($driver, ['sqlite', 'mysql'], true) ? 'ok' : 'fail', 'database',
                     "Database connection is healthy ({$driver})");
@@ -946,15 +946,35 @@ final class Updater
         if ($this->database === null || $this->database->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
             throw new RuntimeException('A SQLite database connection is required for migration snapshot');
         }
-        $row = $this->database->query('PRAGMA database_list')->fetch(PDO::FETCH_ASSOC);
-        $livePath = is_array($row) ? (string)($row['file'] ?? '') : '';
-        if ($livePath === '' || $livePath === ':memory:' || !is_file($livePath)) {
-            throw new RuntimeException('Cannot resolve the live SQLite database path');
-        }
         $backupPath = $snapshotDirectory . DIRECTORY_SEPARATOR . 'database.sqlite';
-        $quoted = str_replace("'", "''", $backupPath);
-        $this->database->exec('PRAGMA wal_checkpoint(TRUNCATE)');
-        $this->database->exec("VACUUM INTO '{$quoted}'");
+        // R42 (review round 16, finding 2): root updating a tree whose private directory the web user owns vacuums the
+        // database as that owner into a file next to it, opened as the owner too, and copies what it reads into its own
+        // snapshot directory (the owner cannot enter it). Root never opens a path in the private directory.
+        $copy = PrivateOwner::rootOutside() ? '' : null;
+        $livePath = '';
+        $handle = PrivateOwner::run(function () use ($backupPath, &$copy, &$livePath) {
+            $row = $this->database->query('PRAGMA database_list')->fetch(PDO::FETCH_ASSOC);
+            $livePath = is_array($row) ? (string)($row['file'] ?? '') : '';
+            if ($livePath === '' || $livePath === ':memory:' || !is_file($livePath)) {
+                throw new RuntimeException('Cannot resolve the live SQLite database path');
+            }
+            if ($copy !== null) $copy = dirname($livePath) . '/.' . basename($livePath) . '.update-snapshot-' . bin2hex(random_bytes(6)) . '.tmp';
+            $quoted = str_replace("'", "''", $copy ?? $backupPath);
+            $this->database->exec('PRAGMA wal_checkpoint(TRUNCATE)');
+            $this->database->exec("VACUUM INTO '{$quoted}'");
+            if ($copy === null) return null;
+            $in = @fopen($copy, 'rb');
+            @unlink($copy);
+            if ($in === false) throw new RuntimeException('SQLite update snapshot was not created');
+            return $in;
+        });
+        if (is_resource($handle)) {
+            $out = @fopen($backupPath, 'xb');
+            $copied = $out !== false && stream_copy_to_stream($handle, $out) !== false && fflush($out);
+            fclose($handle);
+            if ($out !== false) fclose($out);
+            if (!$copied) throw new RuntimeException('SQLite update snapshot was not created');
+        }
         if (!is_file($backupPath)) {
             throw new RuntimeException('SQLite update snapshot was not created');
         }
@@ -1138,8 +1158,11 @@ final class Updater
         }
         // R27 (capability review run 397): run as the owner of the application root, the rollback cannot give the database
         // back to the web user that owns it; refused before the first change instead of leaving it a database it cannot open.
-        $live = $sqliteSource !== null ? @stat((string)$database['live_path']) : false;
-        $keep = is_array($live) ? FileOwnership::cannotKeep((string)$database['live_path'], (int)$live['uid'], (int)$live['gid']) : null;
+        // R42: as the private directory's owner when root updates a tree whose private directory the web user owns.
+        $keep = PrivateOwner::run(static function () use ($sqliteSource, $database): ?string {
+            $live = $sqliteSource !== null ? @stat((string)$database['live_path']) : false;
+            return is_array($live) ? FileOwnership::cannotKeep((string)$database['live_path'], (int)$live['uid'], (int)$live['gid']) : null;
+        });
         if ($keep !== null) {
             throw new RuntimeException("Rollback refused, nothing was changed: {$keep}");
         }
@@ -1184,14 +1207,23 @@ final class Updater
             if ($sqliteSource !== null) {
                 $touched = true;
                 $livePath = (string)$database['live_path'];
-                @unlink($livePath . '-wal');
-                @unlink($livePath . '-shm');
-                $this->installAbsoluteFile($sqliteSource, $livePath, true);
-                @unlink($livePath . '-wal');
-                @unlink($livePath . '-shm');
-                if ($numbering !== []) {
-                    $numberingRaised = self::tryRaiseNumbering(static fn(): PDO => new PDO('sqlite:' . $livePath, null, null,
-                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), $numbering);
+                // R42: root opens its snapshot; the owner of the private directory writes it in place of the live file.
+                $source = PrivateOwner::rootOutside() ? @fopen($sqliteSource, 'rb') : $sqliteSource;
+                if ($source === false) throw new RuntimeException('Cannot open the SQLite rollback snapshot');
+                try {
+                    PrivateOwner::run(function () use ($source, $livePath, $numbering, &$numberingRaised): void {
+                        @unlink($livePath . '-wal');
+                        @unlink($livePath . '-shm');
+                        $this->installAbsoluteFile($source, $livePath, true);
+                        @unlink($livePath . '-wal');
+                        @unlink($livePath . '-shm');
+                        if ($numbering !== []) {
+                            $numberingRaised = self::tryRaiseNumbering(static fn(): PDO => new PDO('sqlite:' . $livePath, null, null,
+                                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), $numbering);
+                        }
+                    });
+                } finally {
+                    if (is_resource($source)) fclose($source);
                 }
             }
 
@@ -1215,12 +1247,17 @@ final class Updater
         } else {
             // Code and database roll back together, only once no other process holds the live file.
             $livePath = (string)$database['live_path'];
-            $this->database = null;
-            if (class_exists('Db', false)) {
-                Db::releaseSqliteFile($livePath);
-            }
-            gc_collect_cycles();
-            SqliteMaintenance::exclusive($livePath, 'update rollback', $restore);
+            // R42: closing a connection deletes its -wal and -shm by name: as the private directory's owner.
+            PrivateOwner::run(function () use ($livePath): void {
+                $this->database = null;
+                if (class_exists('Db', false)) {
+                    Db::releaseSqliteFile($livePath);
+                }
+                gc_collect_cycles();
+            });
+            // R42: the maintenance marker and the wait for other connections in the private directory as its owner; the
+            // tree and the update directory as root.
+            PrivateOwner::run(static fn() => SqliteMaintenance::exclusive($livePath, 'update rollback', static fn() => PrivateOwner::asRoot($restore)));
         }
         if ($isMysql && $numbering !== [] && class_exists('Db', false)) {
             $numberingRaised = self::tryRaiseNumbering(static fn(): PDO => Db::get(), $numbering); // reconnects after Db::reset()
@@ -1267,7 +1304,8 @@ final class Updater
      * for a symlink to /etc/shadow between two calls; run as root, chmod/chown by path followed it. The staged file is
      * now created exclusively with its mode, and handed over with lchown/lchgrp on the inode this call created.
      */
-    private function installAbsoluteFile(string $source, string $target, bool $keepOwner = false): void
+    /** @param string|resource $source */
+    private function installAbsoluteFile(mixed $source, string $target, bool $keepOwner = false): void
     {
         $existing = is_file($target) && !is_link($target) ? @stat($target) : false;
         // Only root can hand the file to another owner (cli/update.php run as root); otherwise the mode carries the access.
@@ -1307,18 +1345,20 @@ final class Updater
      * the still open staged file.
      * @return array{0: string, 1: int}
      */
-    private function stageExclusive(string $source, string $target, ?int $mode, ?Closure $whileOpen = null): array
+    private function stageExclusive(mixed $source, string $target, ?int $mode, ?Closure $whileOpen = null): array
     {
-        if (!is_file($source) || is_link($source)) {
-            throw new RuntimeException("Update source is not a regular file: {$source}");
+        // R42: an open stream too (the SQLite snapshot root opened, copied in by the private directory's owner).
+        $stream = is_resource($source);
+        if (!$stream && (!is_string($source) || !is_file($source) || is_link($source))) {
+            throw new RuntimeException('Update source is not a regular file: ' . (is_string($source) ? $source : 'stream'));
         }
         $this->ensureDirectory(dirname($target), 0755);
-        $mode = ($mode ?? ((fileperms($source) & 0111) !== 0 ? 0755 : 0644)) & 0777;
+        $mode = ($mode ?? ($stream ? 0640 : ((fileperms($source) & 0111) !== 0 ? 0755 : 0644))) & 0777;
         $temporary = dirname($target) . DIRECTORY_SEPARATOR . '.' . basename($target)
             . '.update-' . bin2hex(random_bytes(6)) . '.tmp';
         $previous = umask(~$mode & 0777);
         try {
-            $in = @fopen($source, 'rb');
+            $in = $stream ? $source : @fopen($source, 'rb');
             $out = $in ? @fopen($temporary, 'xb') : false;
             $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
             $stat = $copied ? fstat($out) : false;
@@ -1327,7 +1367,7 @@ final class Updater
             @unlink($temporary);
             throw $e;
         } finally {
-            if (!empty($in)) fclose($in);
+            if (!$stream && !empty($in)) fclose($in);
             if (!empty($out)) fclose($out);
             umask($previous);
         }
@@ -1512,8 +1552,27 @@ final class Updater
         $this->writeJsonAtomic($path, $metadata);
     }
 
-    /** Highest id per tracked table (0 when empty); a table that cannot be read is left out. */
+    /**
+     * R42 (review round 16, finding 2): the database root updates reads and writes only as the owner of the private
+     * directory (PrivateOwner; a no-op unless root updates a tree whose private directory the web user owns).
+     */
     private function highWaterMarks(): array
+    {
+        return PrivateOwner::run(fn(): array => $this->readHighWaterMarks());
+    }
+
+    private function discardedWrites(array $snapshot): ?array
+    {
+        return PrivateOwner::run(fn(): ?array => $this->countDiscardedWrites($snapshot));
+    }
+
+    private function numberingHighWater(): array|string
+    {
+        return PrivateOwner::run(fn(): array|string => $this->readNumberingHighWater());
+    }
+
+    /** Highest id per tracked table (0 when empty); a table that cannot be read is left out. */
+    private function readHighWaterMarks(): array
     {
         $marks = [];
         if ($this->database === null) {
@@ -1536,7 +1595,7 @@ final class Updater
      * Returns null for a snapshot without a database, or when this instance has no connection
      * (cli/update.php rollback, where --accept-data-loss already acknowledged the loss).
      */
-    private function discardedWrites(array $snapshot): ?array
+    private function countDiscardedWrites(array $snapshot): ?array
     {
         if (!is_array($snapshot['database'] ?? null) || $this->database === null) {
             return null;
@@ -1575,7 +1634,7 @@ final class Updater
      * Never throws (it runs right before an automatic rollback): an unreadable counter is returned as the error text.
      * @return array<string, list<array<string, int|string>>>|string table => rows (key columns + last_number), or the error
      */
-    private function numberingHighWater(): array|string
+    private function readNumberingHighWater(): array|string
     {
         $marks = [];
         if ($this->database === null) {

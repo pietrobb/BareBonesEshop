@@ -378,9 +378,10 @@ class PaymentService {
             $item = Db::get()->prepare('SELECT status FROM order_refunds WHERE order_id = ? AND store_id = ? AND idempotency_key = ?');
             $item->execute([$orderId, StoreContext::current()->id(), $idempotencyKey]);
             $status = $item->fetchColumn(); $item->closeCursor();
-            if ($status === false) return true;
-            if ($status !== 'pending') return false;
-            self::logTransaction($orderId, self::providerName($gateway), '', 'refund_attempted', 0, (string)$order['currency'], 'refund_dispatch_' . $idempotencyKey, ['item_dispatch_started' => true], true);
+            if ($status !== false && $status !== 'pending') return false;
+            // R42 (low 8): a refund request's job marks its dispatch too (requestedRefundAtProvider()).
+            self::logTransaction($orderId, self::providerName($gateway), '', 'refund_attempted', 0, (string)$order['currency'], 'refund_dispatch_' . $idempotencyKey,
+                [$status === false ? 'dispatch_started' : 'item_dispatch_started' => true], true);
             return true;
         })) return ['status' => 'skipped'];
         if ($idempotencyKey !== null && $idempotencyKey !== '' && $gateway instanceof IdempotentRefundAdapter) {
@@ -538,6 +539,21 @@ class PaymentService {
     /** A refund requested (requestRefund()) whose money is not booked yet: a credit note must not promise it again. */
     public static function requestedRefundInFlight(array $order): int {
         return (int)(self::latestRefundRequestRow($order, true)['amount'] ?? 0);
+    }
+
+    /**
+     * R42 (low 8): requestedRefundInFlight() the provider may have executed already: its payment_refund job started
+     * (dispatch marker, attempt or answer on the ledger), or the merchant refunds by hand at the provider. A request whose
+     * job still waits in the queue explained a provider refund event it cannot be (a dashboard refund of the same money).
+     */
+    public static function requestedRefundAtProvider(array $order): int {
+        $request = self::latestRefundRequestRow($order, true);
+        if ($request === null) return 0;
+        if (self::refundsByHand($order)) return (int)$request['amount'];
+        $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);
+        $stmt = Db::get()->prepare('SELECT 1 FROM payment_transactions WHERE order_id = ? AND store_id = ? AND idempotency_key IN (?, ?, ?) LIMIT 1');
+        $stmt->execute([(int)$order['id'], StoreContext::current()->id(), $executeKey, 'refund_attempt_' . $executeKey, 'refund_dispatch_' . $executeKey]);
+        return $stmt->fetchColumn() ? (int)$request['amount'] : 0;
     }
 
     public static function requestRefund(int $orderId, int $amount, string $idempotencyKey, array $payload = []): bool {

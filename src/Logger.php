@@ -53,15 +53,16 @@ class Logger
             error_log(rtrim($line));
             return false;
         }
-        $dir = dirname($path);
-        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
-            error_log(rtrim($line));
-            return false;
-        }
-        self::rotate($path, (int)($cfg['structured_log_max_bytes'] ?? 10485760), (int)($cfg['structured_log_max_files'] ?? 5));
-        // R29: without file locks (NFS without lockd, CIFS nobrl) LOCK_EX refuses every write; append the line without it.
-        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) !== strlen($line)
-            && @file_put_contents($path, $line, FILE_APPEND) !== strlen($line)) {
+        // R42: in the private directory as its owner when root updates the tree (cli/update.php, PrivateOwner).
+        $append = static function () use ($path, $line, $cfg): bool {
+            $dir = dirname($path);
+            if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) return false;
+            self::rotate($path, (int)($cfg['structured_log_max_bytes'] ?? 10485760), (int)($cfg['structured_log_max_files'] ?? 5));
+            // R29: without file locks (NFS without lockd, CIFS nobrl) LOCK_EX refuses every write; append the line without it.
+            return @file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === strlen($line)
+                || @file_put_contents($path, $line, FILE_APPEND) === strlen($line);
+        };
+        if (!(class_exists('PrivateOwner', false) ? PrivateOwner::run($append) : $append())) {
             error_log(rtrim($line));
             return false;
         }

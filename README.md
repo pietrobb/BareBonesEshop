@@ -666,6 +666,11 @@ directory (`update_storage_dir`) is root's alone as well, outside the private ru
 directory, which stays the web server user's (step 1). Then root runs the owner's steps
 there, `update.php apply` included (its theme check runs the new release's checkout
 probe as root on root's copy), and `bbe-step` checks all that before any PHP runs.
+Root never works in the private directory as root: a step started as root switches to
+the owner of the private directories first (one account, the web server user), and
+`update.php`, `migrate.php` and `restore.php`, which write the tree, keep root for it
+and open the database, write backups, locks and restored files there with that owner's
+user and groups (`src/PrivateOwner.php`); private directories of two accounts are refused.
 Otherwise every step started as root is refused and names the path. A release
 extracted as root keeps the archive's modes (0664/0775): extract it with
 `tar --no-same-permissions -xf …` or run `chmod -R go-w /var/www/shop` afterwards.
