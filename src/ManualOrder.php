@@ -73,6 +73,7 @@ final class ManualOrder {
         $customerId = self::customerIdFor($email);
         $locale = self::locale((string)($buyer['locale'] ?? ''));
         unset($buyer['placed_ip_country']); // an edit's evidence of the order placed (editItems()), never posted
+        unset($buyer['residence_decided']); // R41: likewise
         // R31: billed to another address than delivered to (billing_different + billing_*); the company goes with it.
         foreach (OrderAddress::BILLING_FIELDS as $field => $max) {
             if (isset($buyer[$field]) && (!is_string($buyer[$field]) || mb_strlen(trim($buyer[$field])) > $max)) return self::refusal('admin.order.manual.invalid');
@@ -159,6 +160,8 @@ final class ManualOrder {
             // R40 (low): so does the IP country it was placed with (the admin's request has none): an e-book-only order
             // taxed where its IP was could not be edited ("VAT changed").
             'placed_ip_country' => (string)($stored['digital_residence']['ip'] ?? ''),
+            // R41 (low 7): and a declaration that decided it still does, two matching items aside (R40's rule came later).
+            'residence_decided' => isset($stored['digital_residence']['declared']),
         ];
         $customerId = !empty($order['customer_id']) ? (int)$order['customer_id'] : null;
         // The VAT ID was checked when the order was placed. The edit keeps that verification instead of asking VIES again
@@ -313,7 +316,8 @@ final class ManualOrder {
             // states it (residence_country, CheckoutService::digitalResidence()); the billing country is no default.
             $declared = strtoupper(trim(Security::str($buyer['residence_country'] ?? '')));
             $placedIp = strtoupper(trim(Security::str($buyer['placed_ip_country'] ?? '')));
-            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry, (string)($company['fields']['company'] ?? ''), $declared, $placedIp);
+            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus, $billingCountry, (string)($company['fields']['company'] ?? ''), $declared, $placedIp,
+                ($buyer['residence_decided'] ?? false) === true);
             if ($vat['residence_required']) return ['error' => 'checkout.error.residence_required', 'detail' => implode(' / ', $vat['residence_choices'])];
             $company['fields'] = CheckoutService::withoutInvalidVatId($company['fields'], $vat['vat_id_status']);
             $cart = Cart::enriched($vat['context']);

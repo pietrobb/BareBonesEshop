@@ -63,7 +63,7 @@ class CheckoutService {
      * an e-service is taxed where the consumer lives or the business is established, not where a parcel goes.
      * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string, oss_threshold: mixed, residence_choices: array, residence_required: bool}
      */
-    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = '', string $ipCountry = ''): array {
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = '', string $ipCountry = '', bool $declarationDecided = false): array {
         $store = StoreContext::current()->config();
         $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
         $vatIdValid = false;
@@ -102,7 +102,7 @@ class CheckoutService {
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         // A business with a valid VAT ID gets downloads where it is established (below), so no residence is asked.
         $residenceCheck = self::hasDownload($vatGoods) && !$vatIdValid
-            ? self::digitalResidence($digitalOnly, $billingCountry, $country, ($rate['carrier'] ?? '') === 'pickup', $declaredResidence, $ipCountry)
+            ? self::digitalResidence($digitalOnly, $billingCountry, $country, ($rate['carrier'] ?? '') === 'pickup', $declaredResidence, $ipCountry, $declarationDecided)
             : ['country' => strtoupper(trim(vatSupplyCountry($rate, $country, $sellerCountry))), 'choices' => [], 'required' => false, 'evidence' => []];
         $residence = $residenceCheck['country'];
         $consumerResidence = $residence;
@@ -171,9 +171,11 @@ class CheckoutService {
      * ('required') and the previews price with the billing country. Without a contradiction a declaration is not
      * needed (nor taken). A digital-only order had nothing but the billing country the buyer typed: the country of the
      * buyer's IP address ($ipCountry, art. 24f(b); ipCountry()) is a second item when the store's proxy supplies it.
+     * R41 (low 7): $declarationDecided — an edit of an order the declaration decided (placed before R40's rule, which lets two
+     * matching items outrank it): it still decides, else the edit was refused ("VAT changed").
      * @return array{country: string, choices: list<string>, required: bool, evidence: array<string, string>}
      */
-    public static function digitalResidence(bool $digitalOnly, string $billingCountry, string $deliveryCountry, bool $collectedInStore, string $declared, string $ipCountry = ''): array {
+    public static function digitalResidence(bool $digitalOnly, string $billingCountry, string $deliveryCountry, bool $collectedInStore, string $declared, string $ipCountry = '', bool $declarationDecided = false): array {
         $delivery = strtoupper(trim($deliveryCountry));
         $billing = strtoupper(trim($billingCountry)) ?: $delivery;
         $declared = strtoupper(trim($declared));
@@ -183,6 +185,7 @@ class CheckoutService {
         if (array_key_exists($ipCountry, ShippingService::billingCountries())) $evidence['ip'] = $ipCountry;
         $choices = array_values(array_unique(array_filter($evidence)));
         if (count($choices) <= 1) return ['country' => $billing, 'choices' => [], 'required' => false, 'evidence' => $evidence];
+        if ($declarationDecided && in_array($declared, $choices, true)) return ['country' => $declared, 'choices' => $choices, 'required' => false, 'evidence' => $evidence + ['declared' => $declared]];
         // R40 (low): two items naming one country are the two non-contradictory items of art. 24b: they decide, and the
         // third is no reason to ask (billed and delivered in Slovakia, an Austrian IP declared Austria and paid its VAT).
         $counts = array_count_values(array_filter($evidence));
@@ -228,7 +231,10 @@ class CheckoutService {
             $reason .= ' ' . sprintf(I18n::t('checkout.vat_reason.digital'), $name($residence));
         }
         // R40 (low): a VAT ID VIES registers to another name was charged VAT without a word (vatIdHolderMismatch()).
-        if ($reason !== '' && str_starts_with((string)($vat['vat_id_status'] ?? ''), 'mismatch_')) $reason .= ' ' . I18n::t('checkout.vat_reason.vat_id_holder');
+        // R41 (low 8): only when VAT is charged; an export (no VAT whatever the VAT ID) told the buyer VAT was charged for it.
+        if ($reason !== '' && str_starts_with((string)($vat['vat_id_status'] ?? ''), 'mismatch_') && !in_array($scenario, [VatService::SCENARIO_REVERSE_CHARGE, VatService::SCENARIO_EXPORT], true)) {
+            $reason .= ' ' . I18n::t('checkout.vat_reason.vat_id_holder');
+        }
         return [
             'vat_reason' => $reason,
             'residence_label' => I18n::t('checkout.residence.label'), 'residence_hint' => I18n::t('checkout.residence.hint'),

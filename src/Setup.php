@@ -289,6 +289,9 @@ class Setup
             $add(is_dir($dir) && is_writable($dir) ? 'pass' : 'fail', 'runtime.' . $name, (is_dir($dir) && is_writable($dir) ? 'Writable: ' : 'Missing or not writable by the PHP user: ') . $name, "Create {$dir} and make it writable by the PHP user.");
         }
 
+        foreach (is_array($stores) ? (array)($stores['stores'] ?? []) : [] as $storeId => $store) {
+            if (is_array($store) && ($check = self::ipCountryHeaderCheck($config, (string)$storeId, $store)) !== null) $add(...array_values($check));
+        }
         try {
             $probe = $db ?? Db::get();
             $probe->query('SELECT 1')->fetchColumn();
@@ -332,6 +335,31 @@ class Setup
     }
 
     /** What in a store's legal block is still the shipped example or unusable ([] = looks like a real seller). */
+    /**
+     * R41 (low 8): the IP country header (vat_ip_country_header, an item of evidence where e-book buyers live) is read
+     * only from a request of trusted_proxies (CheckoutService::ipCountry()); without them, or with entries that are no
+     * address or CIDR range, it was dropped silently. Null when the store reads no such header.
+     * @return ?array{status: string, name: string, message: string, action: string}
+     */
+    public static function ipCountryHeaderCheck(array $config, string $storeId, array $store): ?array {
+        $header = trim((string)($store['vat_ip_country_header'] ?? ''));
+        if ($header === '') return null;
+        $name = 'stores.ip_country_header.' . $storeId;
+        $invalid = Security::invalidTrustedProxies($config);
+        $trusted = array_diff(array_map(static fn($e): string => trim((string)$e), (array)($config['trusted_proxies'] ?? [])), $invalid);
+        if ($trusted === []) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "Store {$storeId} reads the buyer's IP country from {$header}, but trusted_proxies " . ($invalid === [] ? 'is empty' : 'holds no IP address or CIDR range (' . implode(', ', $invalid) . ')') . ': the header is ignored, so e-book buyers have one item of evidence less.',
+                'action' => 'List the addresses or CIDR ranges of your proxy or CDN (e.g. Cloudflare\'s published ranges) in trusted_proxies of config.php.'];
+        }
+        if ($invalid !== []) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => 'trusted_proxies entries ' . implode(', ', $invalid) . " are neither an IP address nor a CIDR range and never match; requests through them carry no {$header} the shop reads.",
+                'action' => 'Correct them in trusted_proxies of config.php (e.g. 173.245.48.0/20).'];
+        }
+        return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} reads the buyer's IP country from {$header} of its trusted proxies.", 'action' => ''];
+    }
+
     public static function legalIdentityProblems(array $legal): array
     {
         $problems = [];
