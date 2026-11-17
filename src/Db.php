@@ -47,12 +47,19 @@ class Db {
             if (PHP_SAPI !== 'cli' && !is_file($sqlitePath)) {
                 throw new RuntimeException("SQLite database file does not exist: {$sqlitePath}");
             }
+            // R41 (low 10): as root (a step that keeps root) the path is checked before anything opens it, and the
+            // connection does not switch the database to WAL: that write reached another account's database before the
+            // backup refused it. The web user's own connection switches it.
+            $asRoot = function_exists('posix_geteuid') && posix_geteuid() === 0;
+            if ($asRoot && ($refused = BackupService::rootOpenRefusal($sqlitePath)) !== null) {
+                throw new RuntimeException("SQLite database refused as root: {$refused}");
+            }
             self::$pdo = new $pdoClass('sqlite:' . $sqlitePath, null, null, [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
             $journalMode = strtolower((string)self::$pdo->query('PRAGMA journal_mode')->fetchColumn());
-            if ($journalMode !== 'wal') self::$pdo->exec('PRAGMA journal_mode = WAL');
+            if ($journalMode !== 'wal' && !$asRoot) self::$pdo->exec('PRAGMA journal_mode = WAL');
             self::$pdo->exec('PRAGMA busy_timeout = 5000');
             self::$pdo->exec('PRAGMA synchronous = NORMAL');
             self::$pdo->exec('PRAGMA cache_size = -64000');
