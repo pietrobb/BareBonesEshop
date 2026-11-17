@@ -41,23 +41,67 @@ function cli_drop_root(string $root): void
         // primary group instead, and refuse when that is root's too.
         if ($gid === 0) $gid = is_array($user) ? (int)$user['gid'] : 0;
         if ($gid === 0) $refuse("the application root and its owner ({$name}) have group root, which the step would keep; chgrp the application root");
-        // initgroups first: root's supplementary groups (0 among them) must not stay with the step.
-        if (!@posix_initgroups($name, $gid) || !@posix_setgid($gid) || !@posix_setuid($uid)) {
-            $refuse("it cannot switch to the owner of the application root ({$name}, uid {$uid}, gid {$gid})");
-        }
-        $groups = posix_getgroups();
-        if (posix_getuid() !== $uid || posix_geteuid() !== $uid || @posix_seteuid(0) || posix_getgid() === 0 || posix_getegid() === 0
-            || in_array(0, is_array($groups) ? $groups : [0], true)) {
-            $refuse('root rights could not be given up for good');
-        }
-        if (is_array($user)) putenv('HOME=' . $user['dir']); // mysqldump & co. read the owner's ~/.my.cnf, not root's
-        fwrite(STDERR, "NOTICE: started as root; this step runs as {$name} (uid {$uid}, gid {$gid}), the owner of the application root.\n");
+        cli_switch_to($uid, $gid, $name, is_array($user) ? (string)$user['dir'] : null, 'the owner of the application root', $refuse);
         return;
     }
     $why = cli_not_root_only($root);
     // R29: say how to make a tree root owns root's alone: a release extracted by root keeps the archive's 0664/0775.
     if ($why !== null) $refuse($why . ', and root would run code another account can change. For a tree only root may change:'
         . " chmod -R go-w {$root} (extract a release as root with tar --no-same-permissions); otherwise chown it to the account the step runs as", false);
+    // R42 (review round 16, findings 1, 2, 7): root kept root in the private directory the web user owns too, and checked
+    // each path before it opened it there: the migrations lock followed the web user's link, a directory swapped after the
+    // check gave root another database. Root works there only as the directory's owner (src/PrivateOwner.php): a step
+    // switches to it for good, cli/update.php (which installs the tree) only while it works there.
+    $owner = cli_private_owner($root);
+    if (is_string($owner)) $refuse("{$owner} (in a tree root owns alone, root works in the private directory only as its owner)", false);
+    if ($owner === null) return;
+    // The steps that write the application root (the files of an update, the maintenance window of an update, a
+    // migration and a restore) keep root for it and work in the private directory as its owner (PrivateOwner::run()).
+    $script = realpath((string)($_SERVER['SCRIPT_FILENAME'] ?? ''));
+    $treeSteps = array_map(static fn(string $step): string|false => realpath(__DIR__ . '/' . $step), ['update.php', 'migrate.php', 'restore.php']);
+    if ($script !== false && in_array($script, $treeSteps, true)) {
+        PrivateOwner::record($owner);
+        fwrite(STDERR, "NOTICE: started as root; this step writes the application root as root and works in the private directory"
+            . " {$owner['dir']} as its owner {$owner['name']} (uid {$owner['uid']}, gid {$owner['gid']}).\n");
+        return;
+    }
+    $user = posix_getpwuid($owner['uid']);
+    cli_switch_to($owner['uid'], $owner['gid'], $owner['name'], is_array($user) ? (string)$user['dir'] : null,
+        "the owner of the private directory {$owner['dir']}", $refuse);
+}
+
+/** Gives up root for good: the step runs as $uid/$gid with $name's groups, never root's group 0. */
+function cli_switch_to(int $uid, int $gid, string $name, ?string $home, string $who, callable $refuse): void
+{
+    // initgroups first: root's supplementary groups (0 among them) must not stay with the step.
+    if (!@posix_initgroups($name, $gid) || !@posix_setgid($gid) || !@posix_setuid($uid)) {
+        $refuse("it cannot switch to {$who} ({$name}, uid {$uid}, gid {$gid})");
+    }
+    $groups = posix_getgroups();
+    if (posix_getuid() !== $uid || posix_geteuid() !== $uid || @posix_seteuid(0) || posix_getgid() === 0 || posix_getegid() === 0
+        || in_array(0, is_array($groups) ? $groups : [0], true)) {
+        $refuse('root rights could not be given up for good');
+    }
+    if ($home !== null) putenv('HOME=' . $home); // mysqldump & co. read the owner's ~/.my.cnf, not root's
+    fwrite(STDERR, "NOTICE: started as root; this step runs as {$name} (uid {$uid}, gid {$gid}), {$who}.\n");
+}
+
+/**
+ * Whose the private directories of the shop at $root are (PrivateOwner::find()): null when root's alone or no config.php
+ * yet. Called only for a tree root owns alone, so its config.php and src/ are root's to load.
+ * @return array{uid: int, gid: int, name: string, dir: string}|string|null
+ */
+function cli_private_owner(string $root): array|string|null
+{
+    foreach (['AppConfig', 'PrivateOwner'] as $class) {
+        // Not a shop's tree (a stripped copy): nothing private to protect, as before.
+        if (!class_exists($class, false) && !is_file($root . '/src/' . $class . '.php')) return null;
+        if (!class_exists($class, false)) require_once $root . '/src/' . $class . '.php';
+    }
+    $path = AppConfig::path($root);
+    if (!is_file($path)) return null;
+    $config = (static fn(string $file): mixed => require $file)($path);
+    return is_array($config) ? PrivateOwner::find(PrivateOwner::directories($config, $root)) : null;
 }
 
 /**

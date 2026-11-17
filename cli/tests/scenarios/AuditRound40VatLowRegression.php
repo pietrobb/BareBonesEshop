@@ -78,9 +78,13 @@ try {
     assert_true(Db::hasColumn('invoices', 'oss_net_eur', $pdo), 'R40 EUR at issue: the migration adds invoices.oss_net_eur');
     $r40vYear = (int)ShopTime::date('Y');
     $r40vRates = $pdo->query('SELECT currency, rate, as_of FROM eur_exchange_rates')->fetchAll(PDO::FETCH_NUM);
+    // R42 (low 8): the ECB history other scenarios (or an earlier run) left is set aside, so this one passes in any order;
+    // the rate is today's (R42: only the rate of the last publication day is fixed at issue).
+    $r40vHistory = Db::tableExists('eur_exchange_rate_history', $pdo) ? $pdo->query('SELECT currency, as_of, rate FROM eur_exchange_rate_history')->fetchAll(PDO::FETCH_NUM) : null;
+    if ($r40vHistory !== null) $pdo->exec('DELETE FROM eur_exchange_rate_history');
     $r40vSetCzk = static function (float $rate) use ($pdo): void {
         $pdo->exec('DELETE FROM eur_exchange_rates');
-        $pdo->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)')->execute(['CZK', $rate, gmdate('Y-m-d', ShopTime::now() - 86400)]);
+        $pdo->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)')->execute(['CZK', $rate, gmdate('Y-m-d', ShopTime::now())]);
         EurRates::reset();
     };
     $r40vSetCzk(0.04);
@@ -160,6 +164,11 @@ try {
     $pdo->exec("DELETE FROM shipping_methods WHERE code = 'r40v-pick'");
     unset($_SERVER['HTTP_CF_IPCOUNTRY']);
     if ($r40vRemote === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r40vRemote;
+    if (($r40vHistory ?? null) !== null) {
+        $pdo->exec('DELETE FROM eur_exchange_rate_history');
+        $r40vRestoreHistory = $pdo->prepare('INSERT INTO eur_exchange_rate_history (currency, as_of, rate) VALUES (?, ?, ?)');
+        foreach ($r40vHistory as $r40vHistRow) $r40vRestoreHistory->execute($r40vHistRow);
+    }
     $r40vCfg->setValue(null, $r40vCfgBefore);
     $r40vStoresProp->setValue(null, $r40vStores);
     Bootstrap::initStoreContext('/', '', 'default');

@@ -1278,7 +1278,8 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
         $deferred = new PaymentWebhookDeferred("Refunds of Stripe charge {$chargeId} cannot be listed");
         // R40 (low): what the ledger lacks is the shop's own refunds in flight (booked by id when they settle): a stalled
         // list then raised a critical "book the refund by hand" for money no one had to book.
-        $deferred->explained = PaymentService::refundedAmount($orderId) + PaymentService::requestedRefundInFlight($order)
+        // R42 (low 8): only a request whose job reached Stripe (requestedRefundAtProvider()); one still queued is not it.
+        $deferred->explained = PaymentService::refundedAmount($orderId) + PaymentService::requestedRefundAtProvider($order)
             + PaymentService::unbookedCreditAmount($orderId) >= $refundedAmount;
         throw $deferred;
     }

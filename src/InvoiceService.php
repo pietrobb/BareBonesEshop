@@ -227,14 +227,17 @@ final class InvoiceService
             throw $e;
         }
 
+        // R41 (low 4, capability review 533): refunds booked before the invoice existed get their credit notes now, however
+        // it is issued (invoice_issue job, the admin's button, cli/invoices-backfill.php). Only a newly issued invoice.
+        // R42 (low 3): queued right after the commit, before the PDF: a failed PDF write left the invoice committed and its
+        // credit notes never queued (a retry finds the invoice and returns before this line); the PDF is rebuilt on demand.
+        self::queueCreditsOfBookedRefunds($orderId);
+
         // Render PDF AFTER successful commit (filesystem is non-transactional).
         $invoice = self::byId($invoiceId);
         $vatBreakdown['services_only'] = self::servicesOnly($order);
         $pdfBin  = self::renderPdf($invoice, self::invoiceRows($invoice, $order, $items, $financialSnapshot), $sellerSnapshot, $customerSnapshot, $vatBreakdown);
         self::writePdf($absPath, $pdfBin);
-        // R41 (low 4, capability review 533): refunds booked before the invoice existed get their credit notes now, however
-        // it is issued (invoice_issue job, the admin's button, cli/invoices-backfill.php). Only a newly issued invoice.
-        self::queueCreditsOfBookedRefunds($orderId);
 
         return $invoice;
     }

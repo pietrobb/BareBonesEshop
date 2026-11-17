@@ -95,7 +95,8 @@ try {
     PaymentService::requestRefund($o1, 1000, 'order_refund_request_' . $o1);
     $gateway->during = $fr4Reported($o1, '3000000901');
     PaymentService::refund($o1, '3000000901', 1000, $gateway, 'order_refund_' . $o1, 'eur');
-    assert_equals([['refunded', 1000], ['refund_pending:1000', 'refund_attempted:1000', 'refunded:1000', 'refund_confirmed:1000']], [$fr4State($o1), $fr4Ledger($o1)],
+    // R42 (low 8): the request's job marks its dispatch first (refund_attempted:0, no money).
+    assert_equals([['refunded', 1000], ['refund_pending:1000', 'refund_attempted:0', 'refund_attempted:1000', 'refunded:1000', 'refund_confirmed:1000']], [$fr4State($o1), $fr4Ledger($o1)],
         'FR4 1: a GoPay REFUNDED notification booked during the refund call leaves the worker a refund_confirmed (was 2000 of 1000)');
     // An admin request executed by its payment_refund job, ThePay-like (refund id ''), notification during the call.
     $o1b = $fr4Order('delivered', 'paid', 'gopay', '3000000902');

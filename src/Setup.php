@@ -289,6 +289,13 @@ class Setup
             $add(is_dir($dir) && is_writable($dir) ? 'pass' : 'fail', 'runtime.' . $name, (is_dir($dir) && is_writable($dir) ? 'Writable: ' : 'Missing or not writable by the PHP user: ') . $name, "Create {$dir} and make it writable by the PHP user.");
         }
 
+        // R42 (low 5): 0.0.0.0/0 or ::/0 trusts every client's X-Forwarded-For/-Proto and IP country header; such a range
+        // is never matched (Security::isTrustedProxy()), and named here.
+        $wideProxies = Security::tooWideTrustedProxies($config);
+        if ($wideProxies !== []) {
+            $add('fail', 'config.trusted_proxies', 'trusted_proxies ranges ' . implode(', ', $wideProxies) . ' would trust any client to name its own IP address and country; they are ignored.',
+                'List only the addresses or published ranges of your proxy or CDN in trusted_proxies of config.php (IPv4 at most /8, IPv6 at most /7).');
+        }
         foreach (is_array($stores) ? (array)($stores['stores'] ?? []) : [] as $storeId => $store) {
             if (is_array($store) && ($check = self::ipCountryHeaderCheck($config, (string)$storeId, $store)) !== null) $add(...array_values($check));
         }
@@ -346,7 +353,13 @@ class Setup
         if ($header === '') return null;
         $name = 'stores.ip_country_header.' . $storeId;
         $invalid = Security::invalidTrustedProxies($config);
-        $trusted = array_diff(array_map(static fn($e): string => trim((string)$e), (array)($config['trusted_proxies'] ?? [])), $invalid);
+        $wide = Security::tooWideTrustedProxies($config);
+        $trusted = array_diff(array_map(static fn($e): string => trim((string)$e), (array)($config['trusted_proxies'] ?? [])), $invalid, $wide);
+        if ($trusted === [] && $wide !== []) {
+            return ['status' => 'fail', 'name' => $name,
+                'message' => "Store {$storeId} reads the buyer's IP country from {$header}, but trusted_proxies holds only ranges that would trust any client (" . implode(', ', $wide) . '); they are ignored, so is the header.',
+                'action' => 'List the addresses or CIDR ranges of your proxy or CDN (e.g. Cloudflare\'s published ranges) in trusted_proxies of config.php.'];
+        }
         if ($trusted === []) {
             return ['status' => 'warn', 'name' => $name,
                 'message' => "Store {$storeId} reads the buyer's IP country from {$header}, but trusted_proxies " . ($invalid === [] ? 'is empty' : 'holds no IP address or CIDR range (' . implode(', ', $invalid) . ')') . ': the header is ignored, so e-book buyers have one item of evidence less.',

@@ -106,6 +106,12 @@ try {
             VALUES (?, 'default', 'stripe', ?, ?, ?, 'eur', ?, ?)");
         $r40fLedger->execute([$r40fFlight, 're_r40f_booked', 'partially_refunded', 300, 'stripe_refund_re_r40f_booked', '{}']);
         $r40fLedger->execute([$r40fFlight, 'pi_r40f-flight', 'refund_pending', 500, 'r40f_request', json_encode(['event_type' => 'refund.requested'])]);
+        // R42 (low 8): its payment_refund job started (the dispatch marker PaymentService::refund() writes before calling Stripe).
+        $r40fLedger->execute([$r40fFlight, '', 'refund_attempted', 0, 'refund_dispatch_r40f_request_execute', json_encode(['dispatch_started' => true])]);
+        // R42 (low 8): the same, but its job still waits in the queue: it is not at Stripe yet.
+        $r40fQueued = $r40fOrder('R40F-QUEUED', 'delivered', 'refund_pending');
+        $r40fLedger->execute([$r40fQueued, 're_r40f_qbooked', 'partially_refunded', 300, 'stripe_refund_re_r40f_qbooked', '{}']);
+        $r40fLedger->execute([$r40fQueued, 'pi_r40f-queued', 'refund_pending', 500, 'r40f_qrequest', json_encode(['event_type' => 'refund.requested'])]);
 
         $r40fSocket = stream_socket_server('tcp://127.0.0.1:0');
         $r40fAddress = stream_socket_get_name($r40fSocket, false);
@@ -154,6 +160,9 @@ try {
             assert_equals([503, 0, ['delivered', 'refund_pending', 300]], [$r40fFlightResponse[0], $r40fIncidents('payment.webhook_deferred_dead'), $r40fState($r40fFlight)],
                 "{$r40fTag}: an event whose excess is the shop's own refund in flight is still deferred, with no critical incident after " . PaymentWebhookRouting::MAX_ATTEMPTS . ' deliveries (was: payment.webhook_deferred_dead)');
             assert_true($r40fIncidents('payment.webhook_deferred') >= 1, "{$r40fTag}: it is reported as a warning");
+            for ($r40fI = 0; $r40fI < PaymentWebhookRouting::MAX_ATTEMPTS; $r40fI++) $r40fQueuedResponse = $r40fStripe($r40fRefunded('evt_r40f_queued', 'pi_r40f-queued', null, 800));
+            assert_equals([503, 1, ['delivered', 'refund_pending', 300]], [$r40fQueuedResponse[0], min(1, $r40fIncidents('payment.webhook_deferred_dead')), $r40fState($r40fQueued)],
+                "{$r40fTag}: R42 an admin refund whose job has not reached Stripe yet does not explain the 5.00 more: critical once dead (was: explained, no incident)");
             for ($r40fI = 0; $r40fI < PaymentWebhookRouting::MAX_ATTEMPTS; $r40fI++) $r40fStripe($r40fRefunded('evt_r40f_unknown', 'pi_r40f-flight', null, 900));
             assert_equals(1, min(1, $r40fIncidents('payment.webhook_deferred_dead')), "{$r40fTag}: 1.00 more than booked and in flight is a refund the shop does not know: critical once dead (control)");
         } finally {

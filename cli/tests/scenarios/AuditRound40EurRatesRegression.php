@@ -32,7 +32,11 @@ $r40eRefresh = static function (string $feed, bool $force = false) use ($pdo): s
 };
 $r40eStored = static fn(): array => $pdo->query('SELECT currency, rate, as_of FROM eur_exchange_rates ORDER BY currency')->fetchAll(PDO::FETCH_ASSOC);
 $r40eConfigured = (string)(VatService::config()['eur_exchange_rates_as_of'] ?? '');
+// R42 (low 8): the ECB history (R41) bounds a feed by the week before it; what other scenarios left is set aside, so this
+// one passes in any order, and what it stores is removed again.
+$r40eHistory = Db::tableExists('eur_exchange_rate_history', $pdo) ? $pdo->query('SELECT currency, as_of, rate FROM eur_exchange_rate_history')->fetchAll(PDO::FETCH_NUM) : null;
 try {
+    if ($r40eHistory !== null) $pdo->exec('DELETE FROM eur_exchange_rate_history');
     $pdo->exec('DELETE FROM eur_exchange_rates');
     assert_equals(['refused', [], $r40eConfigured], [$r40eRefresh($r40eFeed('2099-12-31', $r40eAll)), $r40eStored(), EurRates::current()['as_of']],
         'R40 ECB rates: a feed dated after today is refused; the configured rates stay in use (was: stored, outranking them for good)');
@@ -73,5 +77,10 @@ try {
 } finally {
     EurRates::setFixtureTransport(null);
     $pdo->exec('DELETE FROM eur_exchange_rates');
+    if ($r40eHistory !== null) {
+        $pdo->exec('DELETE FROM eur_exchange_rate_history');
+        $r40eRestore = $pdo->prepare('INSERT INTO eur_exchange_rate_history (currency, as_of, rate) VALUES (?, ?, ?)');
+        foreach ($r40eHistory as $r40eRow) $r40eRestore->execute($r40eRow);
+    }
     EurRates::reset();
 }

@@ -81,7 +81,7 @@ try {
             );
         }
         // The same migration runner as apply, so a package with migrations gets the preflight apply will see (never run here).
-        $updater = new Updater($root, $stateDirectory, Db::get(), updateMigrationRunner($root), $databaseBackup, new ThemeUpgradeGate($stateDirectory), $config);
+        $updater = new Updater($root, $stateDirectory, PrivateOwner::run(static fn(): PDO => Db::get()), updateMigrationRunner($root), $databaseBackup, new ThemeUpgradeGate($stateDirectory), $config);
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
@@ -156,7 +156,7 @@ try {
         // With a connection the rollback counts the rows it discards (the restore releases it before replacing the
         // database); a code-only rollback still works when the database is unreachable.
         try {
-            $database = Db::get();
+            $database = PrivateOwner::run(static fn(): PDO => Db::get());
         } catch (Throwable $e) {
             $database = null;
             fwrite(STDERR, 'No database connection; rows discarded by a database rollback cannot be counted: ' . $e->getMessage() . "\n");
@@ -200,7 +200,7 @@ try {
     $migrationRunner = null;
     $databaseBackup = null;
     if ($package->runsMigrations()) {
-        $database = Db::get();
+        $database = PrivateOwner::run(static fn(): PDO => Db::get());
         $databaseBackup = createUpdateDatabaseBackup($config);
         $migrationRunner = updateMigrationRunner($root);
     }
@@ -239,11 +239,12 @@ try {
         fwrite(STDERR, "WARNING: the shop stays closed until the step .maintenance names succeeds ({$result['still_closed']})\n");
     }
     // R15 high 7: a shop adopted from v1.x still has the old stores.json, which this release cannot run on (503).
-    if (DataOverrides::storesNeedUpgrade($root, $config)) {
+    PrivateOwner::run(static function () use ($root, $config): void { // R42: the private directory as its owner
+        if (!DataOverrides::storesNeedUpgrade($root, $config)) return;
         $stores = DataOverrides::seedStores($root, $config);
         echo $stores !== null ? "stores.json: {$stores['action']} ({$stores['path']})\n"
             : "WARNING: stores.json is in the v1.x format and no private_runtime_dir is configured; run php cli/setup.php apply after setting it\n";
-    }
+    });
     try {
         $pruned = $updater->pruneSnapshots((int)($config['update_snapshots_keep'] ?? 3));
         if ($pruned) echo 'Deleted ' . count($pruned) . " old update snapshot(s) (update_snapshots_keep).\n";
@@ -270,12 +271,16 @@ function updateRecordCoreBaseline(string $root, string $stateDirectory, array $c
 
 function updateMigrationRunner(string $root): Closure
 {
+    // R42 (review round 16, findings 1, 7): the migrations, their lock next to the database included, as the owner of the
+    // private directory when root updates (the lock followed the web user's link and was left root's).
     return static function () use ($root): void {
-        $migrator = new Migrator(Db::get(), $root . '/migrations');
-        $applied = $migrator->apply(static function (string $message): void {
-            echo "  {$message}\n";
+        PrivateOwner::run(static function () use ($root): void {
+            $migrator = new Migrator(Db::get(), $root . '/migrations');
+            $applied = $migrator->apply(static function (string $message): void {
+                echo "  {$message}\n";
+            });
+            echo '  Applied ' . count($applied) . " migration(s).\n";
         });
-        echo '  Applied ' . count($applied) . " migration(s).\n";
     };
 }
 

@@ -72,6 +72,7 @@ try {
             'cache_dir' => $r38oBase . '/root-state/cache', 'jobs_dir' => $r38oBase . '/root-state/jobs',
             'backup_storage_dir' => $r38oBase . '/root-state/backups', 'backup_log_file' => $r38oBase . '/root-state/backup.log',
         ], true) . ";\n");
+        // R42: root runs the backup as the private directory's owner (PrivateOwner), so its storage is the owner's too.
         mkdir($r38oBase . '/root-state', 0700);
         shell_exec('chown -R 0:0 ' . escapeshellarg($app) . ' && chmod -R go-w ' . escapeshellarg($app));
         // A database only root may read, and the web user's (65534) private directory.
@@ -92,25 +93,28 @@ try {
             return false;
         };
         @mkdir($r38oBase . '/root-state/backups', 0700, true);
+        shell_exec('chown -R 65534:65534 ' . escapeshellarg($r38oBase . '/root-state'));
 
         // The web user plants a link at db_path; root runs the nightly backup.
         symlink($r38oBase . '/secret/root.sqlite', $db);
         lchown($db, 65534);
         $linked = $r38oRun([PHP_BINARY, $app . '/cli/backup.php', '--quiet']);
-        assert_true($linked['exit'] !== 0 && str_contains($linked['err'], 'is a symbolic link') && !$leaked(),
+        // R42: as the owner, the link to root's database cannot even be opened (before: refused by the link check as root).
+        $refusedByOwner = static fn(string $err): bool => str_contains($err, 'this step runs as nobody') && str_contains($err, 'unable to open database file');
+        assert_true($linked['exit'] !== 0 && (str_contains($linked['err'], 'is a symbolic link') || $refusedByOwner($linked['err'])) && !$leaked(),
             'R38 root backup: a symbolic link at db_path is refused, nothing of the other database is in the backups (was: root copied it; exit '
             . $linked['exit'] . ', ' . trim(substr($linked['out'] . $linked['err'], 0, 220)) . ')');
         unlink($db);
         // A second name of the same file (hard link) is refused too.
         link($r38oBase . '/secret/root.sqlite', $db);
         $hard = $r38oRun([PHP_BINARY, $app . '/cli/backup.php', '--quiet']);
-        assert_true($hard['exit'] !== 0 && str_contains($hard['err'], 'single link') && !$leaked(),
+        assert_true($hard['exit'] !== 0 && (str_contains($hard['err'], 'single link') || $refusedByOwner($hard['err'])) && !$leaked(),
             'R38 root backup: a hard link to another database is refused (exit ' . $hard['exit'] . ', ' . trim(substr($hard['err'], 0, 200)) . ')');
         unlink($db);
         // The shop's own database file: the root backup works as before.
         rename($private . '/db/real.sqlite', $db);
         $own = $r38oRun([PHP_BINARY, $app . '/cli/backup.php', '--quiet']);
-        assert_true($own['exit'] === 0 && !$leaked(), 'R38 root backup: the shop\'s own database file is backed up as root (exit ' . $own['exit'] . ', ' . trim(substr($own['out'] . $own['err'], 0, 220)) . ')');
+        assert_true($own['exit'] === 0 && !$leaked(), 'R38 root backup: the shop\'s own database file is backed up when root starts the backup (exit ' . $own['exit'] . ', ' . trim(substr($own['out'] . $own['err'], 0, 220)) . ')');
     }
 } finally {
     shell_exec('rm -rf ' . escapeshellarg($r38oBase));

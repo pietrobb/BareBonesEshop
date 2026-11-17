@@ -28,7 +28,10 @@ foreach (array_slice($argvLocal, 1) as $a) {
 }
 $cmd = $args[0] ?? 'apply';
 
-$migrator = new Migrator();
+// R42 (review round 16, findings 1, 2): started as root in a tree root owns, the database, the migrations lock next to it
+// and the pre-migration backup are the private directory owner's work (PrivateOwner::run()); the maintenance window in
+// the application root stays root's (PrivateOwner::asRoot()).
+$migrator = PrivateOwner::run(static fn(): Migrator => new Migrator());
 
 $logger = static function (string $msg): void {
     echo $msg . "\n";
@@ -104,40 +107,45 @@ try {
             $priorMarker = null;
             $carried = [];
             $beforeFirst = static function (array $names, callable $log) use (&$backupTaken, &$ownMaintenance, &$schemaTouched, &$priorMarker, &$carried, $isMigration, $preApplyHook, $root): void {
-                // R23: an update, rollback or other migration that is running holds its window; migrating under it and
-                // lifting it at the end opened the shop in the middle of that step. Held is held, failed-marked or not:
-                // a running step marks its window failed (arm()) before its first change.
-                // R24: the step lock first (MaintenanceMode::claim()): an update entering between this check and enter() was
-                // overwritten by this migration's window, which then lifted it while the update still ran.
-                if (!MaintenanceMode::claim($root) || (!$ownMaintenance && MaintenanceMode::heldElsewhere($root))) {
-                    throw new RuntimeException('Another maintenance window is open (' . MaintenanceMode::busy($root)
-                        . '); no migration ran. Wait until that step ends, then run php cli/migrate.php apply again');
-                }
-                if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {
-                    if (MaintenanceMode::failed($root)) {
-                        $priorMarker = MaintenanceMode::marker($root);
-                        $carried = array_values(array_filter(MaintenanceMode::failures($priorMarker), static fn(array $f): bool => !$isMigration($f)));
+                PrivateOwner::asRoot(static function () use ($names, $log, &$ownMaintenance, &$priorMarker, &$carried, $isMigration, $root): void {
+                    // R23: an update, rollback or other migration that is running holds its window; migrating under it and
+                    // lifting it at the end opened the shop in the middle of that step. Held is held, failed-marked or not:
+                    // a running step marks its window failed (arm()) before its first change.
+                    // R24: the step lock first (MaintenanceMode::claim()): an update entering between this check and enter() was
+                    // overwritten by this migration's window, which then lifted it while the update still ran.
+                    if (!MaintenanceMode::claim($root) || (!$ownMaintenance && MaintenanceMode::heldElsewhere($root))) {
+                        throw new RuntimeException('Another maintenance window is open (' . MaintenanceMode::busy($root)
+                            . '); no migration ran. Wait until that step ends, then run php cli/migrate.php apply again');
                     }
-                    MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
-                    $ownMaintenance = true;
-                    $log('  [maintenance] the shop answers 503 until the migrations finish');
-                }
+                    if (!$ownMaintenance && (!MaintenanceMode::active($root) || MaintenanceMode::failed($root, 'cli/migrate.php'))) {
+                        if (MaintenanceMode::failed($root)) {
+                            $priorMarker = MaintenanceMode::marker($root);
+                            $carried = array_values(array_filter(MaintenanceMode::failures($priorMarker), static fn(array $f): bool => !$isMigration($f)));
+                        }
+                        MaintenanceMode::enter($root, 'cli/migrate.php: ' . count($names) . ' pending migration(s)');
+                        $ownMaintenance = true;
+                        $log('  [maintenance] the shop answers 503 until the migrations finish');
+                    }
+                });
                 if (!$backupTaken && $preApplyHook !== null) {
                     $preApplyHook($names, $log);
                     $backupTaken = true;
                 }
                 // R23: a run killed during a migration (no catch runs) keeps the shop closed instead of an expiring marker.
                 if ($ownMaintenance) {
-                    MaintenanceMode::arm($root, 'cli/migrate.php was interrupted during a migration — the shop stays in maintenance; fix the cause and run php cli/migrate.php apply again',
-                        MaintenanceMode::about([], $carried));
+                    PrivateOwner::asRoot(static fn() => MaintenanceMode::arm($root, 'cli/migrate.php was interrupted during a migration — the shop stays in maintenance; fix the cause and run php cli/migrate.php apply again',
+                        MaintenanceMode::about([], $carried)));
                 }
                 $schemaTouched = true; // Migrator::apply() runs the pending migrations right after this hook
             };
             try {
-                $applied = $migrator->apply($logger, $beforeFirst);
-                foreach (Extensions::migrators() as $code => $extensionMigrator) {
-                    $applied = array_merge($applied, $extensionMigrator->apply($logger, $beforeFirst));
-                }
+                $applied = PrivateOwner::run(static function () use ($migrator, $logger, $beforeFirst): array {
+                    $applied = $migrator->apply($logger, $beforeFirst);
+                    foreach (Extensions::migrators() as $code => $extensionMigrator) {
+                        $applied = array_merge($applied, $extensionMigrator->apply($logger, $beforeFirst));
+                    }
+                    return $applied;
+                });
             } catch (Throwable $migrationError) {
                 if ($ownMaintenance && !MaintenanceMode::owned($root)) {
                     // R23: another step took the window over meanwhile; it is that step's to lift.
@@ -174,13 +182,16 @@ try {
             break;
 
         case 'status':
-            $s = $migrator->status();
-            foreach (Extensions::migrators() as $extensionMigrator) {
-                $extensionStatus = $extensionMigrator->status();
-                $s['applied'] += $extensionStatus['applied'];
-                $s['pending'] = array_merge($s['pending'], $extensionStatus['pending']);
-                $s['missing'] = array_merge($s['missing'], $extensionStatus['missing']);
-            }
+            $s = PrivateOwner::run(static function () use ($migrator): array {
+                $s = $migrator->status();
+                foreach (Extensions::migrators() as $extensionMigrator) {
+                    $extensionStatus = $extensionMigrator->status();
+                    $s['applied'] += $extensionStatus['applied'];
+                    $s['pending'] = array_merge($s['pending'], $extensionStatus['pending']);
+                    $s['missing'] = array_merge($s['missing'], $extensionStatus['missing']);
+                }
+                return $s;
+            });
             echo "Applied:\n";
             if (!$s['applied']) {
                 echo "  (none)\n";
@@ -217,7 +228,7 @@ try {
 
         case 'baseline':
             echo "Baselining existing migrations...\n";
-            $marked = $migrator->baseline($logger);
+            $marked = PrivateOwner::run(static fn(): array => $migrator->baseline($logger));
             $n = count($marked);
             echo $n === 0 ? "Nothing to baseline.\n" : "Marked {$n} migration(s) as applied.\n";
             break;

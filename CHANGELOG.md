@@ -235,6 +235,37 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   50 % each), and refuses even with `--force` an impossible rate or one 10 times away. As root, the shop's connection
   checks `db_sqlite_path` before opening it and no longer switches the database to WAL, and backups refuse a `-journal`,
   `-wal` or `-shm` that is a link or belongs to another account.
+- **Root works in the private directory only as its owner (review round 42, medium 1 and 2, low 7).** In a tree root
+  owns alone, root kept root in the private runtime directory too and checked each path before opening it there: the
+  web user's link at `<db>.migrations.lock` made `migrate.php` create its target (`/etc/nologin`), and the database
+  directory swapped for a link right after the check made root connect to a database only root may read. Now a step
+  started as root in such a tree switches to the owner of the private directories (`private_runtime_dir`, the SQLite
+  database's directory, `jobs_dir`, `private_cache_dir`, `invoice_storage_dir`, `backup_storage_dir`,
+  `backup_recovery_dir`, `uploads_dir`, `digital_assets_base_dir`) before it loads `src/`, unless they are root's alone
+  as well. `update.php`, `migrate.php` and `restore.php`, which write the application root, keep root for it and do
+  everything in the private directory (the database, its update snapshot and rollback, the migrations lock, backups,
+  restored files, the log) with the owner's user and groups; opened as root, the SQLite database is refused. The kernel
+  checks every open there with the owner's rights, so a link or a swapped directory reaches only what the web user may
+  reach. Private directories of two accounts, a root directory another account can write, or a link of a third
+  account on the way refuse the step with the path to fix. A migrations lock that an earlier root run left
+  (0644 root) no longer stops the web user's migrations. Backup directories and locks an earlier root run left stay
+  root's: `chown -R <web user>: <private_runtime_dir>` once after the update.
+- **Credit notes, ECB rates, proxies, VAT holder names, refunds (review round 42, low).** An invoice whose PDF could not be written still queues the
+  credit notes of refunds booked before it (it is committed already; the PDF is rebuilt on demand). A document is fixed
+  in EUR only at the rate of the last day the ECB published on before it (weekends, 1 January, Good Friday, Easter
+  Monday, 1 May, 25 and 26 December have none), so a stopped cron no longer fixes the rate of days before, and
+  `cli/eur-rates.php` no longer converts a Sunday's document at Wednesday's rate before fetching Friday's; where the ECB
+  history it fetches shows no publication in between, the older rate is the one. `--force` is bounded by the stored,
+  the week's, the configured and the built-in approximate rate together (forced feeds can no longer chain 10 times
+  each), and a forced feed is not kept in the history. A credit note of an invoice of a year the threshold no longer
+  counts no longer waits for conversion (doctor warning, history download on every run). The history is parsed without
+  `LIBXML_PARSEHUGE` and its download stops at its size limit. `trusted_proxies` ranges wider than IPv4 /8 or IPv6 /7
+  (`0.0.0.0/0`, `::/0`) are ignored and fail the setup doctor (`config.trusted_proxies`): with them any client named its
+  own IP address and IP country. IPv6 entries are compared as addresses (`2001:DB8:0::1` is `2001:db8::1`), and a proxy
+  a dual-stack server reports as `::ffff:a.b.c.d` matches its IPv4 entry or range. The VIES holder check no longer takes
+  a title joined to the name for a title (`Dr.Max s.r.o.` is not `Max Mustermann`) and drops `Ing. arch.` and
+  `Mgr. art.` whole. A Stripe `charge.refunded` whose refunds cannot be listed is explained by an admin refund only once
+  its job has reached Stripe; one still queued no longer hides a dashboard refund of the same money.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
 - **Theme assets:** the default theme is version 2.3.16 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that

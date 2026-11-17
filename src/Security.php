@@ -638,14 +638,14 @@ class Security {
      */
     public static function isTrustedProxy(string $ip): bool {
         if ($ip === '') return false;
-        $binary = @inet_pton($ip);
+        $binary = self::ipBinary($ip);
+        if ($binary === null) return false;
         foreach ((array)(self::cfg()['trusted_proxies'] ?? []) as $entry) {
-            $entry = trim((string)$entry);
-            if ($entry === $ip) return true;
-            if ($binary === false || !preg_match('~^([0-9a-fA-F:.]+)/(\d{1,3})$~', $entry, $m)) continue;
-            $network = @inet_pton($m[1]);
-            $bits = (int)$m[2];
-            if ($network === false || strlen($network) !== strlen($binary) || $bits > strlen($binary) * 8) continue;
+            $range = self::proxyRange(trim((string)$entry));
+            // R42 (low 5): a range wider than MIN_PROXY_PREFIX (0.0.0.0/0, ::/0) trusts every client: never matched.
+            if ($range === null || $range[1] < self::MIN_PROXY_PREFIX[strlen($range[0])]) continue;
+            [$network, $bits] = $range;
+            if (strlen($network) !== strlen($binary)) continue;
             $bytes = intdiv($bits, 8);
             if (substr($binary, 0, $bytes) !== substr($network, 0, $bytes)) continue;
             $rest = $bits % 8;
@@ -656,15 +656,54 @@ class Security {
         return false;
     }
 
+    /** R42 (low 5): the shortest prefix a trusted_proxies range may have, by address length (IPv4 /8, IPv6 /7: fc00::/7). */
+    public const MIN_PROXY_PREFIX = [4 => 8, 16 => 7];
+
+    /**
+     * R42 (low 5): the binary address of $ip; an IPv4-mapped IPv6 address (::ffff:a.b.c.d, as a dual-stack server reports
+     * IPv4 clients) as its IPv4 address. Single IPv6 addresses were compared as text ("2001:db8::1" vs "2001:DB8:0::1").
+     */
+    private static function ipBinary(string $ip): ?string {
+        $binary = @inet_pton($ip);
+        if ($binary === false) return null;
+        return strlen($binary) === 16 && str_starts_with($binary, str_repeat("\0", 10) . "\xff\xff") ? substr($binary, 12) : $binary;
+    }
+
+    /** @return array{0: string, 1: int}|null a trusted_proxies entry as [binary network, prefix bits]; an address is /32 or /128 */
+    private static function proxyRange(string $entry): ?array {
+        $bits = null;
+        if (preg_match('~^([0-9a-fA-F:.]+)/(\d{1,3})$~', $entry, $m)) [$entry, $bits] = [$m[1], (int)$m[2]];
+        $raw = @inet_pton($entry);
+        if ($raw === false) return null;
+        $bits ??= strlen($raw) * 8;
+        if ($bits > strlen($raw) * 8) return null;
+        $network = self::ipBinary($entry);
+        if (strlen($network) !== strlen($raw)) {
+            // ::ffff:a.b.c.d/N is the IPv4 range /N-96.
+            if ($bits < 96) return [$raw, $bits];
+            $bits -= 96;
+        }
+        return [$network, $bits];
+    }
+
     /** R41: trusted_proxies entries that are neither an IP address nor a CIDR range (never matched; the setup doctor names them). */
     public static function invalidTrustedProxies(array $config): array {
         $invalid = [];
         foreach ((array)($config['trusted_proxies'] ?? []) as $entry) {
             $entry = trim((string)$entry);
-            $range = preg_match('~^([0-9a-fA-F:.]+)/(\d{1,3})$~', $entry, $m) && ($n = @inet_pton($m[1])) !== false && (int)$m[2] <= strlen($n) * 8;
-            if (!$range && @inet_pton($entry) === false) $invalid[] = $entry;
+            if (self::proxyRange($entry) === null) $invalid[] = $entry;
         }
         return $invalid;
+    }
+
+    /** R42 (low 5): trusted_proxies ranges wider than MIN_PROXY_PREFIX (0.0.0.0/0, ::/0): never matched, the doctor fails. */
+    public static function tooWideTrustedProxies(array $config): array {
+        $wide = [];
+        foreach ((array)($config['trusted_proxies'] ?? []) as $entry) {
+            $range = self::proxyRange(trim((string)$entry));
+            if ($range !== null && $range[1] < self::MIN_PROXY_PREFIX[strlen($range[0])]) $wide[] = trim((string)$entry);
+        }
+        return $wide;
     }
 
     public static function clientIp(): string {
