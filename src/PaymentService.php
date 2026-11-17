@@ -1629,6 +1629,12 @@ class PaymentService {
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
         if ($stmt->fetchColumn() !== false) return;
         $payment = (string)($order['payment_status'] ?? '');
+        // R41 (low 5): only an order still waiting for its payment (it can become paid) is settled. One fulfilled already,
+        // whose older data has no 'paid' ledger row, was cancelled and its stock put back; it is only logged, as before R40.
+        if (!OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
+            AuditLog::log('payment_webhook_ignored', $orderId, $payment, $payment, $note . ': captured after a refund, order ' . (string)$order['status'] . ' left as it is');
+            return;
+        }
         if ($payment === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'cancelled')) {
             OrderWorkflow::transition($orderId, 'cancelled', $note . ': captured after it was refunded in full');
         } elseif ($payment === 'partially_refunded') {

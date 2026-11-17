@@ -282,7 +282,7 @@ class BackupService
             $file = @lstat($canonical);
             if (!is_array($file)) return "the database {$path} cannot be read";
             if (((int)$file['mode'] & 0170000) !== 0100000 || (int)$file['nlink'] !== 1) return "the database {$path} is not a regular file with a single link";
-            return $file;
+            return self::foreignSidecar($canonical, $file) ?? $file;
         };
         $file = $checked();
         if (is_string($file)) return $file;
@@ -295,7 +295,7 @@ class BackupService
             $open = [];
             foreach (scandir('/proc/self/fd') ?: [] as $fd) {
                 $s = ctype_digit((string)$fd) ? @stat('/proc/self/fd/' . $fd) : false;
-                if (is_array($s)) $open[(int)$fd] = [(int)$s['dev'], (int)$s['ino'], (int)$s['mode'] & 0170000, (string)@readlink('/proc/self/fd/' . $fd)];
+                if (is_array($s)) $open[(int)$fd] = [(int)$s['dev'], (int)$s['ino'], (int)$s['mode'] & 0170000, (string)@readlink('/proc/self/fd/' . $fd), (int)$s['nlink'], (int)$s['uid']];
             }
             return $open;
         };
@@ -320,6 +320,9 @@ class BackupService
         foreach ($added as $fd => $d) {
             if ($d[3] === $canonical) $main = [$d[0], $d[1], $fd];
             elseif (!in_array($d[3], $sidecars, true)) return "the database open is not the file at {$path} ({$d[3]})";
+            // R41 (low 10): the journal, WAL and shared memory root opened are the database owner's own single-link files
+            // (a hard link put there after the check above made root write to the linked file).
+            elseif ($d[4] !== 1 || !in_array($d[5], [0, (int)$file['uid']], true)) return "{$d[3]} is not a single-link file of the database's owner";
         }
         $after = $checked();
         if (is_string($after)) return $after;
@@ -349,6 +352,43 @@ class BackupService
     private static function runsAsRoot(): bool
     {
         return function_exists('posix_geteuid') && posix_geteuid() === 0;
+    }
+
+    /**
+     * R41 (low 10): the shop's own connection (Db::get()) as root switched the database at db_sqlite_path to WAL — a write —
+     * before a backup refused it as another account's (a link swapped in). Why root may not open the SQLite database at
+     * $path, or null (also when not root): a link of another account on the way, not a regular single-link file, or a
+     * journal, WAL or shared memory next to it that is not (rootForeignDatabase() verifies the file opened afterwards).
+     */
+    public static function rootOpenRefusal(string $path): ?string
+    {
+        if (!self::runsAsRoot()) return null;
+        clearstatcache();
+        if (!file_exists($path) && !is_link($path)) {
+            // A database root creates (install, seed): no link of another account leads to its directory.
+            return self::rootResolvedPath(dirname($path), $error) === null ? $error : null;
+        }
+        $canonical = self::rootResolvedPath($path, $error);
+        if ($canonical === null) return $error;
+        $file = @lstat($canonical);
+        if (!is_array($file) || ((int)$file['mode'] & 0170000) !== 0100000 || (int)$file['nlink'] !== 1) return "the database {$path} is not a regular file with a single link";
+        return self::foreignSidecar($canonical, $file);
+    }
+
+    /**
+     * R41 (low 10): the -journal, -wal and -shm root opens with the database (read and written by SQLite) must be regular
+     * files with a single link of the database's owner or root; a hard or symbolic link there made root write to its target.
+     * @param array<int|string, mixed> $file lstat() of the database
+     */
+    private static function foreignSidecar(string $canonical, array $file): ?string
+    {
+        foreach (['-journal', '-wal', '-shm'] as $suffix) {
+            $s = @lstat($canonical . $suffix);
+            if (!is_array($s)) continue;
+            if (((int)$s['mode'] & 0170000) !== 0100000 || (int)$s['nlink'] !== 1) return "{$canonical}{$suffix} is not a regular file with a single link";
+            if (!in_array((int)$s['uid'], [0, (int)$file['uid']], true)) return "{$canonical}{$suffix} belongs to another account than the database";
+        }
+        return null;
     }
 
     /**

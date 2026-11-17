@@ -622,25 +622,55 @@ class Security {
     public static function requestIsHttps(): bool {
         $https = strtolower((string)($_SERVER['HTTPS'] ?? ''));
         if ($https !== '' && $https !== 'off') return true;
-        $trusted = self::cfg()['trusted_proxies'] ?? [];
-        if (empty($trusted) || !in_array($_SERVER['REMOTE_ADDR'] ?? '', $trusted, true)) return false;
+        if (!self::fromTrustedProxy()) return false;
         $proto = explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
         return strtolower(trim(end($proto))) === 'https';
     }
 
     /** R40: whether the request came from one of the configured trusted_proxies (only they may set forwarded headers). */
     public static function fromTrustedProxy(): bool {
-        $trusted = self::cfg()['trusted_proxies'] ?? [];
-        return !empty($trusted) && in_array($_SERVER['REMOTE_ADDR'] ?? '', $trusted, true);
+        return self::isTrustedProxy((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    }
+
+    /**
+     * R41 (low 8): whether $ip is one of trusted_proxies — an address, or a CIDR range ("173.245.48.0/20", "2400:cb00::/32"),
+     * as a CDN publishes them. A range never matched, so behind Cloudflare the IP country header was dropped silently.
+     */
+    public static function isTrustedProxy(string $ip): bool {
+        if ($ip === '') return false;
+        $binary = @inet_pton($ip);
+        foreach ((array)(self::cfg()['trusted_proxies'] ?? []) as $entry) {
+            $entry = trim((string)$entry);
+            if ($entry === $ip) return true;
+            if ($binary === false || !preg_match('~^([0-9a-fA-F:.]+)/(\d{1,3})$~', $entry, $m)) continue;
+            $network = @inet_pton($m[1]);
+            $bits = (int)$m[2];
+            if ($network === false || strlen($network) !== strlen($binary) || $bits > strlen($binary) * 8) continue;
+            $bytes = intdiv($bits, 8);
+            if (substr($binary, 0, $bytes) !== substr($network, 0, $bytes)) continue;
+            $rest = $bits % 8;
+            if ($rest === 0) return true;
+            $mask = (0xFF << (8 - $rest)) & 0xFF;
+            if ((ord($binary[$bytes]) & $mask) === (ord($network[$bytes]) & $mask)) return true;
+        }
+        return false;
+    }
+
+    /** R41: trusted_proxies entries that are neither an IP address nor a CIDR range (never matched; the setup doctor names them). */
+    public static function invalidTrustedProxies(array $config): array {
+        $invalid = [];
+        foreach ((array)($config['trusted_proxies'] ?? []) as $entry) {
+            $entry = trim((string)$entry);
+            $range = preg_match('~^([0-9a-fA-F:.]+)/(\d{1,3})$~', $entry, $m) && ($n = @inet_pton($m[1])) !== false && (int)$m[2] <= strlen($n) * 8;
+            if (!$range && @inet_pton($entry) === false) $invalid[] = $entry;
+        }
+        return $invalid;
     }
 
     public static function clientIp(): string {
-        $cfg = self::cfg();
-        $trusted = $cfg['trusted_proxies'] ?? [];
-
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 
-        if (!empty($trusted) && in_array($remoteAddr, $trusted)) {
+        if (self::isTrustedProxy($remoteAddr)) {
             $forwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
             if ($forwarded === '') return $remoteAddr;
             $ips = array_map('trim', explode(',', $forwarded));
@@ -650,7 +680,7 @@ class Security {
             // taking the leftmost value let attackers forge their rate-limit IP.
             for ($i = count($ips) - 1; $i >= 0; $i--) {
                 $candidate = $ips[$i];
-                if ($candidate === '' || in_array($candidate, $trusted)) continue;
+                if ($candidate === '' || self::isTrustedProxy($candidate)) continue;
                 return filter_var($candidate, FILTER_VALIDATE_IP) ? $candidate : $remoteAddr;
             }
             return $remoteAddr;

@@ -232,6 +232,9 @@ final class InvoiceService
         $vatBreakdown['services_only'] = self::servicesOnly($order);
         $pdfBin  = self::renderPdf($invoice, self::invoiceRows($invoice, $order, $items, $financialSnapshot), $sellerSnapshot, $customerSnapshot, $vatBreakdown);
         self::writePdf($absPath, $pdfBin);
+        // R41 (low 4, capability review 533): refunds booked before the invoice existed get their credit notes now, however
+        // it is issued (invoice_issue job, the admin's button, cli/invoices-backfill.php). Only a newly issued invoice.
+        self::queueCreditsOfBookedRefunds($orderId);
 
         return $invoice;
     }
@@ -437,6 +440,27 @@ final class InvoiceService
             ':order2' => $orderId, ':store2' => StoreContext::current()->id(), ':key2' => $ledgerKey]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
+    }
+
+    /**
+     * R41 (low 4): refunds the ledger booked before the order had an invoice (a refund of a payment the shop still held
+     * pending, then its late capture: PaymentService::settleLateCapture()) found nothing to correct and their
+     * refund_credit_note job ended; the invoice issued afterwards was for the whole order. Once it is issued (issueAttempt()), every refund
+     * of the order without its credit note gets the job again (creditBookedRefund(): item refunds and those credited already
+     * are left alone). Returns how many were queued.
+     */
+    public static function queueCreditsOfBookedRefunds(int $orderId): int {
+        $db = Db::get();
+        $stmt = $db->prepare("SELECT idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0 AND idempotency_key IS NOT NULL AND idempotency_key <> '' ORDER BY id");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        $queued = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $key) {
+            if (self::refundCreditByKey($db, $orderId, (string)$key) !== null) continue;
+            JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => (string)$key], 5);
+            $queued++;
+        }
+        return $queued;
     }
 
     private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {

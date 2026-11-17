@@ -345,9 +345,89 @@ final class OssThreshold
             if ($source !== null && isset($source['oss_net_eur']) && (int)($source['oss_net'] ?? 0) !== 0) {
                 return (int)round($net * (int)$source['oss_net_eur'] / (int)$source['oss_net']);
             }
+            // R41: the document it corrects still counts in its currency; so does the correction, until both convert.
+            if ($source !== null && (int)($source['oss_net'] ?? 0) !== 0 && strtolower((string)($source['currency'] ?? 'eur')) !== 'eur') return null;
         }
-        $rate = EurRates::current()['rates'][$currency] ?? null;
-        return is_numeric($rate) && (float)$rate > 0 ? (int)round($net * (float)$rate) : null;
+        // R41 (medium 3): the ECB rate of the day of issue only (EurRates::rateOn()); a stale or configured current rate
+        // fixed in oss_net_eur was never corrected. Without one the document waits (convertPending()).
+        $rate = EurRates::rateOn($db, $currency, substr((string)($doc['issued_at'] ?? ''), 0, 10));
+        return $rate !== null ? (int)round($net * $rate) : null;
+    }
+
+    /**
+     * R41 (medium 3): issued documents in another currency without their EUR at issue yet (no ECB rate of their day was
+     * stored then, or they predate oss_net_eur): converted at the rate of their day once cli/eur-rates.php stored it, and
+     * moved from their currency's total to the EUR one. Returns how many were converted, and what still waits.
+     * @return array{converted: int, pending: int, oldest: ?string, currencies: list<string>}
+     */
+    public static function convertPending(PDO $db): array
+    {
+        $done = 0;
+        foreach (self::pendingDocuments($db) as $doc) {
+            $eur = self::issueEur($db, $doc, (int)$doc['oss_net']);
+            if ($eur === null) continue;
+            $own = !$db->inTransaction();
+            if ($own) $db->beginTransaction();
+            try {
+                $stmt = $db->prepare('UPDATE invoices SET oss_net_eur = ? WHERE id = ? AND oss_net_eur IS NULL AND oss_net = ?');
+                $stmt->execute([$eur, (int)$doc['id'], (int)$doc['oss_net']]);
+                if ($stmt->rowCount() === 1) {
+                    self::addToTotal($db, $doc, -(int)$doc['oss_net']);
+                    self::addToTotal($db, $doc, $eur, $eur);
+                    $done++;
+                }
+                if ($own) $db->commit();
+            } catch (Throwable $e) {
+                if ($own && $db->inTransaction()) $db->rollBack();
+                throw $e;
+            }
+        }
+        self::reset();
+        return ['converted' => $done] + self::pending($db);
+    }
+
+    /**
+     * R41: pending() of the seller's stores (worstYear()'s), for the setup doctor.
+     * @param array<string, mixed> $stores every store (stores.json)
+     * @return array{pending: int, oldest: ?string, currencies: list<string>}
+     */
+    public static function pendingOfSeller(PDO $db, string $storeId, array $store, array $stores): array
+    {
+        return self::pending($db, self::sellerStores($storeId, $store, $stores));
+    }
+
+    /**
+     * R41: the documents convertPending() still waits for (of orders of $storeIds when given): how many, the oldest day of
+     * issue, their currencies (upper case).
+     * @param ?list<string> $storeIds
+     * @return array{pending: int, oldest: ?string, currencies: list<string>}
+     */
+    public static function pending(PDO $db, ?array $storeIds = null): array
+    {
+        $docs = self::pendingDocuments($db);
+        if ($storeIds !== null) {
+            $orders = $docs === [] ? [] : array_flip(array_map('intval', array_column(array_filter(
+                $db->query('SELECT id, store_id FROM orders WHERE id IN (' . implode(',', array_map(static fn(array $d): int => (int)$d['order_id'], $docs)) . ')')->fetchAll(PDO::FETCH_ASSOC),
+                static fn(array $o): bool => in_array((string)$o['store_id'], $storeIds, true)), 'id')));
+            $docs = array_values(array_filter($docs, static fn(array $d): bool => isset($orders[(int)$d['order_id']])));
+        }
+        $days = array_map(static fn(array $d): string => substr((string)$d['issued_at'], 0, 10), $docs);
+        $currencies = array_values(array_unique(array_map(static fn(array $d): string => strtoupper((string)$d['currency']), $docs)));
+        sort($currencies);
+        return ['pending' => count($docs), 'oldest' => $days === [] ? null : min($days), 'currencies' => $currencies];
+    }
+
+    /**
+     * @return list<array<string, mixed>> issued documents of this and last year (the years the threshold counts), by id (an
+     * invoice before its credit notes), waiting for their EUR at issue
+     */
+    private static function pendingDocuments(PDO $db): array
+    {
+        if (!self::hasColumn('invoices', 'oss_net_eur', $db)) return [];
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE status = 'issued' AND oss_net IS NOT NULL AND oss_net <> 0 AND oss_net_eur IS NULL
+            AND LOWER(currency) <> 'eur' AND issued_at >= ? ORDER BY id");
+        $stmt->execute([sprintf('%04d-01-01 00:00:00', (int)ShopTime::date('Y') - 1)]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -535,14 +615,16 @@ final class OssThreshold
      * Whether an order's method is collection in the seller's store (ShippingService::isPickupMethod() without a store
      * context, as in a migration recounting documents): the code "pickup", or a method of that carrier or adapter.
      * R40 (low): of the order's store; another store's pickup method of the same code counted a courier order as collected.
+     * R41 (medium 2): of the store's provider scope, whose shipping methods its checkout offered (the sample "de" store
+     * ships with "default"'s, so its collection was counted abroad), and service_type "store_pickup" too — the test
+     * ShippingService::isPickupMethod() applies at checkout.
      */
     private static function collected(string $method, string $storeId): bool
     {
         if ($method === '' || $method === 'digital') return false;
         if ($method === 'pickup') return true;
-        $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = ? AND store_id = ? AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup') LIMIT 1");
-        $stmt->execute([$method, $storeId]);
-        return $stmt->fetchColumn() !== false;
+        $scope = (string)(self::storeConfig($storeId)['provider_scope'] ?? $storeId);
+        return ShippingService::isStorePickupMethod(Db::get(), $method, $scope);
     }
 
     public static function activated(PDO $db, string $storeId, array $store, int $year, bool $withPrevious = true, ?array $stores = null): bool

@@ -109,8 +109,9 @@ return [
     ],
 
     // Security
-    // Reverse proxies / load balancers (exact REMOTE_ADDR values): their X-Forwarded-For gives the client IP and their
-    // X-Forwarded-Proto: https marks the request as https (HSTS, secure cookies) when TLS ends at the proxy.
+    // Reverse proxies / load balancers (REMOTE_ADDR values, or CIDR ranges such as a CDN's '173.245.48.0/20'): their
+    // X-Forwarded-For gives the client IP and their X-Forwarded-Proto: https marks the request as https (HSTS, secure
+    // cookies) when TLS ends at the proxy; a store's vat_ip_country_header is read only from them.
     'trusted_proxies' => [],
 
     // Adapters

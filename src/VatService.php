@@ -795,10 +795,16 @@ class VatService implements TaxProvider
     /** Legal-form words a company name may carry or leave out ("ACME s.r.o." is "ACME"); single letters are dropped too. */
     private const LEGAL_FORMS = ['gmbh', 'mbh', 'ag', 'kg', 'ohg', 'og', 'ug', 'ltd', 'limited', 'llc', 'inc', 'plc', 'sa', 'sas', 'sarl',
         'srl', 'spa', 'bv', 'nv', 'kft', 'zrt', 'nyrt', 'bt', 'oy', 'oyj', 'ab', 'aps', 'as', 'sro', 'spol', 'zoo', 'sp', 'ks', 'vos',
-        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and',
-        // R40 (low): academic titles a sole trader's name carries in one register and not the other ("Ing. Ján Novák").
-        'ing', 'mgr', 'bc', 'dr', 'judr', 'mudr', 'mvdr', 'rndr', 'phdr', 'paeddr', 'thdr', 'phd', 'csc', 'drsc', 'doc', 'prof',
-        'dipl', 'mag', 'mba', 'msc', 'bsc', 'llm', 'dott'];
+        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and'];
+
+    /**
+     * R40 (low): academic titles a sole trader's name carries in one register and not the other ("Ing. Ján Novák").
+     * R41 (low 6): only written as titles — abbreviated with a dot before the name ("Ing.", "doc."), or after it behind a
+     * comma ("…, PhD", "…, MBA"). Dropped anywhere, "ING Bank N.V." matched "Bank Austria" and "Doc Morris" "Morris Garages".
+     */
+    private const TITLES_BEFORE = ['ing', 'mgr', 'bc', 'dr', 'judr', 'mudr', 'mvdr', 'rndr', 'phdr', 'paeddr', 'thdr', 'pharmdr', 'doc', 'prof',
+        'dipl', 'mag', 'dott', 'univ', 'akad'];
+    private const TITLES_AFTER = ['phd', 'csc', 'drsc', 'mba', 'msc', 'bsc', 'llm', 'dis', 'artd'];
 
     /**
      * R38 (low): reverse charge rested on the VAT ID alone: any valid foreign VAT ID, whoever's, took the VAT off. The
@@ -835,6 +841,9 @@ class VatService implements TaxProvider
     private static function holderTokens(string $name): array
     {
         $name = mb_strtolower($name, 'UTF-8');
+        $name = (string)preg_replace(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u',
+            '/(?<![\p{L}\p{N}])(?:' . implode('|', self::TITLES_BEFORE) . ')\./u'], ' ', $name);
+        $name = (string)preg_replace('/,\s*(?:' . implode('|', self::TITLES_AFTER) . ')(?![\p{L}\p{N}])\.?/u', ' ', $name);
         $ascii = function_exists('transliterator_transliterate') ? transliterator_transliterate('Any-Latin; Latin-ASCII', $name) : false;
         if (!is_string($ascii)) $ascii = (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name);
         $ascii = str_replace(['ae', 'oe', 'ue', 'ss'], ['a', 'o', 'u', 's'], strtolower($ascii));

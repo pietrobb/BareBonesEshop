@@ -215,6 +215,26 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   after the refund of a payment the shop still held pending settles the order (cancelled with its stock released when
   refunded in full, paid when in part) instead of leaving it pending; a Stripe refund list that cannot be read while
   the shop's own refunds are in flight no longer raises a critical incident.
+- **OSS threshold and EUR rates (review round 41, medium).** The OSS threshold looks up a store's collection methods
+  in its `provider_scope` (the sample `de` store uses the `default` store's shipping) and also knows `store_pickup`
+  methods, so goods collected in the shop are no longer counted as distance sales. A document is fixed in EUR only at
+  the ECB rate of its day (or of the 7 days before); with a stale or only a configured rate it stays unfixed and is
+  counted at today's rate. `cli/eur-rates.php` keeps the ECB rate history (migration `20261117100000_eur_rate_history`)
+  and converts such documents, also those issued before round 40, at the rate of their day, even on a day it refuses
+  the daily feed (it then exits 1 after converting); `php cli/setup.php doctor`
+  warns again about stale rates and names documents still waiting for that conversion. Run `php cli/eur-rates.php`
+  once after the update.
+- **Refunds, VAT evidence, ECB rates and root backups (review round 41, low).** An invoice issued after refunds were
+  booked queues their credit notes (a late capture after a partial refund invoiced the whole order without one); a late
+  capture changes only an order still awaiting payment, an order already fulfilled is only logged. The VIES holder check
+  drops titles only when written as titles ("Ing.", not "ING Bank"). Editing an order keeps the residence declaration
+  that decided its VAT. `trusted_proxies` accepts CIDR ranges (Cloudflare) and the doctor warns when
+  `vat_ip_country_header` is set but no trusted proxy can send it; a company export with an invalid VAT ID says so
+  instead of claiming VAT is charged for the VAT ID. `cli/eur-rates.php` checks a first feed's currencies the
+  configuration lacks, bounds a rate by the week before as well (feeds fetched again the same day can no longer move it
+  50 % each), and refuses even with `--force` an impossible rate or one 10 times away. As root, the shop's connection
+  checks `db_sqlite_path` before opening it and no longer switches the database to WAL, and backups refuse a `-journal`,
+  `-wal` or `-shm` that is a link or belongs to another account.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
 - **Theme assets:** the default theme is version 2.3.16 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
