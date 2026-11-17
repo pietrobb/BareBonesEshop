@@ -247,6 +247,9 @@ jobs:
       - name: ESLint (storefront scripts and qualification tooling)
         run: npx eslint --max-warnings=0 .
 
+      - name: npm audit (no known vulnerable qualification dependency)
+        run: npm audit --audit-level=moderate
+
       - name: OpenAPI lint (docs/openapi.yaml parses strictly, no stray keys)
         run: npm run lint:openapi
 

@@ -64,7 +64,8 @@ $r8qRejected = [
     'wrong secret' => [$r8qBody, 't=' . $r8qNow . ',v1=' . $r8qSig($r8qNow, '', 'whsec_r8q_other_secret_xx')],
     'signature over another timestamp' => [$r8qBody, 't=' . $r8qNow . ',v1=' . $r8qSig((string)((int)$r8qNow - 1))],
     'old timestamp' => [$r8qBody, 't=' . ((int)$r8qNow - 301) . ',v1=' . $r8qSig((string)((int)$r8qNow - 301))],
-    'future timestamp' => [$r8qBody, 't=' . ((int)$r8qNow + 301) . ',v1=' . $r8qSig((string)((int)$r8qNow + 301))],
+    // +400, not +301 (idea #43): $r8qNow is taken before the checks, and a second passing in between left exactly 300 s.
+    'future timestamp' => [$r8qBody, 't=' . ((int)$r8qNow + 400) . ',v1=' . $r8qSig((string)((int)$r8qNow + 400))],
     'no timestamp' => [$r8qBody, 'v1=' . $r8qGood],
     'non-numeric timestamp' => [$r8qBody, 't=' . $r8qNow . 'x,v1=' . $r8qSig($r8qNow . 'x')],
     'two different timestamps' => [$r8qBody, 't=' . ((int)$r8qNow - 1000) . ',t=' . $r8qNow . ',v1=' . $r8qGood],

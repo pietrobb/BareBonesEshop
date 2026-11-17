@@ -425,7 +425,17 @@ class Products {
             sort($ids);
             $cacheKey = Cache::localePath($lang, 'facets/' . hash('sha256', implode(',', $ids)) . '.json');
             $cached = Cache::readCatalogJson($cacheKey, 3600);
-            if ($cached !== null) return $cached;
+            // Ideas #30/#48: JSON stores 10.0 as 10; the cached payload must equal a fresh one (numeric is a float).
+            if ($cached !== null) {
+                foreach ($cached as &$values) {
+                    foreach ($values as &$value) {
+                        if (is_int($value['numeric'] ?? null)) $value['numeric'] = (float)$value['numeric'];
+                    }
+                    unset($value);
+                }
+                unset($values);
+                return $cached;
+            }
         }
 
         if (is_array($categoryId)) {
@@ -511,7 +521,7 @@ class Products {
             $filters[$criterion] = array_map(static fn(array $value): array => [
                 'value' => $value['criteria_value'],
                 'count' => (int)$value['cnt'],
-                'numeric' => $value['numeric_val'],
+                'numeric' => $value['numeric_val'] === null ? null : (float)$value['numeric_val'],
             ], $values);
         }
         if ($cacheKey !== null) Cache::writeJson($cacheKey, $filters);

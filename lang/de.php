@@ -1997,7 +1997,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'variant_invalid' => 'Die gewählte Variante ist ungültig.', 'product_invalid' => 'Produkt ist nicht verfügbar.', 'product_unavailable' => 'Diese Auswahl ist nicht verfügbar.',
     'cart_full' => 'Der Warenkorb kann höchstens 100 verschiedene Artikel enthalten.',
     'shipping_loading' => 'Versandarten werden geladen…', 'shipping_unavailable' => 'Versand ist nicht verfügbar.', 'select_shipping_first' => 'Wählen Sie zuerst den Versand.',
-    'payment_loading' => 'Zahlungsarten werden geladen…', 'payment_unavailable' => 'Zahlung ist nicht verfügbar.',
     // Storefront core audit: wishlist, landmarks, checkout errors, order confirmation, review duplicates.
     'wishlist.title' => 'Wunschliste',
     'wishlist.remove' => 'Von der Wunschliste entfernen',

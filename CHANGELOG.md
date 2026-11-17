@@ -316,6 +316,24 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **No known vulnerable qualification dependency (round 43).** The browser/Lighthouse tooling (dev dependencies
+  only, never deployed) had open advisories: minimatch (eslint, Dependabot #20), basic-ftp (Dependabot #21), zod
+  through Lighthouse's puppeteer, and body-parser through the Lighthouse CI server. `@lhci/cli` is 0.16.1 (Lighthouse
+  13), minimatch 10 is overridden to 11.0.9, the stale overrides (`basic-ftp`, `tmp`, `uuid`, `@puppeteer/browsers`)
+  are gone, and `npm audit` reports 0 vulnerabilities. CI runs `npm audit --audit-level=moderate` after ESLint.
+- **`php cli/update.php doctor` checks the private runtime paths the shop creates on first use (round 43).**
+  `jobs_dir` and `private_cache_dir` must be a writable directory (or creatable in a writable one), and
+  `gdpr_salt_file` a readable valid salt (or creatable); otherwise the job worker or the first request needing them
+  failed only later with a 500. The checks run as the private directory's owner.
+- **A refused request no longer counts toward its rate limit (round 43).** `Security::rateLimit()` recorded every
+  attempt, refused ones too, so a third party that kept sending held a limit not bound to its address (the checkout
+  limit per e-mail address) closed for as long as it liked. Only allowed attempts are recorded now.
+- **On Windows a successful `php cli/migrate.php` lifts its maintenance window (round 43).** Windows file locks are
+  mandatory: the step could not read the `.maintenance` marker it held locked, took it for another step's, and left it
+  failed ("interrupted during a migration"), so the shop answered 503 until a second run. Linux was not affected.
+- **Round 43 small fixes.** Duplicate keys in `lang/cs|de|hu|pl|es.php` removed (same values) and
+  `cli/i18n-parity.php` fails on a key written twice; facet values report `numeric` as a float also from the facet
+  cache (it came back as an int); the Stripe future-timestamp test no longer flakes at the second boundary.
 - **The checkout prices the delivery it offers after a change of country (review round 36, medium 3).** The form
   still named in-store pickup (the default) after the buyer switched to an address abroad, where pickup is not
   offered, and the VAT preview counted the goods as collected in the shop: a business with a valid Austrian VAT ID saw

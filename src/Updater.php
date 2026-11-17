@@ -679,6 +679,13 @@ final class Updater
             $add('fail', 'public_key', 'Public key cannot be validated without sodium');
         }
 
+        $runtimeConfig = $config ?? $this->config;
+        if ($runtimeConfig !== null) {
+            foreach (PrivateOwner::run(fn(): array => $this->privateRuntimePathChecks($runtimeConfig)) as [$level, $name, $message]) {
+                $add($level, $name, $message);
+            }
+        }
+
         $add(is_writable($this->stateDirectory) ? 'ok' : 'fail', 'state_directory',
             is_writable($this->stateDirectory)
                 ? 'Private update state directory is writable'
@@ -807,6 +814,60 @@ final class Updater
             $add('warn', 'payment_webhooks', 'api.php is still installed (a release before 2.1.0): this update removes it, so payment and carrier'
                 . ' webhooks must move to /api/v1/webhooks/payment/<provider> and /api/v1/webhooks/shipping/<carrier>. Change the URL in the'
                 . ' Stripe (Developers → Webhooks) and Comgate portals and in every carrier webhook when you deploy (CHANGELOG 2.1.0 upgrade notes)');
+        }
+        return $checks;
+    }
+
+    /**
+     * Idea #7: the job queue, the rate-limit cache and the GDPR salt are created on first use; a private directory the web
+     * server user cannot write turns into a 500 or a worker fatal only then. Paths inside the application root are the
+     * config check's FAIL already.
+     * @return list<array{0: string, 1: string, 2: string}>
+     */
+    private function privateRuntimePathChecks(array $config): array
+    {
+        $private = dirname($this->root) . '/bareboneseshop-private';
+        $nearestExisting = static function (string $path): string {
+            while (!file_exists($path) && !is_link($path) && dirname($path) !== $path) $path = dirname($path);
+            return $path;
+        };
+        $checks = [];
+        foreach (['jobs_dir' => $private . '/jobs', 'private_cache_dir' => $private . '/cache'] as $setting => $default) {
+            $dir = trim((string)($config[$setting] ?? '')) ?: $default;
+            if ($this->isInsideRoot($dir)) continue;
+            clearstatcache();
+            if (is_dir($dir)) {
+                $checks[] = is_writable($dir)
+                    ? ['ok', $setting, "{$setting} {$dir} is a writable directory outside the application root"]
+                    : ['fail', $setting, "{$setting} {$dir} is not writable by the shop; the worker and the shop fail on first use (chown it to the web server user)"];
+                continue;
+            }
+            $existing = $nearestExisting($dir);
+            $checks[] = file_exists($dir) || is_link($dir)
+                ? ['fail', $setting, "{$setting} {$dir} is not a directory"]
+                : (is_dir($existing) && is_writable($existing)
+                    ? ['ok', $setting, "{$setting} {$dir} does not exist yet and will be created on first use"]
+                    : ['fail', $setting, "{$setting} {$dir} does not exist and {$existing} is not a writable directory to create it in"]);
+        }
+        if (trim((string)($config['gdpr_hash_salt'] ?? '')) !== '') {
+            $checks[] = ['ok', 'gdpr_salt_file', 'gdpr_hash_salt is configured; no salt file is used'];
+            return $checks;
+        }
+        $salt = trim((string)($config['gdpr_salt_file'] ?? '')) ?: $private . '/secrets/gdpr_salt';
+        if ($this->isInsideRoot($salt)) return $checks;
+        clearstatcache();
+        if (is_link($salt) || (file_exists($salt) && !is_file($salt))) {
+            $checks[] = ['fail', 'gdpr_salt_file', "gdpr_salt_file {$salt} is not a regular file (a link or a directory is refused)"];
+        } elseif (is_file($salt)) {
+            $stored = is_readable($salt) ? trim((string)@file_get_contents($salt, false, null, 0, 128)) : '';
+            $checks[] = preg_match('/^[0-9a-f]{64}$/', $stored) === 1
+                ? ['ok', 'gdpr_salt_file', "gdpr_salt_file {$salt} holds a valid salt"]
+                : ['fail', 'gdpr_salt_file', "gdpr_salt_file {$salt} is unreadable, empty or corrupt; restore it from a backup (a new salt breaks existing GDPR hash matches)"];
+        } else {
+            $existing = $nearestExisting(dirname($salt));
+            $checks[] = is_dir($existing) && is_writable($existing)
+                ? ['ok', 'gdpr_salt_file', "gdpr_salt_file {$salt} does not exist yet and will be created on first use"]
+                : ['fail', 'gdpr_salt_file', "gdpr_salt_file {$salt} does not exist and {$existing} is not a writable directory to create it in"];
         }
         return $checks;
     }
