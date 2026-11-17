@@ -1235,16 +1235,25 @@ class ShippingService
     public static function isPickupMethod(string $methodCode): bool
     {
         if ($methodCode === '') return false;
-        if (self::hasDatabasePricing()) {
-            $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = :code AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup' OR service_type = 'store_pickup')"
-                . (Db::hasColumn('shipping_methods', 'store_id') ? ' AND store_id = :store' : '') . ' LIMIT 1');
-            $stmt->execute([':code' => $methodCode] + (Db::hasColumn('shipping_methods', 'store_id') ? [':store' => StoreContext::current()->providerId()] : []));
-            if ($stmt->fetchColumn() !== false) return true;
-        }
+        if (self::hasDatabasePricing()
+            && self::isStorePickupMethod(Db::get(), $methodCode, Db::hasColumn('shipping_methods', 'store_id') ? StoreContext::current()->providerId() : null)) return true;
         foreach (self::resolveAdapters() as $adapter) {
             if ($adapter->carrierId() === 'pickup' && $methodCode === 'pickup') return true;
         }
         return false;
+    }
+
+    /**
+     * R41 (medium 2): the one test of a configured collection-in-store method, shared with OssThreshold (which has no
+     * store context): of the shipping methods of provider scope $providerScope (any when null, a schema without store_id),
+     * the pickup carrier or adapter, or service_type "store_pickup".
+     */
+    public static function isStorePickupMethod(\PDO $db, string $methodCode, ?string $providerScope): bool
+    {
+        $stmt = $db->prepare("SELECT 1 FROM shipping_methods WHERE code = ? AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup' OR service_type = 'store_pickup')"
+            . ($providerScope !== null ? ' AND store_id = ?' : '') . ' LIMIT 1');
+        $stmt->execute($providerScope !== null ? [$methodCode, $providerScope] : [$methodCode]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /** @return list<string> codes of the shipping methods the store set up, active or not */

@@ -535,14 +535,16 @@ final class OssThreshold
      * Whether an order's method is collection in the seller's store (ShippingService::isPickupMethod() without a store
      * context, as in a migration recounting documents): the code "pickup", or a method of that carrier or adapter.
      * R40 (low): of the order's store; another store's pickup method of the same code counted a courier order as collected.
+     * R41 (medium 2): of the store's provider scope, whose shipping methods its checkout offered (the sample "de" store
+     * ships with "default"'s, so its collection was counted abroad), and service_type "store_pickup" too — the test
+     * ShippingService::isPickupMethod() applies at checkout.
      */
     private static function collected(string $method, string $storeId): bool
     {
         if ($method === '' || $method === 'digital') return false;
         if ($method === 'pickup') return true;
-        $stmt = Db::get()->prepare("SELECT 1 FROM shipping_methods WHERE code = ? AND store_id = ? AND (carrier = 'pickup' OR adapter_class = 'PersonalPickup') LIMIT 1");
-        $stmt->execute([$method, $storeId]);
-        return $stmt->fetchColumn() !== false;
+        $scope = (string)(self::storeConfig($storeId)['provider_scope'] ?? $storeId);
+        return ShippingService::isStorePickupMethod(Db::get(), $method, $scope);
     }
 
     public static function activated(PDO $db, string $storeId, array $store, int $year, bool $withPrevious = true, ?array $stores = null): bool
