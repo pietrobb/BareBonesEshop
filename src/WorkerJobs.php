@@ -517,8 +517,6 @@ final class WorkerJobs
         JobQueue::heartbeat(true); // a fresh lease for the PDF rendering
         $invoice = InvoiceService::issue($orderId);
         if (!$invoice) return;
-        // R41 (low 4): refunds booked before the invoice existed get their credit notes now.
-        InvoiceService::queueCreditsOfBookedRefunds($orderId);
         JobQueue::heartbeat(); // renew (or abort if taken over) before the slow mail delivery
 
         $order = Orders::byId($orderId);

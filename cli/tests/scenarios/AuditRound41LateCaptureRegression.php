@@ -9,6 +9,9 @@
 echo "\n--- R41 late capture: credit note of a refund booked before the invoice, fulfilled orders left alone ---\n";
 
 Bootstrap::initStoreContext('/', '', 'default');
+$r41lJobsDir = test_fixture_path('r41l-jobs');
+JobQueue::setDir($r41lJobsDir);
+$r41lOrder = 0;
 $r41lOrders = [];
 $r41lCart = $_SESSION['cart'] ?? null;
 try {
@@ -32,16 +35,25 @@ try {
 
     PaymentService::settleLateCapture($r41lOrder, 'R41L capture');
     assert_equals('paid', (string)Orders::byId($r41lOrder)['status'], 'R41 late capture: captured after a partial refund, the pending order is paid (R40, control)');
+    // Issued the way the admin's "issue invoice" button and cli/invoices-backfill.php do (InvoiceService::issue() alone,
+    // no invoice_issue job): capability review 533, the credit note job was queued by the worker job only.
+    $r41lCreditJobs = static function () use ($r41lJobsDir, &$r41lOrder): array {
+        $jobs = [];
+        foreach (glob($r41lJobsDir . '/pending/*.json') ?: [] as $file) {
+            $job = json_decode((string)file_get_contents($file), true) ?: [];
+            if (($job['type'] ?? '') === 'refund_credit_note' && (int)($job['payload']['order_id'] ?? 0) === $r41lOrder) $jobs[] = (string)($job['payload']['refund_key'] ?? '');
+        }
+        return $jobs;
+    };
     $r41lInvoice = InvoiceService::issue($r41lOrder);
     assert_true(is_array($r41lInvoice) && (int)$r41lInvoice['total_gross'] === $r41lTotal, 'R41 late capture: the invoice is for the whole order');
-    assert_equals(1, InvoiceService::queueCreditsOfBookedRefunds($r41lOrder), 'R41 late capture: the refund booked before the invoice gets its credit note job again');
-    $r41lCredit = InvoiceService::creditBookedRefund($r41lOrder, 'stripe_refund_re_r41l_part');
-    assert_true(is_array($r41lCredit) && (int)$r41lCredit['total_gross'] === -500 && (string)$r41lCredit['type'] === 'credit_note',
-        'R41 late capture: that job issues the credit note of the 5.00 refunded (was: 30.00 invoiced, no credit note) (got ' . json_encode(is_array($r41lCredit) ? [$r41lCredit['type'], $r41lCredit['total_gross']] : $r41lCredit) . ')');
+    assert_equals(['stripe_refund_re_r41l_part'], $r41lCreditJobs(), 'R41 late capture: issuing the invoice (admin button, backfill, worker alike) queues the credit note job of the refund booked before it');
+    InvoiceService::issue($r41lOrder);
+    assert_equals(1, count($r41lCreditJobs()), 'R41 late capture: issuing again returns the existing invoice and queues nothing more');
+    foreach ($r41lCreditJobs() as $r41lKey) $r41lCredit = InvoiceService::creditBookedRefund($r41lOrder, $r41lKey);
+    assert_true(is_array($r41lCredit ?? null) && (int)$r41lCredit['total_gross'] === -500 && (string)$r41lCredit['type'] === 'credit_note',
+        'R41 late capture: that job issues the credit note of the 5.00 refunded (was: 30.00 invoiced, no credit note) (got ' . json_encode(is_array($r41lCredit ?? null) ? [$r41lCredit['type'], $r41lCredit['total_gross']] : null) . ')');
     assert_equals(0, InvoiceService::queueCreditsOfBookedRefunds($r41lOrder), 'R41 late capture: a refund credited already is not queued again');
-    $r41lWorker = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/WorkerJobs.php');
-    assert_true((bool)preg_match('/InvoiceService::issue\(\$orderId\);\s*if \(!\$invoice\) return;\s*\/\/[^\n]*\n\s*InvoiceService::queueCreditsOfBookedRefunds\(\$orderId\);/', $r41lWorker),
-        'R41 late capture: the invoice_issue job queues them right after issuing the invoice');
 
     // 5. Fulfilled orders without a 'paid' ledger row (older data) are left as they are.
     foreach (['processing', 'shipped', 'paid'] as $r41lStatus) {

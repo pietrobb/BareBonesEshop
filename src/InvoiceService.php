@@ -232,6 +232,9 @@ final class InvoiceService
         $vatBreakdown['services_only'] = self::servicesOnly($order);
         $pdfBin  = self::renderPdf($invoice, self::invoiceRows($invoice, $order, $items, $financialSnapshot), $sellerSnapshot, $customerSnapshot, $vatBreakdown);
         self::writePdf($absPath, $pdfBin);
+        // R41 (low 4, capability review 533): refunds booked before the invoice existed get their credit notes now, however
+        // it is issued (invoice_issue job, the admin's button, cli/invoices-backfill.php). Only a newly issued invoice.
+        self::queueCreditsOfBookedRefunds($orderId);
 
         return $invoice;
     }
@@ -442,7 +445,7 @@ final class InvoiceService
     /**
      * R41 (low 4): refunds the ledger booked before the order had an invoice (a refund of a payment the shop still held
      * pending, then its late capture: PaymentService::settleLateCapture()) found nothing to correct and their
-     * refund_credit_note job ended; the invoice issued afterwards was for the whole order. Once it is issued, every refund
+     * refund_credit_note job ended; the invoice issued afterwards was for the whole order. Once it is issued (issueAttempt()), every refund
      * of the order without its credit note gets the job again (creditBookedRefund(): item refunds and those credited already
      * are left alone). Returns how many were queued.
      */
