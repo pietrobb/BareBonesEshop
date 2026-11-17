@@ -129,6 +129,15 @@ try {
     // database are the owner's work, the snapshot root's.
     $r42pOwner = PrivateOwner::find(PrivateOwner::directories(require $r42pApp . '/config.php', $r42pApp));
     assert_true(is_array($r42pOwner) && $r42pOwner['uid'] === 65534 && $r42pOwner['dir'] === $r42pPrivate, 'R42 root: the private directory\'s owner is found');
+    // This process runs the checkout's classes, which the web user may not read (CI: /home/runner is 0750): load them
+    // while still root. A real step runs the shop's own tree, which the web user reads anyway.
+    foreach (glob($r42pRepo . '/src/*.php') ?: [] as $r42pClassFile) {
+        $r42pClass = basename($r42pClassFile, '.php');
+        if (preg_match('/^(?:final\s+|abstract\s+|readonly\s+)*(?:class|interface|trait|enum)\s+' . preg_quote($r42pClass, '/') . '\b/m', (string)file_get_contents($r42pClassFile)) === 1
+            && !class_exists($r42pClass) && !interface_exists($r42pClass) && !trait_exists($r42pClass) && !enum_exists($r42pClass)) {
+            throw new RuntimeException('R42 root: could not preload ' . $r42pClass);
+        }
+    }
     PrivateOwner::record($r42pOwner);
     try {
         Db::useConfig($r42pApp . '/config.php');
