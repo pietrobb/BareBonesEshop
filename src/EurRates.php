@@ -70,6 +70,9 @@ final class EurRates
      * now, the stored rates kept: a date after today or before the stored one, a currency stored before missing (or fewer
      * than MIN_CURRENCIES at first), a rate more than MAX_CHANGE away from the stored or configured one. $force (checked
      * by the merchant: php cli/eur-rates.php --force) accepts a missing currency and a large change, never a future date.
+     * R41 (low): a first feed's currencies the configuration lacks are checked too (ANCHORS), a rate is bounded by the week
+     * before its day as well (feeds fetched again the same day moved it by 50 % each), and --force refuses a rate outside
+     * MIN_RATE..MAX_RATE or FORCE_FACTOR times away from what it was.
      * @return array{as_of: string, count: int}
      */
     public static function refresh(PDO $db, bool $force = false): array
@@ -121,21 +124,68 @@ final class EurRates
             $storedAsOf = max($storedAsOf, (string)$row['as_of']);
         }
         if (strcmp($asOf, $storedAsOf) < 0) throw new RuntimeException("The ECB rates feed is dated {$asOf}, before the stored rates ({$storedAsOf})");
-        if ($force) return;
-        $missing = array_diff(array_keys($stored), array_keys($rates));
-        if ($missing !== []) throw new RuntimeException('The ECB rates feed lacks ' . implode(', ', $missing) . '; check it and run php cli/eur-rates.php --force to store it anyway');
-        if ($stored === [] && count($rates) < self::MIN_CURRENCIES) throw new RuntimeException('The ECB rates feed has only ' . count($rates) . ' currencies');
         $configured = [];
         foreach ((array)(VatService::config()['eur_exchange_rates'] ?? []) as $code => $rate) {
             if (is_numeric($rate) && (float)$rate > 0) $configured[strtoupper((string)$code)] = (float)$rate;
         }
+        $before = self::daysBefore($db, $asOf);
         foreach ($rates as $code => $rate) {
-            $reference = $stored[$code] ?? $configured[$code] ?? null;
-            if ($reference !== null && abs($rate / $reference - 1) > self::MAX_CHANGE) {
-                throw new RuntimeException("The ECB rate of {$code} ({$rate} EUR) is more than 50 % away from the one it replaces ({$reference} EUR); check it and run php cli/eur-rates.php --force to store it anyway");
+            // R41 (low): no rate, even forced, outside what any currency is worth, nor FORCE_FACTOR away from what it was.
+            if ($rate < self::MIN_RATE || $rate > self::MAX_RATE) throw new RuntimeException("The ECB rate of {$code} ({$rate} EUR) is not a plausible rate");
+            $anchor = $stored[$code] ?? $before[$code][0] ?? $configured[$code] ?? self::ANCHORS[$code] ?? null;
+            if ($anchor !== null && max($rate / $anchor, $anchor / $rate) > self::FORCE_FACTOR) {
+                throw new RuntimeException("The ECB rate of {$code} ({$rate} EUR) is more than " . self::FORCE_FACTOR . " times away from {$anchor} EUR; it is not stored, not even with --force");
+            }
+        }
+        if ($force) return;
+        $missing = array_diff(array_keys($stored), array_keys($rates));
+        if ($missing !== []) throw new RuntimeException('The ECB rates feed lacks ' . implode(', ', $missing) . '; check it and run php cli/eur-rates.php --force to store it anyway');
+        if ($stored === [] && count($rates) < self::MIN_CURRENCIES) throw new RuntimeException('The ECB rates feed has only ' . count($rates) . ' currencies');
+        foreach ($rates as $code => $rate) {
+            // R41 (low): every rate the ECB published in the week before this feed's day bounds it too, so feeds fetched
+            // again the same day cannot move a rate by MAX_CHANGE each; the stored one may be such a feed's.
+            $references = array_merge(isset($stored[$code]) ? [$stored[$code]] : [], $before[$code] ?? []);
+            if ($references === [] && isset($configured[$code])) $references = [$configured[$code]];
+            foreach ($references as $reference) {
+                if (abs($rate / $reference - 1) > self::MAX_CHANGE) {
+                    throw new RuntimeException("The ECB rate of {$code} ({$rate} EUR) is more than 50 % away from {$reference} EUR it had; check it and run php cli/eur-rates.php --force to store it anyway");
+                }
+            }
+            // R41 (low): a first feed's currency the configuration lacks is checked against ANCHORS (wider: they age).
+            if ($references === [] && isset(self::ANCHORS[$code]) && max($rate / self::ANCHORS[$code], self::ANCHORS[$code] / $rate) > self::ANCHOR_FACTOR) {
+                throw new RuntimeException("The ECB rate of {$code} ({$rate} EUR) is more than " . self::ANCHOR_FACTOR . ' times away from about ' . self::ANCHORS[$code] . ' EUR; check it and run php cli/eur-rates.php --force to store it anyway');
             }
         }
     }
+
+    /** @return array<string, list<float>> the history's rates (EUR per unit, by currency) of the ISSUE_WINDOW_DAYS before $asOf */
+    private static function daysBefore(PDO $db, string $asOf): array
+    {
+        if (!Db::tableExists('eur_exchange_rate_history', $db)) return [];
+        $from = gmdate('Y-m-d', (int)strtotime($asOf . ' 00:00:00 UTC') - self::ISSUE_WINDOW_DAYS * 86400);
+        $stmt = $db->prepare('SELECT currency, rate FROM eur_exchange_rate_history WHERE as_of < ? AND as_of >= ? ORDER BY as_of DESC');
+        $stmt->execute([$asOf, $from]);
+        $before = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ((float)$row['rate'] > 0) $before[strtoupper((string)$row['currency'])][] = (float)$row['rate'];
+        }
+        return $before;
+    }
+
+    /** R41 (low): EUR per unit no currency is outside of (the ECB's range is about 0.00005 IDR to 1.2 GBP). */
+    public const MIN_RATE = 1e-6;
+    public const MAX_RATE = 1e3;
+    /** R41 (low): --force accepts a move up to this factor, never more (a decimal point lost, a rate inverted). */
+    public const FORCE_FACTOR = 10;
+    /** R41 (low): a first feed's rate may be this factor away from ANCHORS (approximate, they age). */
+    public const ANCHOR_FACTOR = 3;
+    /** R41 (low): approximate EUR per unit (2026) of the currencies the ECB publishes, for a first feed's unconfigured ones. */
+    public const ANCHORS = [
+        'USD' => 0.86, 'JPY' => 0.0058, 'BGN' => 0.511, 'CZK' => 0.041, 'DKK' => 0.134, 'GBP' => 1.15, 'HUF' => 0.0026, 'PLN' => 0.235,
+        'RON' => 0.197, 'SEK' => 0.091, 'CHF' => 1.07, 'ISK' => 0.0070, 'NOK' => 0.085, 'TRY' => 0.021, 'AUD' => 0.56, 'BRL' => 0.16,
+        'CAD' => 0.62, 'CNY' => 0.12, 'HKD' => 0.11, 'IDR' => 0.000052, 'ILS' => 0.26, 'INR' => 0.0098, 'KRW' => 0.00060, 'MXN' => 0.047,
+        'MYR' => 0.205, 'NZD' => 0.49, 'PHP' => 0.0148, 'SGD' => 0.66, 'THB' => 0.026, 'ZAR' => 0.049,
+    ];
 
     /** R41: the ECB's last 90 days, and its whole history (since 1999, several MB) for documents issued before them. */
     public const HISTORY_90D = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml';
