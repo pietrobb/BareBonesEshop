@@ -441,6 +441,14 @@ class Setup
                 // R39 (low): the ECB rates are fetched (cli/eur-rates.php, EurRates); the configured ones are the fallback.
                 'action' => 'Add the daily cron line "php cli/eur-rates.php" (ECB reference rates), or update eur_exchange_rates in config/vat-rates.json to the rates your accountant uses and set eur_exchange_rates_as_of to their date (YYYY-MM-DD).'];
         }
+        // R41 (medium 3): documents still without the ECB rate of their day are counted at today's rate meanwhile.
+        $pending = OssThreshold::pendingOfSeller($db, $storeId, $store, $stores);
+        $window = gmdate('Y-m-d', ShopTime::now() - EurRates::ISSUE_WINDOW_DAYS * 86400);
+        if ($pending['oldest'] !== null && strcmp($pending['oldest'], $window) < 0) {
+            return ['status' => 'warn', 'name' => $name,
+                'message' => "{$pending['pending']} invoices or credit notes in " . implode(', ', $pending['currencies']) . " issued since {$pending['oldest']} are counted against the 10 000 EUR OSS threshold at today's EUR rate: the ECB rate of their day is not stored; counted so far: {$amount}.",
+                'action' => 'Run "php cli/eur-rates.php" (it converts them at the ECB rate of their day, from the ECB history) and keep it as a daily cron line.'];
+        }
         return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];
     }
 

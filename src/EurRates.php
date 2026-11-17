@@ -98,6 +98,7 @@ final class EurRates
             $db->exec('DELETE FROM eur_exchange_rates');
             $insert = $db->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)');
             foreach ($rates as $code => $rate) $insert->execute([$code, $rate, $asOf]);
+            self::remember($db, [$asOf => $rates]);
         } catch (Throwable $e) {
             if ($own) $db->rollBack();
             throw $e;
@@ -136,7 +137,92 @@ final class EurRates
         }
     }
 
-    private static function download(string $url): string
+    /** R41: the ECB's last 90 days, and its whole history (since 1999, several MB) for documents issued before them. */
+    public const HISTORY_90D = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml';
+    public const HISTORY_ALL = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.xml';
+    /**
+     * R41 (medium 3): a document counts in EUR at the ECB rate of its day (art. 91(2): the latest one published then) — a
+     * rate dated at most this many days before it (weekends and TARGET holidays have none). Nothing older, and never a
+     * configured rate, is fixed into invoices.oss_net_eur.
+     */
+    public const ISSUE_WINDOW_DAYS = 7;
+
+    /**
+     * R41 (medium 3): EUR per unit of $currency the ECB published on $date or within ISSUE_WINDOW_DAYS before (the
+     * history cli/eur-rates.php keeps, or the stored daily rates), else null.
+     */
+    public static function rateOn(PDO $db, string $currency, string $date): ?float
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return null;
+        $from = gmdate('Y-m-d', (int)strtotime($date . ' 00:00:00 UTC') - self::ISSUE_WINDOW_DAYS * 86400);
+        foreach (['eur_exchange_rate_history', 'eur_exchange_rates'] as $table) {
+            if (!Db::tableExists($table, $db)) continue;
+            $stmt = $db->prepare("SELECT rate FROM {$table} WHERE currency = ? AND as_of <= ? AND as_of >= ? ORDER BY as_of DESC LIMIT 1");
+            $stmt->execute([strtoupper($currency), $date, $from]);
+            $rate = $stmt->fetchColumn();
+            if (is_numeric($rate) && (float)$rate > 0) return (float)$rate;
+        }
+        return null;
+    }
+
+    /**
+     * R41 (medium 3): store the ECB's rates of the days since $since (YYYY-MM-DD) of $currencies (upper case) in the history
+     * rateOn() reads: the 90-day feed, or the whole history when $since is older. A rate more than MAX_CHANGE away from the
+     * current one is not stored (its documents stay counted at the current rate). Returns [days stored, rates refused].
+     * @param list<string> $currencies
+     * @return array{days: int, refused: list<string>}
+     */
+    public static function fetchHistory(PDO $db, string $since, array $currencies): array
+    {
+        $today = gmdate('Y-m-d', ShopTime::now());
+        $url = strcmp($since, gmdate('Y-m-d', ShopTime::now() - 85 * 86400)) >= 0 ? self::HISTORY_90D : self::HISTORY_ALL;
+        $body = self::$fixtureTransport !== null ? (string)(self::$fixtureTransport)($url) : self::download($url, 32 * 1048576);
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($body, SimpleXMLElement::class, LIBXML_NONET | LIBXML_PARSEHUGE);
+        libxml_use_internal_errors($previous);
+        if ($xml === false) throw new RuntimeException('The ECB rates history is not XML');
+        $current = self::current()['rates'];
+        $from = gmdate('Y-m-d', (int)strtotime($since . ' 00:00:00 UTC') - self::ISSUE_WINDOW_DAYS * 86400);
+        $wanted = array_flip(array_map('strtoupper', $currencies));
+        $days = [];
+        $refused = [];
+        $xml->registerXPathNamespace('e', 'http://www.ecb.int/vocabulary/2002-08-01/eurofxref');
+        foreach ($xml->xpath('//e:Cube[@time]') ?: [] as $day) {
+            $asOf = (string)$day['time'];
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $asOf) || strcmp($asOf, $from) < 0 || strcmp($asOf, $today) > 0) continue;
+            $day->registerXPathNamespace('e', 'http://www.ecb.int/vocabulary/2002-08-01/eurofxref');
+            foreach ($day->xpath('e:Cube[@currency]') ?: [] as $cube) {
+                $code = strtoupper((string)$cube['currency']);
+                $perEur = (float)(string)$cube['rate'];
+                if (!isset($wanted[$code]) || $perEur <= 0) continue;
+                $rate = 1 / $perEur;
+                $reference = $current[strtolower($code)] ?? null;
+                if ($reference === null || abs($rate / $reference - 1) > self::MAX_CHANGE) {
+                    $refused[] = "{$code} {$asOf}";
+                    continue;
+                }
+                $days[$asOf][$code] = $rate;
+            }
+        }
+        self::remember($db, $days);
+        return ['days' => count($days), 'refused' => $refused];
+    }
+
+    /** @param array<string, array<string, float>> $days date => EUR per unit by upper-case currency */
+    private static function remember(PDO $db, array $days): void
+    {
+        if ($days === [] || !Db::tableExists('eur_exchange_rate_history', $db)) return;
+        $delete = $db->prepare('DELETE FROM eur_exchange_rate_history WHERE currency = ? AND as_of = ?');
+        $insert = $db->prepare('INSERT INTO eur_exchange_rate_history (currency, as_of, rate) VALUES (?, ?, ?)');
+        foreach ($days as $asOf => $rates) {
+            foreach ($rates as $code => $rate) {
+                $delete->execute([$code, $asOf]);
+                $insert->execute([$code, $asOf, $rate]);
+            }
+        }
+    }
+
+    private static function download(string $url, int $limit = 1048576): string
     {
         if (!function_exists('curl_init')) throw new RuntimeException('cURL extension is required to fetch the ECB rates');
         $ch = curl_init($url);
@@ -145,7 +231,7 @@ final class EurRates
         $body = curl_exec($ch);
         $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $error = curl_error($ch);
-        if (!is_string($body) || $status !== 200 || strlen($body) > 1048576) throw new RuntimeException("The ECB rates feed answered HTTP {$status} {$error}");
+        if (!is_string($body) || $status !== 200 || strlen($body) > $limit) throw new RuntimeException("The ECB rates feed answered HTTP {$status} {$error}");
         return $body;
     }
 }
