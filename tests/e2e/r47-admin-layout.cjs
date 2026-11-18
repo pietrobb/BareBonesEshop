@@ -1,5 +1,5 @@
 // R47: real admin pages in Chromium at phone, tablet and desktop widths; nothing may widen the page.
-/* global fixture, console, process, document */
+/* global fixture, console, process, document, getComputedStyle */
 (async () => {
   const { chromium, expect } = require(fixture.playwright);
   const browser = await chromium.launch({ headless: true });
