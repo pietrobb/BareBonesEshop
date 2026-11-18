@@ -796,7 +796,9 @@ final class Updater
             : 'config.php points ' . implode(', ', $inside) . ' inside the application root (or uses a relative path), which this release refuses'
                 . ' (the admin, workers and cron fail); move them outside the web root (default: ../bareboneseshop-private/…)'
                 . ' and move their contents before the update');
-        if (DataOverrides::storesNeedUpgrade($this->root, $config)) {
+        // R47 (review round 17, low): stores.json in private_runtime_dir is the owner's file: root reads it as the owner,
+        // like it writes it, so a symlink there cannot make root read (and answer yes/no about) a file the owner may not.
+        if (PrivateOwner::run(fn(): bool => DataOverrides::storesNeedUpgrade($this->root, $config))) {
             $hasDataDirectory = DataOverrides::dir($config) !== null;
             $add($hasDataDirectory ? 'warn' : 'fail', 'stores', $hasDataDirectory
                 ? 'stores.json is in the v1.x format (no default_store); apply writes the upgraded copy to private_runtime_dir/stores.json'
