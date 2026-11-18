@@ -38,9 +38,20 @@ $r44oSwapper = static function (string $dir, string $name, array $targets) {
         . '    for l in links:' . "\n"
         . '        for _ in range(1000): libc.renameat2(-100, n, -100, l, 2)' . "\n";
     $process = proc_open(array_merge(['setpriv', '--reuid=65534', '--regid=65534', '--clear-groups', 'python3', '-c', $script, $dir, $name], $targets), [], $pipes);
-    usleep(300000);
+    // The race is only proven when the swapper really runs: it must be alive with all its links in place, else the
+    // test fails (a missing setpriv/python3 or a failing renameat2 must not pass as "0 leaks").
+    $links = 0;
+    for ($wait = 0; $wait < 40 && $links < count($targets); $wait++) {
+        usleep(50000);
+        clearstatcache();
+        $links = count(glob($dir . '/' . $name . '.l*', GLOB_NOSORT) ?: []);
+    }
+    if (!is_resource($process) || !proc_get_status($process)['running'] || $links !== count($targets)) {
+        throw new RuntimeException("R44 swapper did not start in {$dir} ({$links} of " . count($targets) . ' links)');
+    }
     return $process;
 };
+$r44oAlive = static fn($swapper): bool => is_resource($swapper) && proc_get_status($swapper)['running'];
 $r44oStop = static function ($swapper, string $dir, string $name): void {
     proc_terminate($swapper, 9);
     proc_close($swapper);
@@ -121,6 +132,7 @@ try {
         $r44oSwap = $r44oSwapper($r44oParent, 'private', [$r44oBase . '/secret', $r44oBase . '/other']);
         try {
             $r44oResults[$r44oLayout] = $r44oRace($r44oParent . '/private', 4.0);
+            $r44oResults[$r44oLayout]['alive'] = $r44oAlive($r44oSwap);
         } finally {
             $r44oStop($r44oSwap, $r44oParent, 'private');
         }
@@ -129,6 +141,9 @@ try {
         assert_true($r44oCount['root'] === 0 && $r44oCount['other'] === 0 && $r44oCount['owner'] > 0,
             "R44 root: {$r44oCount['calls']} find() calls while the web user swaps its private directory ({$r44oLayout} parent): never root's alone,"
             . ' never another account, the owner otherwise (' . json_encode($r44oCount) . ')');
+        // Proof the swap landed during find(): the swapper outlived the race and some calls caught the link and refused.
+        assert_true($r44oCount['alive'] && $r44oCount['refused'] > 0,
+            "R44 root: the swap really happened during the race ({$r44oLayout} parent): swapper alive, refused > 0 (" . json_encode($r44oCount) . ')');
     }
 
     // End to end: migrate.php started as root in a root-owned tree, its database in the swapped directory, never
@@ -143,12 +158,22 @@ try {
     file_put_contents($r44oApp . '/config.php', '<?php return ' . var_export(['db_driver' => 'sqlite', 'db_sqlite_path' => $r44oBase . '/web/private/shop.sqlite',
         'private_runtime_dir' => $r44oBase . '/web/private'], true) . ';');
     shell_exec('chown -R 0:0 ' . escapeshellarg($r44oApp) . ' && chmod -R go-w ' . escapeshellarg($r44oApp));
+    // Without the swap the same migrate.php works (as the private directory's owner): the harness itself is sound.
+    [$r44oX, $r44oO] = $r44oRun([PHP_BINARY, $r44oApp . '/cli/migrate.php', '--skip-backup']);
+    assert_true($r44oX === 0 && is_file($r44oBase . '/web/private/shop.sqlite'),
+        'R44 root: without the swap migrate.php as root runs as the owner and creates its database (exit ' . $r44oX . ': ' . substr(trim($r44oO), -300) . ')');
     $r44oSwap = $r44oSwapper($r44oBase . '/web', 'private', [$r44oBase . '/secret']);
     try {
-        for ($r44oI = 0; $r44oI < 40; $r44oI++) $r44oRun([PHP_BINARY, $r44oApp . '/cli/migrate.php', '--skip-backup']);
+        $r44oExits = [];
+        for ($r44oI = 0; $r44oI < 40; $r44oI++) $r44oExits[] = $r44oRun([PHP_BINARY, $r44oApp . '/cli/migrate.php', '--skip-backup'])[0];
+        $r44oE2eAlive = $r44oAlive($r44oSwap);
     } finally {
         $r44oStop($r44oSwap, $r44oBase . '/web', 'private');
     }
+    // Proof the swap reached migrate.php: the swapper outlived the 40 runs and some were refused by find() (exit 1); the
+    // rest switched to the owner first, so a swap after the check only fails to open the database (no root write).
+    assert_true($r44oE2eAlive && in_array(1, $r44oExits, true),
+        'R44 root: the swapper ran through the 40 migrations and some were refused by the owner check (exits ' . json_encode(array_count_values($r44oExits)) . ')');
     $r44oSecret = new PDO('sqlite:' . $r44oSecretDb);
     assert_equals([['t'], ['.', '..', 'shop.sqlite']],
         [$r44oSecret->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN), scandir($r44oBase . '/secret')],
