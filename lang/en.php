@@ -299,6 +299,7 @@ return [
 
     // Admin UI
     'admin.app_name'         => 'BareBonesShop',
+    'admin.nav.badge' => 'Admin',
     'admin.language'         => 'Language',
     'admin.logout'           => 'Log out',
     'admin.nav.dashboard'    => 'Dashboard',

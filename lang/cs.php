@@ -299,6 +299,7 @@ return array_replace(require __DIR__ . '/en.php', [
 
     // Admin UI
     'admin.app_name'         => 'BareBonesShop',
+    'admin.nav.badge' => 'Správa',
     'admin.language'         => 'Jazyk',
     'admin.logout'           => 'Odhlásit',
     'admin.nav.dashboard'    => 'Dashboard',

@@ -466,6 +466,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'no_specs' => 'Sin especificaciones',
     'ph_from' => 'desde',
     'admin.app_name' => 'BareBonesShop',
+    'admin.nav.badge' => 'Gestión',
     'admin.language' => 'Idioma',
     'admin.logout' => 'Cerrar sesión',
     'admin.nav.dashboard' => 'Panel',

@@ -301,6 +301,7 @@ return [
 
     // Admin UI (admin.php)
     'admin.app_name'         => 'BareBonesShop',
+    'admin.nav.badge' => 'Správa',
     'admin.language'         => 'Jazyk',
     'admin.logout'           => 'Odhlásiť',
     // Navigation
