@@ -117,7 +117,9 @@ test('admin pages fit a 360px phone without sideways scrolling or serious axe vi
     '/admin.php?p=products', `/admin.php?p=product&id=${product.row.id}`, '/admin.php?p=reports', '/admin.php?p=customers', '/admin.php?p=page_edit',
     '/admin.php?p=rma', '/admin.php?p=shipping', '/admin.php?p=payments', '/admin.php?p=warehouses', '/admin.php?p=audit',
     // R22: the feed form (its import-mode select), promotions, digital assets and the CSV import page ran off the phone.
-    '/admin.php?p=feed', '/admin.php?p=promotions', '/admin.php?p=digital_assets', '/admin.php?p=import']) {
+    '/admin.php?p=feed', '/admin.php?p=promotions', '/admin.php?p=digital_assets', '/admin.php?p=import',
+    // R47: the stores page's long "example data" badge did not wrap (906px wide on a phone).
+    '/admin.php?p=stores']) {
     await page.goto(path);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `${path} scrolls sideways by ${overflow}px at 360px`).toBeLessThanOrEqual(0);

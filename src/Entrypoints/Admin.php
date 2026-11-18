@@ -162,7 +162,7 @@ h1{margin-bottom:1rem;font-size:1.45rem;font-weight:700;letter-spacing:-.2px}h2{
 table{width:100%;border-collapse:collapse}th,td{padding:.55rem .75rem;text-align:left;border-bottom:1px solid #eef0f3}
 th{background:#f9fafb;font-weight:700;font-size:.72rem;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
 tr:hover{background:#fafbfc}td a:not(.btn){color:var(--text);font-weight:500}td a:not(.btn):hover{color:var(--accent-d)}th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.mono{font-family:var(--mono);font-size:.85em}
-.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;white-space:nowrap}
+.badge{display:inline-block;max-width:100%;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;overflow-wrap:anywhere}td>.badge{white-space:nowrap}
 .badge-pending{background:#fef3c7;color:#92400e}.badge-paid{background:#d1fae5;color:#065f46}.badge-shipped{background:#dbeafe;color:#1e40af}.badge-delivered{background:#d1fae5;color:#065f46}
 .badge-cancelled,.badge-failed{background:#fee2e2;color:#991b1b}.badge-returned{background:#fce7f3;color:#9d174d}.badge-refunded{background:#e2e8f0;color:#475569}.badge-processing{background:#e0e7ff;color:#3730a3}
 .badge-refund_pending{background:#fef3c7;color:#92400e}.badge-authorized{background:#dbeafe;color:#1e40af}
