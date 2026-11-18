@@ -159,7 +159,7 @@ $a154Check = static function(string $label, array $r, array $expect) use ($a154L
     $missing = array_values(array_filter($expect, static fn(string $t): bool => !str_contains($r['out'], $t)));
     assert_true($r['code'] === 200 && $left === [] && $missing === [],
         "{$label} (code=" . var_export($r['code'], true) . ' leftovers=' . json_encode($left, JSON_UNESCAPED_UNICODE)
-        . ' missing=' . json_encode($missing, JSON_UNESCAPED_UNICODE) . ($r['code'] === null ? ' raw=' . $r['out'] : '') . ($missing ? ' main=' . substr((string)strstr($r['out'], '<main>'), 0, 500) : '') . ')');
+        . ' missing=' . json_encode($missing, JSON_UNESCAPED_UNICODE) . ($r['code'] === null ? ' raw=' . $r['out'] : '') . ($missing ? ' main=' . substr((string)strstr($r['out'], '<main'), 0, 500) : '') . ')');
 };
 
 try {
