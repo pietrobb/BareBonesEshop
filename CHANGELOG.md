@@ -244,6 +244,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   with what `lstat()` saw) and takes the owner from that same directory. **Refused from now on for steps started as
   root:** a private directory configured as a link (configure the directory it points to), and a directory on the way
   that any account may write without the sticky bit. A parent the web user owns and a sticky `/tmp` stay supported.
+- **The doctor run by root checks the private paths as their owner (review round 44, low 2 and 3).** `update.php doctor`
+  started as root reported `jobs_dir`, `private_cache_dir` and the GDPR salt's directory writable whatever their mode,
+  because `is_writable()` goes by the real user (root, also while it works as the owner); it now creates and deletes a
+  probe file as the owner. `update.php` started as root no longer creates the update directory in the web user's private directory
+  before refusing it: it refuses first and creates nothing.
 - **Root works in the private directory only as its owner (review round 42, medium 1 and 2, low 7).** In a tree root
   owns alone, root kept root in the private runtime directory too and checked each path before opening it there: the
   web user's link at `<db>.migrations.lock` made `migrate.php` create its target (`/etc/nologin`), and the database

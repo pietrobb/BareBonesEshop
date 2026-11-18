@@ -48,6 +48,8 @@ final class Updater
         }
         $this->root = rtrim($realRoot, DIRECTORY_SEPARATOR);
         $this->stateDirectory = $this->absolutePath($stateDirectory);
+        $asRoot = PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() === 0 && function_exists('cli_not_root_only');
+        if ($asRoot) self::assertRootMayCreate($this->stateDirectory);
         $this->ensureDirectory($this->stateDirectory, 0750);
         $realStateDirectory = realpath($this->stateDirectory);
         if ($realStateDirectory === false || is_link($this->stateDirectory)) {
@@ -61,7 +63,7 @@ final class Updater
         // R28 (finding 5): root keeps root only in a tree no other account can change (cli/cli-only.php), but the update
         // directory was not checked: in the private directory the web user writes (SQLite), it put code into a snapshot,
         // a rollback installed it root:root and the next step ran it as root. Root needs that directory to be root's too.
-        if (PHP_OS_FAMILY !== 'Windows' && function_exists('posix_geteuid') && posix_geteuid() === 0 && function_exists('cli_not_root_only')) {
+        if ($asRoot) {
             $why = cli_not_root_only($this->stateDirectory);
             if ($why !== null) {
                 throw new RuntimeException("REFUSED: this step runs as root, but the update directory is not root's alone: {$why},"
@@ -837,7 +839,7 @@ final class Updater
             if ($this->isInsideRoot($dir)) continue;
             clearstatcache();
             if (is_dir($dir)) {
-                $checks[] = is_writable($dir)
+                $checks[] = self::canCreateIn($dir)
                     ? ['ok', $setting, "{$setting} {$dir} is a writable directory outside the application root"]
                     : ['fail', $setting, "{$setting} {$dir} is not writable by the shop; the worker and the shop fail on first use (chown it to the web server user)"];
                 continue;
@@ -845,7 +847,7 @@ final class Updater
             $existing = $nearestExisting($dir);
             $checks[] = file_exists($dir) || is_link($dir)
                 ? ['fail', $setting, "{$setting} {$dir} is not a directory"]
-                : (is_dir($existing) && is_writable($existing)
+                : (self::canCreateIn($existing)
                     ? ['ok', $setting, "{$setting} {$dir} does not exist yet and will be created on first use"]
                     : ['fail', $setting, "{$setting} {$dir} does not exist and {$existing} is not a writable directory to create it in"]);
         }
@@ -865,11 +867,28 @@ final class Updater
                 : ['fail', 'gdpr_salt_file', "gdpr_salt_file {$salt} is unreadable, empty or corrupt; restore it from a backup (a new salt breaks existing GDPR hash matches)"];
         } else {
             $existing = $nearestExisting(dirname($salt));
-            $checks[] = is_dir($existing) && is_writable($existing)
+            $checks[] = self::canCreateIn($existing)
                 ? ['ok', 'gdpr_salt_file', "gdpr_salt_file {$salt} does not exist yet and will be created on first use"]
                 : ['fail', 'gdpr_salt_file', "gdpr_salt_file {$salt} does not exist and {$existing} is not a writable directory to create it in"];
         }
         return $checks;
+    }
+
+    /**
+     * R44 (review round 16, low 2): is_writable() asks access(), which goes by the real user: root's also inside
+     * PrivateOwner::run(), where only the effective user is the owner's, so the doctor run by root said "writable" for
+     * any mode. Creating and deleting a file there is what the kernel lets the effective user do.
+     */
+    private static function canCreateIn(string $dir): bool
+    {
+        clearstatcache();
+        if (!is_dir($dir)) return false;
+        $probe = rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . '.bbe-doctor-' . bin2hex(random_bytes(6));
+        $handle = @fopen($probe, 'x');
+        if ($handle === false) return false;
+        fclose($handle);
+        @unlink($probe);
+        return true;
     }
 
     /** Mirrors the runtime checks (JobQueue::validatePrivateDir): a relative path is refused as well. */
@@ -1869,6 +1888,29 @@ final class Updater
                     if ($entry !== '.' && $entry !== '..') $pending[] = $path . DIRECTORY_SEPARATOR . $entry;
                 }
             }
+        }
+    }
+
+    /**
+     * R44 (review round 16, low 3): root created a missing update directory first (root's, in the private directory the
+     * web user writes) and refused it only afterwards, leaving it behind. Root creates it only where cli_not_root_only()
+     * accepts it: the nearest existing directory and every one above it root's, written by no one else (sticky aside).
+     */
+    private static function assertRootMayCreate(string $path): void
+    {
+        clearstatcache();
+        if (file_exists($path) || is_link($path)) return;
+        $existing = $path;
+        while (!file_exists($existing) && !is_link($existing) && dirname($existing) !== $existing) $existing = dirname($existing);
+        for ($dir = $existing; ; $dir = dirname($dir)) {
+            $s = @stat($dir);
+            if (!is_array($s) || ((int)$s['mode'] & 0170000) !== 0040000 || (int)$s['uid'] !== 0
+                || (((int)$s['mode'] & 0022) !== 0 && ((int)$s['mode'] & 01000) === 0)) {
+                throw new RuntimeException("REFUSED: this step runs as root, but the update directory {$path} does not exist and {$dir} is not root's alone,"
+                    . ' so root would create it where another account can change it (nothing was created). Run the step as the owner of the'
+                    . ' application root, or set update_storage_dir to a directory only root can write (not under a directory the web user writes).');
+            }
+            if ($dir === dirname($dir)) break;
         }
     }
 
