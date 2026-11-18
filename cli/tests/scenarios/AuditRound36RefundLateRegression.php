@@ -143,8 +143,8 @@ try {
     $r36rLate($o3, $a3, 're_r36r_late_3');
     assert_equals('pending', (string)(Rma::refundById($other3)['status'] ?? ''), 'R36 refunds: a refund of the other returned units is not stopped');
 
-    // Operations lists an incident with a link to its order.
-    $r36rOps = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Operations.php');
+    // The dashboard's monitoring lists an incident with a link to its order.
+    $r36rOps = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Dashboard.php');
     assert_true(str_contains($r36rOps, "json_decode((string)(\$incident['context_json'] ?? ''), true)['order_id']") && str_contains($r36rOps, 'admin.php?p=order&id=<?= $incidentOrder ?>'),
         'R36 refunds: the incident list links an incident to its order');
 } catch (Throwable $e) {

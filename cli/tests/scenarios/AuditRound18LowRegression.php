@@ -157,7 +157,8 @@ try {
     assert_true(str_contains($r18lAdminSrc('Customers.php'), "adminCodeLabel('admin.gdpr.action.', (string)\$e['action'])") && !str_contains($r18lAdminSrc('Customers.php'), "<td><?= esc(\$e['action']) ?></td>"),
         'R18 UX: the GDPR event log shows the action label');
     $r18lOps = $r18lAdminSrc('Operations.php');
-    assert_true(str_contains($r18lOps, "adminCodeLabel('admin.ops.webhook_status.', (string)\$incident['status'])") && !str_contains($r18lOps, "<td><?= esc(\$incident['status']) ?></td>"),
+    $r18lDash = $r18lAdminSrc('Dashboard.php'); // the webhook incidents moved to the dashboard's monitoring panel (R44)
+    assert_true(str_contains($r18lDash, "adminCodeLabel('admin.ops.webhook_status.', (string)\$incident['status'])") && !str_contains($r18lDash . $r18lOps, "<td><?= esc(\$incident['status']) ?></td>"),
         'R18 UX: webhook incidents show the status label');
     assert_true(str_contains($r18lOps, "adminCodeLabel('admin.audit.action.', (string)\$log['action'])") && !str_contains($r18lOps, "<td><?= esc(\$log['action']) ?></td>"),
         'R18 UX: the audit log shows the action label');

@@ -197,7 +197,7 @@ try {
     $a154Check('A15.4 de: feed form and its JSON error flash are German', $a154Run(['p' => 'feed']),
         ['Ungültiges JSON in der Feldzuordnung:', 'Lager wählen', 'Feldzuordnung (JSON)', 'Zeitplan (Cron-Ausdruck)']);
     $a154Check('A15.4 de: cache page is German', $a154Run(['p' => 'cache']), ['Cache-Verwaltung', 'Gesamten Cache leeren?']);
-    $a154Check('A15.4 de: dashboard operations block is German', $a154Run(['p' => 'dashboard']), ['Betrieb', 'Fehlgeschlagene Jobs', 'Korrelation']);
+    $a154Check('A15.4 de: dashboard operations block is German', $a154Run(['p' => 'dashboard']), ['Systemzustand', 'Fehlgeschlagene Jobs', 'Korrelation']);
     $a154Check('A15.4 de: audit log is German', $a154Run(['p' => 'audit']), ['Entität', 'Wann']);
 
     // English, including pages that had no title of their own.
