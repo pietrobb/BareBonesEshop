@@ -51,27 +51,16 @@ final class PrivateOwner
     {
         $owners = [];
         foreach ($dirs as $dir) {
-            $existing = $dir;
-            while (!file_exists($existing) && !is_link($existing) && dirname($existing) !== $existing) $existing = dirname($existing);
-            $real = realpath($existing);
-            clearstatcache();
-            $s = $real === false ? false : @stat($real);
-            if (!is_array($s) || ((int)$s['mode'] & 0170000) !== 0040000) return "the private directory {$dir} cannot be resolved to a directory";
+            $walk = self::walk($dir);
+            if (is_string($walk)) return $walk;
+            ['stat' => $s, 'path' => $real, 'foreign' => $foreign, 'links' => $links] = $walk;
             $uid = (int)$s['uid'];
-            $foreign = [];
-            for ($d = $real; ; $d = dirname($d)) {
-                $l = @lstat($d);
-                if (!is_array($l)) return "{$d} cannot be read";
-                $sticky = $d !== $real && ((int)$l['mode'] & 01000) !== 0;
-                if ((int)$l['uid'] !== 0 || (((int)$l['mode'] & 0022) !== 0 && !$sticky)) $foreign[] = [$d, (int)$l['uid']];
-                if ($d === dirname($d)) break;
-            }
+            // The private directory itself: root's must be root's alone; another owner's is the owner's to write.
+            if ($uid !== 0) $foreign[] = [$real, $uid];
+            elseif (((int)$s['mode'] & 0022) !== 0) $foreign[] = [$real, 0];
             // A link on the configured path is followed by whoever opens it: it must be root's or the owner's.
-            for ($d = $existing; $d !== dirname($d); $d = dirname($d)) {
-                $l = @lstat($d);
-                if (is_link($d) && is_array($l) && !in_array((int)$l['uid'], [0, $uid], true)) {
-                    return "{$d} on the way to the private directory is a link of another account (uid {$l['uid']})";
-                }
+            foreach ($links as [$d, $u]) {
+                if ($u !== 0 && $u !== $uid) return "{$d} on the way to the private directory is a link of another account (uid {$u})";
             }
             if ($foreign === []) continue;
             if ($uid === 0) {
@@ -79,7 +68,8 @@ final class PrivateOwner
                     . ' give the private directory to the web server user (chown) or make it and every directory above it root\'s alone';
             }
             foreach ($foreign as [$d, $u]) {
-                if ($u !== 0 && $u !== $uid) return "{$d} above the private directory {$real} belongs to another account (uid {$u}) than the directory (uid {$uid})";
+                if ($u === -1) return "{$d} on the way to the private directory {$real} can be changed by any account (group or other write without the sticky bit)";
+                if ($u !== 0 && $u !== $uid) return "{$d} on the way to the private directory {$real} can be changed by another account (uid {$u}) than the directory's (uid {$uid})";
             }
             $owners[$uid] ??= ['dir' => $real, 'gid' => (int)$s['gid']];
         }
@@ -95,6 +85,86 @@ final class PrivateOwner
         $gid = $owners[$uid]['gid'] !== 0 ? $owners[$uid]['gid'] : (int)$user['gid'];
         if ($gid === 0) return "the private directory {$owners[$uid]['dir']} and its owner ({$user['name']}) have group root; chgrp the private directory";
         return ['uid' => $uid, 'gid' => $gid, 'name' => (string)$user['name'], 'dir' => $owners[$uid]['dir']];
+    }
+
+    /**
+     * R44 (review round 16, finding 1): the owner came from realpath() and stat(), which follow links, and the links on
+     * the way from a later, separate lstat() walk. Where the web user can change a directory on the way (a parent it
+     * owns, or /tmp), it swapped the private directory and a link to root's (or another account's) directory between
+     * the two: find() said "root's alone" and migrate.php stayed root (or switched to the wrong account). Now one walk
+     * decides both, directory by directory, the way openat() would: each step lstat()s the next name in the directory
+     * the process stands in, chdir()s into it and stat()s "." — the directory it now stands in, whatever the name points
+     * to by then — and refuses when that is not the inode lstat() saw. What it reports is the inodes it stood in.
+     *
+     * @return array{stat: array<int|string, int>, path: string, foreign: list<array{0: string, 1: int}>, links: list<array{0: string, 1: int}>}|string
+     *   foreign: who besides root can change a name on the way ([directory, uid]; uid -1: any account), links: [link, its owner]
+     */
+    private static function walk(string $dir): array|string
+    {
+        // A thread-safe build keeps a virtual working directory and opens relative names by their full path again.
+        if (PHP_ZTS) return 'root steps need a PHP build without thread safety (ZTS) to check the private directory';
+        $cwd = getcwd();
+        $foreign = [];
+        $links = [];
+        try {
+            $here = self::enter('/');
+            if ($here === false) return 'the root directory cannot be read';
+            $path = '/';
+            $names = explode('/', $dir);
+            $hops = 0;
+            while ($names !== []) {
+                $name = array_shift($names);
+                if ($name === '' || $name === '.') continue;
+                $entry = ($path === '/' ? '' : $path) . '/' . $name;
+                clearstatcache();
+                $l = @lstat($name);
+                if (!is_array($l)) break; // not created yet: the nearest directory above it counts
+                // Who can rename or replace this name: the directory's owner; with group or other write anyone, unless
+                // the sticky bit limits that to the owner of the entry.
+                if ((int)$here['uid'] !== 0) $foreign[] = [$path, (int)$here['uid']];
+                if (((int)$here['mode'] & 0022) !== 0) {
+                    if (((int)$here['mode'] & 01000) === 0) $foreign[] = [$path, -1];
+                    elseif ((int)$l['uid'] !== 0) $foreign[] = [$entry, (int)$l['uid']];
+                }
+                if (((int)$l['mode'] & 0170000) === 0120000) {
+                    if (!array_filter($names, static fn(string $n): bool => $n !== '' && $n !== '.')) {
+                        return "the private directory {$dir} is a link ({$entry}); configure the directory it points to";
+                    }
+                    $target = @readlink($name);
+                    if (!is_string($target) || ++$hops > 40) return "the link {$entry} on the way to the private directory {$dir} cannot be followed";
+                    $links[] = [$entry, (int)$l['uid']];
+                    if (str_starts_with($target, '/')) {
+                        $here = self::enter('/');
+                        if ($here === false) return 'the root directory cannot be read';
+                        $path = '/';
+                    }
+                    $names = array_merge(explode('/', $target), $names);
+                    continue;
+                }
+                if (((int)$l['mode'] & 0170000) !== 0040000) return "the private directory {$dir} cannot be resolved to a directory ({$entry} is not one)";
+                $s = self::enter($name);
+                if ($s === false || $s['dev'] !== $l['dev'] || $s['ino'] !== $l['ino']) {
+                    return "{$entry} on the way to the private directory changed while it was checked";
+                }
+                $here = $s;
+                $path = $name === '..' ? dirname($path) : $entry;
+            }
+            return ['stat' => $here, 'path' => $path, 'foreign' => $foreign, 'links' => $links];
+        } finally {
+            if (is_string($cwd)) @chdir($cwd);
+            clearstatcache();
+        }
+    }
+
+    /**
+     * chdir() into $name and stat() the directory the process then stands in.
+     * @phpstan-impure
+     * @return array<int|string, int>|false
+     */
+    private static function enter(string $name): array|false
+    {
+        clearstatcache();
+        return @chdir($name) ? @stat('.') : false;
     }
 
     /** cli/update.php keeps root for the tree; run() works in the private directory as $owner. */

@@ -235,6 +235,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   50 % each), and refuses even with `--force` an impossible rate or one 10 times away. As root, the shop's connection
   checks `db_sqlite_path` before opening it and no longer switches the database to WAL, and backups refuse a `-journal`,
   `-wal` or `-shm` that is a link or belongs to another account.
+- **A root step finds the private directory's owner from the directory it stands in (review round 44, high 1).** The
+  owner came from `realpath()`/`stat()` and the links on the way from a separate, later walk. Where the web user may
+  change a directory on the way (a parent it owns, or `/tmp`), it swapped its private directory for a link to a
+  directory only root may read, or to another account's, between the two: about 4 % of root `migrate.php`/`restore.php`/
+  `update.php` runs stayed root and wrote `schema_migrations` into root's database, others switched to the wrong account.
+  The check now walks the path directory by directory (it changes into each one and compares the directory it stands in
+  with what `lstat()` saw) and takes the owner from that same directory. **Refused from now on for steps started as
+  root:** a private directory configured as a link (configure the directory it points to), and a directory on the way
+  that any account may write without the sticky bit. A parent the web user owns and a sticky `/tmp` stay supported.
 - **Root works in the private directory only as its owner (review round 42, medium 1 and 2, low 7).** In a tree root
   owns alone, root kept root in the private runtime directory too and checked each path before opening it there: the
   web user's link at `<db>.migrations.lock` made `migrate.php` create its target (`/etc/nologin`), and the database
