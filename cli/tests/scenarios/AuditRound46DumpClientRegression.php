@@ -70,16 +70,30 @@ assert_equals([true, false, false], [
 @unlink($r46dDump);
 
 // 2. Native: a MySQL 8 shop with categories rows, dumped and restored with MariaDB's tools.
+// CI's native job already has MariaDB's tools as TEST_MYSQL_*_BINARY; they count when their --version says MariaDB.
+$r46dIsMariaClient = static fn(string $bin): bool => $bin !== ''
+    && stripos((string)shell_exec(escapeshellarg($bin) . ' --version 2>&1'), 'mariadb') !== false;
 $r46dDumpBin = (string)getenv('TEST_MARIADB_DUMP_BINARY');
 $r46dClientBin = (string)getenv('TEST_MARIADB_CLIENT_BINARY');
-if (!getenv('TEST_MYSQL_DSN') || $r46dDumpBin === '' || $r46dClientBin === '') {
-    print "  [SKIP] R46 dump client native MySQL (set TEST_MYSQL_DSN, TEST_MARIADB_DUMP_BINARY and TEST_MARIADB_CLIENT_BINARY)\n";
-} else {
+if ($r46dDumpBin === '' && $r46dClientBin === '' && getenv('TEST_MYSQL_DSN')
+    && $r46dIsMariaClient((string)getenv('TEST_MYSQL_DUMP_BINARY')) && $r46dIsMariaClient((string)getenv('TEST_MYSQL_CLIENT_BINARY'))) {
+    [$r46dDumpBin, $r46dClientBin] = [(string)getenv('TEST_MYSQL_DUMP_BINARY'), (string)getenv('TEST_MYSQL_CLIENT_BINARY')];
+}
+[$r46dServer, $r46dServerVersion, $r46dHost, $r46dPort] = [null, '', [], []];
+if (getenv('TEST_MYSQL_DSN') && $r46dDumpBin !== '' && $r46dClientBin !== '') {
     preg_match('/host=([^;]+)/', (string)getenv('TEST_MYSQL_DSN'), $r46dHost);
     preg_match('/port=(\d+)/', (string)getenv('TEST_MYSQL_DSN'), $r46dPort);
     [$r46dUser, $r46dPass] = [getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: ''];
     $r46dServer = new PDO('mysql:host=' . ($r46dHost[1] ?? '127.0.0.1') . ';port=' . ($r46dPort[1] ?? 3306), $r46dUser, $r46dPass,
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]);
+    $r46dServerVersion = (string)$r46dServer->query('SELECT VERSION()')->fetchColumn();
+}
+if ($r46dServer === null) {
+    print "  [SKIP] R46 dump client native MySQL (set TEST_MYSQL_DSN and MariaDB's dump/client as TEST_MARIADB_* or TEST_MYSQL_*_BINARY)\n";
+} elseif (stripos($r46dServerVersion, 'mariadb') !== false) {
+    print "  [SKIP] R46 dump client native MySQL (the server is MariaDB {$r46dServerVersion}; the case needs MySQL 8)\n";
+} else {
+    print "  [RUN] R46 dump client native MySQL (server {$r46dServerVersion}, dump client {$r46dDumpBin})\n";
     $r46dDb = 'bbe_r46d_' . getmypid() . '_' . bin2hex(random_bytes(3));
     $r46dCleanup = [$r46dDb, $r46dDb . '_update_probe', $r46dDb . '_restore_scratch'];
     $r46dSlugs = static fn(): array => $r46dServer->query("SELECT CONCAT(slug, ':', parent_id_uniq) FROM `{$r46dDb}`.categories ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
