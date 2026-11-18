@@ -54,7 +54,7 @@ try {
         $probe = stream_socket_server('tcp://127.0.0.1:0');
         $port = (int)substr(strrchr((string)stream_socket_get_name($probe, false), ':'), 1);
         fclose($probe);
-        $r12iServers[] = proc_open(array_merge([PHP_BINARY, '-S', "127.0.0.1:{$port}"], $router ? ['router.php'] : ['-t', $r12iWeb]),
+        $r12iServers[] = test_spawn_server(array_merge([PHP_BINARY, '-S', "127.0.0.1:{$port}"], $router ? ['router.php'] : ['-t', $r12iWeb]),
             [0 => ['pipe', 'r'], 1 => ['file', $r12iBase . '/server.log', 'a'], 2 => ['file', $r12iBase . '/server.log', 'a']], $pipes, $r12iWeb);
         for ($i = 0; $i < 100 && @fsockopen('127.0.0.1', $port) === false; $i++) usleep(100000);
         return ['HTTP_HOST' => "127.0.0.1:{$port}", 'SERVER_ADDR' => '127.0.0.1', 'SERVER_PORT' => (string)$port, 'SCRIPT_NAME' => '/install.php'];

@@ -213,7 +213,7 @@ require $script;
     $edProbe = stream_socket_server('tcp://127.0.0.1:0');
     $edPort = (int)substr(strrchr((string)stream_socket_get_name($edProbe, false), ':'), 1);
     fclose($edProbe);
-    $edServer = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$edPort}", $edRouter], [0 => ['pipe', 'r'], 1 => ['file', $edRoot . '/server.log', 'a'], 2 => ['file', $edRoot . '/server.log', 'a']], $edPipes, $edAppRoot);
+    $edServer = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$edPort}", $edRouter], [0 => ['pipe', 'r'], 1 => ['file', $edRoot . '/server.log', 'a'], 2 => ['file', $edRoot . '/server.log', 'a']], $edPipes, $edAppRoot);
     $edGet = static function(string $target) use ($edPort): array {
         for ($i = 0; $i < 50; $i++) {
             $body = @file_get_contents("http://127.0.0.1:{$edPort}{$target}", false, stream_context_create(['http' => ['ignore_errors' => true, 'header' => "Host: shop.example\r\n", 'timeout' => 20]]));

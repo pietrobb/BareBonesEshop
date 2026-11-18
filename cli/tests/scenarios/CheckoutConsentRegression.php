@@ -70,7 +70,7 @@ if (($_GET["transport"] ?? "html") === "json") {
 $ccSocket = stream_socket_server('tcp://127.0.0.1:0', $ccErrno, $ccError);
 $ccAddress = stream_socket_get_name($ccSocket, false);
 fclose($ccSocket);
-$ccServer = proc_open([PHP_BINARY, '-S', $ccAddress, $ccRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $ccRoot . '/server.log', 'a'], 2 => ['file', $ccRoot . '/server.log', 'a']], $ccPipes);
+$ccServer = test_spawn_server([PHP_BINARY, '-S', $ccAddress, $ccRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $ccRoot . '/server.log', 'a'], 2 => ['file', $ccRoot . '/server.log', 'a']], $ccPipes);
 fclose($ccPipes[0]);
 try {
     $ccReady = false;

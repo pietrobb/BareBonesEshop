@@ -164,7 +164,7 @@ try {
     $wiProbe = stream_socket_server('tcp://127.0.0.1:0');
     $wiPort = (int)substr(strrchr((string)stream_socket_get_name($wiProbe, false), ':'), 1);
     fclose($wiProbe);
-    $wiServer = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$wiPort}", 'router.php'], [0 => ['pipe', 'r'], 1 => ['file', $wiBase . '/server.log', 'a'], 2 => ['file', $wiBase . '/server.log', 'a']], $wiPipes, $wiShop, $wiEnv);
+    $wiServer = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$wiPort}", 'router.php'], [0 => ['pipe', 'r'], 1 => ['file', $wiBase . '/server.log', 'a'], 2 => ['file', $wiBase . '/server.log', 'a']], $wiPipes, $wiShop, $wiEnv);
     $wiCookie = '';
     $wiHttp = static function (string $path, ?array $post = null, string $extraHeaders = '') use ($wiPort, &$wiCookie): array {
         $headers = ($wiCookie !== '' ? "Cookie: {$wiCookie}\r\n" : '') . ($post !== null ? "Content-Type: application/x-www-form-urlencoded\r\n" : '') . $extraHeaders;

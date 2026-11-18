@@ -85,7 +85,7 @@ $a094Probe = stream_socket_server('tcp://127.0.0.1:0');
 $a094Port = (int)substr(strrchr((string)stream_socket_get_name($a094Probe, false), ':'), 1);
 fclose($a094Probe);
 $a094Log = test_fixture_path('prefix-router') . '.log';
-$a094Server = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$a094Port}", $a094Router],
+$a094Server = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$a094Port}", $a094Router],
     [0 => ['pipe', 'r'], 1 => ['file', $a094Log, 'a'], 2 => ['file', $a094Log, 'a']], $a094Pipes, $a094Root);
 $a094Get = static function (string $path) use ($a094Port): array {
     $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 15]]);

@@ -188,7 +188,7 @@ try {
 
     // Development server through router.php: same deny/rewrite contract as .htaccess
     // (without router.php the documented command was plain `php -S`).
-    $a111Server = proc_open(array_merge([PHP_BINARY, '-S', "127.0.0.1:{$a111Port}"], is_file($a111Shop . '/router.php') ? ['router.php'] : []),
+    $a111Server = test_spawn_server(array_merge([PHP_BINARY, '-S', "127.0.0.1:{$a111Port}"], is_file($a111Shop . '/router.php') ? ['router.php'] : []),
         [0 => ['pipe', 'r'], 1 => ['file', $a111Base . '/server.log', 'a'], 2 => ['file', $a111Base . '/server.log', 'a']], $a111Pipes, $a111Shop, $a111Env);
     $a111Get = static function (string $path) use ($a111Port): array {
         $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);

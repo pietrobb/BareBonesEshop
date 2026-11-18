@@ -86,7 +86,7 @@ PHP);
         $socket = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
         $address = stream_socket_get_name($socket, false);
         fclose($socket);
-        $server = proc_open([PHP_BINARY, '-S', $address, '-t', $r37aApp, $dir . '/request.php'], [0 => ['pipe', 'r'], 1 => ['file', $dir . '/http.log', 'a'], 2 => ['file', $dir . '/http.log', 'a']], $pipes);
+        $server = test_spawn_server([PHP_BINARY, '-S', $address, '-t', $r37aApp, $dir . '/request.php'], [0 => ['pipe', 'r'], 1 => ['file', $dir . '/http.log', 'a'], 2 => ['file', $dir . '/http.log', 'a']], $pipes);
         fclose($pipes[0]);
         for ($i = 0; $i < 100; $i++) {
             $probe = @stream_socket_client('tcp://' . $address, $errno, $errstr, 0.1);

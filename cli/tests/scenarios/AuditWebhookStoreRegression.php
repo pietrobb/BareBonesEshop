@@ -111,7 +111,7 @@ try {
         $a056Socket = stream_socket_server('tcp://127.0.0.1:0');
         $a056Address = stream_socket_get_name($a056Socket, false);
         fclose($a056Socket);
-        $a056Server = proc_open([PHP_BINARY, '-S', $a056Address, $a056Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a056Root . '/server.log', 'a'], 2 => ['file', $a056Root . '/server.log', 'a']], $a056Pipes);
+        $a056Server = test_spawn_server([PHP_BINARY, '-S', $a056Address, $a056Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a056Root . '/server.log', 'a'], 2 => ['file', $a056Root . '/server.log', 'a']], $a056Pipes);
         fclose($a056Pipes[0]);
         try {
             $a056Ready = false;

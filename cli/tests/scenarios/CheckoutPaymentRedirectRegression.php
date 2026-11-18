@@ -128,7 +128,7 @@ if (str_starts_with($uri, "/api/v1/")) { require ' . var_export($p0AppRoot . '/a
 $_GET["path"] = $uri;
 require ' . var_export($p0AppRoot . '/redirect.php', true) . ';
 ');
-$p0Server = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $p0Root . '/sessions', '-S', "127.0.0.1:{$p0Port}", $p0Root . '/router.php'],
+$p0Server = test_spawn_server([PHP_BINARY, '-d', 'session.save_path=' . $p0Root . '/sessions', '-S', "127.0.0.1:{$p0Port}", $p0Root . '/router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', $p0Root . '/server.log', 'a'], 2 => ['file', $p0Root . '/server.log', 'a']], $p0Pipes, $p0AppRoot);
 $p0Http = static function (string $method, string $path, array $post, string &$sid) use ($p0Port): array {
     $headers = "Content-Type: application/x-www-form-urlencoded\r\nHost: 127.0.0.1:{$p0Port}\r\n" . ($sid !== '' ? "Cookie: PHPSESSID={$sid}\r\n" : '');

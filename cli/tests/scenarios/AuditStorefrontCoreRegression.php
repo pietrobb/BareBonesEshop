@@ -97,7 +97,7 @@ if ($route !== null) { $_GET = $route[1] + $_GET; require $sfaApp . "/" . $route
 $_GET["path"] = $uri;
 require $sfaApp . "/redirect.php";
 ');
-$sfaServer = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $sfaRoot . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1', '-d', 'error_log=' . $sfaRoot . '/php-error.log',
+$sfaServer = test_spawn_server([PHP_BINARY, '-d', 'session.save_path=' . $sfaRoot . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1', '-d', 'error_log=' . $sfaRoot . '/php-error.log',
     '-S', "127.0.0.1:{$sfaPort}", $sfaRoot . '/router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', $sfaRoot . '/server.log', 'a'], 2 => ['file', $sfaRoot . '/server.log', 'a']], $sfaPipes, $sfaApp);
 $sfaHttp = static function (string $method, string $path, array $post = [], ?string &$sid = null, array $extraHeaders = []) use ($sfaPort): array {

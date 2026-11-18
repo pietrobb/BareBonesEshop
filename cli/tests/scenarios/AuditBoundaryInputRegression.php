@@ -31,7 +31,7 @@ $a102Probe = stream_socket_server('tcp://127.0.0.1:0');
 $a102Port = (int)substr(strrchr((string)stream_socket_get_name($a102Probe, false), ':'), 1);
 fclose($a102Probe);
 $a102Log = test_fixture_path('a102-router') . '.log';
-$a102Server = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$a102Port}", $a102Router],
+$a102Server = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$a102Port}", $a102Router],
     [0 => ['pipe', 'r'], 1 => ['file', $a102Log, 'a'], 2 => ['file', $a102Log, 'a']], $a102Pipes, $a102Root);
 $a102Request = static function (string $method, string $target, array $options = []) use ($a102Port): array {
     $headers = 'Host: shop.example' . "\r\n";

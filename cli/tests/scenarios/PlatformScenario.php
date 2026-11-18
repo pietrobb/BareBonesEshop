@@ -1683,7 +1683,7 @@ require ' . var_export($uaRoot . '/redirect.php', true) . ';
 $uaProbe = stream_socket_server('tcp://127.0.0.1:0');
 $uaPort = (int)substr(strrchr((string)stream_socket_get_name($uaProbe, false), ':'), 1);
 fclose($uaProbe);
-$uaServer = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $uaSessions, '-S', "127.0.0.1:{$uaPort}", $uaRouter],
+$uaServer = test_spawn_server([PHP_BINARY, '-d', 'session.save_path=' . $uaSessions, '-S', "127.0.0.1:{$uaPort}", $uaRouter],
     [0 => ['pipe', 'r'], 1 => ['file', $uaSessions . '/server.log', 'a'], 2 => ['file', $uaSessions . '/server.log', 'a']], $uaPipes, $uaRoot);
 $uaHttp = static function (string $method, string $path, array $post = [], string $sid = '') use ($uaPort): array {
     $headers = "Content-Type: application/x-www-form-urlencoded\r\n" . ($sid !== '' ? "Cookie: PHPSESSID={$sid}\r\n" : '');
