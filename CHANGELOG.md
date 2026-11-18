@@ -260,6 +260,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   bounds the later ones. A rate stored with `php cli/eur-rates.php --force` is marked (migration
   `20261118100000_eur_rates_forced`) and still counts as today's rate, but no document is fixed in EUR at it; documents
   of its day take the ECB history's rate instead.
+- **`trusted_proxies`: a public range is at most IPv4 /16 or IPv6 /32 (review round 44, low 7).** R42 accepted up to
+  /8 and /7, so a whole /8 of other networks could name its own client IP and IP country. A wider public range is ignored
+  and `setup.php doctor` fails `config.trusted_proxies`; list it as several (Cloudflare's `104.16.0.0/13`,
+  `172.64.0.0/13` and `2a06:98c0::/29` as their /16 and /32 parts). Private networks (`10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, `100.64.0.0/10`, `127.0.0.0/8`, `fc00::/7`) may still be listed whole. CI runs `npm audit` as its own
+  first job, from the lock file, instead of at the end of the browser job.
 - **The doctor run by root checks the private paths as their owner (review round 44, low 2 and 3).** `update.php doctor`
   started as root reported `jobs_dir`, `private_cache_dir` and the GDPR salt's directory writable whatever their mode,
   because `is_writable()` goes by the real user (root, also while it works as the owner); it now creates and deletes a

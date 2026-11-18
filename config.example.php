@@ -111,7 +111,8 @@ return [
     // Security
     // Reverse proxies / load balancers (REMOTE_ADDR values, or CIDR ranges such as a CDN's '173.245.48.0/20'): their
     // X-Forwarded-For gives the client IP and their X-Forwarded-Proto: https marks the request as https (HSTS, secure
-    // cookies) when TLS ends at the proxy; a store's vat_ip_country_header is read only from them.
+    // cookies) when TLS ends at the proxy; a store's vat_ip_country_header is read only from them. A public range is at most
+    // IPv4 /16 or IPv6 /32 (list a wider one as several); private networks (10.0.0.0/8, fc00::/7) may be listed whole.
     'trusted_proxies' => [],
 
     // Adapters

@@ -10,6 +10,24 @@ permissions:
   contents: read
 
 jobs:
+  # Review round 16 (R44, low 7): a known vulnerable dependency fails CI within a minute, from the lock file alone,
+  # not after the hour of browser installs and e2e it used to run behind.
+  npm-audit:
+    name: npm audit (no known vulnerable qualification dependency)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+
   test:
     name: Lint & Test (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
@@ -246,9 +264,6 @@ jobs:
 
       - name: ESLint (storefront scripts and qualification tooling)
         run: npx eslint --max-warnings=0 .
-
-      - name: npm audit (no known vulnerable qualification dependency)
-        run: npm audit --audit-level=moderate
 
       - name: OpenAPI lint (docs/openapi.yaml parses strictly, no stray keys)
         run: npm run lint:openapi

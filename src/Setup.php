@@ -294,7 +294,7 @@ class Setup
         $wideProxies = Security::tooWideTrustedProxies($config);
         if ($wideProxies !== []) {
             $add('fail', 'config.trusted_proxies', 'trusted_proxies ranges ' . implode(', ', $wideProxies) . ' would trust any client to name its own IP address and country; they are ignored.',
-                'List only the addresses or published ranges of your proxy or CDN in trusted_proxies of config.php (IPv4 at most /8, IPv6 at most /7).');
+                'List only the addresses or published ranges of your proxy or CDN in trusted_proxies of config.php: a public range at most IPv4 /16 or IPv6 /32 (list a wider one as several, e.g. 104.16.0.0/13 as 104.16.0.0/16 … 104.23.0.0/16); private networks (10.0.0.0/8, fc00::/7) may be listed whole.');
         }
         foreach (is_array($stores) ? (array)($stores['stores'] ?? []) : [] as $storeId => $store) {
             if (is_array($store) && ($check = self::ipCountryHeaderCheck($config, (string)$storeId, $store)) !== null) $add(...array_values($check));
