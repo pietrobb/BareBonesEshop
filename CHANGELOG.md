@@ -244,6 +244,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   with what `lstat()` saw) and takes the owner from that same directory. **Refused from now on for steps started as
   root:** a private directory configured as a link (configure the directory it points to), and a directory on the way
   that any account may write without the sticky bit. A parent the web user owns and a sticky `/tmp` stay supported.
+- **"Ing.Ján Novák" matches the VIES holder "Novák Jan" again (review round 44, low 4).** Since the R42 fix for "Dr.Max
+  s.r.o." a title written without a space after it stayed a word of the name, and reverse charge was refused to a sole
+  trader. A title joined to a person's name (no legal form, a first name and a surname after it) is dropped again;
+  "Dr.Max s.r.o." and "Dr.Max" are still the company Dr.Max.
 - **The doctor run by root checks the private paths as their owner (review round 44, low 2 and 3).** `update.php doctor`
   started as root reported `jobs_dir`, `private_cache_dir` and the GDPR salt's directory writable whatever their mode,
   because `is_writable()` goes by the real user (root, also while it works as the owner); it now creates and deletes a

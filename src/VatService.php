@@ -847,11 +847,31 @@ class VatService implements TaxProvider
         $name = (string)preg_replace(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u',
             '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|' . implode('|', self::TITLES_BEFORE) . ')\.(?=[\s\-]|$)/u'], ' ', $name);
         $name = (string)preg_replace('/,\s*(?:' . implode('|', self::TITLES_AFTER) . ')(?![\p{L}\p{N}])\.?/u', ' ', $name);
+        $words = self::nameWords($name);
+        // R44 (review round 16, low 4): R42 kept a title joined to the next word, so "Ing.Ján Novák" (a sole trader
+        // typing without the space) no longer matched "Jan Novak". Joined, it is a title in a person's name: no legal
+        // form, and a first name and a surname left after it. "Dr.Max s.r.o." stays the company Dr.Max.
+        $joined = '/(?<![\p{L}\p{N}])(?:' . implode('|', self::TITLES_BEFORE) . ')\.(?=\p{L})/u';
+        if (preg_match($joined, $name) === 1) {
+            $person = self::nameWords((string)preg_replace($joined, ' ', $name));
+            $forms = preg_split('/[^a-z0-9]+/', str_replace('.', '', self::asciiName($name)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if (count($person) >= 2 && array_intersect($forms, self::LEGAL_FORMS) === []) return $person;
+        }
+        return $words;
+    }
+
+    /** @return list<string> */
+    private static function nameWords(string $name): array
+    {
+        $words = preg_split('/[^a-z0-9]+/', self::asciiName($name), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return array_values(array_unique(array_filter($words, static fn(string $w): bool => strlen($w) > 1 && !in_array($w, self::LEGAL_FORMS, true))));
+    }
+
+    private static function asciiName(string $name): string
+    {
         $ascii = function_exists('transliterator_transliterate') ? transliterator_transliterate('Any-Latin; Latin-ASCII', $name) : false;
         if (!is_string($ascii)) $ascii = (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name);
-        $ascii = str_replace(['ae', 'oe', 'ue', 'ss'], ['a', 'o', 'u', 's'], strtolower($ascii));
-        $words = preg_split('/[^a-z0-9]+/', $ascii, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        return array_values(array_unique(array_filter($words, static fn(string $w): bool => strlen($w) > 1 && !in_array($w, self::LEGAL_FORMS, true))));
+        return str_replace(['ae', 'oe', 'ue', 'ss'], ['a', 'o', 'u', 's'], strtolower($ascii));
     }
 
     /** R34: the status of a VAT ID while its cached VIES answer is fresh (see validateVatId()), else null. */
