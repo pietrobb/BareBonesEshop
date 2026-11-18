@@ -664,21 +664,41 @@ class Security {
         foreach ((array)(self::cfg()['trusted_proxies'] ?? []) as $entry) {
             $range = self::proxyRange(trim((string)$entry));
             // R42 (low 5): a range wider than MIN_PROXY_PREFIX (0.0.0.0/0, ::/0) trusts every client: never matched.
-            if ($range === null || $range[1] < self::MIN_PROXY_PREFIX[strlen($range[0])]) continue;
-            [$network, $bits] = $range;
-            if (strlen($network) !== strlen($binary)) continue;
-            $bytes = intdiv($bits, 8);
-            if (substr($binary, 0, $bytes) !== substr($network, 0, $bytes)) continue;
-            $rest = $bits % 8;
-            if ($rest === 0) return true;
-            $mask = (0xFF << (8 - $rest)) & 0xFF;
-            if ((ord($binary[$bytes]) & $mask) === (ord($network[$bytes]) & $mask)) return true;
+            if ($range === null || self::tooWide($range)) continue;
+            if (self::inRange($binary, $range)) return true;
         }
         return false;
     }
 
-    /** R42 (low 5): the shortest prefix a trusted_proxies range may have, by address length (IPv4 /8, IPv6 /7: fc00::/7). */
-    public const MIN_PROXY_PREFIX = [4 => 8, 16 => 7];
+    /** @param array{0: string, 1: int} $range */
+    private static function inRange(string $binary, array $range): bool {
+        [$network, $bits] = $range;
+        if (strlen($network) !== strlen($binary)) return false;
+        $bytes = intdiv($bits, 8);
+        if (substr($binary, 0, $bytes) !== substr($network, 0, $bytes)) return false;
+        $rest = $bits % 8;
+        if ($rest === 0) return true;
+        $mask = (0xFF << (8 - $rest)) & 0xFF;
+        return (ord($binary[$bytes]) & $mask) === (ord($network[$bytes]) & $mask);
+    }
+
+    /**
+     * The shortest prefix a public trusted_proxies range may have, by address length. R42 (low 5): IPv4 /8, IPv6 /7.
+     * R44 (low 7): IPv4 /16, IPv6 /32 (what a CDN publishes per network; a wider one is listed as several).
+     */
+    public const MIN_PROXY_PREFIX = [4 => 16, 16 => 32];
+    /** R44 (low 7): private blocks a range may cover whole: no client on the internet has such an address (RFC 1918, 6598, 4193). */
+    public const PRIVATE_PROXY_BLOCKS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '127.0.0.0/8', 'fc00::/7'];
+
+    /** @param array{0: string, 1: int} $range */
+    private static function tooWide(array $range): bool {
+        if ($range[1] >= self::MIN_PROXY_PREFIX[strlen($range[0])]) return false;
+        foreach (self::PRIVATE_PROXY_BLOCKS as $block) {
+            $private = self::proxyRange($block);
+            if ($private !== null && $range[1] >= $private[1] && self::inRange($range[0], $private)) return false;
+        }
+        return true;
+    }
 
     /**
      * R42 (low 5): the binary address of $ip; an IPv4-mapped IPv6 address (::ffff:a.b.c.d, as a dual-stack server reports
@@ -722,7 +742,7 @@ class Security {
         $wide = [];
         foreach ((array)($config['trusted_proxies'] ?? []) as $entry) {
             $range = self::proxyRange(trim((string)$entry));
-            if ($range !== null && $range[1] < self::MIN_PROXY_PREFIX[strlen($range[0])]) $wide[] = trim((string)$entry);
+            if ($range !== null && self::tooWide($range)) $wide[] = trim((string)$entry);
         }
         return $wide;
     }

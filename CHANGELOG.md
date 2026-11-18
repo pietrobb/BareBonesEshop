@@ -235,6 +235,42 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   50 % each), and refuses even with `--force` an impossible rate or one 10 times away. As root, the shop's connection
   checks `db_sqlite_path` before opening it and no longer switches the database to WAL, and backups refuse a `-journal`,
   `-wal` or `-shm` that is a link or belongs to another account.
+- **A root step finds the private directory's owner from the directory it stands in (review round 44, high 1).** The
+  owner came from `realpath()`/`stat()` and the links on the way from a separate, later walk. Where the web user may
+  change a directory on the way (a parent it owns, or `/tmp`), it swapped its private directory for a link to a
+  directory only root may read, or to another account's, between the two: about 4 % of root `migrate.php`/`restore.php`/
+  `update.php` runs stayed root and wrote `schema_migrations` into root's database, others switched to the wrong account.
+  The check now walks the path directory by directory (it changes into each one and compares the directory it stands in
+  with what `lstat()` saw) and takes the owner from that same directory. **Refused from now on for steps started as
+  root:** a private directory configured as a link (configure the directory it points to), and a directory on the way
+  that any account may write without the sticky bit. A parent the web user owns and a sticky `/tmp` stay supported.
+- **"Ing.Ján Novák" matches the VIES holder "Novák Jan" again (review round 44, low 4).** Since the R42 fix for "Dr.Max
+  s.r.o." a title written without a space after it stayed a word of the name, and reverse charge was refused to a sole
+  trader. A title joined to a person's name (no legal form, a first name and a surname after it) is dropped again;
+  "Dr.Max s.r.o." and "Dr.Max" are still the company Dr.Max.
+- **A refund keeps its credit note when the queue fails after the invoice is issued (review round 44, low 5).** An
+  invoice issued after refunds were booked queues their credit notes after its commit; when that push failed, the retry
+  (worker job, admin button, backfill) found the invoice and returned it, and the refund never got its credit note. Every
+  issue of an invoiced order now queues those still missing and not queued already. `setup.php doctor` warns about
+  refunds booked over two days ago on invoiced orders without a credit note (`invoices.refund_credit_notes`), and
+  `cli/invoices-backfill.php` queues them again.
+- **ECB rates: a day's first feed anchors it, a forced rate fixes no document (review round 44, low 6).** On a
+  currency's first day (no rate in the week before) each feed fetched again that day was bounded only by the previous
+  one, so repeated feeds could walk a rate up to 10 times its anchor; the day's first feed now stays in the history and
+  bounds the later ones. A rate stored with `php cli/eur-rates.php --force` is marked (migration
+  `20261118100000_eur_rates_forced`) and still counts as today's rate, but no document is fixed in EUR at it; documents
+  of its day take the ECB history's rate instead.
+- **`trusted_proxies`: a public range is at most IPv4 /16 or IPv6 /32 (review round 44, low 7).** R42 accepted up to
+  /8 and /7, so a whole /8 of other networks could name its own client IP and IP country. A wider public range is ignored
+  and `setup.php doctor` fails `config.trusted_proxies`; list it as several (Cloudflare's `104.16.0.0/13`,
+  `172.64.0.0/13` and `2a06:98c0::/29` as their /16 and /32 parts). Private networks (`10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, `100.64.0.0/10`, `127.0.0.0/8`, `fc00::/7`) may still be listed whole. CI runs `npm audit` as its own
+  first job, from the lock file, instead of at the end of the browser job.
+- **The doctor run by root checks the private paths as their owner (review round 44, low 2 and 3).** `update.php doctor`
+  started as root reported `jobs_dir`, `private_cache_dir` and the GDPR salt's directory writable whatever their mode,
+  because `is_writable()` goes by the real user (root, also while it works as the owner); it now creates and deletes a
+  probe file as the owner. `update.php` started as root no longer creates the update directory in the web user's private directory
+  before refusing it: it refuses first and creates nothing.
 - **Root works in the private directory only as its owner (review round 42, medium 1 and 2, low 7).** In a tree root
   owns alone, root kept root in the private runtime directory too and checked each path before opening it there: the
   web user's link at `<db>.migrations.lock` made `migrate.php` create its target (`/etc/nologin`), and the database
