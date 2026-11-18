@@ -254,6 +254,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   issue of an invoiced order now queues those still missing and not queued already. `setup.php doctor` warns about
   refunds booked over two days ago on invoiced orders without a credit note (`invoices.refund_credit_notes`), and
   `cli/invoices-backfill.php` queues them again.
+- **ECB rates: a day's first feed anchors it, a forced rate fixes no document (review round 44, low 6).** On a
+  currency's first day (no rate in the week before) each feed fetched again that day was bounded only by the previous
+  one, so repeated feeds could walk a rate up to 10 times its anchor; the day's first feed now stays in the history and
+  bounds the later ones. A rate stored with `php cli/eur-rates.php --force` is marked (migration
+  `20261118100000_eur_rates_forced`) and still counts as today's rate, but no document is fixed in EUR at it; documents
+  of its day take the ECB history's rate instead.
 - **The doctor run by root checks the private paths as their owner (review round 44, low 2 and 3).** `update.php doctor`
   started as root reported `jobs_dir`, `private_cache_dir` and the GDPR salt's directory writable whatever their mode,
   because `is_writable()` goes by the real user (root, also while it works as the owner); it now creates and deletes a

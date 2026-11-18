@@ -109,9 +109,17 @@ final class EurRates
         if ($own) $db->beginTransaction();
         try {
             $db->exec('DELETE FROM eur_exchange_rates');
-            $insert = $db->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)');
-            foreach ($rates as $code => $rate) $insert->execute([$code, $rate, $asOf]);
-            if (!$forced) self::remember($db, [$asOf => $rates]);
+            // R44 (low 6): rates only --force let through are marked; rateOn() fixes no document in EUR at them.
+            if (Db::hasColumn('eur_exchange_rates', 'forced', $db)) {
+                $insert = $db->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of, forced) VALUES (?, ?, ?, ?)');
+                foreach ($rates as $code => $rate) $insert->execute([$code, $rate, $asOf, $forced ? 1 : 0]);
+            } else {
+                $insert = $db->prepare('INSERT INTO eur_exchange_rates (currency, rate, as_of) VALUES (?, ?, ?)');
+                foreach ($rates as $code => $rate) $insert->execute([$code, $rate, $asOf]);
+            }
+            // R44 (low 6): a day's first feed stays its history (the anchor daysBefore() bounds later feeds of that day by):
+            // feeds fetched again the same day replaced it and could move the rate by MAX_CHANGE each.
+            if (!$forced) self::remember($db, [$asOf => $rates], false);
         } catch (Throwable $e) {
             if ($own) $db->rollBack();
             throw $e;
@@ -173,12 +181,15 @@ final class EurRates
         }
     }
 
-    /** @return array<string, list<float>> the history's rates (EUR per unit, by currency) of the ISSUE_WINDOW_DAYS before $asOf */
+    /**
+     * @return array<string, list<float>> the history's rates (EUR per unit, by currency) of the ISSUE_WINDOW_DAYS before $asOf,
+     * and of $asOf itself (R44: its first feed's)
+     */
     private static function daysBefore(PDO $db, string $asOf): array
     {
         if (!Db::tableExists('eur_exchange_rate_history', $db)) return [];
         $from = gmdate('Y-m-d', (int)strtotime($asOf . ' 00:00:00 UTC') - self::ISSUE_WINDOW_DAYS * 86400);
-        $stmt = $db->prepare('SELECT currency, rate FROM eur_exchange_rate_history WHERE as_of < ? AND as_of >= ? ORDER BY as_of DESC');
+        $stmt = $db->prepare('SELECT currency, rate FROM eur_exchange_rate_history WHERE as_of <= ? AND as_of >= ? ORDER BY as_of DESC');
         $stmt->execute([$asOf, $from]);
         $before = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -224,7 +235,9 @@ final class EurRates
         $best = null;
         foreach (['eur_exchange_rate_history', 'eur_exchange_rates'] as $table) {
             if (!Db::tableExists($table, $db)) continue;
-            $stmt = $db->prepare("SELECT rate, as_of FROM {$table} WHERE currency = ? AND as_of <= ? AND as_of >= ? AND rate > 0 ORDER BY as_of DESC LIMIT 1");
+            // R44 (low 6): never at a rate only --force stored (refresh()); the ECB history stands in for it.
+            $unforced = $table === 'eur_exchange_rates' && Db::hasColumn($table, 'forced', $db) ? ' AND forced = 0' : '';
+            $stmt = $db->prepare("SELECT rate, as_of FROM {$table} WHERE currency = ? AND as_of <= ? AND as_of >= ? AND rate > 0{$unforced} ORDER BY as_of DESC LIMIT 1");
             $stmt->execute([$code, $date, $from]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (is_array($row) && is_numeric($row['rate']) && ($best === null || strcmp((string)$row['as_of'], $best['as_of']) > 0)) {
@@ -378,15 +391,26 @@ final class EurRates
         return ['exit' => $failed === [] ? 0 : 1, 'out' => $out, 'err' => $err];
     }
 
-    /** @param array<string, array<string, float>> $days date => EUR per unit by upper-case currency */
-    private static function remember(PDO $db, array $days): void
+    /**
+     * @param array<string, array<string, float>> $days date => EUR per unit by upper-case currency
+     * @param bool $replace false: a day's rate stored already stays (refresh(): the first feed of the day)
+     */
+    private static function remember(PDO $db, array $days, bool $replace = true): void
     {
         if ($days === [] || !Db::tableExists('eur_exchange_rate_history', $db)) return;
         $delete = $db->prepare('DELETE FROM eur_exchange_rate_history WHERE currency = ? AND as_of = ?');
+        $exists = $db->prepare('SELECT 1 FROM eur_exchange_rate_history WHERE currency = ? AND as_of = ?');
         $insert = $db->prepare('INSERT INTO eur_exchange_rate_history (currency, as_of, rate) VALUES (?, ?, ?)');
         foreach ($days as $asOf => $rates) {
             foreach ($rates as $code => $rate) {
-                $delete->execute([$code, $asOf]);
+                if ($replace) {
+                    $delete->execute([$code, $asOf]);
+                } else {
+                    $exists->execute([$code, $asOf]);
+                    $found = $exists->fetchColumn();
+                    $exists->closeCursor();
+                    if ($found !== false) continue;
+                }
                 $insert->execute([$code, $asOf, $rate]);
             }
         }
