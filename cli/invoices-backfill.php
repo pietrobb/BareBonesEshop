@@ -6,6 +6,7 @@ require_once __DIR__ . '/cli-only.php';
  *
  * Issues invoices for legacy paid/processing/shipped/delivered orders that
  * don't yet have one. Forward-only (existing invoices are never touched).
+ * Then queues the credit notes of refunds booked on invoiced orders that have none (R44; setup doctor reports them).
  *
  * Usage:
  *   php cli/invoices-backfill.php                  # do it
@@ -45,11 +46,6 @@ echo "Status filter: " . implode(',', $statusFilter) . "\n";
 echo "Mode: " . ($dryRun ? "DRY-RUN (no writes)" : "LIVE") . "\n";
 echo "----\n";
 
-if ($total === 0) {
-    echo "Nothing to do.\n";
-    exit(0);
-}
-
 $ok = 0;
 $fail = 0;
 $failures = [];
@@ -79,6 +75,28 @@ foreach ($candidates as $row) {
 
 echo "----\n";
 echo "Summary: {$ok} ok, {$fail} failed (of {$total})\n";
+
+// R44 (low 5): refunds booked on invoiced orders without their credit note (a failed queue push lost the job; setup doctor
+// reports them) get it queued again, each in its order's store.
+$uncredited = InvoiceService::uncreditedBookedRefunds($db);
+echo "Refunds without a credit note: " . count($uncredited) . "\n";
+$seen = [];
+foreach ($uncredited as $refund) {
+    if ($dryRun) {
+        echo "  [DRY] order #{$refund['order_id']} ({$refund['order_number']}) refund {$refund['refund_key']}\n";
+        continue;
+    }
+    if (isset($seen[$refund['store_id'] . '|' . $refund['order_id']])) continue;
+    $seen[$refund['store_id'] . '|' . $refund['order_id']] = true;
+    try {
+        $queued = PaymentWebhookRouting::within($refund['store_id'], static fn(): int => InvoiceService::queueCreditsOfBookedRefunds($refund['order_id']));
+        echo "  [OK]  order #{$refund['order_id']} ({$refund['order_number']}): {$queued} credit note job(s) queued\n";
+    } catch (\Throwable $e) {
+        echo "  [ERR] order #{$refund['order_id']} ({$refund['order_number']}): " . $e->getMessage() . "\n";
+        $fail++;
+        $failures[] = ['order_id' => $refund['order_id'], 'error' => $e->getMessage()];
+    }
+}
 
 if ($failures && !$dryRun) {
     echo "\nFailures:\n";

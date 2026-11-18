@@ -248,6 +248,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   s.r.o." a title written without a space after it stayed a word of the name, and reverse charge was refused to a sole
   trader. A title joined to a person's name (no legal form, a first name and a surname after it) is dropped again;
   "Dr.Max s.r.o." and "Dr.Max" are still the company Dr.Max.
+- **A refund keeps its credit note when the queue fails after the invoice is issued (review round 44, low 5).** An
+  invoice issued after refunds were booked queues their credit notes after its commit; when that push failed, the retry
+  (worker job, admin button, backfill) found the invoice and returned it, and the refund never got its credit note. Every
+  issue of an invoiced order now queues those still missing and not queued already. `setup.php doctor` warns about
+  refunds booked over two days ago on invoiced orders without a credit note (`invoices.refund_credit_notes`), and
+  `cli/invoices-backfill.php` queues them again.
 - **The doctor run by root checks the private paths as their owner (review round 44, low 2 and 3).** `update.php doctor`
   started as root reported `jobs_dir`, `private_cache_dir` and the GDPR salt's directory writable whatever their mode,
   because `is_writable()` goes by the real user (root, also while it works as the owner); it now creates and deletes a

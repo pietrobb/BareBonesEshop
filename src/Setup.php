@@ -320,6 +320,7 @@ class Setup
             }
             $add(...array_values(self::digitalFilesCheck($probe)));
             $add(...array_values(self::digitalBundlesCheck($probe)));
+            $add(...array_values(self::refundCreditNotesCheck($probe)));
             $pricingFile = $root . '/pricing.json';
             $add(...array_values(self::legacyPricingCheck(is_file($pricingFile) ? (array)json_decode((string)file_get_contents($pricingFile), true) : [])));
             foreach (PaymentReadiness::checks($probe, $config, is_array($stores) ? (array)($stores['stores'] ?? []) : null) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
@@ -513,6 +514,20 @@ class Setup
             ? 'Every download has its file.'
             : count($missing) . ' download(s) have no active file and are not for sale (e.g. ' . implode(', ', array_slice($missing, 0, 5)) . ').',
             'action' => $missing === [] ? '' : 'Add the file for each SKU in Admin → Digital files (or untick Download on the variant).'];
+    }
+
+    /**
+     * R44 (low 5): refunds booked on invoiced orders more than two days ago (their credit note job retries for about a day
+     * at most) still without a credit note: a failed queue push lost the job, so the invoice was never corrected.
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function refundCreditNotesCheck(PDO $db, ?int $now = null): array {
+        $missing = InvoiceService::uncreditedBookedRefunds($db, null, gmdate('Y-m-d H:i:s', ($now ?? time()) - 2 * 86400));
+        $orders = array_values(array_unique(array_map(static fn(array $refund): string => $refund['order_number'], $missing)));
+        return ['status' => $missing === [] ? 'pass' : 'warn', 'name' => 'invoices.refund_credit_notes', 'message' => $missing === []
+            ? 'Every refund booked on an invoiced order has its credit note.'
+            : count($missing) . ' refund(s) booked on invoiced orders have no credit note (orders ' . implode(', ', array_slice($orders, 0, 5)) . ').',
+            'action' => $missing === [] ? '' : 'Run php cli/invoices-backfill.php to queue their credit notes again and keep the worker running; a refund that still gets none is reported in Admin → Monitoring.'];
     }
 
     /**

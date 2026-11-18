@@ -108,6 +108,10 @@ final class InvoiceService
         $replaces = null;
         if ($existing !== null) {
             if ((string)($existing['type'] ?? 'invoice') !== 'invoice' || (string)($existing['status'] ?? '') !== self::STATUS_CANCELLED) {
+                // R44 (low 5): the issue that committed this invoice may have failed queueing its booked refunds' credit
+                // notes (JobQueue::push after the commit); its retry ended here and they were lost. Those still missing
+                // and not queued already are queued now.
+                if ((string)($existing['type'] ?? 'invoice') === 'invoice') self::queueCreditsOfBookedRefunds($orderId);
                 return $existing;
             }
             $replaces = (int)$existing['id'];
@@ -451,19 +455,77 @@ final class InvoiceService
      * refund_credit_note job ended; the invoice issued afterwards was for the whole order. Once it is issued (issueAttempt()), every refund
      * of the order without its credit note gets the job again (creditBookedRefund(): item refunds and those credited already
      * are left alone). Returns how many were queued.
+     * R44 (low 5): run again by every later issue() of the order, so not those whose job is still open.
      */
     public static function queueCreditsOfBookedRefunds(int $orderId): int {
-        $db = Db::get();
-        $stmt = $db->prepare("SELECT idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store
-            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0 AND idempotency_key IS NOT NULL AND idempotency_key <> '' ORDER BY id");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        $open = [];
+        foreach (JobQueue::openJobs('refund_credit_note') ?? [] as $payload) {
+            if ((int)($payload['order_id'] ?? 0) === $orderId) $open[(string)($payload['refund_key'] ?? '')] = true;
+        }
         $queued = 0;
-        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $key) {
-            if (self::refundCreditByKey($db, $orderId, (string)$key) !== null) continue;
-            JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => (string)$key], 5);
+        foreach (self::uncreditedBookedRefunds(Db::get(), $orderId) as $refund) {
+            if (isset($open[$refund['refund_key']])) continue;
+            JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $refund['refund_key']], 5);
             $queued++;
         }
         return $queued;
+    }
+
+    /**
+     * R44 (low 5): refunds booked on the payment ledger of an invoiced order (its invoice not cancelled) without their
+     * credit note: none was issued under the refund's key, and no item refund (RMA credit note) corrects the invoice for
+     * it (creditBookedRefund() leaves those alone). One order's of the active store, or every store's; $bookedBefore
+     * ('Y-m-d H:i:s') leaves out the refunds booked since.
+     * @return list<array{store_id: string, order_id: int, order_number: string, refund_key: string}>
+     */
+    public static function uncreditedBookedRefunds(PDO $db, ?int $orderId = null, ?string $bookedBefore = null): array {
+        $params = [':cancelled' => self::STATUS_CANCELLED];
+        $where = '';
+        if ($orderId !== null) {
+            $where .= ' AND t.order_id = :order AND t.store_id = :store';
+            $params += [':order' => $orderId, ':store' => StoreContext::current()->id()];
+        }
+        if ($bookedBefore !== null) {
+            $where .= ' AND t.created_at < :before';
+            $params[':before'] = $bookedBefore;
+        }
+        $stmt = $db->prepare("SELECT t.store_id, t.order_id, o.order_number, t.idempotency_key, t.provider_ref, t.raw_response
+            FROM payment_transactions t JOIN orders o ON o.id = t.order_id
+            WHERE t.status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND t.amount > 0
+              AND t.idempotency_key IS NOT NULL AND t.idempotency_key <> ''{$where}
+              AND EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = t.order_id AND i.store_id = t.store_id AND i.type = 'invoice' AND i.status <> :cancelled)
+            ORDER BY t.id");
+        $stmt->execute($params);
+        $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status <> 'failed'
+            AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
+        $credited = [];
+        $missing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $store = (string)$row['store_id'];
+            $order = (int)$row['order_id'];
+            $key = (string)$row['idempotency_key'];
+            $credited[$store . '|' . $order] ??= self::creditedRefundKeys($db, $store, $order);
+            if (isset($credited[$store . '|' . $order][$key])) continue;
+            $settles = json_decode((string)($row['raw_response'] ?? ''), true);
+            $item->execute([':order' => $order, ':store' => $store, ':key' => $key, ':ref' => (string)$row['provider_ref'],
+                ':settles' => is_array($settles) ? (string)($settles['settles_refund_request'] ?? '') : '']);
+            $settled = $item->fetchColumn();
+            $item->closeCursor();
+            if ($settled === false) $missing[] = ['store_id' => $store, 'order_id' => $order, 'order_number' => (string)$row['order_number'], 'refund_key' => $key];
+        }
+        return $missing;
+    }
+
+    /** @return array<string, true> the refund keys the order's credit notes were issued under */
+    private static function creditedRefundKeys(PDO $db, string $storeId, int $orderId): array {
+        $stmt = $db->prepare("SELECT credit_snapshot FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note'");
+        $stmt->execute([':store' => $storeId, ':order' => $orderId]);
+        $keys = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $snapshot) {
+            $snapshot = json_decode((string)$snapshot, true);
+            if (is_array($snapshot) && is_string($snapshot['refund_key'] ?? null)) $keys[$snapshot['refund_key']] = true;
+        }
+        return $keys;
     }
 
     private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {
