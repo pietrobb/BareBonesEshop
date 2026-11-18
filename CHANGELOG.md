@@ -349,9 +349,25 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   private directory if root created it), and make the package directory readable for the owner
   (`chmod -R o+rX /srv/releases/update-2.1.3` or `chown -R <owner>:`). Then run
   `sudo -u <owner> php cli/update.php apply --package=…` (or `bbe-step`).
+- **Migration** `20261118110000_mysql_table_collation` (review round 46, MySQL only): tables that older migrations
+  created with `DEFAULT CHARSET=utf8mb4` and no collation took the server's default (`utf8mb4_0900_ai_ci` on MySQL 8),
+  so joins with the core tables failed with error 1267. It converts them to the database's collation; a table that
+  already matches is left alone, and SQLite or a non-utf8mb4 database is not touched.
 
 ### Changes
 
+- **MySQL 8 shops can update and back up with MariaDB's client tools (round 46).** `mariadb-dump` (also Debian's
+  `mysqldump`) writes the values of generated columns (`categories.parent_id_uniq`, the invoice uniqueness column)
+  into its dump, and MySQL refuses them on restore (ERROR 3105); round 17 refused such a client, so `update.php apply`
+  and `cli/backup.php` stopped. The shop's update snapshots, rollback safety copies and backup dumps now write
+  `DEFAULT` for those values, which MySQL recomputes. `update.php doctor` and `check` warn (`dump_client`) instead of
+  refusing, because a dump taken by hand with that client still cannot be restored.
+- **MySQL: newer tables follow the database collation (round 46).** On MySQL 8 a table created with
+  `DEFAULT CHARSET=utf8mb4` and no collation gets `utf8mb4_0900_ai_ci`, not the database's collation. On a
+  `utf8mb4_unicode_ci` database the e-mail opt-out list, stock alert state, operational incidents, CSP reports and
+  ERP watermark tables then failed every JOIN with customers or products ("Illegal mix of collations", 1267). The
+  migration `20261118110000_mysql_table_collation` converts those eight tables to the database collation (only on a
+  utf8mb4 database, only when they differ); the released migrations are unchanged.
 - **Catalog cache entries follow the catalog version, not the second (round 45).** A cached product, listing,
   category tree or facet list rebuilt in the same second as a catalog change was rebuilt again on every request
   until the second passed, and one built from rows read just before a change but written a second later was served

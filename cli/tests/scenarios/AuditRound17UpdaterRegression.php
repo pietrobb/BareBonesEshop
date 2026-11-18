@@ -65,7 +65,7 @@ $r17upMaria = 'mariadb-dump from 11.4.3-MariaDB, client 10.19 for debian-linux-g
 $r17upMysql = 'mysqldump  Ver 8.4.3 for Linux on x86_64 (MySQL Community Server - GPL)';
 $r17upProblem = MysqlUpdateDatabaseBackup::clientProblem($r17upMaria, '8.4.3', ['categories.parent_id_uniq', 'invoices.invoice_order_id']);
 assert_true($r17upProblem !== null && str_contains($r17upProblem, 'ERROR 3105') && str_contains($r17upProblem, 'categories.parent_id_uniq') && str_contains($r17upProblem, 'update_mysql_dump_binary'),
-    'R17 updater: a MariaDB dump client against MySQL is refused with the reason and the setting to change (' . $r17upProblem . ')');
+    'R17 updater: a MariaDB dump client against MySQL is named with the reason and the setting to change (R46: a warning, the shop rewrites its own dumps) (' . $r17upProblem . ')');
 assert_equals([null, null, null], [MysqlUpdateDatabaseBackup::clientProblem($r17upMaria, '11.4.3-MariaDB-ubu2404', ['categories.parent_id_uniq']),
     MysqlUpdateDatabaseBackup::clientProblem($r17upMysql, '8.4.3', ['categories.parent_id_uniq']), MysqlUpdateDatabaseBackup::clientProblem($r17upMaria, '8.4.3', [])],
     'R17 updater: MariaDB to MariaDB, MySQL to MySQL and a schema without generated columns are fine');

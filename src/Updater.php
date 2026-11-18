@@ -152,6 +152,8 @@ final class Updater
                 }
                 $dumpProblem = $driver === 'mysql' && $this->databaseBackup instanceof MysqlUpdateDatabaseBackup ? $this->databaseBackup->dumpClientProblem() : null;
                 if ($dumpProblem !== null) $blockers[] = $dumpProblem;
+                elseif ($driver === 'mysql' && $this->databaseBackup instanceof MysqlUpdateDatabaseBackup
+                    && ($dumpWarning = $this->databaseBackup->dumpClientWarning()) !== null) $warnings[] = $dumpWarning;
             }
         }
 
@@ -730,6 +732,10 @@ final class Updater
                         } else {
                             $this->databaseBackup->probe($probeDirectory);
                             $add('ok', 'database_backup', 'MySQL dump, disposable restore, schema, row-count, and content-checksum comparison passed');
+                            if ($this->databaseBackup instanceof MysqlUpdateDatabaseBackup) {
+                                $dumpWarning = $this->databaseBackup->dumpClientWarning();
+                                if ($dumpWarning !== null) $add('warn', 'dump_client', $dumpWarning);
+                            }
                         }
                     } catch (Throwable $e) {
                         $add('fail', 'database_backup', $e->getMessage());

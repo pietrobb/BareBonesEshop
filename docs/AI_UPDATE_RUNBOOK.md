@@ -250,14 +250,16 @@ The updater refuses:
 - a probe schema that already exists;
 - non-InnoDB base tables, because `--single-transaction` cannot guarantee their consistency;
 - missing dump/client binaries or insufficient privileges;
-- a MariaDB dump client (`mariadb-dump`, also installed as `mysqldump` by the Debian/Ubuntu `mariadb-client`
-  package) against a MySQL server when the schema has generated columns (`categories.parent_id_uniq`, the invoice
-  uniqueness column): it writes their values into the dump and MySQL refuses them on restore (`ERROR 3105`), so no
-  snapshot could ever be restored. `doctor`, `check` and `apply` name the client and the columns. Install the MySQL
-  8.x client (`mysqldump` and `mysql`, e.g. from the MySQL APT repository or the official `mysql` image) and point
-  `update_mysql_dump_binary` and `update_mysql_client_binary` at them. Against a MariaDB server the MariaDB client is right;
 - a schema that changes while the dump runs (the live schema inventory is read before and after the dump and must be identical);
 - a dump whose disposable restore differs from the live schema (tables, columns, indexes, constraints, triggers, routines, events) or from the rows the dump itself carries (row count per table, counted from its `INSERT` statements).
+
+A MariaDB dump client (`mariadb-dump`, also installed as `mysqldump` by the Debian/Ubuntu `mariadb-client` package)
+against a MySQL server writes the values of generated columns (`categories.parent_id_uniq`, the invoice uniqueness
+column) into its dump, and MySQL refuses them on restore (`ERROR 3105`). Since round 46 the shop's update snapshots,
+rollback safety copies and `cli/backup.php` dumps write `DEFAULT` for those values, so they restore; `doctor` and
+`check` still warn (`dump_client`), because a dump you take yourself with that client does not. Prefer the MySQL 8.x
+client (`mysqldump` and `mysql`, e.g. from the MySQL APT repository or the official `mysql` image) and point
+`update_mysql_dump_binary` and `update_mysql_client_binary` at them. Against a MariaDB server the MariaDB client is right.
 
 Credentials are written only to a mode-`0600` temporary MySQL option file and are never passed as process arguments. The temporary file is deleted after each client invocation.
 
