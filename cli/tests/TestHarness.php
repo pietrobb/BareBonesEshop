@@ -30,7 +30,7 @@ function entrypointSource(string $entrypoint): string {
         'admin.php' => [
             'src/Entrypoints/Admin.php', 'src/Entrypoints/Admin/Shared.php', 'src/Entrypoints/Admin/LayoutScript.php',
             'src/Entrypoints/Admin/Catalog.php', 'src/Entrypoints/Admin/Orders.php',
-            'src/Entrypoints/Admin/Customers.php', 'src/Entrypoints/Admin/Operations.php',
+            'src/Entrypoints/Admin/Customers.php', 'src/Entrypoints/Admin/Operations.php', 'src/Entrypoints/Admin/Dashboard.php',
             'src/Entrypoints/Admin/Request.php',
         ],
         'api/v1/index.php' => ['src/Entrypoints/Api.php', 'src/ApiRoute.php', 'src/Http/ApiHandlers.php', 'src/Entrypoints/ApiExternal.php'],

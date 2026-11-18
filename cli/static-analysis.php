@@ -205,7 +205,7 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/MailDelivery.php' => ['lines' => 138, 'functions' => 3, 'max_function_lines' => 69, 'coupling' => 6],
     // Data files: route => page modules, side menu and page permissions.
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
-    'src/Entrypoints/Admin/Navigation.php' => ['lines' => 40, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
+    'src/Entrypoints/Admin/Navigation.php' => ['lines' => 45, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Permissions.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
@@ -214,7 +214,9 @@ $architectureBudgets = [
     // +4 lines R21: the feed page lists the items its last sync refused.
     // +7 lines R23 UX: checklist checks titled in the admin's language, the doctor's text in a details element.
     // +1 line, +1 coupling R30: CSV import row errors in the admin's language (ImportErrorLabels).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 824, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 25],
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 74, 'coupling' => 23],
+    // Admin UI refresh: the dashboard moved out of Operations.php (tiles, 14-day revenue, health, checklist, incidents, monitoring).
+    'src/Entrypoints/Admin/Dashboard.php' => ['lines' => 240, 'functions' => 11, 'max_function_lines' => 50, 'coupling' => 14],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).

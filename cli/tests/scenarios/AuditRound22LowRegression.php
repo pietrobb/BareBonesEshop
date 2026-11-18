@@ -45,8 +45,9 @@ try {
     $r22lAdmin = (string)file_get_contents($r22lRoot . '/src/Entrypoints/Admin.php');
     $r22lCatalog = (string)file_get_contents($r22lRoot . '/src/Entrypoints/Admin/Catalog.php');
     $r22lE2e = (string)file_get_contents($r22lRoot . '/tests/e2e/admin-ux.spec.js');
-    assert_true(str_contains($r22lAdmin, 'font-size:.9rem;max-width:100%}') && str_contains($r22lAdmin, 'margin-bottom:1rem;overflow-wrap:anywhere}')
-        && str_contains($r22lAdmin, 'code{overflow-wrap:anywhere}')
+    assert_true(preg_match('/(?:^|\n)input,select,textarea\{[^}]*max-width:100%/', $r22lAdmin) === 1
+        && preg_match('/(?:^|\n)\.flash\{[^}]*overflow-wrap:anywhere/', $r22lAdmin) === 1
+        && preg_match('/\}code\{[^}]*overflow-wrap:anywhere/', $r22lAdmin) === 1
         && str_contains($r22lCatalog, "<div class=\"card table-scroll\">\n        <h3><?= esc(I18n::t('admin.digital.mappings'))")
         && str_contains($r22lE2e, "'/admin.php?p=feed', '/admin.php?p=promotions', '/admin.php?p=digital_assets', '/admin.php?p=import'"),
         'R22 admin: inputs and selects fit their cell, flash details and paths wrap, the digital-assets table scrolls; the phone test covers the pages');

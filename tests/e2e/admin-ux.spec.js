@@ -122,9 +122,10 @@ test('admin pages fit a 360px phone without sideways scrolling or serious axe vi
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, `${path} scrolls sideways by ${overflow}px at 360px`).toBeLessThanOrEqual(0);
     await noSeriousViolations(page, `${path} at 360px`);
-    // A table wider than the phone scrolls in its own named box that the keyboard can reach.
+    // A table wider than the phone scrolls in its own named box that the keyboard can reach (a box folded away in a
+    // closed <details>, such as the dashboard's monitoring evidence, is out of reach until opened).
     for (const box of await page.locator('main .table-scroll').all()) {
-      if (await box.evaluate(el => el.scrollWidth > el.clientWidth + 1)) {
+      if (await box.isVisible() && await box.evaluate(el => el.scrollWidth > el.clientWidth + 1)) {
         await expect(box).toHaveAttribute('tabindex', '0');
         await expect(box).toHaveAttribute('role', 'region');
         await expect(box).toHaveAccessibleName(/\S/);
