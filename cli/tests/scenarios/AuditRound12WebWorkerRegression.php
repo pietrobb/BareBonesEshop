@@ -57,9 +57,9 @@ PHP);
     fclose($r12wProbe);
     // R20: the server inherits the suite's environment (BBE_SUITE_*), or the app it loads opens the developer's config.php.
     $r12wEnv = array_merge(getenv(), ['PHP_CLI_SERVER_WORKERS' => '3', 'R12W_ROOT' => $r12wRoot, 'R12W_APP' => dirname(TEST_CLI_DIR)]);
-    $r12wServer = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $r12wRoot . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1',
+    $r12wServer = test_spawn_server([PHP_BINARY, '-d', 'session.save_path=' . $r12wRoot . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1',
         '-d', 'error_log=' . $r12wBase . '/php-error.log', '-S', "127.0.0.1:{$r12wPort}", $r12wRoot . '/router.php'],
-        [0 => ['pipe', 'r'], 1 => ['file', $r12wBase . '/server.log', 'a'], 2 => ['file', $r12wBase . '/server.log', 'a']], $r12wPipes, $r12wRoot, $r12wEnv);
+        [0 => ['pipe', 'r'], 1 => ['file', $r12wBase . '/server.log', 'a'], 2 => ['file', $r12wBase . '/server.log', 'a']], $r12wRoot, $r12wEnv, $r12wPipes);
     // A client that, like a browser or a payment gateway, treats the response as complete once Content-Length bytes arrived.
     $r12wGet = static function (string $path, string $cookie = '') use ($r12wPort): array {
         $start = microtime(true);
@@ -107,7 +107,11 @@ PHP);
 } catch (Throwable $e) {
     assert_true(false, 'R12 web worker (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
-    if (is_resource($r12wServer)) { proc_terminate($r12wServer); proc_close($r12wServer); }
+    $r12wPipes ??= [];
+    test_stop_server($r12wServer, $r12wPipes);
+    // R45: proc_terminate() killed only the php -S master; its PHP_CLI_SERVER_WORKERS children outlived every suite.
+    for ($i = 0; $i < 30 && test_processes_matching($r12wBase) !== []; $i++) usleep(100000);
+    assert_equals([], test_processes_matching($r12wBase), 'R45 web worker: stopping the php -S server ends its worker processes too');
     if (is_dir($r12wBase)) {
         foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r12wBase, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $item) {
             $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
@@ -115,3 +119,23 @@ PHP);
         @rmdir($r12wBase);
     }
 }
+
+// R45: a suite killed by its timeout (SIGKILL, no finally) left every server it had started running for days.
+$r45Base = test_fixture_path('r45-orphan-server');
+mkdir($r45Base, 0777, true);
+$r45Probe = stream_socket_server('tcp://127.0.0.1:0');
+$r45Port = (int)substr(strrchr((string)stream_socket_get_name($r45Probe, false), ':'), 1);
+fclose($r45Probe);
+$r45Child = proc_open([PHP_BINARY, '-r', 'require $argv[1]; $p = test_spawn_server([PHP_BINARY, "-S", "127.0.0.1:" . $argv[3], "-t", $argv[2]],'
+    . ' [1 => ["file", "/dev/null", "a"], 2 => ["file", "/dev/null", "a"]], $argv[2], array_merge(getenv(), ["PHP_CLI_SERVER_WORKERS" => "2"]), $pipes); sleep(60);',
+    TEST_CLI_DIR . '/tests/ServerProcess.php', $r45Base, (string)$r45Port], [0 => ['pipe', 'r'], 1 => ['file', '/dev/null', 'a'], 2 => ['file', '/dev/null', 'a']], $r45ChildPipes);
+for ($i = 0; $i < 50 && count(test_processes_matching($r45Base)) < 4; $i++) usleep(100000);
+$r45Started = count(test_processes_matching($r45Base));
+proc_terminate($r45Child, 9);
+proc_close($r45Child);
+for ($i = 0; $i < 30 && test_processes_matching($r45Base) !== []; $i++) usleep(100000);
+$r45Left = test_processes_matching($r45Base);
+if ($r45Left !== []) exec('kill -9 ' . implode(' ', $r45Left));
+@rmdir($r45Base);
+assert_true($r45Started >= 4, "R45 web worker: the probe server ran with its workers ({$r45Started} processes)");
+assert_equals([], $r45Left, 'R45 web worker: a test process killed with SIGKILL takes its php -S server and workers with it');
