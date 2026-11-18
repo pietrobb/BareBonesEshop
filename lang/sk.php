@@ -301,6 +301,7 @@ return [
 
     // Admin UI (admin.php)
     'admin.app_name'         => 'BareBonesShop',
+    'admin.nav.badge' => 'Správa',
     'admin.language'         => 'Jazyk',
     'admin.logout'           => 'Odhlásiť',
     // Navigation
@@ -1884,6 +1885,7 @@ return [
     'account.download_link_note' => 'Každé stiahnutie z tejto stránky vytvorí nový odkaz; odkaz z e-mailu potom prestane fungovať.',
     'format.date' => 'j. n. Y',
     'format.datetime' => 'j. n. Y H:i',
+    'format.day_month' => 'j. n.',
     'order_status.pending' => 'Čaká na spracovanie',
     'order_status.paid' => 'Zaplatená',
     'order_status.processing' => 'Spracováva sa',

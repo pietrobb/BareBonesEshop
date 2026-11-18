@@ -170,7 +170,7 @@ try {
     assert_equals(1, count(array_slice($a103Events(), $a103Before)), 'A10.3 GDPR export: rejected exports are not logged as exports');
 
     $r = $a103Run('owner', 'GET', ['p' => ['x' => 'orders'], 'action' => ['y'], 'id' => ['1']]);
-    assert_true(!$a103Fatal($r) && str_contains($r['out'], '<main>'), $a103Label('A10.3 admin router: p[]/action[] arrays fall back to the dashboard without a TypeError', $r));
+    assert_true(!$a103Fatal($r) && str_contains($r['out'], '<main'), $a103Label('A10.3 admin router: p[]/action[] arrays fall back to the dashboard without a TypeError', $r));
 } finally {
     $a103StorageProp->setValue(null, $a103OldStorage);
     $a103Db->exec("DELETE FROM customers WHERE email IN ('a103-gdpr@example.com', 'a103-foreign@example.com')");

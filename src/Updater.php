@@ -796,13 +796,27 @@ final class Updater
             : 'config.php points ' . implode(', ', $inside) . ' inside the application root (or uses a relative path), which this release refuses'
                 . ' (the admin, workers and cron fail); move them outside the web root (default: ../bareboneseshop-private/…)'
                 . ' and move their contents before the update');
-        if (DataOverrides::storesNeedUpgrade($this->root, $config)) {
+        // R47 (review round 17, low): stores.json in private_runtime_dir is the owner's file: root reads it as the owner,
+        // like it writes it, so a symlink there cannot make root read (and answer yes/no about) a file the owner may not.
+        if (PrivateOwner::run(fn(): bool => DataOverrides::storesNeedUpgrade($this->root, $config))) {
             $hasDataDirectory = DataOverrides::dir($config) !== null;
             $add($hasDataDirectory ? 'warn' : 'fail', 'stores', $hasDataDirectory
                 ? 'stores.json is in the v1.x format (no default_store); apply writes the upgraded copy to private_runtime_dir/stores.json'
                     . ' (the main store becomes "default") and keeps the old file for a rollback'
                 : 'stores.json is in the v1.x format (no default_store) and no private_runtime_dir is configured for the upgraded copy;'
                     . ' this release would answer 503: set private_runtime_dir first');
+        }
+        // R47 (review round 17, low 6): R44 ignores public trusted_proxies ranges wider than IPv4 /16 (IPv6 /32), among them
+        // Cloudflare's published 104.16.0.0/13, 104.24.0.0/14, 162.158.0.0/15 and 2a06:98c0::/29. Only setup.php doctor
+        // said so, after the update; the update went through and every request via them counted as the proxy's address.
+        if ((array)($config['trusted_proxies'] ?? []) !== []) {
+            $wideProxies = Security::tooWideTrustedProxies($config);
+            $add($wideProxies === [] ? 'ok' : 'fail', 'trusted_proxies', $wideProxies === []
+                ? 'trusted_proxies holds no public range wider than IPv4 /16 or IPv6 /32'
+                : 'trusted_proxies ranges ' . implode(', ', $wideProxies) . ' are wider than this release trusts (a public range is at most'
+                    . ' IPv4 /16 or IPv6 /32) and would be ignored: requests through them would count as the proxy\'s own address'
+                    . ' (rate limits, the buyer\'s IP and IP country). List each as its /16 (IPv6 /32) parts in config.php, e.g.'
+                    . ' 104.16.0.0/13 as 104.16.0.0/16 … 104.23.0.0/16; older releases accept them too');
         }
         // The deny rules and the carrier-webhook default of the release running this doctor (CHANGELOG upgrade notes).
         $missingDenies = UpgradeChecks::nginxMissingDenies($config, dirname(__DIR__));

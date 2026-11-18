@@ -458,12 +458,15 @@ final class InvoiceService
      * R44 (low 5): run again by every later issue() of the order, so not those whose job is still open.
      */
     public static function queueCreditsOfBookedRefunds(int $orderId): int {
+        // R47 (review round 17, low 5): the queue is listed only for an order with a refund still lacking its credit note.
+        $missing = self::uncreditedBookedRefunds(Db::get(), $orderId);
+        if ($missing === []) return 0;
         $open = [];
         foreach (JobQueue::openJobs('refund_credit_note') ?? [] as $payload) {
             if ((int)($payload['order_id'] ?? 0) === $orderId) $open[(string)($payload['refund_key'] ?? '')] = true;
         }
         $queued = 0;
-        foreach (self::uncreditedBookedRefunds(Db::get(), $orderId) as $refund) {
+        foreach ($missing as $refund) {
             if (isset($open[$refund['refund_key']])) continue;
             JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $refund['refund_key']], 5);
             $queued++;

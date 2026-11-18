@@ -142,7 +142,7 @@ a{color:var(--accent-d);text-decoration:none}a:hover,p a:not(.btn),li a:not(.btn
 .wrap{display:flex;min-height:100vh}
 nav{width:248px;background:var(--dark);color:#fff;padding:0 0 1.5rem;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2c3a55 transparent}
 nav h2{display:flex;align-items:center;gap:.4rem;padding:1.1rem 1.1rem 1rem;font-size:1.05rem;font-weight:800;letter-spacing:.2px;background:var(--dark3);border-bottom:1px solid #24304a}
-nav h2::after{content:"ADMIN";background:var(--accent-d);color:#fff;border-radius:4px;padding:1px 6px;font-size:.68rem;letter-spacing:.6px}
+nav h2 .nav-badge{background:var(--accent-d);color:#fff;border-radius:4px;padding:1px 6px;font-size:.68rem;letter-spacing:.6px;text-transform:uppercase}.skip-link{position:absolute;left:-9999px;top:.5rem;z-index:100;padding:.5rem .9rem;border-radius:6px;background:#fff;color:var(--accent-dd);font-weight:600}.skip-link:focus{left:.5rem}
 nav .nav-user{display:flex;align-items:center;gap:.6rem;margin:.9rem .8rem .5rem;padding:.6rem .7rem;background:var(--dark2);border:1px solid #2c3a55;border-radius:8px;font-size:.8rem;color:#c3cbd9;line-height:1.3}
 .nav-avatar{flex:none;width:2rem;height:2rem;border-radius:50%;background:var(--accent-d);color:#fff;display:grid;place-items:center;font-weight:700;text-transform:uppercase}
 .nav-who{flex:1;min-width:0}.nav-who b{display:block;color:#fff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -161,8 +161,8 @@ h1{margin-bottom:1rem;font-size:1.45rem;font-weight:700;letter-spacing:-.2px}h2{
 .stat{position:relative}.card.stat{border-top:3px solid var(--accent)}.stat .num{font-size:1.75rem;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.2}.stat .label{font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
 table{width:100%;border-collapse:collapse}th,td{padding:.55rem .75rem;text-align:left;border-bottom:1px solid #eef0f3}
 th{background:#f9fafb;font-weight:700;font-size:.72rem;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
-tr:hover{background:#fafbfc}td a:not(.btn){color:var(--text);font-weight:500}td a:not(.btn):hover{color:var(--accent-d)}th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.mono{font-family:var(--mono);font-size:.85em}
-.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;white-space:nowrap}
+tr:hover{background:#fafbfc}td a:not(.btn){color:var(--accent-d);font-weight:500;text-decoration:underline;text-underline-offset:2px}td a:not(.btn):hover{color:var(--accent-dd)}th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.mono{font-family:var(--mono);font-size:.85em}
+.badge{display:inline-block;max-width:100%;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;overflow-wrap:anywhere}td>.badge{white-space:nowrap}
 .badge-pending{background:#fef3c7;color:#92400e}.badge-paid{background:#d1fae5;color:#065f46}.badge-shipped{background:#dbeafe;color:#1e40af}.badge-delivered{background:#d1fae5;color:#065f46}
 .badge-cancelled,.badge-failed{background:#fee2e2;color:#991b1b}.badge-returned{background:#fce7f3;color:#9d174d}.badge-refunded{background:#e2e8f0;color:#475569}.badge-processing{background:#e0e7ff;color:#3730a3}
 .badge-refund_pending{background:#fef3c7;color:#92400e}.badge-authorized{background:#dbeafe;color:#1e40af}
@@ -174,7 +174,7 @@ tr:hover{background:#fafbfc}td a:not(.btn){color:var(--text);font-weight:500}td 
 .flash{padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;overflow-wrap:anywhere;border:1px solid transparent}code{overflow-wrap:anywhere;font-family:var(--mono);font-size:.85em}
 .flash-ok{background:#ecfdf3;color:#065f46;border-color:#a7f3d0}.flash-err{background:#fef2f2;color:#991b1b;border-color:#fecaca}.flash-warn{background:#fffbeb;color:#92400e;border-color:#fde68a}
 input,select,textarea{padding:.45rem .65rem;border:1px solid #d6dae0;border-radius:6px;font:inherit;font-size:.9rem;max-width:100%;background:#fff;color:var(--text)}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(234,88,12,.15)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(234,88,12,.15)}:focus-visible{outline:2px solid var(--accent-d);outline-offset:2px}nav :focus-visible{outline-color:#fff}#main:focus{outline:0}
 input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5rem;height:1.5rem;margin:0 .25rem 0 0;vertical-align:middle;accent-color:var(--accent-d)}textarea{resize:vertical}
 .form-row{margin-bottom:.75rem}.form-row label{display:block;font-weight:600;font-size:.85rem;margin-bottom:2px}
 .bbf-field{margin-bottom:.75rem}.bbf-label{display:block;font-weight:600;font-size:.85rem;margin-bottom:2px}.bbf-required{color:#b91c1c}
@@ -208,10 +208,10 @@ input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5r
 @media(max-width:760px){.wrap{display:block}nav{width:100%;height:auto;position:static;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div,nav .nav-user,nav .nav-langs,nav .nav-group{display:none}nav a{white-space:nowrap;margin:0 1px}nav .nav-out{padding:0 .5rem 0 0;flex:0 0 auto}nav .store-switcher{order:-1;flex:0 0 auto;flex-wrap:nowrap;padding:0 .5rem 0 0}nav .store-switcher select{flex:0 0 auto;min-width:9rem}main{padding:1rem;min-width:0}.grid-2{grid-template-columns:minmax(0,1fr)}.sales-toolbar{align-items:stretch}.sales-toolbar>*{max-width:100%}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}.kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}.kpi{grid-template-columns:minmax(0,1fr);grid-template-areas:"label" "value";padding:.75rem .85rem}.kpi-icon{display:none}.kpi-value{font-size:1.25rem}.report-chart text{font-size:26px}.report-chart .chart-axis,.report-chart .chart-day:not(.chart-day-key){display:none}.report-chart .chart-day-last{text-anchor:end}}
 </style>
 </head>
-<body>
+<body><a class="skip-link" href="#main"><?= esc(I18n::t('skip_to_content')) ?></a>
 <div class="wrap">
 <nav>
-    <h2><?= esc($adminAppName) ?></h2>
+    <h2><?= esc($adminAppName) ?> <span class="nav-badge"><?= esc(I18n::t('admin.nav.badge')) ?></span></h2>
     <div class="nav-user"><span class="nav-avatar" aria-hidden="true"><?= esc(mb_substr(Security::adminUser(), 0, 1)) ?></span><span class="nav-who"><b><?= esc(Security::adminUser()) ?></b><?= esc(Security::adminRole()) ?> · <a href="admin.php?p=my_account"><?= esc(I18n::t('admin.title.my_account')) ?></a></span></div>
     <form method="post" action="admin.php" class="nav-out">
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -229,7 +229,7 @@ input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5r
         <?php endforeach; ?>
     </div>
 </nav>
-<main>
+<main id="main" tabindex="-1">
 <?php flash(); ?>
 <?php
 match($page) {

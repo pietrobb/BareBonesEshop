@@ -299,6 +299,7 @@ return array_replace(require __DIR__ . '/en.php', [
 
     // Admin UI
     'admin.app_name'         => 'BareBonesShop',
+    'admin.nav.badge' => 'Verwaltung',
     'admin.language'         => 'Sprache',
     'admin.logout'           => 'Abmelden',
     'admin.nav.dashboard'    => 'Dashboard',
@@ -1875,6 +1876,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.download_link_note' => 'Jeder Download von dieser Seite erzeugt einen neuen Link; der Link aus der E-Mail funktioniert danach nicht mehr.',
     'format.date' => 'd.m.Y',
     'format.datetime' => 'd.m.Y H:i',
+    'format.day_month' => 'd.m.',
     'order_status.pending' => 'Ausstehend',
     'order_status.paid' => 'Bezahlt',
     'order_status.processing' => 'In Bearbeitung',

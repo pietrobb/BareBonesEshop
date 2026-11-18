@@ -299,6 +299,7 @@ return array_replace(require __DIR__ . '/en.php', [
 
     // Admin UI
     'admin.app_name'         => 'BareBonesShop',
+    'admin.nav.badge' => 'Kezelő',
     'admin.language'         => 'Nyelv',
     'admin.logout'           => 'Kijelentkezés',
     'admin.nav.dashboard'    => 'Irányítópult',
@@ -1875,6 +1876,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.download_link_note' => 'Minden letöltés erről az oldalról új hivatkozást hoz létre; az e-mailben kapott hivatkozás ezután nem működik.',
     'format.date' => 'Y. m. d.',
     'format.datetime' => 'Y. m. d. H:i',
+    'format.day_month' => 'm. d.',
     'order_status.pending' => 'Függőben',
     'order_status.paid' => 'Fizetve',
     'order_status.processing' => 'Feldolgozás alatt',

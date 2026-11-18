@@ -410,7 +410,7 @@ assert_equals(3, count($r10xBars[0]), 'R10 UX10: the chart has one bar per day')
 assert_true((float)$r10xBars[2][0] > (float)$r10xBars[2][2] && (float)$r10xBars[2][2] > 0 && (float)$r10xBars[2][1] === 0.0 && (float)$r10xBars[1][0] < (float)$r10xBars[1][1],
     'R10 UX10: bars run in date order with heights in proportion to the revenue (an empty day has none)');
 assert_true(preg_match('/aria-labelledby="(report-chart-eur)"/', $r10xChart) === 1 && str_contains($r10xChart, '<figcaption id="report-chart-eur"')
-    && str_contains($r10xChart, '2026-10-01') && str_contains($r10xChart, '2026-10-03') && substr_count($r10xChart, '<title>') === 3, 'R10 UX10: the chart is named by its visible summary and every bar has a tooltip');
+    && str_contains($r10xChart, I18n::date('2026-10-01')) && str_contains($r10xChart, I18n::date('2026-10-03')) && substr_count($r10xChart, '<title>') === 3, 'R10 UX10: the chart is named by its visible summary and every bar has a tooltip');
 assert_equals('', SalesChart::dailyRevenue([], 'eur'), 'R10 UX10: no data, no chart');
 $r10xEvil = SalesChart::dailyRevenue(['<script>' => ['orders' => 1, 'revenue' => 1]], 'eur');
 assert_true(!str_contains($r10xEvil, '<script>'), 'R10 UX10: chart text is escaped');

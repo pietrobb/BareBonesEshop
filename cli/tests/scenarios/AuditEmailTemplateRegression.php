@@ -213,7 +213,7 @@ $a158Check = static function(string $label, array $r, array $expect, array $abse
     $present = array_values(array_filter($absent, static fn(string $t): bool => str_contains($r['out'], $t)));
     assert_true($r['code'] === 200 && $missing === [] && $present === [], "{$label} (code=" . var_export($r['code'], true)
         . ' missing=' . json_encode($missing, JSON_UNESCAPED_UNICODE) . ' present=' . json_encode($present, JSON_UNESCAPED_UNICODE)
-        . ($missing || $r['code'] !== 200 ? ' main=' . substr((string)(strstr($r['out'], '<main>') ?: $r['out']), 0, 600) : '') . ')');
+        . ($missing || $r['code'] !== 200 ? ' main=' . substr((string)(strstr($r['out'], '<main') ?: $r['out']), 0, 600) : '') . ')');
 };
 $a158Editor = ['p' => 'email_templates', 'template' => 'order_confirmation', 'locale' => 'sk'];
 $a158Draft = ['subject' => 'A158 Bestellung {{order_number}}', 'html' => '<p>A158 Entwurf {{order_number}} für {{customer_name}}</p>' . $a158Consumer, 'text' => ''];

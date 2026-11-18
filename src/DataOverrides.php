@@ -146,8 +146,27 @@ final class DataOverrides
     /** True when the stores.json in use is still in the v1.x format (see upgradeLegacyStores). */
     public static function storesNeedUpgrade(string $appRoot, array $config): bool
     {
-        $data = json_decode((string)@file_get_contents(self::storesPath($appRoot, $config)), true);
+        $data = json_decode((string)self::readRegularFile(self::storesPath($appRoot, $config)), true);
         return is_array($data) && self::upgradeLegacyStores($data) !== null;
+    }
+
+    /**
+     * R47 (review round 17, low): the contents of a regular file, else null. Opened non-blocking ('n' = O_NONBLOCK), so a
+     * FIFO swapped in after storesPath()'s is_file() cannot stall the caller (root's update doctor/check); fstat() of
+     * the open handle then refuses anything but a regular file.
+     */
+    public static function readRegularFile(string $path): ?string
+    {
+        $handle = @fopen($path, 'rn');
+        if ($handle === false) return null;
+        try {
+            $stat = fstat($handle);
+            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0100000) return null;
+            $contents = stream_get_contents($handle);
+            return $contents === false ? null : $contents;
+        } finally {
+            fclose($handle);
+        }
     }
 
     /**
