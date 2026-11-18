@@ -20,7 +20,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 phar=${PHPSTAN_PHAR:-"$root/cache/phpstan-$PHPSTAN_VERSION.phar"}
 if [ ! -f "$phar" ]; then
     mkdir -p "$(dirname "$phar")"
-    curl -fsSL -o "$phar.tmp" "https://github.com/phpstan/phpstan/releases/download/$PHPSTAN_VERSION/phpstan.phar"
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 20 --max-time 120 \
+        -o "$phar.tmp" "https://github.com/phpstan/phpstan/releases/download/$PHPSTAN_VERSION/phpstan.phar"
     mv "$phar.tmp" "$phar"
 fi
 echo "$PHPSTAN_SHA256  $phar" | sha256sum -c - >/dev/null

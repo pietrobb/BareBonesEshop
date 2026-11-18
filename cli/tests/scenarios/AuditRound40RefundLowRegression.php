@@ -116,7 +116,7 @@ try {
         $r40fSocket = stream_socket_server('tcp://127.0.0.1:0');
         $r40fAddress = stream_socket_get_name($r40fSocket, false);
         fclose($r40fSocket);
-        $r40fServer = proc_open([PHP_BINARY, '-S', $r40fAddress, $r40fRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $r40fRoot . '/server.log', 'a'], 2 => ['file', $r40fRoot . '/server.log', 'a']], $r40fPipes);
+        $r40fServer = test_spawn_server([PHP_BINARY, '-S', $r40fAddress, $r40fRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $r40fRoot . '/server.log', 'a'], 2 => ['file', $r40fRoot . '/server.log', 'a']], $r40fPipes);
         fclose($r40fPipes[0]);
         try {
             $r40fReady = false;

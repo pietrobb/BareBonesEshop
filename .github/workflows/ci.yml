@@ -165,10 +165,23 @@ jobs:
           coverage: none
           tools: none
 
+      # GitHub's release download answered 504 for hours (2026-11-08): keep the checksummed phar between runs.
+      - name: Cache pinned PHPStan phar
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/phpstan-phar
+          key: phpstan-phar-${{ env.PHPSTAN_VERSION }}-${{ env.PHPSTAN_SHA256 }}
+
       - name: Download pinned PHPStan phar (CI only, the runtime stays dependency-free)
         run: |
-          curl -fsSL -o /tmp/phpstan.phar "https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
-          echo "${PHPSTAN_SHA256}  /tmp/phpstan.phar" | sha256sum -c -
+          phar=~/.cache/phpstan-phar/phpstan.phar
+          if [ ! -f "$phar" ]; then
+            mkdir -p ~/.cache/phpstan-phar
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 20 --max-time 120 \
+              -o "$phar" "https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
+          fi
+          echo "${PHPSTAN_SHA256}  $phar" | sha256sum -c - || { rm -f "$phar"; exit 1; }
+          cp "$phar" /tmp/phpstan.phar
 
       - name: Analyse (new findings fail; existing ones are in phpstan-baseline.neon)
         run: php -d memory_limit=2G /tmp/phpstan.phar analyse -c phpstan.neon.dist --no-progress
@@ -244,23 +257,19 @@ jobs:
           node-version: '24'
           cache: npm
 
+      - name: Cache Playwright browsers and their system packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-chromium-webkit-firefox
+
       - name: Install qualification tools and browsers (Chromium, WebKit, Firefox)
         timeout-minutes: 40
         run: |
           npm ci
-          # The runner's apt mirror can stall for minutes per package: time out and retry instead of hanging the job.
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
-          for attempt in 1 2 3; do
-            timeout 480 npx playwright install --with-deps chromium webkit firefox && exit 0
-            echo "::warning::playwright install attempt $attempt did not finish; retrying"
-            # timeout stops npx, not the apt-get it started: give that a few minutes to finish (it holds the dpkg lock),
-            # then stop a stalled one so the retry can take the lock.
-            timeout 240 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
-            sudo pkill -x apt-get || true
-            sleep 5
-            sudo dpkg --configure -a || true
-          done
-          exit 1
+          bash .github/scripts/playwright-install.sh chromium webkit firefox
 
       - name: ESLint (storefront scripts and qualification tooling)
         run: npx eslint --max-warnings=0 .
@@ -326,20 +335,19 @@ jobs:
           node-version: '24'
           cache: npm
 
+      - name: Cache Playwright Chromium and its system packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-chromium
+
       - name: Install Playwright Chromium
         timeout-minutes: 20
         run: |
           npm ci
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
-          for attempt in 1 2 3; do
-            timeout 480 npx playwright install --with-deps chromium && exit 0
-            echo "::warning::playwright install attempt $attempt did not finish; retrying"
-            timeout 240 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
-            sudo pkill -x apt-get || true
-            sleep 5
-            sudo dpkg --configure -a || true
-          done
-          exit 1
+          bash .github/scripts/playwright-install.sh chromium
 
       # Builds the upload-and-sell zip, unpacks it into a clean php:8.4-apache container (no CLI, no cron) and buys
       # an eBook (download), a paperback (cash on delivery) and a hardcover (bank transfer) that the owner handles.

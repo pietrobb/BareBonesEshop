@@ -33,6 +33,7 @@ on:
       - 'tests/e2e/**'
       - 'playwright.config.js'
       - '.github/workflows/payment-gateway.yml'
+      - '.github/scripts/playwright-install.sh'
   pull_request:
     branches: [main, master]
     paths:
@@ -55,6 +56,7 @@ on:
       - 'tests/e2e/**'
       - 'playwright.config.js'
       - '.github/workflows/payment-gateway.yml'
+      - '.github/scripts/playwright-install.sh'
 
 permissions:
   contents: read
@@ -116,20 +118,19 @@ jobs:
           node-version: '24'
           cache: npm
 
+      - name: Cache Playwright browsers and their system packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-apt
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-chromium-webkit-firefox
+
       - name: Install Playwright browsers
         timeout-minutes: 40
         run: |
           npm ci --ignore-scripts
-          # The runner's apt mirror can stall for minutes per package: time out and retry instead of hanging the job.
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
-          for attempt in 1 2 3; do
-            timeout 480 npx playwright install --with-deps chromium webkit firefox && exit 0
-            echo "::warning::playwright install attempt $attempt did not finish; retrying"
-            # timeout stops npx, not the apt-get it started: let that finish (it holds the dpkg lock) before retrying.
-            timeout 600 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
-            sudo dpkg --configure -a || true
-          done
-          exit 1
+          bash .github/scripts/playwright-install.sh chromium webkit firefox
 
       - name: Prepare disposable SQLite application with the Stripe test key
         env:

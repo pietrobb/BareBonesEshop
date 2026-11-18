@@ -101,7 +101,7 @@ $script = UrlAliases::dispatch($uri);
 if ($script !== null) { $_SERVER["SCRIPT_NAME"] = "/" . $script; require $r4App . "/" . $script; exit; }
 http_response_code(404);
 ');
-$r4Server = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $r4Root . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1', '-d', 'error_log=' . $r4Root . '/php-error.log',
+$r4Server = test_spawn_server([PHP_BINARY, '-d', 'session.save_path=' . $r4Root . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1', '-d', 'error_log=' . $r4Root . '/php-error.log',
     '-d', 'date.timezone=Europe/Bratislava', '-S', "127.0.0.1:{$r4Port}", $r4Root . '/router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', $r4Root . '/server.log', 'a'], 2 => ['file', $r4Root . '/server.log', 'a']], $r4Pipes, $r4App);
 $r4Http = static function (string $method, string $path, array $post = [], ?string &$sid = null, array $cookies = []) use ($r4Port): array {

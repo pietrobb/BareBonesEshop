@@ -40,7 +40,7 @@ echo json_encode(($_GET["action"] ?? "") === "webhook_stripe" ? apiWebhookStripe
 $a02Socket = stream_socket_server('tcp://127.0.0.1:0', $a02Errno, $a02Error);
 $a02Address = stream_socket_get_name($a02Socket, false);
 fclose($a02Socket);
-$a02Server = proc_open([PHP_BINARY, '-S', $a02Address, $a02Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a02Root . '/server.log', 'a'], 2 => ['file', $a02Root . '/server.log', 'a']], $a02Pipes);
+$a02Server = test_spawn_server([PHP_BINARY, '-S', $a02Address, $a02Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a02Root . '/server.log', 'a'], 2 => ['file', $a02Root . '/server.log', 'a']], $a02Pipes);
 fclose($a02Pipes[0]);
 try {
     $a02Ready = false;

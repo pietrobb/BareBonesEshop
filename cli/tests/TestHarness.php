@@ -3,6 +3,7 @@
 define('TEST_CLI_DIR', dirname(__DIR__));
 
 require_once TEST_CLI_DIR . '/../src/autoload.php';
+require_once __DIR__ . '/ServerProcess.php';
 
 // R16: after `setup.php install` the shop's stores.json and legal texts live in private_runtime_dir; the suite runs on
 // its own copy of the shipped stores.example.json there instead (and never writes into the installed shop's data).

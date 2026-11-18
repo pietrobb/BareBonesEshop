@@ -120,7 +120,7 @@ try {
         $r39sSocket = stream_socket_server('tcp://127.0.0.1:0');
         $r39sAddress = stream_socket_get_name($r39sSocket, false);
         fclose($r39sSocket);
-        $r39sServer = proc_open([PHP_BINARY, '-S', $r39sAddress, $r39sRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $r39sRoot . '/server.log', 'a'], 2 => ['file', $r39sRoot . '/server.log', 'a']], $r39sPipes);
+        $r39sServer = test_spawn_server([PHP_BINARY, '-S', $r39sAddress, $r39sRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $r39sRoot . '/server.log', 'a'], 2 => ['file', $r39sRoot . '/server.log', 'a']], $r39sPipes);
         fclose($r39sPipes[0]);
         try {
             $r39sReady = false;

@@ -64,7 +64,7 @@ $a101Probe = stream_socket_server('tcp://127.0.0.1:0');
 $a101Port = (int)substr(strrchr((string)stream_socket_get_name($a101Probe, false), ':'), 1);
 fclose($a101Probe);
 $a101Log = test_fixture_path('a101-router') . '.log';
-$a101Server = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$a101Port}", $a101Router],
+$a101Server = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$a101Port}", $a101Router],
     [0 => ['pipe', 'r'], 1 => ['file', $a101Log, 'a'], 2 => ['file', $a101Log, 'a']], $a101Pipes, $a101Root);
 $a101Get = static function (string $path, string $appUrl = '') use ($a101Port): array {
     $headers = "Host: attacker.example\r\n" . ($appUrl !== '' ? "X-Test-App-Url: {$appUrl}\r\n" : '');

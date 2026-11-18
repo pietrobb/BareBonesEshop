@@ -27,7 +27,7 @@ $r13wServe = static function (string $docroot, array $args) use ($r13wBase, &$r1
     $probe = stream_socket_server('tcp://127.0.0.1:0');
     $port = (int)substr(strrchr((string)stream_socket_get_name($probe, false), ':'), 1);
     fclose($probe);
-    $r13wServers[] = proc_open(array_merge([PHP_BINARY, '-S', "127.0.0.1:{$port}"], $args),
+    $r13wServers[] = test_spawn_server(array_merge([PHP_BINARY, '-S', "127.0.0.1:{$port}"], $args),
         [0 => ['pipe', 'r'], 1 => ['file', $r13wBase . '/server.log', 'a'], 2 => ['file', $r13wBase . '/server.log', 'a']], $pipes, $docroot);
     for ($i = 0; $i < 100 && @fsockopen('127.0.0.1', $port) === false; $i++) usleep(100000);
     return $port;

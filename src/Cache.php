@@ -62,14 +62,33 @@ class Cache {
      */
     public static function write(string $path, string $data): void {
         $file = self::path($path);
+        $tagged = array_key_exists($path, self::$catalogTokens);
+        $token = self::$catalogTokens[$path] ?? '';
+        unset(self::$catalogTokens[$path]);
+        if (!self::writeFile($file, $data)) {
+            Logger::warning('cache.write_failed', ['path' => $path]);
+            return;
+        }
+        // R45: an entry rebuilt after a readCatalogJson() miss carries the catalog version it was built against (and
+        // the hash of what was written, so two concurrent rebuilds cannot pair one's stamp with the other's entry).
+        // Any other write leaves the entry to the time-based rule.
+        if ($tagged) {
+            if (!self::writeFile($file . self::CATALOG_STAMP, self::catalogStamp($token, $data))) @unlink($file . self::CATALOG_STAMP);
+        } elseif (is_file($file . self::CATALOG_STAMP)) {
+            @unlink($file . self::CATALOG_STAMP);
+        }
+    }
+
+    private static function writeFile(string $file, string $data): bool {
         $tmp = $file . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
         $dir = dirname($file);
         if (!is_dir($dir)) mkdir($dir, 0750, true);
         // The .tmp name is unique per write, so no lock is needed: nobody else writes this file.
         if (@file_put_contents($tmp, $data) !== strlen($data) || !@rename($tmp, $file)) {
             @unlink($tmp);
-            Logger::warning('cache.write_failed', ['path' => $path]);
+            return false;
         }
+        return true;
     }
 
     /**
@@ -248,10 +267,18 @@ class Cache {
         }
     }
 
+    /** Suffix of the stamp next to a catalog entry: the catalog version it was built against + hash of the entry. */
+    private const CATALOG_STAMP = '.catalog';
+    /** @var array<string, string> path => catalog version read at its readCatalogJson() miss (consumed by write()) */
+    private static array $catalogTokens = [];
+
     /**
-     * readJson() for entries derived from catalog rows: also a miss when the entry was written in or before
-     * the second of the last catalogChanged() of the active catalog. Both times are file modification
-     * times, so they come from the same (filesystem) clock even on a network or container volume.
+     * readJson() for entries derived from catalog rows: a miss unless built after the last catalogChanged() of the
+     * active catalog. R45: an entry rebuilt after a miss here is fresh exactly while the catalog version read at that
+     * miss is still current — also when rebuilt in the same second as the change, and never when the catalog changed
+     * while it was being built (whatever second it was written in). Entries written otherwise (cache warm-up, the
+     * rebuild job) fall back to file modification times: a miss when written in or before the second of the last
+     * change (both times from the same filesystem clock, also on a network or container volume).
      * Equally a miss when a promotion or price list started or ended after it was written: a sale price is
      * never served past the end of the sale (nor the regular price after its start) for the rest of the TTL.
      */
@@ -259,11 +286,33 @@ class Cache {
         self::flushPendingCatalogChanges();
         $file = self::path($path);
         $marker = self::catalogMarker(StoreContext::current()->catalogId());
+        $token = self::markerToken($marker);
         clearstatcache(true, $file);
         clearstatcache(true, $marker);
-        if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker)) return null;
-        if (is_file($file) && (int)filemtime($file) <= Pricing::lastScheduledChange()) return null;
-        return self::readJson($path, $ttl);
+        $data = is_file($file) && (int)filemtime($file) > Pricing::lastScheduledChange() ? self::read($path, $ttl) : null;
+        if ($data !== null) {
+            $stamp = self::read($path . self::CATALOG_STAMP);
+            $fresh = $stamp !== null
+                ? hash_equals($stamp, self::catalogStamp($token, $data))
+                : !is_file($marker) || (int)filemtime($file) > (int)filemtime($marker);
+            $decoded = $fresh ? json_decode($data, true) : null;
+            if (is_array($decoded)) return $decoded;
+        }
+        self::$catalogTokens[$path] = $token;
+        return null;
+    }
+
+    private static function markerToken(string $marker): string {
+        $handle = @fopen($marker, 'rb');
+        if ($handle === false) return '';
+        flock($handle, LOCK_SH); // catalogChanged() truncates and rewrites it under LOCK_EX
+        $token = (string)stream_get_contents($handle);
+        fclose($handle);
+        return $token;
+    }
+
+    private static function catalogStamp(string $token, string $data): string {
+        return hash('sha256', $token) . ' ' . hash('sha256', $data);
     }
 
     /**

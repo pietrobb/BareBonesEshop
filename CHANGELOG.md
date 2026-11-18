@@ -368,6 +368,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   ERP watermark tables then failed every JOIN with customers or products ("Illegal mix of collations", 1267). The
   migration `20261118110000_mysql_table_collation` converts those eight tables to the database collation (only on a
   utf8mb4 database, only when they differ); the released migrations are unchanged.
+- **Catalog cache entries follow the catalog version, not the second (round 45).** A cached product, listing,
+  category tree or facet list rebuilt in the same second as a catalog change was rebuilt again on every request
+  until the second passed, and one built from rows read just before a change but written a second later was served
+  as current for up to an hour. An entry rebuilt after a cache miss now records the catalog version it was built
+  against (`<entry>.catalog` next to it) and is current exactly while that version is; entries written by
+  `cli/cache-warm.php` and the rebuild job keep the time-based rule.
 - **No known vulnerable qualification dependency (round 43).** The browser/Lighthouse tooling (dev dependencies
   only, never deployed) had open advisories: minimatch (eslint, Dependabot #20), basic-ftp (Dependabot #21), zod
   through Lighthouse's puppeteer, and body-parser through the Lighthouse CI server. `@lhci/cli` is 0.16.1 (Lighthouse
