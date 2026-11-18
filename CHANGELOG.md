@@ -349,6 +349,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   private directory if root created it), and make the package directory readable for the owner
   (`chmod -R o+rX /srv/releases/update-2.1.3` or `chown -R <owner>:`). Then run
   `sudo -u <owner> php cli/update.php apply --package=…` (or `bbe-step`).
+- **Migration** `20261118110000_mysql_table_collation` (review round 46, MySQL only): tables that older migrations
+  created with `DEFAULT CHARSET=utf8mb4` and no collation took the server's default (`utf8mb4_0900_ai_ci` on MySQL 8),
+  so joins with the core tables failed with error 1267. It converts them to the database's collation; a table that
+  already matches is left alone, and SQLite or a non-utf8mb4 database is not touched.
 
 ### Changes
 
