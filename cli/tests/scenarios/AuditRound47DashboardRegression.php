@@ -29,7 +29,13 @@ if ($phase === 'setup') {
     $warehouse = (int)$db->query('SELECT id FROM warehouses WHERE is_default = 1 ORDER BY id LIMIT 1')->fetchColumn();
     $db->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (?, 'R47-LOW-SKU', 1, 0)")->execute([$warehouse]);
     $db->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, created_at, is_synthetic)
-        VALUES ('R47-ORDER-0001', 'pending', 'pending', 'R47 Secret Buyer', 'r47@example.test', 'bank', 4321, 4321, 'eur', 'default', ?, 0)")->execute([gmdate('Y-m-d H:i:s')]);
+        VALUES ('R47-ORDER-0001', 'pending', 'pending', 'R47 Secret Buyer', 'r47@example.test', 'bank', 4321, 4321, 'eur', 'default', ?, 0)")->execute([gmdate('Y-m-d H:i:s', time() - 7200)]);
+    // Capability review #567: the order is a stale-pending payment incident and its mail failed, so the incident tables render too.
+    $order = (int)$db->lastInsertId();
+    $db->prepare("INSERT INTO email_log (store_id, order_id, recipient, template, subject, payload, status, error) VALUES ('default', ?, 'r47@example.test', 'order_created', 'R47', '{}', 'failed', 'smtp down')")->execute([$order]);
+    $db->prepare("INSERT INTO operational_incidents (id, store_id, code, phase, severity, correlation_id, occurred_at, context_json) VALUES ('r47incident', 'default', 'payment_stuck', 'payment', 'error', 'r47-corr', ?, ?)")->execute([time(), json_encode(['order_id' => 4747])]);
+    $db->prepare('UPDATE orders SET id = 4747 WHERE id = ?')->execute([$order]);
+    $db->exec('UPDATE email_log SET order_id = 4747');
     exit(0);
 }
 StoreContext::activate(StoreContext::resolve(Bootstrap::stores(), '/', '', 'default'));
@@ -64,7 +70,8 @@ $r47dLinks = static function(string $html): array {
 };
 
 $r47dHtml = $r47dPage('reports.view');
-foreach (['R47 Secret Buyer' => 'customer name', 'R47-ORDER-0001' => 'order number', '43,21' => 'order total', 'R47-LOW-SKU' => 'low-stock SKU', 'R47 Scarce Lamp' => 'low-stock product name'] as $r47dSecret => $r47dWhat) {
+foreach (['R47 Secret Buyer' => 'customer name', 'R47-ORDER-0001' => 'order number', '43,21' => 'order total', 'R47-LOW-SKU' => 'low-stock SKU', 'R47 Scarce Lamp' => 'low-stock product name',
+    'r47@example.test' => 'failed-mail recipient', '#4747' => 'monitored incident order id'] as $r47dSecret => $r47dWhat) {
     assert_true(!str_contains($r47dHtml, $r47dSecret), "R47 dashboard (reports.view only): no {$r47dWhat} ('{$r47dSecret}')");
 }
 foreach (['order', 'orders', 'product', 'products'] as $r47dPageName) {
@@ -72,6 +79,11 @@ foreach (['order', 'orders', 'product', 'products'] as $r47dPageName) {
 }
 assert_true(str_contains($r47dHtml, 'class="kpi kpi-') && substr_count($r47dHtml, 'class="kpi kpi-') === 4, 'R47 dashboard (reports.view only): the four figure tiles stay, as plain figures');
 assert_true(in_array('reports', $r47dLinks($r47dHtml), true), 'R47 dashboard (reports.view only): the reports link stays');
+assert_true(preg_match('~admin\.ops\.payment_incidents|Payment incidents~i', $r47dHtml) === 1, 'R47 dashboard (reports.view only): the payment-incident count is still reported');
+
+$r47dHtml = $r47dPage('reports.view,orders.view');
+assert_true(str_contains($r47dHtml, 'r47@example.test') && str_contains($r47dHtml, 'admin.php?p=order&id=4747">#4747'), 'R47 dashboard (orders.view): incident tables show the failed-mail recipient and the incident order');
+assert_true(substr_count($r47dHtml, 'R47-ORDER-0001') >= 2, 'R47 dashboard (orders.view): the stale order is listed as a payment incident as well as a recent order');
 
 $r47dHtml = $r47dPage('reports.view,orders.view');
 foreach (['R47 Secret Buyer', 'R47-ORDER-0001'] as $r47dShown) assert_true(str_contains($r47dHtml, $r47dShown), "R47 dashboard (orders.view): recent orders show '{$r47dShown}'");
