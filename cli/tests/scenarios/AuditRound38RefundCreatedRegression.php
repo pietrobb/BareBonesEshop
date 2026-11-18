@@ -92,7 +92,7 @@ try {
         $socket = stream_socket_server('tcp://127.0.0.1:0');
         $address = stream_socket_get_name($socket, false);
         fclose($socket);
-        $server = proc_open([PHP_BINARY, '-S', $address, $r38rRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $r38rRoot . '/server.log', 'a'], 2 => ['file', $r38rRoot . '/server.log', 'a']], $pipes);
+        $server = test_spawn_server([PHP_BINARY, '-S', $address, $r38rRoot . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $r38rRoot . '/server.log', 'a'], 2 => ['file', $r38rRoot . '/server.log', 'a']], $pipes);
         fclose($pipes[0]);
         try {
             $ready = false;

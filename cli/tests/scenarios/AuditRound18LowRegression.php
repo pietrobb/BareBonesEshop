@@ -11,7 +11,7 @@ $r18lProbe = stream_socket_server('tcp://127.0.0.1:0');
 $r18lPort = (int)substr(strrchr((string)stream_socket_get_name($r18lProbe, false), ':'), 1);
 fclose($r18lProbe);
 $r18lLog = test_fixture_path('r18-low-router') . '.log';
-$r18lServer = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$r18lPort}", 'router.php'],
+$r18lServer = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$r18lPort}", 'router.php'],
     [0 => ['pipe', 'r'], 1 => ['file', $r18lLog, 'a'], 2 => ['file', $r18lLog, 'a']], $r18lPipes, $r18lRoot);
 $r18lStatus = static function (string $path) use ($r18lPort): int {
     $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 15]]);

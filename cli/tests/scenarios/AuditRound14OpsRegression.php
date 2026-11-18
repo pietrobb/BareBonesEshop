@@ -147,7 +147,7 @@ if ($r14oHasMaintenance) {
     $r14oSocket = stream_socket_server('tcp://127.0.0.1:0');
     $r14oPort = (int)substr(strrchr((string)stream_socket_get_name($r14oSocket, false), ':'), 1);
     fclose($r14oSocket);
-    $r14oServer = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$r14oPort}", '-t', $r14oDocroot],
+    $r14oServer = test_spawn_server([PHP_BINARY, '-S', "127.0.0.1:{$r14oPort}", '-t', $r14oDocroot],
         [0 => ['pipe', 'r'], 1 => ['file', $r14oRoot . '/server.log', 'a'], 2 => ['file', $r14oRoot . '/server.log', 'a']], $r14oPipes, $r14oDocroot);
     $r14oGet = static function () use ($r14oPort): array {
         $body = @file_get_contents("http://127.0.0.1:{$r14oPort}/probe.php", false, stream_context_create(['http' => ['ignore_errors' => true, 'timeout' => 20]]));

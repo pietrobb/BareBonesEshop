@@ -196,7 +196,7 @@ PHP);
 $a164Socket = stream_socket_server('tcp://127.0.0.1:0');
 $a164Address = stream_socket_get_name($a164Socket, false);
 fclose($a164Socket);
-$a164Server = proc_open([PHP_BINARY, '-S', $a164Address, $a164Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a164Root . '/server.log', 'a'], 2 => ['file', $a164Root . '/server.log', 'a']], $a164Pipes);
+$a164Server = test_spawn_server([PHP_BINARY, '-S', $a164Address, $a164Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a164Root . '/server.log', 'a'], 2 => ['file', $a164Root . '/server.log', 'a']], $a164Pipes);
 fclose($a164Pipes[0]);
 try {
     $a164Up = false;

@@ -59,7 +59,7 @@ PHP);
     $r12wEnv = array_merge(getenv(), ['PHP_CLI_SERVER_WORKERS' => '3', 'R12W_ROOT' => $r12wRoot, 'R12W_APP' => dirname(TEST_CLI_DIR)]);
     $r12wServer = test_spawn_server([PHP_BINARY, '-d', 'session.save_path=' . $r12wRoot . '/sessions', '-d', 'display_errors=0', '-d', 'log_errors=1',
         '-d', 'error_log=' . $r12wBase . '/php-error.log', '-S', "127.0.0.1:{$r12wPort}", $r12wRoot . '/router.php'],
-        [0 => ['pipe', 'r'], 1 => ['file', $r12wBase . '/server.log', 'a'], 2 => ['file', $r12wBase . '/server.log', 'a']], $r12wRoot, $r12wEnv, $r12wPipes);
+        [0 => ['pipe', 'r'], 1 => ['file', $r12wBase . '/server.log', 'a'], 2 => ['file', $r12wBase . '/server.log', 'a']], $r12wPipes, $r12wRoot, $r12wEnv);
     // A client that, like a browser or a payment gateway, treats the response as complete once Content-Length bytes arrived.
     $r12wGet = static function (string $path, string $cookie = '') use ($r12wPort): array {
         $start = microtime(true);
@@ -127,7 +127,7 @@ $r45Probe = stream_socket_server('tcp://127.0.0.1:0');
 $r45Port = (int)substr(strrchr((string)stream_socket_get_name($r45Probe, false), ':'), 1);
 fclose($r45Probe);
 $r45Child = proc_open([PHP_BINARY, '-r', 'require $argv[1]; $p = test_spawn_server([PHP_BINARY, "-S", "127.0.0.1:" . $argv[3], "-t", $argv[2]],'
-    . ' [1 => ["file", "/dev/null", "a"], 2 => ["file", "/dev/null", "a"]], $argv[2], array_merge(getenv(), ["PHP_CLI_SERVER_WORKERS" => "2"]), $pipes); sleep(60);',
+    . ' [1 => ["file", "/dev/null", "a"], 2 => ["file", "/dev/null", "a"]], $pipes, $argv[2], array_merge(getenv(), ["PHP_CLI_SERVER_WORKERS" => "2"])); sleep(60);',
     TEST_CLI_DIR . '/tests/ServerProcess.php', $r45Base, (string)$r45Port], [0 => ['pipe', 'r'], 1 => ['file', '/dev/null', 'a'], 2 => ['file', '/dev/null', 'a']], $r45ChildPipes);
 for ($i = 0; $i < 50 && count(test_processes_matching($r45Base)) < 4; $i++) usleep(100000);
 $r45Started = count(test_processes_matching($r45Base));

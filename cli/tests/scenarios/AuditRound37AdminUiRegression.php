@@ -54,7 +54,7 @@ $r37uiSetupExit = proc_close($r37uiSetup);
 assert_equals(0, $r37uiSetupExit, 'R37 UI: isolated seeded database (' . file_get_contents($r37uiDir . '/setup.log') . ')');
 if ($r37uiSetupExit !== 0) return;
 $r37uiSocket = stream_socket_server('tcp://127.0.0.1:0'); $r37uiAddress = stream_socket_get_name($r37uiSocket, false); fclose($r37uiSocket);
-$r37uiServer = proc_open([PHP_BINARY, '-S', $r37uiAddress, '-t', $r37uiRoot, $r37uiDir . '/router.php'], [0 => ['file', '/dev/null', 'r'], 1 => ['file', $r37uiDir . '/http.log', 'w'], 2 => ['file', $r37uiDir . '/http.log', 'a']], $r37uiPipes);
+$r37uiServer = test_spawn_server([PHP_BINARY, '-S', $r37uiAddress, '-t', $r37uiRoot, $r37uiDir . '/router.php'], [0 => ['file', '/dev/null', 'r'], 1 => ['file', $r37uiDir . '/http.log', 'w'], 2 => ['file', $r37uiDir . '/http.log', 'a']], $r37uiPipes);
 try {
     for ($r37uiTry = 0; $r37uiTry < 100; $r37uiTry++) {
         $r37uiProbe = @stream_socket_client('tcp://' . $r37uiAddress, $r37uiErrno, $r37uiErrstr, .1);

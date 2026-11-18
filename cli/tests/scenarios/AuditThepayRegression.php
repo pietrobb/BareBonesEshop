@@ -230,7 +230,7 @@ PHP);
 $a166Socket = stream_socket_server('tcp://127.0.0.1:0');
 $a166Address = stream_socket_get_name($a166Socket, false);
 fclose($a166Socket);
-$a166Server = proc_open([PHP_BINARY, '-S', $a166Address, $a166Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a166Root . '/server.log', 'a'], 2 => ['file', $a166Root . '/server.log', 'a']], $a166Pipes);
+$a166Server = test_spawn_server([PHP_BINARY, '-S', $a166Address, $a166Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a166Root . '/server.log', 'a'], 2 => ['file', $a166Root . '/server.log', 'a']], $a166Pipes);
 fclose($a166Pipes[0]);
 try {
     $a166Up = false;

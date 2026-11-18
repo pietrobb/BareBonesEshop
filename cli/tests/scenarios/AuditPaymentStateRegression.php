@@ -87,7 +87,7 @@ try {
         $a061Socket = stream_socket_server('tcp://127.0.0.1:0');
         $a061Address = stream_socket_get_name($a061Socket, false);
         fclose($a061Socket);
-        $a061Server = proc_open([PHP_BINARY, '-S', $a061Address, $a061Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a061Root . '/server.log', 'a'], 2 => ['file', $a061Root . '/server.log', 'a']], $a061Pipes);
+        $a061Server = test_spawn_server([PHP_BINARY, '-S', $a061Address, $a061Root . '/router.php'], [0 => ['pipe', 'r'], 1 => ['file', $a061Root . '/server.log', 'a'], 2 => ['file', $a061Root . '/server.log', 'a']], $a061Pipes);
         fclose($a061Pipes[0]);
         try {
             $a061Ready = false;
