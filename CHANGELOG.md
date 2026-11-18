@@ -352,6 +352,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **MySQL 8 shops can update and back up with MariaDB's client tools (round 46).** `mariadb-dump` (also Debian's
+  `mysqldump`) writes the values of generated columns (`categories.parent_id_uniq`, the invoice uniqueness column)
+  into its dump, and MySQL refuses them on restore (ERROR 3105); round 17 refused such a client, so `update.php apply`
+  and `cli/backup.php` stopped. The shop's update snapshots, rollback safety copies and backup dumps now write
+  `DEFAULT` for those values, which MySQL recomputes. `update.php doctor` and `check` warn (`dump_client`) instead of
+  refusing, because a dump taken by hand with that client still cannot be restored.
 - **MySQL: newer tables follow the database collation (round 46).** On MySQL 8 a table created with
   `DEFAULT CHARSET=utf8mb4` and no collation gets `utf8mb4_0900_ai_ci`, not the database's collation. On a
   `utf8mb4_unicode_ci` database the e-mail opt-out list, stock alert state, operational incidents, CSP reports and

@@ -486,21 +486,40 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         }
     }
 
-    /**
-     * R17: why the configured dump client cannot back up this database, or null. mariadb-dump (the Debian/Ubuntu
-     * default client) writes the values of generated columns into its INSERTs and MySQL refuses them on restore
-     * (ERROR 3105), so neither an update snapshot nor its rollback would ever work against a MySQL server.
-     */
+    /** Why the configured dump client cannot back up this database (it cannot be run), or null. */
     public function dumpClientProblem(): ?string
     {
-        $server = $this->serverConnection();
-        $generated = self::generatedColumns($server, $this->database);
         try {
-            $client = $this->run([$this->dumpBinary, '--version']);
+            $this->dumpClientVersion();
         } catch (Throwable $e) {
             return "The MySQL dump client {$this->dumpBinary} cannot be run: " . $e->getMessage();
         }
-        return self::clientProblem($client, (string)$server->query('SELECT VERSION()')->fetchColumn(), $generated);
+        return null;
+    }
+
+    /**
+     * R17/R46: a warning when the dump client is MariaDB's (the Debian/Ubuntu default) and the server is MySQL. Its
+     * dumps carry the values of generated columns, which MySQL refuses on restore (ERROR 3105); the shop's own dumps
+     * are rewritten (dump()), but a dump taken outside the shop with that client is not.
+     */
+    public function dumpClientWarning(): ?string
+    {
+        $server = $this->serverConnection();
+        return self::clientProblem($this->dumpClientVersion(), (string)$server->query('SELECT VERSION()')->fetchColumn(),
+            self::generatedColumns($server, $this->database));
+    }
+
+    private ?string $dumpClientVersion = null;
+
+    private function dumpClientVersion(): string
+    {
+        return $this->dumpClientVersion ??= $this->run([$this->dumpBinary, '--version']);
+    }
+
+    /** MariaDB's dump client against a MySQL server: it writes generated-column values MySQL refuses on restore. */
+    public static function clientWritesGeneratedValues(string $clientVersion, string $serverVersion): bool
+    {
+        return stripos($serverVersion, 'mariadb') === false && stripos($clientVersion, 'mariadb') !== false;
     }
 
     /**
@@ -521,11 +540,12 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
     /** @param list<string> $generatedColumns "table.column" of the live schema */
     public static function clientProblem(string $clientVersion, string $serverVersion, array $generatedColumns): ?string
     {
-        if ($generatedColumns === [] || stripos($serverVersion, 'mariadb') !== false || stripos($clientVersion, 'mariadb') === false) return null;
+        if ($generatedColumns === [] || !self::clientWritesGeneratedValues($clientVersion, $serverVersion)) return null;
         return 'The dump client is MariaDB\'s (' . trim(strtok($clientVersion, "\n")) . ') but the server is MySQL ' . $serverVersion
             . ': it writes the generated columns ' . implode(', ', $generatedColumns) . ' into the dump, which MySQL refuses on restore'
-            . ' (ERROR 3105), so no update snapshot or backup could be restored. Install the MySQL client (mysqldump and mysql 8.x)'
-            . ' and set update_mysql_dump_binary and update_mysql_client_binary in config.php to them (docs/AI_UPDATE_RUNBOOK.md).';
+            . ' (ERROR 3105). The shop\'s update snapshots and backups write DEFAULT for them, but a dump you take yourself with this'
+            . ' client cannot be restored. Install the MySQL client (mysqldump and mysql 8.x) and set update_mysql_dump_binary and'
+            . ' update_mysql_client_binary in config.php to them (docs/AI_UPDATE_RUNBOOK.md).';
     }
 
     private function assertDumpClientFits(): void
@@ -534,8 +554,173 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         if ($problem !== null) throw new RuntimeException($problem);
     }
 
+    /**
+     * Per table, the 0-based positions of its generated columns in a dumped row (SELECT * order: invisible columns are
+     * not dumped). Only tables that have one.
+     * @return array<string, list<int>>
+     */
+    public static function generatedPositions(PDO $server, string $database): array
+    {
+        $columns = $server->prepare("SELECT TABLE_NAME, EXTRA FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = :db AND EXTRA NOT LIKE '%INVISIBLE%' ORDER BY TABLE_NAME, ORDINAL_POSITION");
+        $columns->execute([':db' => $database]);
+        $positions = [];
+        $next = [];
+        foreach ($columns->fetchAll(PDO::FETCH_NUM) as [$table, $extra]) {
+            $position = $next[$table] = ($next[$table] ?? -1) + 1;
+            if (stripos((string)$extra, 'VIRTUAL GENERATED') !== false || stripos((string)$extra, 'STORED GENERATED') !== false) {
+                $positions[(string)$table][] = $position;
+            }
+        }
+        return $positions;
+    }
+
+    /**
+     * R46 (#36): replaces the values of generated columns in the dump's INSERT rows with DEFAULT, which MySQL accepts
+     * and recomputes (mariadb-dump writes the values, MySQL refuses them with ERROR 3105). Strings, comments and
+     * DELIMITER blocks (routine and trigger bodies) are scanned like countDumpRows(). Returns the values replaced.
+     * @param array<string, list<int>> $generated table => positions, see generatedPositions()
+     */
+    public static function defaultGeneratedValues(string $dumpPath, array $generated): int
+    {
+        $in = @fopen($dumpPath, 'rb');
+        $tmpPath = $dumpPath . '.generated-' . bin2hex(random_bytes(4));
+        $out = $in === false ? false : @fopen($tmpPath, 'xb');
+        if ($in === false || $out === false) {
+            if ($in !== false) fclose($in);
+            throw new RuntimeException('Cannot rewrite the generated columns of the MySQL dump');
+        }
+        $delimiter = ';';
+        $statementStart = true;
+        $quote = null;
+        $escaped = false;
+        $blockComment = false;
+        $positions = null; // generated positions (as keys) of the current INSERT's table
+        $depth = 0;
+        $index = 0;
+        $skip = false;     // inside a generated value that is being replaced
+        $replaced = 0;
+        try {
+            while (($line = fgets($in)) !== false) {
+                if ($statementStart && !$blockComment && $quote === null && preg_match('/^DELIMITER\s+(\S+)/i', $line, $match) === 1) {
+                    $delimiter = $match[1];
+                    fwrite($out, $line);
+                    continue;
+                }
+                $buffer = '';
+                $length = strlen($line);
+                for ($i = 0; $i < $length; $i++) {
+                    $char = $line[$i];
+                    if ($blockComment) {
+                        $buffer .= $char;
+                        if ($char === '*' && ($line[$i + 1] ?? '') === '/') {
+                            $buffer .= '/';
+                            $blockComment = false;
+                            $i++;
+                        }
+                        continue;
+                    }
+                    if ($quote !== null) {
+                        if (!$skip) $buffer .= $char;
+                        if ($escaped) {
+                            $escaped = false;
+                        } elseif ($char === '\\' && $quote !== '`') {
+                            $escaped = true;
+                        } elseif ($char === $quote) {
+                            $quote = null;
+                        }
+                        continue;
+                    }
+                    if ($char === '#' || ($char === '-' && ($line[$i + 1] ?? '') === '-' && ctype_space($line[$i + 2] ?? "\n"))) {
+                        $buffer .= substr($line, $i);
+                        break;
+                    }
+                    if ($char === '/' && ($line[$i + 1] ?? '') === '*' && ($line[$i + 2] ?? '') !== '!'
+                        && !(($line[$i + 2] ?? '') === 'M' && ($line[$i + 3] ?? '') === '!')) {
+                        $buffer .= '/*';
+                        $blockComment = true;
+                        $i++;
+                        continue;
+                    }
+                    if ($statementStart) {
+                        if (ctype_space($char)) {
+                            $buffer .= $char;
+                            continue;
+                        }
+                        $statementStart = false;
+                        $positions = null;
+                        if ($delimiter === ';' && preg_match('/^INSERT INTO `((?:[^`]|``)+)`(?: \([^)]*\))? VALUES ?/', substr($line, $i), $match) === 1) {
+                            $table = str_replace('``', '`', $match[1]);
+                            $positions = isset($generated[$table]) ? array_flip($generated[$table]) : null;
+                            $depth = 0;
+                            $buffer .= $match[0];
+                            $i += strlen($match[0]) - 1;
+                            continue;
+                        }
+                    }
+                    if ($positions !== null && $depth === 1 && ($char === ',' || $char === ')')) {
+                        $skip = false;
+                        $buffer .= $char;
+                        if ($char === ')') {
+                            $depth = 0;
+                        } elseif (isset($positions[++$index])) {
+                            $buffer .= 'DEFAULT';
+                            $skip = true;
+                            $replaced++;
+                        }
+                        continue;
+                    }
+                    if ($positions !== null && $char === '(' && $depth === 0) {
+                        $buffer .= $char;
+                        $depth = 1;
+                        $index = 0;
+                        if (isset($positions[0])) {
+                            $buffer .= 'DEFAULT';
+                            $skip = true;
+                            $replaced++;
+                        }
+                        continue;
+                    }
+                    if ($char === "'" || $char === '"' || $char === '`') {
+                        $quote = $char;
+                    } elseif ($positions !== null && $char === '(') {
+                        $depth++;
+                    } elseif ($positions !== null && $char === ')') {
+                        $depth--;
+                    } elseif ($depth === 0 && $char === $delimiter[0] && substr_compare($line, $delimiter, $i, strlen($delimiter)) === 0) {
+                        $positions = null;
+                        $statementStart = true;
+                        $buffer .= $delimiter;
+                        $i += strlen($delimiter) - 1;
+                        continue;
+                    }
+                    if (!$skip) $buffer .= $char;
+                }
+                fwrite($out, $buffer);
+            }
+        } finally {
+            fclose($in);
+            fclose($out);
+        }
+        if ($replaced === 0) {
+            @unlink($tmpPath);
+            return 0;
+        }
+        @chmod($tmpPath, 0600);
+        if (!@rename($tmpPath, $dumpPath)) {
+            @unlink($tmpPath);
+            throw new RuntimeException('Cannot replace the MySQL dump with its generated columns rewritten');
+        }
+        return $replaced;
+    }
+
     private function dump(string $dumpPath): void
     {
+        $server = $this->serverConnection();
+        $generated = self::clientWritesGeneratedValues($this->dumpClientVersion(), (string)$server->query('SELECT VERSION()')->fetchColumn())
+            ? self::generatedPositions($server, $this->database)
+            : [];
+        $server = null;
         $this->withDefaultsFile(function (string $defaultsFile) use ($dumpPath): void {
             $this->run([
                 $this->dumpBinary,
@@ -553,6 +738,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
                 $this->database,
             ]);
         });
+        if ($generated !== []) self::defaultGeneratedValues($dumpPath, $generated);
     }
 
     private function import(string $dumpPath, string $database): void
