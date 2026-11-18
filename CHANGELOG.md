@@ -351,8 +351,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `sudo -u <owner> php cli/update.php apply --package=…` (or `bbe-step`).
 - **Migration** `20261118110000_mysql_table_collation` (review round 46, MySQL only): tables that older migrations
   created with `DEFAULT CHARSET=utf8mb4` and no collation took the server's default (`utf8mb4_0900_ai_ci` on MySQL 8),
-  so joins with the core tables failed with error 1267. It converts them to the database's collation; a table that
-  already matches is left alone, and SQLite or a non-utf8mb4 database is not touched.
+  so joins with the core tables failed with error 1267. It converts them to the collation of the core tables
+  (`customers`, `products`, `orders`), not the database default, which may have changed since install; a table that
+  already matches is left alone, and SQLite, a non-utf8mb4 database or core tables on different collations are not
+  touched. Each conversion copies the table and blocks writes to it until done (reads go on, `LOCK=SHARED`): e-mail
+  opt-outs, stock alerts, incidents, CSP reports and the ERP watermark. They are small, but a shop that kept many CSP
+  reports or incidents should run `apply` in its maintenance window (as above) and may empty `csp_violations` first.
 
 ### Changes
 
@@ -366,8 +370,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `DEFAULT CHARSET=utf8mb4` and no collation gets `utf8mb4_0900_ai_ci`, not the database's collation. On a
   `utf8mb4_unicode_ci` database the e-mail opt-out list, stock alert state, operational incidents, CSP reports and
   ERP watermark tables then failed every JOIN with customers or products ("Illegal mix of collations", 1267). The
-  migration `20261118110000_mysql_table_collation` converts those eight tables to the database collation (only on a
-  utf8mb4 database, only when they differ); the released migrations are unchanged.
+  migration `20261118110000_mysql_table_collation` converts those eight tables to the core tables' collation (only on
+  a utf8mb4 database, only when they differ); the released migrations are unchanged.
 - **Catalog cache entries follow the catalog version, not the second (round 45).** A cached product, listing,
   category tree or facet list rebuilt in the same second as a catalog change was rebuilt again on every request
   until the second passed, and one built from rows read just before a change but written a second later was served
