@@ -1875,6 +1875,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.download_link_note' => 'Każde pobranie z tej strony tworzy nowy link; link z e-maila przestaje wtedy działać.',
     'format.date' => 'd.m.Y',
     'format.datetime' => 'd.m.Y H:i',
+    'format.day_month' => 'd.m',
     'order_status.pending' => 'Oczekujące',
     'order_status.paid' => 'Opłacone',
     'order_status.processing' => 'W realizacji',

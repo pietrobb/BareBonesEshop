@@ -46,7 +46,7 @@ function pageDashboard(): void {
             <?php if ($canProducts && $lowStock['count'] > 0) dashboardLowStock($lowStock['products'], Security::adminCan($permissions['product'])); ?>
         </div>
         <div class="dash-side">
-            <?php dashboardHealth($operations, $count('SELECT COUNT(*) FROM products WHERE store_id=:store', [':store' => $storeId])); ?>
+            <?php dashboardHealth($operations, $count('SELECT COUNT(*) FROM products WHERE store_id=:store', [':store' => StoreContext::current()->catalogId()])); ?>
         </div>
     </div>
     <?php if (Security::adminRole() === 'owner') dashboardChecklist(); // doctor output names server paths: owner only ?>
@@ -70,12 +70,17 @@ function dashboardPanelHead(string $title, ?string $href = null, ?string $linkTe
 
 function dashboardTrend(string $storeId): void {
     $trend = SalesReport::trend($storeId, DASHBOARD_TREND_DAYS);
-    $currency = isset($trend[strtolower(StoreContext::current()->currency())]) ? strtolower(StoreContext::current()->currency()) : array_key_first($trend);
+    // R47: every currency the shop was paid in gets its own chart (amounts are never added up), the shop's own first.
+    $own = strtolower(StoreContext::current()->currency());
+    if (isset($trend[$own])) $trend = [$own => $trend[$own]] + $trend;
     ?>
     <section class="card">
         <?= dashboardPanelHead(I18n::format('admin.dashboard.trend', ['days' => DASHBOARD_TREND_DAYS]), 'admin.php?p=reports', I18n::t('admin.nav.reports')) ?>
-        <?php if ($currency === null): ?><p class="muted"><?= esc(I18n::t('admin.reports.no_data')) ?></p>
-        <?php else: ?><?= SalesChart::dailyRevenue($trend[$currency], (string)$currency) ?><?php endif; ?>
+        <?php if ($trend === []): ?><p class="muted"><?= esc(I18n::t('admin.reports.no_data')) ?></p><?php endif; ?>
+        <?php foreach ($trend as $currency => $days): ?>
+        <?php if (count($trend) > 1): ?><h3><?= esc(strtoupper((string)$currency)) ?></h3><?php endif; ?>
+        <?= SalesChart::dailyRevenue($days, (string)$currency) ?>
+        <?php endforeach; ?>
     </section>
     <?php
 }

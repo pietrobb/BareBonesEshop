@@ -1875,6 +1875,7 @@ return [
     'account.download_link_note' => 'Each download from this page creates a new link; the link from the e-mail then stops working.',
     'format.date' => 'j M Y',
     'format.datetime' => 'j M Y, H:i',
+    'format.day_month' => 'j M',
     'order_status.pending' => 'Pending',
     'order_status.paid' => 'Paid',
     'order_status.processing' => 'Processing',

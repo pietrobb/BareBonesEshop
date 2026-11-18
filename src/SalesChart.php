@@ -52,7 +52,7 @@ final class SalesChart {
             $revenue = (int)$row['revenue'];
             $center = self::GUTTER + ($index + 0.5) * $slot;
             $height = $revenue > 0 ? max(1.0, round($revenue / $scale * $plotHeight, 1)) : 0.0;
-            $title = $day . ': ' . I18n::price($revenue, $currency) . ' (' . I18n::format('admin.reports.chart_orders', ['count' => (int)$row['orders']]) . ')';
+            $title = I18n::date($day) . ': ' . I18n::price($revenue, $currency) . ' (' . I18n::format('admin.reports.chart_orders', ['count' => (int)$row['orders']]) . ')';
             $bars .= sprintf('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="%.1f" fill="#2563eb"><title>%s</title></rect>',
                 $center - $barWidth / 2, $base - $height, $barWidth, $height, min(3.0, $barWidth / 2), $h($title));
             if ($revenue === 0 && $slot >= 12) $marks .= sprintf('<circle cx="%.1f" cy="%d" r="2.5" fill="#cbd5e1"/>', $center, $base);
@@ -60,7 +60,7 @@ final class SalesChart {
                 // A phone keeps only the first and the last day label and no value labels (the admin stylesheet hides the rest).
                 $class = 'chart-day' . ($index < $labelStep ? ' chart-day-key' : '') . ($index === $count - 1 ? ' chart-day-key chart-day-last' : '');
                 $date = DateTimeImmutable::createFromFormat('!Y-m-d', $day);
-                $labels .= $text($center, self::HEIGHT - 4, 'middle', $date !== false ? $date->format('j.n.') : $day, ' class="' . $class . '"');
+                $labels .= $text($center, self::HEIGHT - 4, 'middle', $date !== false ? $date->format(I18n::t('format.day_month')) : $day, ' class="' . $class . '"');
             }
             if ($day === $peakDay && $peak > 0) {
                 $anchor = $center > self::WIDTH - 40 ? 'end' : ($center < self::GUTTER + 40 ? 'start' : 'middle');
@@ -72,8 +72,8 @@ final class SalesChart {
         $first = (string)array_key_first($days);
         $last = (string)array_key_last($days);
         $label = I18n::format('admin.reports.chart_label', [
-            'currency' => strtoupper($currency), 'from' => $first, 'to' => $last, 'total' => I18n::price($total, $currency),
-            'peak' => I18n::price($peak, $currency), 'peak_day' => $peakDay,
+            'currency' => strtoupper($currency), 'from' => I18n::date($first), 'to' => I18n::date($last), 'total' => I18n::price($total, $currency),
+            'peak' => I18n::price($peak, $currency), 'peak_day' => I18n::date($peakDay),
         ]);
         $id = 'report-chart-' . preg_replace('/[^a-z0-9]/', '', strtolower($currency));
         return '<figure class="report-chart" style="margin:.5rem 0 1rem">'

@@ -1947,6 +1947,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.download_link_note' => 'Cada descarga desde esta página crea un enlace nuevo; el enlace del correo electrónico deja de funcionar.',
     'format.date' => 'd/m/Y',
     'format.datetime' => 'd/m/Y H:i',
+    'format.day_month' => 'd/m',
     'order_status.pending' => 'Pendiente',
     'order_status.paid' => 'Pagado',
     'order_status.processing' => 'En preparación',

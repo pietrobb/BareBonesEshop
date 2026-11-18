@@ -1875,6 +1875,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.download_link_note' => 'Každé stažení z této stránky vytvoří nový odkaz; odkaz z e-mailu pak přestane fungovat.',
     'format.date' => 'j. n. Y',
     'format.datetime' => 'j. n. Y H:i',
+    'format.day_month' => 'j. n.',
     'order_status.pending' => 'Čeká na zpracování',
     'order_status.paid' => 'Zaplacená',
     'order_status.processing' => 'Zpracovává se',
