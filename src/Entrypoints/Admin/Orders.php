@@ -418,18 +418,18 @@ function pageOrder(): void {
         <h3><?= esc(I18n::t('admin.order.payment_timeline')) ?></h3>
         <?php if ($paymentTxs): ?>
         <table>
-            <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th>Ref</th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.order.details')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th><?= esc(I18n::t('admin.order.tx_reference')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.order.details')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
             <?php foreach ($paymentTxs as $tx): ?>
             <?php
                 $raw = json_decode((string)($tx['raw_response'] ?? '{}'), true) ?: [];
                 $details = [];
                 foreach (['reason', 'actor', 'refund_id', 'session_id', 'payment_id'] as $key) {
-                    if (!empty($raw[$key])) $details[] = $key . ': ' . (string)$raw[$key];
+                    if (!empty($raw[$key]) && is_scalar($raw[$key])) $details[] = I18n::t('admin.order.tx_detail.' . $key) . ': ' . (string)$raw[$key]; // R49: was "refund_id: …"
                 }
             ?>
             <tr>
-                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc(OrderStatusLabels::payment((string)$tx['status'])) ?></span></td>
-                <td><?= esc($tx['provider']) ?></td>
+                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc(OrderStatusLabels::transaction((string)$tx['status'])) ?></span></td>
+                <td><?= esc(AdminEventLabels::provider((string)$tx['provider'])) ?></td>
                 <td class="muted"><?= esc($tx['provider_ref']) ?></td>
                 <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
                 <td class="muted"><?= esc(AuditLogLabels::note('payment_status', $id, (string)($raw['event_type'] ?? ''))) ?></td>

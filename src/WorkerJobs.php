@@ -192,19 +192,27 @@ final class WorkerJobs
      * R27: true when the links were only written to the log for a misconfigured mail provider: they reached nobody and are
      * revoked (they stand in the log), and the caller tries again with new ones (was: marked delivered, never sent).
      */
+    /**
+     * R49 (review round 19, low): how long a download link is valid, in the order's language (was: "no expiry",
+     * "max 3 downloads" in every e-mail).
+     * @param array{expires_at: int|string|null, download_limit: int|string|null} $link
+     */
+    public static function digitalValidity(array $link, string $locale): string {
+        $validity = $link['expires_at'] === null
+            ? I18n::tIn('email.digital.no_expiry', $locale)
+            : strtr(I18n::tIn('email.digital.valid_until', $locale), ['{date}' => date(I18n::tIn('format.datetime', $locale) . ' T', (int)$link['expires_at'])]);
+        if ($link['download_limit'] !== null) $validity .= ', ' . strtr(I18n::tIn('email.digital.download_limit', $locale), ['{count}' => (string)(int)$link['download_limit']]);
+        return $validity;
+    }
+
     public static function fulfilDigitalOrder(int $orderId, ?string &$claim = null): bool {
         $links = DigitalDelivery::grant($orderId);
         if (!$links) return false;
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} not found");
 
-        $formatted = array_map(static function (array $link): array {
-            $validity = $link['expires_at'] === null
-                ? 'no expiry'
-                : date('Y-m-d H:i T', (int)$link['expires_at']);
-            if ($link['download_limit'] !== null) $validity .= ', max ' . (int)$link['download_limit'] . ' downloads';
-            return ['label' => $link['label'], 'url' => $link['url'], 'validity' => $validity];
-        }, $links);
+        $locale = (string)($order['locale'] ?? '');
+        $formatted = array_map(static fn(array $link): array => ['label' => $link['label'], 'url' => $link['url'], 'validity' => self::digitalValidity($link, $locale)], $links);
 
         // Fresh leases for the slow mail: the job's, and the per-order claim (lost = another worker took the order
         // over and rotates these links; it delivers its own, so this run must not mail links about to be revoked).

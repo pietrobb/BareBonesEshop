@@ -80,6 +80,11 @@ function dashboardTrend(string $storeId): void {
         <?php foreach ($trend as $currency => $days): ?>
         <?php if (count($trend) > 1): ?><h3><?= esc(strtoupper((string)$currency)) ?></h3><?php endif; ?>
         <?= SalesChart::dailyRevenue($days, (string)$currency) ?>
+        <?php // R49 (review round 19, low): a bar's amount was only in its hover tooltip; by keyboard and touch the days read here. ?>
+        <details class="chart-values"><summary><?= esc(I18n::t('admin.dashboard.chart_values')) ?></summary><div class="table-scroll"><table>
+            <tr><th><?= esc(I18n::t('admin.reports.day')) ?></th><th><?= esc(I18n::t('admin.reports.orders')) ?></th><th><?= esc(I18n::t('admin.reports.revenue')) ?></th></tr>
+            <?php foreach (array_reverse($days, true) as $day => $row): ?><tr><td><?= esc(I18n::date((string)$day)) ?></td><td><?= (int)$row['orders'] ?></td><td><?= esc(I18n::price((int)$row['revenue'], (string)$currency)) ?></td></tr><?php endforeach; ?>
+        </table></div></details>
         <?php endforeach; ?>
     </section>
     <?php
@@ -142,7 +147,7 @@ function dashboardHealth(array $operations, int $totalProducts): void {
             <?php foreach (['failed_jobs', 'failed_mail', 'payment_incidents', 'webhook_incidents'] as $kind): $n = (int)$operations['counts'][$kind]; ?>
             <li><?= $light($n === 0) ?><span><?= esc(I18n::t('admin.ops.' . $kind)) ?></span><strong class="<?= $n > 0 ? 'status-error' : '' ?>"><?= $n ?></strong></li>
             <?php endforeach; ?>
-            <li><?= $light((int)$jobStats['failed'] === 0) ?><span><?= esc(I18n::t('admin.dashboard.jobs_queue')) ?> (<?= esc($operations['queue_backend']) ?>)</span><strong><?= (int)$jobStats['pending'] ?> <?= esc(I18n::t('admin.dashboard.jobs_pending')) ?> · <?= (int)$jobStats['failed'] ?> <?= esc(I18n::t('admin.dashboard.jobs_failed')) ?></strong></li>
+            <li><?= $light((int)$jobStats['failed'] === 0) ?><span><?= esc(I18n::t('admin.dashboard.jobs_queue')) ?> (<?= esc(adminCodeLabel('admin.dashboard.queue_backend.', (string)$operations['queue_backend'])) ?>)</span><strong><?= (int)$jobStats['pending'] ?> <?= esc(I18n::t('admin.dashboard.jobs_pending')) ?> · <?= (int)$jobStats['failed'] ?> <?= esc(I18n::t('admin.dashboard.jobs_failed')) ?></strong></li>
             <li><?= $monitor['enabled'] ? $light(true) : '<span class="dot" aria-hidden="true"></span>' ?><span><?= esc(I18n::t($monitor['enabled'] ? 'admin.ops.monitoring_enabled' : 'admin.ops.monitoring_disabled')) ?></span></li>
             <li><?= $light($monitor['available']) ?><span><?= esc(I18n::t($monitor['available'] ? 'admin.ops.evidence_available' : 'admin.ops.evidence_unavailable')) ?></span></li>
             <li><span class="dot" aria-hidden="true"></span><span><?= esc(I18n::t('admin.dashboard.total_products')) ?></span><strong><?= $totalProducts ?></strong></li>
@@ -199,7 +204,7 @@ function dashboardIncidents(array $operations, bool $canOrders): void {
         </table></div><?php endif; ?>
         <?php if ($operations['webhook_incidents']): ?>
         <h3><?= esc(I18n::t('admin.ops.webhook_incidents')) ?></h3><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.attempts')) ?></th><th><?= esc(I18n::t('admin.common.error')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th></tr>
-            <?php foreach ($operations['webhook_incidents'] as $incident): ?><tr><td><?= esc($incident['event_type']) ?></td><td title="<?= esc((string)$incident['status']) ?>"><?= esc(adminCodeLabel('admin.ops.webhook_status.', (string)$incident['status'])) ?></td><td><?= (int)$incident['attempts'] ?></td><td><?= $error($incident['last_error'] ?? '') ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td></tr><?php endforeach; ?>
+            <?php foreach ($operations['webhook_incidents'] as $incident): ?><tr><td title="<?= esc((string)$incident['event_type']) ?>"><?= esc(AdminEventLabels::event((string)$incident['event_type'])) ?></td><td title="<?= esc((string)$incident['status']) ?>"><?= esc(adminCodeLabel('admin.ops.webhook_status.', (string)$incident['status'])) ?></td><td><?= (int)$incident['attempts'] ?></td><td><?= $error($incident['last_error'] ?? '') ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td></tr><?php endforeach; ?>
         </table></div><?php endif; ?>
     </section>
     <?php

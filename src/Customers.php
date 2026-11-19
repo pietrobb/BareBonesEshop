@@ -665,12 +665,15 @@ class Customers {
         return $errors;
     }
 
-    /** @return array<string,string> fields that are not UTF-8 single-line text (no control characters) */
+    /**
+     * @return array<string,string> fields that are not UTF-8 single-line text (no control characters). R49 (low): nor the
+     * bidi embedding, override and isolate controls (U+202A–U+202E, U+2066–U+2069) that turn the text around wherever it is shown.
+     */
     private static function invalidTextErrors(array $values, array $fields): array {
         $errors = [];
         foreach ($fields as $field) {
             $value = Security::str($values[$field] ?? '');
-            if (!mb_check_encoding($value, 'UTF-8') || preg_match('/[\p{Cc}\p{Zl}\p{Zp}]/u', $value)) $errors[$field] = 'account.err_invalid_text';
+            if (!mb_check_encoding($value, 'UTF-8') || preg_match('/[\p{Cc}\p{Zl}\p{Zp}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', $value)) $errors[$field] = 'account.err_invalid_text';
         }
         return $errors;
     }

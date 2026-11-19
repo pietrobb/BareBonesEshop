@@ -126,7 +126,7 @@ $runtimeConfig = [
         'product_invalid' => I18n::t('product_invalid'),
         'product_unavailable' => I18n::t('product_unavailable'),
         'cart_full' => I18n::t('cart_full'),
-        'free' => I18n::t('free'),
+        'free' => I18n::t('free'), 'freeShipping' => I18n::t('free_shipping'), // R49 (low): free shipping in words, as the page renders it
         'quantityClamped' => I18n::t('cart_quantity_clamped'),
         'shippingLoading' => I18n::t('shipping_loading'),
         'shippingUnavailable' => I18n::t('shipping_unavailable'),

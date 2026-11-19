@@ -32,13 +32,28 @@ final class AuditLogLabels {
         'complaint' => 'rma.manage', 'rma_receipt' => 'rma.manage', 'rma_status' => 'rma.manage',
         'customer' => 'customers.view', 'company' => 'customers.view', 'customer_group' => 'customers.view',
         'admin_account' => 'admins.manage',
+        // R49 (low): every other entity follows its page too — the SMTP host and login of the mail settings, suppliers'
+        // contacts, purchase orders, store settings, payment and shipping setup were readable with reports.view alone.
+        'mail_settings' => 'mail.manage', 'store_settings' => 'stores.manage', 'legal_text' => 'stores.manage', 'email_template' => 'emails.manage',
+        'supplier' => 'import', 'purchase_order' => 'import', 'warehouse' => 'import', 'feed' => 'import', 'import' => 'import',
+        'promotion' => 'pricing.manage', 'price_list' => 'pricing.manage', 'review' => 'products.edit', 'digital_asset' => 'products.edit',
+        'shipping_methods' => 'shipping.manage', 'shipping_zones' => 'shipping.manage', 'shipping_zone_countries' => 'shipping.manage', 'shipping_rates' => 'shipping.manage',
+        'payment_methods' => 'payments.manage', 'payment_method_countries' => 'payments.manage', 'payment_method_shipping' => 'payments.manage',
     ];
+    /** R49: catalog entries anyone who sees the log may read (what the storefront shows anyway). */
+    private const PUBLIC = ['product', 'inventory', 'category', 'brand', 'attribute', 'page', 'cache',
+        'content_menu', 'content_banner', 'content_redirect', 'content_landing_page'];
+    /** R49: field names the code writes into old/new values, shown by admin.audit.field.<name>. */
+    private const FIELDS = ['idempotency_key', 'refund_id'];
     /** @var array<int, string> */
     private static array $currencies = [];
 
-    /** The permission an entry's details need beyond reports.view, or null when anyone who sees the log may read them. */
+    /**
+     * The permission an entry's details need beyond reports.view, or null when anyone who sees the log may read them.
+     * R49: an entity neither listed nor public (a new one) is shown only to the owner until it is mapped.
+     */
     public static function permission(string $entity): ?string {
-        return self::PERMISSION[$entity] ?? null;
+        return self::PERMISSION[$entity] ?? (in_array($entity, self::PUBLIC, true) ? null : 'admins.manage');
     }
 
     /** R48: an e-mail address as the audit log keeps it: the first character and the domain ("j***@example.com"). */
@@ -55,6 +70,8 @@ final class AuditLogLabels {
         // R21: the amount a Stripe refund webhook records is in cents: shown in the order's currency.
         if ($entity === 'order_refund' && $entityId !== null && ctype_digit($value)) return self::amount((int)$value, self::orderCurrency($entityId));
         $code = preg_match('/^[a-z_]+$/', $value) === 1;
+        // R49 (review round 19, low): a field the code names ("refund_id" read "Refund id") in words.
+        if ($code && in_array($value, self::FIELDS, true)) return I18n::t('admin.audit.field.' . $value);
         if ($entity === 'order_refund' && in_array($value, ['pending', 'failed', 'succeeded'], true)) return $value === 'pending' ? OrderStatusLabels::payment('refund_pending') : OrderStatusLabels::transaction('refund_' . $value);
         if ($code && in_array($entity, self::ORDER, true)) return OrderStatusLabels::order($value);
         if ($code && in_array($entity, self::PAYMENT, true)) return OrderStatusLabels::payment($value);
@@ -63,13 +80,14 @@ final class AuditLogLabels {
         $fields = json_decode($value, true);
         $status = $prefix !== null && is_array($fields) && is_string($fields['status'] ?? null);
         $money = isset(self::CURRENCY_SQL[$entity]) && is_array($fields) && !array_is_list($fields) && self::hasAmount($fields);
-        if (!$status && !$money) return $value;
+        $named = is_array($fields) && !array_is_list($fields) && array_intersect(array_keys($fields), self::FIELDS) !== [];
+        if (!$status && !$money && !$named) return $value;
         // R22: amounts in the JSON ("total": 1647000, "cod_amount", "gross", "price") are cents: shown in the record's currency.
         if ($money) $fields = self::amounts($fields, (string)($fields['currency'] ?? self::recordCurrency($entity, (int)$entityId)));
         $parts = [];
         foreach ($fields as $field => $fieldValue) {
             $parts[] = $field === 'status' && $status ? I18n::t('admin.th.status') . ': ' . self::label((string)$prefix, $fieldValue)
-                : $field . ': ' . (is_scalar($fieldValue) ? (string)$fieldValue : (string)json_encode($fieldValue, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                : (in_array($field, self::FIELDS, true) ? I18n::t('admin.audit.field.' . $field) : $field) . ': ' . (is_scalar($fieldValue) ? (string)$fieldValue : (string)json_encode($fieldValue, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         }
         return implode('; ', $parts);
     }

@@ -340,7 +340,7 @@
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span> <strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span> <strong>${price === 0 ? escapeHtml(text.freeShipping || text.free) : formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode, true));
       box.appendChild(label);
     });
@@ -348,7 +348,8 @@
   }
 
   function updateCheckoutTotal(shipping, paymentFee, subtotal) {
-    document.getElementById('summary-shipping').textContent = formatCents(shipping);
+    // R49 (review round 19, low): free shipping reads "Free shipping" as the server renders it (was: "0,00 €").
+    document.getElementById('summary-shipping').textContent = shipping === 0 ? (text.freeShipping || text.free) : formatCents(shipping);
     const payment = document.getElementById('summary-payment');
     if (payment) payment.textContent = paymentFee === 0 ? text.free : formatCents(paymentFee);
     const discountElement = document.getElementById('checkout-discount');
