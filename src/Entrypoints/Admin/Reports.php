@@ -21,6 +21,8 @@ function pageReports(): void {
     $trend = SalesReport::trend($storeId, $days);
     $top = SalesReport::topProducts($storeId, $since);
     $th = static fn(string $key): string => '<th>' . esc(I18n::t($key)) . '</th>';
+    // R48 (review round 18, low 5): a top product links to the editor only for an admin who may open it.
+    $canEdit = Security::adminCan((require __DIR__ . '/Permissions.php')['product']);
     ?>
     <h1><?= esc(I18n::t('admin.title.reports')) ?></h1>
     <div class="card">
@@ -54,7 +56,7 @@ function pageReports(): void {
         <div class="table-scroll"><table>
             <tr><?= $th('admin.th.sku') . $th('admin.th.name') . $th('admin.reports.quantity') . $th('admin.reports.revenue') ?></tr>
             <?php foreach ($rows as $row): ?>
-            <tr data-report="top" data-currency="<?= esc($currency) ?>" data-key="<?= esc($row['sku']) ?>"><td><?= esc($row['sku']) ?></td><td><a href="admin.php?p=product&amp;id=<?= (int)$row['product_id'] ?>"><?= esc($row['name']) ?></a></td><td data-k="quantity"><?= (int)$row['quantity'] ?></td><td data-k="revenue"><?= esc(I18n::price($row['revenue'], $currency)) ?></td></tr>
+            <tr data-report="top" data-currency="<?= esc($currency) ?>" data-key="<?= esc($row['sku']) ?>"><td><?= esc($row['sku']) ?></td><td><?php if ($canEdit): ?><a href="admin.php?p=product&amp;id=<?= (int)$row['product_id'] ?>"><?= esc($row['name']) ?></a><?php else: ?><?= esc($row['name']) ?><?php endif; ?></td><td data-k="quantity"><?= (int)$row['quantity'] ?></td><td data-k="revenue"><?= esc(I18n::price($row['revenue'], $currency)) ?></td></tr>
             <?php endforeach; ?>
         </table></div>
         <?php endforeach; ?>

@@ -376,15 +376,31 @@ class Setup
 
     public static function legalIdentityProblems(array $legal): array
     {
-        $problems = [];
+        $english = ['name' => 'company name', 'email' => 'e-mail', 'iban' => 'IBAN', 'address' => 'address'];
+        return array_map(static fn(array $issue): string => $english[$issue['field']] . match (true) {
+            $issue['value'] === null => ' missing',
+            $issue['field'] === 'iban' => " {$issue['value']} (check digits invalid)",
+            $issue['field'] === 'name' => " \"{$issue['value']}\"",
+            default => " {$issue['value']}",
+        }, self::legalIdentityIssues($legal));
+    }
+
+    /**
+     * The seller-identity fields still empty or on the shipped example; value null = missing. R48 (review round 18,
+     * low 7): the admin names them in its own language (legalIdentityProblems() is the doctor's English).
+     * @return list<array{field: 'name'|'email'|'iban'|'address', value: ?string}>
+     */
+    public static function legalIdentityIssues(array $legal): array
+    {
+        $issues = [];
         $name = trim((string)($legal['name'] ?? ''));
-        if ($name === '' || stripos($name, 'woodle') !== false) $problems[] = 'company name' . ($name === '' ? ' missing' : " \"{$name}\"");
+        if ($name === '' || stripos($name, 'woodle') !== false) $issues[] = ['field' => 'name', 'value' => $name === '' ? null : $name];
         $email = strtolower(trim((string)($legal['email'] ?? '')));
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || preg_match('/@(.+\.)?example\.[a-z]+$/', $email)) $problems[] = 'e-mail' . ($email === '' ? ' missing' : " {$email}");
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || preg_match('/@(.+\.)?example\.[a-z]+$/', $email)) $issues[] = ['field' => 'email', 'value' => $email === '' ? null : $email];
         $iban = strtoupper((string)preg_replace('/\s+/', '', (string)($legal['iban'] ?? '')));
-        if ($iban !== '' && !BankTransferInstructions::validIban($iban)) $problems[] = "IBAN {$legal['iban']} (check digits invalid)";
-        if (trim((string)($legal['street'] ?? '')) === '' || trim((string)($legal['city'] ?? '')) === '') $problems[] = 'address missing';
-        return $problems;
+        if ($iban !== '' && !BankTransferInstructions::validIban($iban)) $issues[] = ['field' => 'iban', 'value' => (string)$legal['iban']];
+        if (trim((string)($legal['street'] ?? '')) === '' || trim((string)($legal['city'] ?? '')) === '') $issues[] = ['field' => 'address', 'value' => null];
+        return $issues;
     }
 
     /** @return array{status: string, name: string, message: string, action: string} */
