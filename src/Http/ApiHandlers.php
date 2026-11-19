@@ -859,6 +859,21 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         // R38 (low): no order on an unknown VAT (was: the seller's VAT, silently); the count failure is a critical incident.
         return checkoutRefusal('checkout.error.vat_unavailable');
     }
+    // R49 (low): the sale that passes the threshold re-prices lines that keep their net abroad; a percentage discount
+    // follows the goods it is taken from (was: 10 % of the price before, 24,00 € off instead of 24,60 €).
+    $repricedSubtotal = array_sum(array_column($availableItems, 'total'));
+    if ($repricedSubtotal !== $cart['subtotal'] && $totalDiscount > 0) {
+        $autoRules = Pricing::autoCartRules($repricedSubtotal, $availableItems, $loggedInCustomerId, $cartCurrency);
+        $promotionDiscount = array_sum(array_map(static fn(array $rule): int => max(0, (int)($rule['discount'] ?? 0)), $autoRules));
+        if ($couponDiscount > 0) {
+            $couponResult = CheckoutService::couponFor($couponCode, $repricedSubtotal, $promotionDiscount, $email, $cartCurrency);
+            $couponDiscount = Pricing::couponApplies($couponResult) ? (int)$couponResult['discount'] : $couponDiscount;
+        }
+        $promotionDiscount = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount)['promotion'];
+        $totalDiscount = min($repricedSubtotal, $couponDiscount + $promotionDiscount);
+        $snapshotAmounts['discount'] = $totalDiscount;
+        $snapshotAmounts['line_discounts'] = $promotionDiscount > 0 && class_exists('Promotions') ? Promotions::lineDiscounts($autoRules, $availableItems) : [];
+    }
     [$vatContext, $vatScenario] = [$vat['context'], $vat['scenario']];
     $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, $snapshotAmounts);
     // R34: the no-JS form posts the total it showed. Another shipping, payment or country picked without "Recalculate"

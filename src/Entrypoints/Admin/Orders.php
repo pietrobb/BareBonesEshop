@@ -418,18 +418,18 @@ function pageOrder(): void {
         <h3><?= esc(I18n::t('admin.order.payment_timeline')) ?></h3>
         <?php if ($paymentTxs): ?>
         <table>
-            <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th>Ref</th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.order.details')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th><?= esc(I18n::t('admin.order.tx_reference')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.order.details')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
             <?php foreach ($paymentTxs as $tx): ?>
             <?php
                 $raw = json_decode((string)($tx['raw_response'] ?? '{}'), true) ?: [];
                 $details = [];
                 foreach (['reason', 'actor', 'refund_id', 'session_id', 'payment_id'] as $key) {
-                    if (!empty($raw[$key])) $details[] = $key . ': ' . (string)$raw[$key];
+                    if (!empty($raw[$key]) && is_scalar($raw[$key])) $details[] = I18n::t('admin.order.tx_detail.' . $key) . ': ' . (string)$raw[$key]; // R49: was "refund_id: …"
                 }
             ?>
             <tr>
-                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc(OrderStatusLabels::payment((string)$tx['status'])) ?></span></td>
-                <td><?= esc($tx['provider']) ?></td>
+                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc(OrderStatusLabels::transaction((string)$tx['status'])) ?></span></td>
+                <td><?= esc(AdminEventLabels::provider((string)$tx['provider'])) ?></td>
                 <td class="muted"><?= esc($tx['provider_ref']) ?></td>
                 <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
                 <td class="muted"><?= esc(AuditLogLabels::note('payment_status', $id, (string)($raw['event_type'] ?? ''))) ?></td>
@@ -600,7 +600,19 @@ function pageRma(): void {
                 <td><?= esc($r['reason']) ?></td>
                 <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc(adminCodeLabel('admin.rma.status.', (string)$r['status'])) ?></span></td>
                 <td style="white-space:nowrap">
-                    <?php foreach ($next[$r['status']] ?? [] as $to => $label): ?>
+                    <?php [$outside, $due] = isset($next[$r['status']]['refunded']) ? Rma::owedAfterOutside((int)$r['id'], (int)$r['order_id']) : [0, 0]; ?>
+                    <?php $currency = (string)(Orders::byId((int)$r['order_id'])['currency'] ?? 'eur'); ?>
+                    <?php if ($outside > 0): ?>
+                    <p class="muted" data-rma-refunded-outside data-rma-due="<?= (int)$due ?>" style="white-space:normal;margin:0 0 4px"><?= esc(I18n::format('admin.rma.refunded_outside_hint', ['amount' => I18n::price($outside, $currency), 'due' => I18n::price($due, $currency)])) ?></p>
+                    <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
+                        <input type="hidden" name="status" value="refunded">
+                        <input type="hidden" name="outside_refund" value="deduct">
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.rma.refund_less_outside')) ?></button>
+                    </form>
+                    <?php endif; ?>
+                    <?php foreach ($outside > 0 ? [] : ($next[$r['status']] ?? []) as $to => $label): ?>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
@@ -645,12 +657,25 @@ function handleRmaStatus(): void {
         } elseif ($status === 'refunded' && !Rma::settleAlreadyRefunded($id)) {
             $rma = Rma::byId($id);
             if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
+            // R49 (finding 3): money already returned outside this return is named first, then counted: the return closes
+            // without payout when that money covers it, else its credit note and refund are less it (was: the return paid
+            // out in full on top, or closed and the rest unpaid, and the same money counted again by the next return).
+            $outside = Rma::refundedOutsideReturns((int)$rma['order_id']);
+            if ($outside > 0 && Security::clean($_POST['outside_refund'] ?? '') !== 'deduct') {
+                throw new RuntimeException(I18n::format('admin.rma.refunded_outside', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur'))]));
+            }
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
             if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
             $quantities = InvoiceService::creditableQuantities($id);
             if (!$quantities) throw new LogicException(I18n::t('admin.rma.nothing_to_credit'));
+            if ($outside > 0 && $outside >= InvoiceService::rmaCreditGross((int)$source['id'], $id, $quantities)) {
+                if (!Rma::closeWithoutPayout($id)) throw new LogicException(I18n::t('admin.rma.transition_refused'));
+                setFlash('ok', I18n::format('admin.rma.closed_without_payout', ['id' => $id]));
+                header('Location: admin.php?p=rma');
+                exit;
+            }
             // One key per attempt: a concurrent double submit shares it, a retry after a failed refund gets a new credit note.
-            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id));
+            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id), $outside > 0);
             if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
                 PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0));
             }

@@ -43,8 +43,14 @@ try {
     if ($cache !== null && class_exists(OssThresholdCache::class)) {
         $audit = OssThresholdCache::check($db);
         $checks[] = ['audit counts three mismatched keys and one NULL fallback document', $audit['mismatches'] === 3 && $audit['null_nets'] === 1];
+        // R49 (low): the ordinary doctor audits the years the threshold decides on (this and last), not the whole history.
+        $recent = OssThresholdCache::check($db, 2025);
+        $checks[] = ['the 2025–2026 audit counts the two mismatched recent keys, not the 2024 credit note', $recent['mismatches'] === 2 && $recent['null_nets'] === 1];
         $shallow = Setup::doctor($config, $root, $db);
-        $checks[] = ['ordinary dashboard doctor does not run the deep cache scan', !in_array('database.oss_threshold_cache', array_column($shallow['checks'], 'name'), true)];
+        $shallowCache = array_values(array_filter($shallow['checks'], static fn(array $c): bool => $c['name'] === 'database.oss_threshold_cache'))[0] ?? [];
+        $thisYear = (int)ShopTime::date('Y');
+        $checks[] = ['ordinary doctor audits this and last year', str_contains((string)($shallowCache['message'] ?? ''), ($thisYear - 1) . '–' . $thisYear)
+            && ($shallowCache['status'] ?? '') === ($thisYear <= 2027 ? 'fail' : 'pass') && $snapshot() === $before];
         $refused = false;
         try { OssThresholdCache::repair($db, false); } catch (RuntimeException $e) { $refused = str_contains($e->getMessage(), 'writers'); }
         $checks[] = ['repair requires explicit writers-stopped acknowledgement', $refused && $snapshot() === $before];

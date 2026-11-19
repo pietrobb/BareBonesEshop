@@ -349,8 +349,10 @@ final class OssThreshold
             if ($source !== null && (int)($source['oss_net'] ?? 0) !== 0 && strtolower((string)($source['currency'] ?? 'eur')) !== 'eur') return null;
         }
         // R41 (medium 3): the ECB rate of the day of issue only (EurRates::rateOn()); a stale or configured current rate
-        // fixed in oss_net_eur was never corrected. Without one the document waits (convertPending()).
-        $rate = EurRates::rateOn($db, $currency, substr((string)($doc['issued_at'] ?? ''), 0, 10));
+        // fixed in oss_net_eur was never corrected. Without one the document waits (convertPending()). R49 (low): of the day
+        // of supply (delivery_date), the day it counts in (documentDateSql(); art. 91: the chargeable event), else of issue.
+        $day = (string)($doc['delivery_date'] ?? '') !== '' ? (string)$doc['delivery_date'] : (string)($doc['issued_at'] ?? '');
+        $rate = EurRates::rateOn($db, $currency, substr($day, 0, 10));
         return $rate !== null ? (int)round($net * $rate) : null;
     }
 
@@ -398,7 +400,7 @@ final class OssThreshold
 
     /**
      * R41: the documents convertPending() still waits for (of orders of $storeIds when given): how many, the oldest day of
-     * issue, their currencies (upper case).
+     * supply or issue (R49: whose rate converts it), their currencies (upper case).
      * @param ?list<string> $storeIds
      * @return array{pending: int, oldest: ?string, currencies: list<string>}
      */
@@ -411,7 +413,8 @@ final class OssThreshold
                 static fn(array $o): bool => in_array((string)$o['store_id'], $storeIds, true)), 'id')));
             $docs = array_values(array_filter($docs, static fn(array $d): bool => isset($orders[(int)$d['order_id']])));
         }
-        $days = array_map(static fn(array $d): string => substr((string)$d['issued_at'], 0, 10), $docs);
+        // R49: the day whose rate converts it (issueEur(): of supply, else of issue), from which the ECB history is fetched.
+        $days = array_map(static fn(array $d): string => substr((string)(($d['delivery_date'] ?? '') !== '' ? $d['delivery_date'] : $d['issued_at']), 0, 10), $docs);
         $currencies = array_values(array_unique(array_map(static fn(array $d): string => strtoupper((string)$d['currency']), $docs)));
         sort($currencies);
         return ['pending' => count($docs), 'oldest' => $days === [] ? null : min($days), 'currencies' => $currencies];

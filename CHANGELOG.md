@@ -303,7 +303,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `Mgr. art.` whole. A Stripe `charge.refunded` whose refunds cannot be listed is explained by an admin refund only once
   its job has reached Stripe; one still queued no longer hides a dashboard refund of the same money.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
-- **Theme assets:** the default theme is version 2.3.16 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.17 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -357,6 +357,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   touched. Each conversion copies the table and blocks writes to it until done (reads go on, `LOCK=SHARED`): e-mail
   opt-outs, stock alerts, incidents, CSP reports and the ERP watermark. They are small, but a shop that kept many CSP
   reports or incidents should run `apply` in its maintenance window (as above) and may empty `csp_violations` first.
+- **Migration** `20261119180000_rma_outside_refund_applied` (review round 49): adds `rma_requests.outside_refund_applied`.
+  A received return of an order that was already refunded (partly) outside its returns is no longer paid out in full
+  again: "Refunded" asks first, then closes the return without payout when that money covers it, or credits and
+  refunds it less that money; the amount a return used up is recorded so the next return does not count it again.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address

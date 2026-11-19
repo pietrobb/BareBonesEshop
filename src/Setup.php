@@ -312,7 +312,8 @@ class Setup
             } catch (Throwable $e) {
                 $add('fail', 'database.schema', 'Commerce schema is not ready.', 'Run php cli/migrate.php.');
             }
-            if ($ossCache) $add(...array_values(OssThresholdCache::doctorCheck($probe))); self::retentionCheck($probe, $add);
+            // R49 (low): the ordinary doctor audits the totals the threshold decides on; --oss-cache the whole history.
+            $add(...array_values(OssThresholdCache::doctorCheck($probe, !$ossCache))); self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
             foreach (is_array($stores) ? (array)($stores['stores'] ?? []) : [] as $storeId => $store) {
@@ -504,7 +505,7 @@ class Setup
         $window = gmdate('Y-m-d', ShopTime::now() - EurRates::ISSUE_WINDOW_DAYS * 86400);
         if ($pending['oldest'] !== null && strcmp($pending['oldest'], $window) < 0) {
             return ['status' => 'warn', 'name' => $name,
-                'message' => "{$pending['pending']} invoices or credit notes in " . implode(', ', $pending['currencies']) . " issued since {$pending['oldest']} are counted against the 10 000 EUR OSS threshold at today's EUR rate: the ECB rate of their day is not stored; counted so far: {$amount}.",
+                'message' => "{$pending['pending']} invoices or credit notes in " . implode(', ', $pending['currencies']) . " supplied or issued since {$pending['oldest']} are counted against the 10 000 EUR OSS threshold at today's EUR rate: the ECB rate of their day is not stored; counted so far: {$amount}.",
                 'action' => 'Run "php cli/eur-rates.php" (it converts them at the ECB rate of their day, from the ECB history, even when it refuses today\'s feed) and keep it as a daily cron line; if it reports "ECB rates not updated", check the feed with the ECB and run it with --force.'];
         }
         return ['status' => 'pass', 'name' => $name, 'message' => "Store {$label} sold {$amount} net to consumers in other EU states in {$y}, under the 10 000 EUR OSS threshold.", 'action' => ''];

@@ -117,6 +117,12 @@ function renderCheckout(): string {
     if ((bool)$shownVat['context']['seller_oss_enabled'] !== (bool)$vat['context']['seller_oss_enabled'] && Cart::keepsNetAbroad()) {
         $cartData = Cart::enriched($shownVat['context']);
         [$cart, $subtotal] = [$cartData['items'], (int)$cartData['subtotal']];
+        // R49 (low): a percentage discount follows the re-priced goods, as checkoutExecute() charges it.
+        if ($discount > 0) {
+            $repriced = CheckoutService::discountPreview($couponThrottled ? '' : $couponCode, $subtotal, Security::email($state['values']['email']) ?? null, CheckoutService::availableItems($cart), $customerId ?: null);
+            $couponDiscount = $repriced['coupon_discount'];
+            $discount = min($subtotal, $couponDiscount + $repriced['promotion_discount']);
+        }
     }
     [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
     if (in_array($placed['error_code'] ?? '', ['checkout.error.total_changed', 'checkout.error.vat_changed', 'checkout.error.cod_unavailable'], true)) $checkoutError .= ' ' . $t('total_price') . ': ' . $price($subtotal - $discount + $shipping + $paymentFee); // R35: on a phone the new total is far below the message; R36: also after a refused cash on delivery (pickup)

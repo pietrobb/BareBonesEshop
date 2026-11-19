@@ -404,6 +404,14 @@ final class InvoiceService
             }
             foreach ($indexes as $i) $lines[$i]['vat'] = (int)$lines[$i]['gross'] - (int)$lines[$i]['net'];
         }
+        return self::creditTotals($lines);
+    }
+
+    /**
+     * Totals and VAT breakdown (negative) of credit lines.
+     * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
+     */
+    private static function creditTotals(array $lines): array {
         $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
         $breakdown = [];
         foreach ($lines as $line) {
@@ -582,35 +590,11 @@ final class InvoiceService
     }
 
     /**
-     * Issue an immutable item-level credit note from received RMA quantities.
-     * Amounts are deterministic slices of the original financial snapshot.
+     * The lines a credit note of these received RMA quantities would carry, as deterministic slices of the source
+     * invoice's financial snapshot, before any cap.
+     * @return array{0: array, 1: array, 2: array, 3: list<array>} source invoice, order, financial snapshot, lines
      */
-    public static function credit(
-        int $sourceInvoiceId,
-        int $rmaId,
-        array $quantities,
-        string $idempotencyKey
-    ): array {
-        if ($idempotencyKey === '' || !$quantities) throw new InvalidArgumentException('Credit quantities and idempotency key are required');
-        $requestedQuantities = [];
-        foreach ($quantities as $itemId => $quantity) $requestedQuantities[(int)$itemId] = (int)$quantity;
-        ksort($requestedQuantities, SORT_NUMERIC);
-        $quantities = $requestedQuantities;
-        $db = Db::get();
-        $existing = $db->prepare("SELECT i.*, r.id AS refund_id, r.rma_id FROM order_refunds r JOIN invoices i ON i.id=r.credit_note_id
-            WHERE r.store_id=:store AND r.idempotency_key=:key");
-        $existing->execute([':store' => StoreContext::current()->id(), ':key' => $idempotencyKey]);
-        if ($row = $existing->fetch(PDO::FETCH_ASSOC)) {
-            $priorStmt = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund ORDER BY rma_item_id');
-            $priorStmt->execute([':refund' => (int)$row['refund_id']]);
-            $priorQuantities = [];
-            foreach ($priorStmt->fetchAll(PDO::FETCH_ASSOC) as $line) $priorQuantities[(int)$line['rma_item_id']] = (int)$line['quantity'];
-            if ((int)$row['rma_id'] !== $rmaId || (int)$row['refers_to_invoice_id'] !== $sourceInvoiceId || $priorQuantities !== $requestedQuantities) {
-                throw new LogicException('Credit idempotency key was reused with different input');
-            }
-            return $row;
-        }
-
+    private static function rmaCreditDraft(PDO $db, int $sourceInvoiceId, int $rmaId, array $quantities): array {
         $source = self::byId($sourceInvoiceId);
         if (!$source || (string)($source['type'] ?? 'invoice') !== 'invoice') throw new RuntimeException('Source invoice not found');
         $rma = Rma::byId($rmaId);
@@ -672,6 +656,80 @@ final class InvoiceService
             ] + $supply;
             $lines[] = $line;
         }
+        return [$source, $order, $snapshot, $lines];
+    }
+
+    /**
+     * R49 (capability review of finding 3): gross a credit note of these RMA quantities would credit now, before the
+     * money of the order refunded outside its returns is counted (credit() with $deductOutside).
+     */
+    public static function rmaCreditGross(int $sourceInvoiceId, int $rmaId, array $quantities): int {
+        if (!$quantities) return 0;
+        $db = Db::get();
+        [$source, , , $lines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
+        return (int)self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source)[1]['gross'];
+    }
+
+    /**
+     * R49 (capability review of finding 3): an item credit less the money of the order refunded outside its returns
+     * that no other return counted yet (Rma::refundedOutsideReturns()): the customer gets what is still owed, never the
+     * same money twice. The lines are scaled down together (gross in proportion, the last line takes the remainder; net
+     * in proportion). Refused when that money covers the whole credit: the return is closed without payout instead.
+     * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>, 3: int}
+     */
+    private static function lessOutside(array $lines, array $totals, int $orderId): array {
+        $gross = (int)$totals['gross'];
+        $less = min(Rma::refundedOutsideReturns($orderId), $gross);
+        if ($less <= 0) return [...self::creditTotals($lines), 0];
+        if ($less >= $gross) throw new LogicException('Money refunded outside the return covers this credit: close the return without payout');
+        $target = $gross - $less;
+        $left = $target;
+        $last = count($lines) - 1;
+        foreach (array_keys($lines) as $position => $i) {
+            $lineGross = (int)$lines[$i]['gross'];
+            $scaled = $position === $last ? $left : intdiv($lineGross * $target, $gross);
+            $left -= $scaled;
+            $lines[$i]['net'] = $lineGross > 0 ? (int)round((int)$lines[$i]['net'] * $scaled / $lineGross) : 0;
+            $lines[$i]['gross'] = $scaled;
+            $lines[$i]['vat'] = $scaled - (int)$lines[$i]['net'];
+        }
+        return [...self::creditTotals($lines), $less];
+    }
+
+    /**
+     * Issue an immutable item-level credit note from received RMA quantities.
+     * Amounts are deterministic slices of the original financial snapshot.
+     */
+    public static function credit(
+        int $sourceInvoiceId,
+        int $rmaId,
+        array $quantities,
+        string $idempotencyKey,
+        bool $deductOutside = false
+    ): array {
+        if ($idempotencyKey === '' || !$quantities) throw new InvalidArgumentException('Credit quantities and idempotency key are required');
+        $requestedQuantities = [];
+        foreach ($quantities as $itemId => $quantity) $requestedQuantities[(int)$itemId] = (int)$quantity;
+        ksort($requestedQuantities, SORT_NUMERIC);
+        $quantities = $requestedQuantities;
+        $db = Db::get();
+        $existing = $db->prepare("SELECT i.*, r.id AS refund_id, r.rma_id FROM order_refunds r JOIN invoices i ON i.id=r.credit_note_id
+            WHERE r.store_id=:store AND r.idempotency_key=:key");
+        $existing->execute([':store' => StoreContext::current()->id(), ':key' => $idempotencyKey]);
+        if ($row = $existing->fetch(PDO::FETCH_ASSOC)) {
+            $priorStmt = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund ORDER BY rma_item_id');
+            $priorStmt->execute([':refund' => (int)$row['refund_id']]);
+            $priorQuantities = [];
+            foreach ($priorStmt->fetchAll(PDO::FETCH_ASSOC) as $line) $priorQuantities[(int)$line['rma_item_id']] = (int)$line['quantity'];
+            if ((int)$row['rma_id'] !== $rmaId || (int)$row['refers_to_invoice_id'] !== $sourceInvoiceId || $priorQuantities !== $requestedQuantities) {
+                throw new LogicException('Credit idempotency key was reused with different input');
+            }
+            return $row;
+        }
+
+        [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
+        [$lines, $totals, $breakdown] = self::capToUncredited($fullLines, self::uncredited($db, $source)['rates'], $source);
+        if ($deductOutside) [$lines, $totals, $breakdown] = self::lessOutside($lines, $totals, (int)$order['id']);
         [$lines, $totals, $breakdown] = self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
@@ -694,7 +752,9 @@ final class InvoiceService
             Orders::lockWithin((int)$order['id']);
             $lockedOrder = Orders::byId((int)$order['id']) ?: $order;
             // R15 high 3: under the lock again, each VAT rate capped at what the invoice still has uncredited at that rate.
-            [$lines, $totals, $breakdown] = self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source);
+            [$lines, $totals, $breakdown] = self::capToUncredited($fullLines, self::uncredited($db, $source)['rates'], $source);
+            $less = 0;
+            if ($deductOutside) [$lines, $totals, $breakdown, $less] = self::lessOutside($lines, $totals, (int)$order['id']);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             $creditData = [
@@ -702,7 +762,7 @@ final class InvoiceService
                 'source_fingerprint' => (string)($snapshot['fingerprint'] ?? ''),
                 'rounding' => 'source_component_prefix_allocation', 'currency' => (string)$source['currency'],
                 'lines' => $lines, 'totals' => $totals,
-            ];
+            ] + ($less > 0 ? ['outside_applied' => $less] : []);
             $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
             // R14 #2: all credit notes on one invoice together never exceed it.
             if ($totals['gross'] > self::uncredited($db, $source)['gross']) throw new LogicException('Credit exceeds what the invoice still has uncredited');

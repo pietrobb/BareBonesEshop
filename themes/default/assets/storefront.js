@@ -340,7 +340,7 @@
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span> <strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span> <strong>${price === 0 ? escapeHtml(text.freeShipping || text.free) : formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode, true));
       box.appendChild(label);
     });
@@ -348,12 +348,30 @@
   }
 
   function updateCheckoutTotal(shipping, paymentFee, subtotal) {
-    document.getElementById('summary-shipping').textContent = formatCents(shipping);
+    // R49 (review round 19, low): free shipping reads "Free shipping" as the server renders it (was: "0,00 €").
+    document.getElementById('summary-shipping').textContent = shipping === 0 ? (text.freeShipping || text.free) : formatCents(shipping);
     const payment = document.getElementById('summary-payment');
     if (payment) payment.textContent = paymentFee === 0 ? text.free : formatCents(paymentFee);
     const discountElement = document.getElementById('checkout-discount');
     const discount = discountElement ? parseInt(discountElement.value || '0', 10) : 0;
     document.getElementById('summary-total').textContent = formatCents(subtotal - discount + shipping + paymentFee);
+    quoteCheckoutTotal(subtotal - discount + shipping + paymentFee);
+  }
+
+  // R49 (review round 19, finding 2): the order posts the total on screen (quoted_total), as the no-JS form does in its
+  // <noscript>; a server total that differs (a price changed, the OSS threshold passed) is shown again, not charged.
+  function quoteCheckoutTotal(cents) {
+    const form = document.querySelector('form[data-checkout-form]');
+    if (!form || !Number.isInteger(cents)) return;
+    let input = form.querySelector('input[name="quoted_total"][data-js-quote]');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'quoted_total';
+      input.dataset.jsQuote = '1';
+      form.appendChild(input);
+    }
+    input.value = String(cents);
   }
 
   function setConsentCookie(categories) {
@@ -641,6 +659,8 @@
       if (residence) residence.addEventListener('change', reprice);
     }
     restoreCheckoutFocus();
+    const renderedTotal = document.getElementById('checkout-total');
+    if (renderedTotal && renderedTotal.value !== '') quoteCheckoutTotal(parseInt(renderedTotal.value, 10));
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
 
     const banner = document.getElementById('cc-banner');

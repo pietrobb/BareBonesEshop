@@ -227,8 +227,8 @@ try {
         $browserPost = [];
         if (preg_match('~^R37PPOST(.*)$~m', $out, $m)) parse_str(trim($m[1]), $browserPost);
         unset($browserPost['csrf_token']); // the replay runs in a fresh session; its own token is added
-        // quoted_total sits in <noscript> (R34 guard of the no-JS form): a scripted browser shows the live total instead.
-        assert_equals(['HU', 'r37p-post', 'r37p-pay', null, '1'], [$browserPost['country'] ?? null, $browserPost['shipping_method'] ?? null, $browserPost['payment'] ?? null, $browserPost['quoted_total'] ?? null, $browserPost['checkout'] ?? null],
+        // R49: the scripted browser posts the total it shows (quoted_total), as the no-JS form does in its <noscript>.
+        assert_equals(['HU', 'r37p-post', 'r37p-pay', '12700', '1'], [$browserPost['country'] ?? null, $browserPost['shipping_method'] ?? null, $browserPost['payment'] ?? null, $browserPost['quoted_total'] ?? null, $browserPost['checkout'] ?? null],
             "R37 pricing {$r37pDriver}: the browser's own POST after AT → HU carries country, delivery and payment (keys: " . implode(',', array_keys($browserPost)) . ')');
         [$exit, $placed, $noise] = $r37pRun([$r37pDriver, 'order', $r37pApp, $r37pBrowserTarget[$r37pDriver], $r37pRoot,
             json_encode(['oss' => true, 'pricing' => 'net', 'sku' => 'R37P-MUG', 'post' => $browserPost])]);
