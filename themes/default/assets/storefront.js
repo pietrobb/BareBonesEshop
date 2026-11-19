@@ -658,8 +658,8 @@
       if (residence) residence.addEventListener('change', reprice);
     }
     restoreCheckoutFocus();
-    const renderedTotal = document.getElementById('summary-total');
-    if (renderedTotal && renderedTotal.dataset.totalCents) quoteCheckoutTotal(parseInt(renderedTotal.dataset.totalCents, 10));
+    const renderedTotal = document.getElementById('checkout-total');
+    if (renderedTotal && renderedTotal.value !== '') quoteCheckoutTotal(parseInt(renderedTotal.value, 10));
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
 
     const banner = document.getElementById('cc-banner');

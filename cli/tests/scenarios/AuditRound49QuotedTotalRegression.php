@@ -21,9 +21,9 @@ assert_true(str_contains($r49qUpdate, 'quoteCheckoutTotal(subtotal - discount + 
     'R49 quoted total: every total the script shows is also the total the order posts (was: nothing posted with JS)');
 assert_true(str_contains($r49qQuote, "input.name = 'quoted_total'") && str_contains($r49qQuote, "input.type = 'hidden'") && str_contains($r49qQuote, 'form[data-checkout-form]'),
     'R49 quoted total: the script keeps one hidden quoted_total in the checkout form, also for a theme override without it');
-assert_true(str_contains($r49qTpl, '<span id="summary-total" data-total-cents="{{total_cents}}">'),
+assert_true(str_contains($r49qTpl, '<input type="hidden" id="checkout-total" value="{{total_cents}}" autocomplete="off">'),
     'R49 quoted total: the server-rendered total is quoted until the script re-prices (a failed rates request still posts it)');
-assert_true(str_contains($r49qJs, 'quoteCheckoutTotal(parseInt(renderedTotal.dataset.totalCents, 10))'),
+assert_true(str_contains($r49qJs, "document.getElementById('checkout-total')") && str_contains($r49qJs, 'quoteCheckoutTotal(parseInt(renderedTotal.value, 10))'),
     'R49 quoted total: the script quotes the rendered total on load');
 // The no-JS form keeps its own quote; with JS the <noscript> copy is not parsed, so exactly one value is posted.
 assert_true(str_contains($r49qTpl, '<noscript><input type="hidden" name="quoted_total" value="{{total_cents}}"></noscript>'),
