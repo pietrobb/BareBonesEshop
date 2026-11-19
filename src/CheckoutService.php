@@ -235,6 +235,10 @@ class CheckoutService {
         if ($reason !== '' && str_starts_with((string)($vat['vat_id_status'] ?? ''), 'mismatch_') && !in_array($scenario, [VatService::SCENARIO_REVERSE_CHARGE, VatService::SCENARIO_EXPORT], true)) {
             $reason .= ' ' . I18n::t('checkout.vat_reason.vat_id_holder');
         }
+        // R49 (low): VIES could not answer for the VAT ID (down, rate-limited): VAT was charged without a word.
+        if ($reason !== '' && in_array((string)($vat['vat_id_status'] ?? ''), ['unverified', 'unavailable', 'error'], true) && !in_array($scenario, [VatService::SCENARIO_REVERSE_CHARGE, VatService::SCENARIO_EXPORT], true)) {
+            $reason .= ' ' . I18n::t('checkout.vat_reason.vat_id_unverified');
+        }
         return [
             'vat_reason' => $reason,
             'residence_label' => I18n::t('checkout.residence.label'), 'residence_hint' => I18n::t('checkout.residence.hint'),

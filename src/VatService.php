@@ -795,7 +795,9 @@ class VatService implements TaxProvider
     /** Legal-form words a company name may carry or leave out ("ACME s.r.o." is "ACME"); single letters are dropped too. */
     private const LEGAL_FORMS = ['gmbh', 'mbh', 'ag', 'kg', 'ohg', 'og', 'ug', 'ltd', 'limited', 'llc', 'inc', 'plc', 'sa', 'sas', 'sarl',
         'srl', 'spa', 'bv', 'nv', 'kft', 'zrt', 'nyrt', 'bt', 'oy', 'oyj', 'ab', 'aps', 'as', 'sro', 'spol', 'zoo', 'sp', 'ks', 'vos',
-        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and'];
+        'doo', 'dd', 'eood', 'ood', 'ad', 'ou', 'sia', 'uab', 'se', 'co', 'company', 'the', 'und', 'and',
+        // R49: dotted forms written as initials ("r.o.", "o.o.", "e.K.", "r.l."), Greek ones in Latin (ΕΠΕ, ΙΚΕ).
+        'ro', 'oo', 'ek', 'rl', 'epe', 'ike'];
 
     /**
      * R40 (low): academic titles a sole trader's name carries in one register and not the other ("Ing. Ján Novák").
@@ -841,19 +843,46 @@ class VatService implements TaxProvider
         $stmt->execute([':v' => $vatId]);
         $registered = trim((string)$stmt->fetchColumn());
         if (trim($registered, '- ') === '') return null;
+        // R49 (review round 19, low): a name VIES gives in Greek (or Cyrillic) script has no one Latin spelling the buyer
+        // could match ("Ηλίας" is Ilias, Elias, Ēlias): not decidable, like a withheld name (was: refused).
+        if (preg_match('/[\p{Greek}\p{Cyrillic}]/u', $registered) === 1) return null;
         [$holder, $named] = [self::holderTokens($registered), self::holderTokens($company)];
         if ($holder === [] || $named === []) return 'name';
         [$short, $long] = count($named) <= count($holder) ? [$named, $holder] : [$holder, $named];
-        // R40 (low): the leading words in any order ("Novák Ján" registered, "Ján Novák" ordered).
-        $leading = array_slice($long, 0, count($short));
-        sort($leading);
-        sort($short);
-        return $leading === $short ? null : 'name';
+        // R49 (low): words written together or apart are one name ("MediaMarkt" is "Media Markt").
+        if ($short === $long) return null;
+        for ($k = 2; $k <= count($long); $k++) { // one word alone is the first name, judged below ("Ján" is not "Ing. Ján Novák")
+            if (implode('', array_slice($long, 0, $k)) === implode('', $short)) return null;
+        }
+        if (!self::isCompanyName($registered) && !self::isCompanyName($company)) {
+            // R40 (low): a person's words in any order ("Novák Ján" registered, "Ján Novák" ordered). R49 (low): first name
+            // and surname both, a middle name aside ("Ján" alone was "Ing. Ján Novák").
+            return count($short) >= 2 && array_diff($short, $long) === [] ? null : 'name';
+        }
+        // A company: the other's leading words, in order. R49 (low): "Novák Peter" is not "Peter Novák s.r.o.".
+        return array_slice($long, 0, count($short)) === $short ? null : 'name';
+    }
+
+    /** R49: a legal form or a business word names a company, not a person. */
+    private static function isCompanyName(string $name): bool
+    {
+        $words = preg_split('/[^a-z0-9]+/', self::collapseInitials(self::asciiName(mb_strtolower($name, 'UTF-8'))), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return array_intersect($words, array_diff(self::LEGAL_FORMS, ['the', 'und', 'and'])) !== [] || array_intersect($words, self::BUSINESS_WORDS) !== [];
+    }
+
+    /** R49 (low): initials are one word ("J.K. s.r.o." is "jk", "s.r.o." is "sro"; was: single letters dropped, nothing left). */
+    private static function collapseInitials(string $ascii): string
+    {
+        // Written together first ("s.r.o.", "j.k."), then spaced ("j. k."), so "J. K. s.r.o." stays "jk sro".
+        $ascii = (string)preg_replace_callback('/(?<![a-z0-9])(?:[a-z]\.){2,}/', static fn(array $m): string => str_replace('.', '', $m[0]) . ' ', $ascii);
+        return (string)preg_replace_callback('/(?<![a-z0-9])(?:[a-z]\.\s+)+[a-z]\.(?![a-z0-9])/', static fn(array $m): string => (string)preg_replace('/[.\s]+/', '', $m[0]) . ' ', $ascii);
     }
 
     /** @return list<string> the significant words of a company name, lower case ASCII ("ü" and "ue" alike) */
     private static function holderTokens(string $name): array
     {
+        // R49 (low): the Austrian "DI" (Diplom-Ingenieur, also "DI (FH)") is written in capitals without a dot before the name.
+        $name = (string)preg_replace('/(?<![\p{L}\p{N}])DI(?:\s*\(FH\))?\s+(?=\p{Lu})/u', ' ', $name);
         $name = mb_strtolower($name, 'UTF-8');
         // R48 (review round 18, low 3): a business word makes the name a company, written with a space after the title too:
         // "Dr. Max Holding" is the company "Dr. Max Holding", not the holder "Max Holding" (was: a spaced title always went).
@@ -863,7 +892,8 @@ class VatService implements TaxProvider
         // "Mgr. art."; "arch" and "art" stayed as words of the name and the holder did not match).
         $name = (string)preg_replace(array_merge(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u'], $business ? [] : [
             // R47: "Ing. arch.Ján" keeps its two-word title whole for the joined rule below (was: "arch" left as a name).
-            '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|(?:' . implode('|', self::TITLES_BEFORE) . ')(?!\.\s*(?:arch|art)\.))\.(?=[\s\-]|$)/u']), ' ', $name);
+            // R49 (low): the Austrian "Mag. pharm." likewise.
+            '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|mag\.\s*pharm|(?:' . implode('|', self::TITLES_BEFORE) . ')(?!\.\s*(?:arch|art|pharm)\.))\.(?=[\s\-]|$)/u']), ' ', $name);
         $name = (string)preg_replace('/,\s*(?:' . implode('|', self::TITLES_AFTER) . ')(?![\p{L}\p{N}])\.?/u', ' ', $name);
         $words = self::nameWords($name);
         // R44 (review round 16, low 4): R42 kept a title joined to the next word, so "Ing.Ján Novák" (a sole trader
@@ -871,7 +901,7 @@ class VatService implements TaxProvider
         // form, and a first name and a surname left after it. "Dr.Max s.r.o." stays the company Dr.Max.
         // R47 (review round 17, low 4): two-word titles joined too ("Ing.arch.Ján"), and a business word keeps the name a
         // company ("Dr.Max Holding" is not the holder "Max Holding").
-        $joined = '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|' . implode('|', self::TITLES_BEFORE) . ')\.(?=\p{L})/u';
+        $joined = '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|mag\.\s*pharm|' . implode('|', self::TITLES_BEFORE) . ')\.(?=\p{L})/u';
         if (preg_match($joined, $name) === 1) {
             $person = self::nameWords((string)preg_replace($joined, ' ', $name));
             $forms = preg_split('/[^a-z0-9]+/', str_replace('.', '', self::asciiName($name)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
@@ -883,7 +913,9 @@ class VatService implements TaxProvider
     /** @return list<string> */
     private static function nameWords(string $name): array
     {
-        $words = preg_split('/[^a-z0-9]+/', self::asciiName($name), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        // R49 (low): an apostrophe joins ("L'ORÉAL" is "loreal", as typed without it).
+        $ascii = self::collapseInitials(str_replace(["'", '’', '`'], '', self::asciiName(str_replace('’', "'", $name))));
+        $words = preg_split('/[^a-z0-9]+/', $ascii, -1, PREG_SPLIT_NO_EMPTY) ?: [];
         return array_values(array_unique(array_filter($words, static fn(string $w): bool => strlen($w) > 1 && !in_array($w, self::LEGAL_FORMS, true))));
     }
 
