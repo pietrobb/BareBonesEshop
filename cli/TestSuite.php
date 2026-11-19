@@ -64,7 +64,7 @@ foreach ($scenarioFiles as $scenarioIndex => $scenarioFile) {
 if (!is_string($suiteOnly)) {
     // Every *Regression.php, historical order first, then auto-discovered (tests/RegressionSuite.php).
     require __DIR__ . '/tests/RegressionSuite.php';
-    foreach (['test-update.php', 'test-theme-contract.php', 'test-theme-upgrade-gate.php'] as $suiteExtraIndex => $suiteExtraFile) {
+    foreach (suite_tier_regressions() !== null ? [] : ['test-update.php', 'test-theme-contract.php', 'test-theme-upgrade-gate.php'] as $suiteExtraIndex => $suiteExtraFile) {
         require __DIR__ . '/' . $suiteExtraFile;
         suite_progress('extra', $suiteExtraIndex + 1, 3, $suiteExtraFile);
     }

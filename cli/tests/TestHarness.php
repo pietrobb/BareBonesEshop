@@ -108,6 +108,28 @@ function suite_progress(string $phase, int $index, int $count, string $file): vo
     suite_progress_write(sprintf('%s %d/%d %s done: %d assertions, %d failed, %.1f min', $phase, $index, $count, basename($file), $tests, $failed, $minutes));
 }
 
+/**
+ * --tier=critical: the everyday check. All thematic scenarios run as in the full suite, then only the *Regression.php
+ * files listed in cli/tests/critical-tier.txt (one per line, # comments; in the suite's usual order), and none of the
+ * updater/theme extras. The full suite runs before a release and for changes to the database layer, migrations, the
+ * updater or the installer (CONTRIBUTING.md). Returns null without --tier; an unknown tier or a missing file is an error.
+ */
+function suite_tier_regressions(): ?array {
+    static $files = false;
+    if ($files !== false) return $files;
+    $tier = getopt('', ['tier:'])['tier'] ?? null;
+    if ($tier === null) return $files = null;
+    if ($tier !== 'critical') throw new InvalidArgumentException('Unknown --tier=' . (is_string($tier) ? $tier : '?') . ' (known: critical)');
+    $lines = file(__DIR__ . '/critical-tier.txt', FILE_IGNORE_NEW_LINES) ?: [];
+    $listed = array_values(array_filter(array_map(static fn(string $line): string => trim(explode('#', $line, 2)[0]), $lines), 'strlen'));
+    foreach ($listed as $file) {
+        if (basename($file) !== $file || !str_ends_with($file, 'Regression.php') || !is_file(__DIR__ . '/scenarios/' . $file)) {
+            throw new InvalidArgumentException('cli/tests/critical-tier.txt lists no regression file: ' . $file);
+        }
+    }
+    return $files = array_values(array_unique($listed));
+}
+
 function assert_greater(int $actual, int $than, string $message): void {
     assert_true($actual > $than, "{$message} ({$actual} > {$than})");
 }

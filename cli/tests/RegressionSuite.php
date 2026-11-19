@@ -46,6 +46,10 @@ sort($discoveredRegressions, SORT_STRING);
 foreach ($discoveredRegressions as $regressionFile) {
     if (!in_array($regressionFile, $regressionFiles, true)) $regressionFiles[] = $regressionFile;
 }
+// --tier=critical keeps only the listed regressions, in this same order (TestHarness suite_tier_regressions).
+if (($regressionTier = suite_tier_regressions()) !== null) {
+    $regressionFiles = array_values(array_filter($regressionFiles, static fn(string $file): bool => in_array(basename($file), $regressionTier, true)));
+}
 $regressionAlreadyRun = array_map('realpath', get_included_files());
 foreach ($regressionFiles as $regressionIndex => $regressionFile) {
     if (!is_file($regressionFile)) {

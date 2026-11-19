@@ -31,8 +31,7 @@ submodule run `git submodule update --init`. For the browser checks install Node
 ## Checks a pull request must pass
 
 ```bash
-php cli/test.php                 # full suite on SQLite; TEST_MYSQL_DSN=... also runs it on MySQL/MariaDB
-                                 # failures and per-file progress go to STDERR live; --stop-on-fail ends at the first failure
+php cli/test.php --tier=critical # everyday check: all scenarios + the regressions in cli/tests/critical-tier.txt
 php cli/static-analysis.php      # architecture rules (thin entrypoints, module boundaries, events)
 php cli/i18n-parity.php          # every language has every key
 php cli/quality-gates.php        # WCAG, i18n and performance budgets
@@ -41,7 +40,12 @@ npx eslint --max-warnings=0 .    # storefront scripts and tooling
 npm run test:e2e                 # Playwright (start the shop first: php -S localhost:8080 router.php)
 ```
 
-CI additionally runs the suite on PHP 8.1–8.5, MySQL 8.4 and MariaDB 11.4, the Docker deployment, Lighthouse and
+Run the full suite — `php cli/test.php` on SQLite and again with `TEST_MYSQL_DSN=...` on MySQL/MariaDB — before a
+release or tag, and for any change to the database layer, migrations, the updater or the installer. Failures and
+per-file progress go to STDERR live; `--stop-on-fail` ends a run at the first failure. A regression that guards
+checkout, payments, orders, stock, invoices or permissions belongs in `cli/tests/critical-tier.txt`.
+
+CI additionally runs the full suite on PHP 8.1–8.5, MySQL 8.4 and MariaDB 11.4, the Docker deployment, Lighthouse and
 the Bookshop package acceptance (`tests/bookshop/run.sh`).
 
 ## Security

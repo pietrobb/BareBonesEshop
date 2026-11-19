@@ -371,6 +371,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression
   and extra test file with its position, the assertions and failures so far and the elapsed minutes. `--stop-on-fail`
   ends the run at the first failure with exit 1 and leaves its fixtures and database for inspection.
+- **An everyday test run takes minutes, not hours.** `php cli/test.php --tier=critical` runs every thematic scenario
+  and only the regressions listed in `cli/tests/critical-tier.txt` (checkout, payments and webhooks, orders, stock,
+  invoices, permissions and security, the API) — about 3 minutes on SQLite. The full suite on SQLite and MySQL stays
+  the check before a release and for changes to the database layer, migrations, the updater or the installer.
 - **The admin has a new look.** A dashboard opens the admin: today's orders and revenue, pending orders and low stock
   as tiles, a 14-day revenue chart, recent orders, low stock, operational status and (for the owner) a setup
   checklist, with quick actions for a new order and a new product. The navigation is a dark sidebar grouped by area

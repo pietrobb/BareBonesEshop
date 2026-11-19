@@ -50,6 +50,24 @@ try {
         && !str_contains($spErr, 'after the failure') && !str_contains($spErr, 'ABORTED')
         && str_contains($spOut, '[PASS] progress probe passes') && str_contains($spOut, '[FAIL] progress probe fails'),
         "Suite progress: --stop-on-fail ends the run at the first failure with exit 1 and the buffered output (exit {$spExit}: " . trim($spErr) . ')');
+
+    // --tier=critical: the everyday run keeps the thematic scenarios and only the regressions in critical-tier.txt.
+    file_put_contents($spRoot . '/probe.php', "<?php\nrequire " . var_export(__DIR__ . '/../TestHarness.php', true) . ";\n"
+        . "try { echo json_encode(suite_tier_regressions()); } catch (InvalidArgumentException \$e) { fwrite(STDERR, \$e->getMessage()); exit(2); }\n");
+    $spListed = array_values(array_filter(array_map(static fn(string $line): string => trim(explode('#', $line, 2)[0]),
+        file(__DIR__ . '/../critical-tier.txt', FILE_IGNORE_NEW_LINES) ?: []), 'strlen'));
+    [$spExit, $spOut, $spErr] = $spRun(['--tier=critical']);
+    $spTier = json_decode($spOut, true);
+    assert_true($spExit === 0 && is_array($spTier) && $spTier === $spListed && count($spTier) >= 20 && in_array('AuditSuiteProgressRegression.php', $spTier, true)
+        && array_filter($spTier, static fn(string $file): bool => !is_file(__DIR__ . '/' . $file)) === [],
+        "Suite tier: --tier=critical selects exactly the existing regressions listed in cli/tests/critical-tier.txt (exit {$spExit}: " . trim($spErr) . ')');
+    [$spExit, $spOut] = $spRun([]);
+    assert_true($spExit === 0 && $spOut === 'null', 'Suite tier: without --tier the full suite runs every regression');
+    [$spExit, , $spErr] = $spRun(['--tier=nightly']);
+    assert_true($spExit === 2 && str_contains($spErr, 'Unknown --tier=nightly (known: critical)'), "Suite tier: an unknown tier is an error, not a silent full or empty run ({$spErr})");
+    assert_true(str_contains($spRegressions, 'if (($regressionTier = suite_tier_regressions()) !== null)')
+        && str_contains($spRunner, "foreach (suite_tier_regressions() !== null ? [] : ['test-update.php'"),
+        'Suite tier: the runner filters the regressions and skips the updater/theme extras for a tier run');
 } catch (Throwable $e) {
     assert_true(false, 'Suite progress (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
