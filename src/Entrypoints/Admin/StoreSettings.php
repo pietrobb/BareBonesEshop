@@ -9,6 +9,15 @@ function adminStoreSettingsAllowed(string $storeId): bool {
     return Security::adminRole() === 'owner' || $storeId === StoreContext::current()->id();
 }
 
+/** R48 (review round 18, low 7): one seller-identity issue in the admin's language (was the doctor's English). */
+function adminStoreIdentityIssue(array $issue): string {
+    $field = $issue['field'] === 'address'
+        ? I18n::t('admin.stores.field.street') . ', ' . I18n::t('admin.stores.field.city')
+        : I18n::t('admin.stores.field.' . $issue['field']);
+    if ($issue['value'] === null) return I18n::format('admin.stores.problem.missing', ['field' => $field]);
+    return I18n::format($issue['field'] === 'iban' ? 'admin.stores.problem.iban' : 'admin.stores.problem.example', ['field' => $field, 'value' => $issue['value']]);
+}
+
 function pageStoreSettings(): void {
     $settings = StoreSettings::load();
     $stores = $settings['stores'] ?? [];
@@ -25,7 +34,7 @@ function pageStoreSettings(): void {
         $draft = $GLOBALS['adminStoreDraft'][$storeId] ?? null;
         $value = static fn(string $field) => $draft !== null ? ($draft[$field] ?? '') : ($legal[$field] ?? '');
         $seller = isset($legal['seller']) ? (string)$legal['seller'] : null;
-        $problems = $seller === null ? Setup::legalIdentityProblems($legal) : [];
+        $problems = $seller === null ? array_map('adminStoreIdentityIssue', Setup::legalIdentityIssues($legal)) : [];
     ?>
     <div class="card" id="store-<?= esc($storeId) ?>" data-store-settings="<?= esc($storeId) ?>">
         <h3><?= esc((string)($store['name'] ?? $storeId)) ?> <span class="muted">(<?= esc($storeId) ?>)</span>

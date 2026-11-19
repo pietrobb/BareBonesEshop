@@ -191,7 +191,7 @@ input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5r
 .dash-head{display:flex;justify-content:space-between;align-items:flex-end;gap:.75rem 1.5rem;flex-wrap:wrap;margin-bottom:1.1rem}.dash-head h1{margin:0}.dash-actions{display:flex;gap:.5rem;flex-wrap:wrap}
 .kpis{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-bottom:1rem}
 .kpi{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"icon label" "icon value";gap:.1rem .9rem;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem;color:var(--text);box-shadow:0 1px 2px rgba(16,24,40,.04);transition:border-color .15s,box-shadow .15s}
-.kpi:hover{text-decoration:none;border-color:#f3b38a;box-shadow:0 4px 14px rgba(16,24,40,.08)}
+a.kpi:hover{text-decoration:none;border-color:#f3b38a;box-shadow:0 4px 14px rgba(16,24,40,.08)}
 .kpi-icon{grid-area:icon;width:2.9rem;height:2.9rem;border-radius:10px;display:grid;place-items:center;background:var(--accent-bg);color:var(--accent-d)}
 .kpi-label{grid-area:label;font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);align-self:end}
 .kpi-value{grid-area:value;font-size:1.6rem;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums;align-self:start}
