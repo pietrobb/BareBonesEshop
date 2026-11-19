@@ -115,8 +115,11 @@ try {
     ], 'R49 order: the transaction table reads in Slovak (was: "Ref", "stripe", "refund_id: …", "Refund succeeded") — ' . substr(strip_tags($r49aTable), 0, 300));
     I18n::setLocale('en');
     $r49aHtml = $r49aRender(static fn() => dashboardTrend('default'));
+    // The day's row as the report counts it (other scenarios' orders of today are in it too in a full run).
+    $r49aToday = SalesReport::trend('default', DASHBOARD_TREND_DAYS)['eur'][date('Y-m-d')] ?? ['orders' => 0, 'revenue' => 0];
     assert_true(str_contains($r49aHtml, '<details class="chart-values"><summary>Values by day</summary>') && str_contains($r49aHtml, '<th>Day</th><th>Orders</th><th>Revenue</th>')
-        && str_contains($r49aHtml, esc(I18n::price(1000, 'eur'))),
+        && (int)$r49aToday['orders'] >= 1
+        && str_contains($r49aHtml, '<td>' . esc(I18n::date(date('Y-m-d'))) . '</td><td>' . (int)$r49aToday['orders'] . '</td><td>' . esc(I18n::price((int)$r49aToday['revenue'], 'eur')) . '</td>'),
         'R49 dashboard: the chart\'s values by day are a table for keyboard and touch (was: hover tooltips only)');
 
     // 4. The e-book e-mail's link validity in the order's language.

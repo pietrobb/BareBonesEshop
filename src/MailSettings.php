@@ -36,7 +36,7 @@ final class MailSettings
     public static function raw(?array $config = null): array
     {
         $path = self::path($config);
-        if ($path === null) return [];
+        if ($path === null || !file_exists($path)) return [];
         $data = json_decode((string)PrivateOwner::run(static fn(): ?string => DataOverrides::readRegularFile($path)), true);
         return is_array($data) ? $data : [];
     }
