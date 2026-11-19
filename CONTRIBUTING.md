@@ -32,6 +32,7 @@ submodule run `git submodule update --init`. For the browser checks install Node
 
 ```bash
 php cli/test.php                 # full suite on SQLite; TEST_MYSQL_DSN=... also runs it on MySQL/MariaDB
+                                 # failures and per-file progress go to STDERR live; --stop-on-fail ends at the first failure
 php cli/static-analysis.php      # architecture rules (thin entrypoints, module boundaries, events)
 php cli/i18n-parity.php          # every language has every key
 php cli/quality-gates.php        # WCAG, i18n and performance budgets

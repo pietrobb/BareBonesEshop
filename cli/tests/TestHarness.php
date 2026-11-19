@@ -63,9 +63,7 @@ function assert_true(bool $condition, string $message): void {
         echo "  [PASS] {$message}\n";
         return;
     }
-    $failed++;
-    $errors[] = $message;
-    echo "  [FAIL] {$message}\n";
+    suite_record_failure($message);
 }
 
 function assert_equals($expected, $actual, string $message): void {
@@ -76,11 +74,38 @@ function assert_equals($expected, $actual, string $message): void {
         echo "  [PASS] {$message}\n";
         return;
     }
+    suite_record_failure("{$message} (expected: " . var_export($expected, true) . ', got: ' . var_export($actual, true) . ')');
+}
+
+// Live progress: stdout stays buffered until the summary (scenarios send headers and start sessions), so every failure
+// and one line per finished test file also go straight to STDERR — a failure shows minutes into a run, not at its end.
+// --stop-on-fail ends the run at the first failure (exit 1; its fixtures, temp files and database stay for inspection).
+define('TEST_STOP_ON_FAIL', in_array('--stop-on-fail', $_SERVER['argv'] ?? [], true));
+$suiteProgressStream = STDERR;
+
+function suite_progress_write(string $line): void {
+    global $suiteProgressStream;
+    fwrite($suiteProgressStream, '[progress ' . gmdate('H:i:s') . '] ' . $line . "\n");
+}
+
+function suite_record_failure(string $detail): void {
+    global $tests, $failed, $errors;
     $failed++;
-    $expStr = var_export($expected, true);
-    $actStr = var_export($actual, true);
-    $errors[] = "{$message} (expected: {$expStr}, got: {$actStr})";
-    echo "  [FAIL] {$message} (expected: {$expStr}, got: {$actStr})\n";
+    $errors[] = $detail;
+    echo "  [FAIL] {$detail}\n";
+    suite_progress_write("FAILED #{$failed} (assertion {$tests}): {$detail}");
+    if (!TEST_STOP_ON_FAIL) return;
+    while (ob_get_level() > 0) ob_end_flush();
+    fwrite(STDERR, "\nTEST SUITE STOPPED at the first failure (--stop-on-fail): {$detail}\n");
+    define('TEST_SUITE_COMPLETED', true); // reported above; the runner's shutdown check would call it an abort
+    exit(1);
+}
+
+/** One STDERR line per finished scenario/regression file: where the run is, how many assertions ran and failed. */
+function suite_progress(string $phase, int $index, int $count, string $file): void {
+    global $tests, $failed;
+    $minutes = (microtime(true) - (float)($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) / 60;
+    suite_progress_write(sprintf('%s %d/%d %s done: %d assertions, %d failed, %.1f min', $phase, $index, $count, basename($file), $tests, $failed, $minutes));
 }
 
 function assert_greater(int $actual, int $than, string $message): void {

@@ -366,6 +366,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
+  the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
+  at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression
+  and extra test file with its position, the assertions and failures so far and the elapsed minutes. `--stop-on-fail`
+  ends the run at the first failure with exit 1 and leaves its fixtures and database for inspection.
 - **The admin has a new look.** A dashboard opens the admin: today's orders and revenue, pending orders and low stock
   as tiles, a 14-day revenue chart, recent orders, low stock, operational status and (for the owner) a setup
   checklist, with quick actions for a new order and a new product. The navigation is a dark sidebar grouped by area

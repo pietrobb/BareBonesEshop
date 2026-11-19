@@ -47,11 +47,12 @@ foreach ($discoveredRegressions as $regressionFile) {
     if (!in_array($regressionFile, $regressionFiles, true)) $regressionFiles[] = $regressionFile;
 }
 $regressionAlreadyRun = array_map('realpath', get_included_files());
-foreach ($regressionFiles as $regressionFile) {
+foreach ($regressionFiles as $regressionIndex => $regressionFile) {
     if (!is_file($regressionFile)) {
         assert_true(false, 'Regression discovery: listed regression ' . basename($regressionFile) . ' exists');
         continue;
     }
     if (in_array(realpath($regressionFile), $regressionAlreadyRun, true)) continue;
     require $regressionFile;
+    suite_progress('regression', $regressionIndex + 1, count($regressionFiles), $regressionFile);
 }
