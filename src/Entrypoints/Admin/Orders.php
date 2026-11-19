@@ -600,7 +600,20 @@ function pageRma(): void {
                 <td><?= esc($r['reason']) ?></td>
                 <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc(adminCodeLabel('admin.rma.status.', (string)$r['status'])) ?></span></td>
                 <td style="white-space:nowrap">
-                    <?php foreach ($next[$r['status']] ?? [] as $to => $label): ?>
+                    <?php $outside = isset($next[$r['status']]['refunded']) ? Rma::refundedOutsideReturns((int)$r['order_id']) : 0; ?>
+                    <?php if ($outside > 0): ?>
+                    <p class="muted" data-rma-refunded-outside style="white-space:normal;margin:0 0 4px"><?= esc(I18n::format('admin.rma.refunded_outside_hint', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$r['order_id'])['currency'] ?? 'eur'))])) ?></p>
+                    <?php foreach (['close' => I18n::t('admin.rma.close_without_payout'), 'pay' => I18n::t('admin.rma.refund_anyway')] as $decision => $label): ?>
+                    <form method="post" action="admin.php?p=rma&action=status" style="display:inline"<?= $decision === 'pay' ? ' data-confirm="' . esc(I18n::t('admin.rma.refund_anyway_confirm')) . '"' : '' ?>>
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
+                        <input type="hidden" name="status" value="refunded">
+                        <input type="hidden" name="outside_refund" value="<?= esc($decision) ?>">
+                        <button class="btn btn-sm" type="submit"><?= esc($label) ?></button>
+                    </form>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                    <?php foreach ($outside > 0 ? [] : ($next[$r['status']] ?? []) as $to => $label): ?>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
@@ -645,6 +658,19 @@ function handleRmaStatus(): void {
         } elseif ($status === 'refunded' && !Rma::settleAlreadyRefunded($id)) {
             $rma = Rma::byId($id);
             if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
+            // R49 (finding 3): money already returned outside this return is named first; the admin closes the return
+            // without payout or confirms a payout on top of it (was: a second credit note and refund, unannounced).
+            $outside = Rma::refundedOutsideReturns((int)$rma['order_id']);
+            $decision = Security::clean($_POST['outside_refund'] ?? '');
+            if ($outside > 0 && $decision === 'close') {
+                if (!Rma::closeWithoutPayout($id)) throw new LogicException(I18n::t('admin.rma.transition_refused'));
+                setFlash('ok', I18n::format('admin.rma.closed_without_payout', ['id' => $id]));
+                header('Location: admin.php?p=rma');
+                exit;
+            }
+            if ($outside > 0 && $decision !== 'pay') {
+                throw new RuntimeException(I18n::format('admin.rma.refunded_outside', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur'))]));
+            }
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
             if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
             $quantities = InvoiceService::creditableQuantities($id);

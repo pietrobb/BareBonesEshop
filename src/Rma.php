@@ -499,6 +499,54 @@ class Rma {
         }
     }
 
+    /**
+     * R49 (review round 19, finding 3): money of the order returned outside its returns — a partial or whole refund from
+     * the order page or the provider's dashboard: booked refunds no item refund accounts for (by key or provider refund
+     * id), plus a requested refund still in flight. "Refunded" on a return then would pay the same goods a second time.
+     */
+    public static function refundedOutsideReturns(int $orderId): int {
+        $order = Orders::byId($orderId);
+        if (!$order) return 0;
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(t.amount),0) FROM payment_transactions t
+            WHERE t.order_id=:order AND t.store_id=:store AND t.status IN ('partially_refunded','refunded','refund_succeeded') AND t.amount>0
+              AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id=t.order_id AND r.store_id=t.store_id
+                  AND (r.idempotency_key=t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference<>'' AND r.payment_reference=t.provider_ref)))");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        $booked = (int)$stmt->fetchColumn();
+        $stmt->closeCursor();
+        return max(0, $booked + PaymentService::requestedRefundInFlight($order));
+    }
+
+    /**
+     * R49 (finding 3): close a received return whose money went back outside it (refundedOutsideReturns() > 0) without
+     * a credit note or payout; the admin decides so after "Refunded" named that money. Its units count as refunded.
+     */
+    public static function closeWithoutPayout(int $rmaId): bool {
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $rma = self::byId($rmaId);
+            if ($rma) Orders::lockWithin((int)$rma['order_id']);
+            $rma = $rma ? self::lockedRma($rmaId) : null;
+            $outside = $rma ? self::refundedOutsideReturns((int)$rma['order_id']) : 0;
+            $pending = $db->prepare("SELECT COUNT(*) FROM order_refunds WHERE rma_id = ? AND store_id = ? AND status = 'pending'");
+            $pending->execute([$rmaId, StoreContext::current()->id()]);
+            $closable = $rma && $rma['status'] === 'received' && $outside > 0 && (int)$pending->fetchColumn() === 0;
+            $pending->closeCursor();
+            if ($closable) {
+                $db->prepare('UPDATE rma_items SET refunded_quantity = received_quantity WHERE rma_id = ?')->execute([$rmaId]);
+                $db->prepare("UPDATE rma_requests SET status = 'refunded', updated_at = " . Db::now() . ' WHERE id = ? AND store_id = ?')->execute([$rmaId, StoreContext::current()->id()]);
+                AuditLog::log('rma_status', $rmaId, 'received', 'refunded', 'Closed without payout: ' . I18n::price($outside, (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur')) . ' was refunded outside the return');
+            }
+            if ($own) $db->commit();
+            return $closable;
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
     /** Complete a pending item refund; true when this call completed it (false: it was done already). */
     public static function completeRefund(int $refundId, string $paymentReference): bool {
         $db = Db::get();
