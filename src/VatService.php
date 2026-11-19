@@ -805,12 +805,20 @@ class VatService implements TaxProvider
     private const TITLES_BEFORE = ['ing', 'mgr', 'bc', 'dr', 'judr', 'mudr', 'mvdr', 'rndr', 'phdr', 'paeddr', 'thdr', 'pharmdr', 'doc', 'prof',
         'dipl', 'mag', 'dott', 'univ', 'akad'];
     private const TITLES_AFTER = ['phd', 'csc', 'drsc', 'mba', 'msc', 'bsc', 'llm', 'dis', 'artd'];
-    /** R47 (review round 17, low 4): words that make a name without a legal form a business ("Dr.Max Holding"), not a person. */
-    private const BUSINESS_WORDS = ['holding', 'holdings', 'group', 'gruppe', 'skupina', 'grupa', 'grupo', 'csoport', 'trade', 'trading', 'handel',
-        'obchod', 'services', 'service', 'sluzby', 'pharma', 'apotheke', 'lekaren', 'invest', 'investment', 'investments', 'capital',
-        'consulting', 'partners', 'logistics', 'logistik', 'solutions', 'systems', 'technologies', 'technology', 'tech', 'software', 'media',
-        'studio', 'international', 'industries', 'industrie', 'market', 'shop', 'store', 'finance', 'bank', 'energy', 'energie', 'management',
-        'agency', 'agentura', 'center', 'centrum', 'zentrum', 'factory', 'motors', 'export', 'import', 'distribution', 'stiftung', 'nadacia'];
+    /**
+     * R47 (review round 17, low 4): words that make a name without a legal form a business ("Dr.Max Holding"), not a person.
+     * R48 (review round 18, low 3): no word that is also a common surname ("Dr.Peter Handel" is a person: was 'handel'),
+     * and more trades ("Doc.Morris Garages" is a business).
+     */
+    private const BUSINESS_WORDS = ['holding', 'holdings', 'group', 'gruppe', 'skupina', 'grupa', 'grupo', 'csoport', 'trade', 'trading',
+        'obchod', 'services', 'service', 'sluzby', 'pharma', 'pharmacy', 'apotheke', 'lekaren', 'lekarna', 'apteka', 'gyogyszertar', 'farmacia',
+        'invest', 'investment', 'investments', 'capital', 'consulting', 'consult', 'partners', 'logistics', 'logistik', 'solutions', 'systems',
+        'technologies', 'technology', 'tech', 'software', 'media', 'studio', 'international', 'industries', 'industrie', 'market', 'shop',
+        'store', 'stores', 'finance', 'bank', 'energy', 'energie', 'management', 'agency', 'agentura', 'center', 'centrum', 'zentrum', 'factory',
+        'motors', 'motor', 'garage', 'garages', 'auto', 'autos', 'cars', 'export', 'import', 'distribution', 'stiftung', 'nadacia',
+        'nadace', 'fundacja', 'alapitvany', 'fundacion', 'retail', 'wholesale', 'supply', 'supplies', 'products', 'brands', 'foods', 'food',
+        'restaurant', 'hotel', 'travel', 'transport', 'construction', 'stavby', 'bau', 'design', 'labs', 'laboratories', 'electronics',
+        'elektro', 'clinic', 'klinik', 'klinika', 'medical', 'dental', 'fashion', 'textil', 'publishing', 'verlag', 'online', 'digital'];
 
     /**
      * R38 (low): reverse charge rested on the VAT ID alone: any valid foreign VAT ID, whoever's, took the VAT off. The
@@ -847,12 +855,15 @@ class VatService implements TaxProvider
     private static function holderTokens(string $name): array
     {
         $name = mb_strtolower($name, 'UTF-8');
+        // R48 (review round 18, low 3): a business word makes the name a company, written with a space after the title too:
+        // "Dr. Max Holding" is the company "Dr. Max Holding", not the holder "Max Holding" (was: a spaced title always went).
+        $business = array_intersect(preg_split('/[^a-z0-9]+/', self::asciiName($name), -1, PREG_SPLIT_NO_EMPTY) ?: [], self::BUSINESS_WORDS) !== [];
         // R42 (low 6): a title before the name is followed by a space or a hyphen ("Dipl.-Ing."): "Dr.Max s.r.o." is the
         // company Dr.Max (was: "Max", the leading word of "Max Mustermann"). Two-word titles go whole ("Ing. arch.",
         // "Mgr. art."; "arch" and "art" stayed as words of the name and the holder did not match).
-        $name = (string)preg_replace(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u',
+        $name = (string)preg_replace(array_merge(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u'], $business ? [] : [
             // R47: "Ing. arch.Ján" keeps its two-word title whole for the joined rule below (was: "arch" left as a name).
-            '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|(?:' . implode('|', self::TITLES_BEFORE) . ')(?!\.\s*(?:arch|art)\.))\.(?=[\s\-]|$)/u'], ' ', $name);
+            '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|(?:' . implode('|', self::TITLES_BEFORE) . ')(?!\.\s*(?:arch|art)\.))\.(?=[\s\-]|$)/u']), ' ', $name);
         $name = (string)preg_replace('/,\s*(?:' . implode('|', self::TITLES_AFTER) . ')(?![\p{L}\p{N}])\.?/u', ' ', $name);
         $words = self::nameWords($name);
         // R44 (review round 16, low 4): R42 kept a title joined to the next word, so "Ing.Ján Novák" (a sole trader
@@ -864,7 +875,7 @@ class VatService implements TaxProvider
         if (preg_match($joined, $name) === 1) {
             $person = self::nameWords((string)preg_replace($joined, ' ', $name));
             $forms = preg_split('/[^a-z0-9]+/', str_replace('.', '', self::asciiName($name)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-            if (count($person) >= 2 && array_intersect($forms, self::LEGAL_FORMS) === [] && array_intersect($person, self::BUSINESS_WORDS) === []) return $person;
+            if (count($person) >= 2 && array_intersect($forms, self::LEGAL_FORMS) === [] && !$business) return $person;
         }
         return $words;
     }

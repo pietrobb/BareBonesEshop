@@ -162,6 +162,15 @@ class DatabaseQueue implements DelayedQueueBackend {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** R48: a store's waiting (pending or in backoff) and failed jobs; stats() counts the whole queue. */
+    public function storeCounts(string $store): array {
+        $stmt = $this->db->prepare("SELECT SUM(CASE WHEN state IN ('pending', 'retry') THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END) AS failed FROM queue_jobs WHERE store_id = :store");
+        $stmt->execute([':store' => $store]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return ['pending' => (int)($row['pending'] ?? 0), 'failed' => (int)($row['failed'] ?? 0)];
+    }
+
     /** @return list<array<string, mixed>> the payloads of a store's jobs of $type still waiting or running */
     public function openPayloads(string $type, string $store): array {
         $stmt = $this->db->prepare("SELECT payload FROM queue_jobs WHERE type = :type AND store_id = :store AND state IN ('pending', 'retry', 'processing')");
@@ -396,6 +405,26 @@ class RedisQueue implements DelayedQueueBackend {
             ];
         }
         return $failures;
+    }
+
+    /** R48: a store's waiting (pending or delayed) and failed jobs; stats() counts the whole queue. */
+    public function storeCounts(string $store): array {
+        $counts = ['pending' => 0, 'failed' => 0];
+        $this->redis->multi();
+        foreach (['pending', 'delayed', 'failed'] as $index) $this->redis->zRange($this->key($index), 0, -1);
+        $sets = $this->redis->exec() ?: [];
+        $state = [];
+        foreach (['pending', 'pending', 'failed'] as $i => $name) {
+            foreach (is_array($sets[$i] ?? null) ? $sets[$i] : [] as $id) $state[(string)$id] = $name;
+        }
+        if ($state === []) return $counts;
+        $this->redis->pipeline();
+        foreach (array_keys($state) as $id) $this->redis->hGet($this->jobKey((string)$id), 'store_id');
+        $owners = $this->redis->exec() ?: [];
+        foreach (array_values($state) as $i => $name) {
+            if ((string)($owners[$i] ?? '') === $store) $counts[$name]++;
+        }
+        return $counts;
     }
 
     /**

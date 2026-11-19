@@ -71,14 +71,24 @@ function pageAudit(): void {
     <div class="card">
         <table>
             <tr><th><?= esc(I18n::t('admin.audit.entity')) ?></th><th>ID</th><th><?= esc(I18n::t('admin.common.action')) ?></th><th><?= esc(I18n::t('admin.audit.old')) ?></th><th><?= esc(I18n::t('admin.audit.new')) ?></th><th><?= esc(I18n::t('admin.common.note')) ?></th><th><?= esc(I18n::t('admin.common.who')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
-            <?php foreach ($logs as $log): ?>
+            <?php foreach ($logs as $log):
+                // R48: the details of an entry about an order, customer or admin account need that page's permission.
+                $permission = AuditLogLabels::permission((string)$log['entity']);
+                $hidden = $permission !== null && !Security::adminCan($permission);
+            ?>
             <tr>
                 <td><?= esc(adminCodeLabel('admin.audit.entity.', (string)$log['entity'])) ?></td>
+                <?php if ($hidden): ?>
+                <td class="muted">—</td>
+                <td><?= esc(adminCodeLabel('admin.audit.action.', (string)$log['action'])) ?></td>
+                <td class="muted" colspan="3"><?= esc(I18n::t('admin.common.details_hidden')) ?></td>
+                <?php else: ?>
                 <td><?= (int)$log['entity_id'] ?></td>
                 <td><?= esc(adminCodeLabel('admin.audit.action.', (string)$log['action'])) ?></td>
                 <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['old_value'] ?? null, (int)$log['entity_id']), 0, 80)) ?></td>
                 <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(mb_substr(AuditLogLabels::value((string)$log['entity'], $log['new_value'] ?? null, (int)$log['entity_id']), 0, 80)) ?></td>
                 <td><?= esc(AuditLogLabels::note((string)$log['entity'], (int)$log['entity_id'], $log['note'] ?? null)) ?></td>
+                <?php endif; ?>
                 <td><?= esc($log['actor']) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>
             </tr>

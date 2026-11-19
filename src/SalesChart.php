@@ -30,7 +30,9 @@ final class SalesChart {
             if ((int)$row['revenue'] > (int)$days[$peakDay]['revenue']) $peakDay = (string)$day;
         }
         $peak = (int)$days[$peakDay]['revenue'];
-        $scale = self::niceCeiling(max(1, $peak));
+        // R48 (review round 18, low 6): a currency without revenue (or with a few cents) had an axis in cents
+        // ("0,00 zł, 0,00 zł, 0,01 zł"); the smallest scale is one whole unit per gridline.
+        $scale = $peak <= self::GRID * 100 ? self::GRID * 100 : self::niceCeiling($peak);
         $plotWidth = self::WIDTH - self::GUTTER;
         $base = self::HEIGHT - self::AXIS;
         $plotHeight = $base - self::TOP;

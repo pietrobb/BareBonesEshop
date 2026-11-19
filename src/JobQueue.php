@@ -302,6 +302,27 @@ class JobQueue {
     }
 
     /**
+     * R48 (review round 18, low 7): the active store's waiting and failed jobs, or null when the backend cannot tell
+     * them apart by store (stats() counts the whole installation, every store's jobs).
+     * @return array{pending:int, failed:int}|null
+     */
+    public static function storeCounts(): ?array {
+        $store = StoreContext::current()->id();
+        $backend = self::backend();
+        if ($backend instanceof DatabaseQueue || $backend instanceof RedisQueue) return $backend->storeCounts($store);
+        if ($backend !== null) return null;
+        $counts = ['pending' => 0, 'failed' => 0];
+        foreach (array_keys($counts) as $state) {
+            $dir = self::dir() . '/' . $state;
+            self::eachJobFileName($dir, static function (string $name) use (&$counts, $state, $store, $dir): void {
+                $job = self::readJobFile("{$dir}/{$name}");
+                if ($job !== null && (string)($job['payload']['_store_id'] ?? 'default') === $store) $counts[$state]++;
+            });
+        }
+        return $counts;
+    }
+
+    /**
      * Streams the *.json names of one queue directory (no glob(): completed/ grows without bound and a name array of
      * every job would exhaust the admin dashboard's memory).
      */
