@@ -18,8 +18,34 @@ final class AuditLogLabels {
         'product' => 'SELECT currency FROM products WHERE id = :id',
         'price_list' => 'SELECT currency FROM price_lists WHERE id = :id',
     ];
+    /**
+     * R48 (review round 18, finding 2): the audit log needs only reports.view, but entries about orders, payments,
+     * customers and admin accounts carry personal data (a customer's e-mail, refund and cancellation notes, order ids).
+     * Their id, values and note are shown only with the permission of the page they belong to.
+     */
+    private const PERMISSION = [
+        'order' => 'orders.view', 'order_status' => 'orders.view', 'order_refund' => 'orders.view', 'order_dispute' => 'orders.view',
+        'order_backorder_allocated' => 'orders.view', 'payment_status' => 'orders.view', 'payment_link' => 'orders.view',
+        'payment_link_sent' => 'orders.view', 'payment_webhook_ignored' => 'orders.view', 'payment_duplicate_capture' => 'orders.view',
+        'payment_reference' => 'orders.view', 'shipment' => 'orders.view', 'invoice' => 'orders.view', 'invoice_cancelled' => 'orders.view',
+        'credit_note' => 'orders.view', 'withdrawal' => 'orders.view',
+        'complaint' => 'rma.manage', 'rma_receipt' => 'rma.manage', 'rma_status' => 'rma.manage',
+        'customer' => 'customers.view', 'company' => 'customers.view', 'customer_group' => 'customers.view',
+        'admin_account' => 'admins.manage',
+    ];
     /** @var array<int, string> */
     private static array $currencies = [];
+
+    /** The permission an entry's details need beyond reports.view, or null when anyone who sees the log may read them. */
+    public static function permission(string $entity): ?string {
+        return self::PERMISSION[$entity] ?? null;
+    }
+
+    /** R48: an e-mail address as the audit log keeps it: the first character and the domain ("j***@example.com"). */
+    public static function maskEmail(string $email): string {
+        $at = strrpos($email, '@');
+        return $at === false || $at === 0 ? '***' : mb_substr($email, 0, 1) . '***' . substr($email, $at);
+    }
     /** @var array<string, string> */
     private static array $recordCurrencies = [];
 
