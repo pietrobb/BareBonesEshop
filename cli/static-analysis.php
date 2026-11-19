@@ -235,7 +235,7 @@ $architectureBudgets = [
     // +8 lines, +2 function lines R38: "Not executed" for a refund whose provider answer was lost; release without a provider check.
     // +4 lines R39: "Paid" is not offered for a refund the provider has, and on refund_pending it needs orders.refund.
     // +5 lines, +2 function lines R40: "Confirm executed" / "Not executed" post the refund the page showed (request key, amount).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 993, 'functions' => 17, 'max_function_lines' => 331, 'coupling' => 25],
+    /* R49: a received return names the money refunded outside it and what "Refunded" still pays after counting it */ 'src/Entrypoints/Admin/Orders.php' => ['lines' => 1018, 'functions' => 17, 'max_function_lines' => 331, 'coupling' => 25],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
     // +23 lines, +1 function R38: fields that are not UTF-8 are refused with 400 naming the field (was HTTP 500).
@@ -314,7 +314,7 @@ $architectureBudgets = [
     // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
     // +7 lines, +1 coupling R10 UX8: checkout sign-in link + save address, account offer on a guest order's confirmation (GuestPages, GuestCheckoutAccount).
     // +1 line R11: the page after paying asks PaymentLink::returnStatus() whether a retry is paid but not yet confirmed.
-    /* #399: the cart page shows the "Buy later" list (SavedForLater::view, +1 coupling); R37: lines re-priced at the threshold VAT checkout charges */ 'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 274, 'functions' => 7, 'max_function_lines' => 109, 'coupling' => 18],
+    /* #399: the cart page shows the "Buy later" list (SavedForLater::view, +1 coupling); R37: lines re-priced at the threshold VAT checkout charges; R49: the quoted total and a coupon of the re-priced goods */ 'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 280, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 18],
     // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
     'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // R11 H1: ?page=account-claim — the e-mailed link creates the guest's account; the rules live in GuestCheckoutAccount.

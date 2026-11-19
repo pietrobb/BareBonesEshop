@@ -600,18 +600,17 @@ function pageRma(): void {
                 <td><?= esc($r['reason']) ?></td>
                 <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc(adminCodeLabel('admin.rma.status.', (string)$r['status'])) ?></span></td>
                 <td style="white-space:nowrap">
-                    <?php $outside = isset($next[$r['status']]['refunded']) ? Rma::refundedOutsideReturns((int)$r['order_id']) : 0; ?>
+                    <?php [$outside, $due] = isset($next[$r['status']]['refunded']) ? Rma::owedAfterOutside((int)$r['id'], (int)$r['order_id']) : [0, 0]; ?>
+                    <?php $currency = (string)(Orders::byId((int)$r['order_id'])['currency'] ?? 'eur'); ?>
                     <?php if ($outside > 0): ?>
-                    <p class="muted" data-rma-refunded-outside style="white-space:normal;margin:0 0 4px"><?= esc(I18n::format('admin.rma.refunded_outside_hint', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$r['order_id'])['currency'] ?? 'eur'))])) ?></p>
-                    <?php foreach (['close' => I18n::t('admin.rma.close_without_payout'), 'pay' => I18n::t('admin.rma.refund_anyway')] as $decision => $label): ?>
-                    <form method="post" action="admin.php?p=rma&action=status" style="display:inline"<?= $decision === 'pay' ? ' data-confirm="' . esc(I18n::t('admin.rma.refund_anyway_confirm')) . '"' : '' ?>>
+                    <p class="muted" data-rma-refunded-outside data-rma-due="<?= (int)$due ?>" style="white-space:normal;margin:0 0 4px"><?= esc(I18n::format('admin.rma.refunded_outside_hint', ['amount' => I18n::price($outside, $currency), 'due' => I18n::price($due, $currency)])) ?></p>
+                    <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
                         <input type="hidden" name="status" value="refunded">
-                        <input type="hidden" name="outside_refund" value="<?= esc($decision) ?>">
-                        <button class="btn btn-sm" type="submit"><?= esc($label) ?></button>
+                        <input type="hidden" name="outside_refund" value="deduct">
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.rma.refund_less_outside')) ?></button>
                     </form>
-                    <?php endforeach; ?>
                     <?php endif; ?>
                     <?php foreach ($outside > 0 ? [] : ($next[$r['status']] ?? []) as $to => $label): ?>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
@@ -658,25 +657,25 @@ function handleRmaStatus(): void {
         } elseif ($status === 'refunded' && !Rma::settleAlreadyRefunded($id)) {
             $rma = Rma::byId($id);
             if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
-            // R49 (finding 3): money already returned outside this return is named first; the admin closes the return
-            // without payout or confirms a payout on top of it (was: a second credit note and refund, unannounced).
+            // R49 (finding 3): money already returned outside this return is named first, then counted: the return closes
+            // without payout when that money covers it, else its credit note and refund are less it (was: the return paid
+            // out in full on top, or closed and the rest unpaid, and the same money counted again by the next return).
             $outside = Rma::refundedOutsideReturns((int)$rma['order_id']);
-            $decision = Security::clean($_POST['outside_refund'] ?? '');
-            if ($outside > 0 && $decision === 'close') {
-                if (!Rma::closeWithoutPayout($id)) throw new LogicException(I18n::t('admin.rma.transition_refused'));
-                setFlash('ok', I18n::format('admin.rma.closed_without_payout', ['id' => $id]));
-                header('Location: admin.php?p=rma');
-                exit;
-            }
-            if ($outside > 0 && $decision !== 'pay') {
+            if ($outside > 0 && Security::clean($_POST['outside_refund'] ?? '') !== 'deduct') {
                 throw new RuntimeException(I18n::format('admin.rma.refunded_outside', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur'))]));
             }
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
             if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
             $quantities = InvoiceService::creditableQuantities($id);
             if (!$quantities) throw new LogicException(I18n::t('admin.rma.nothing_to_credit'));
+            if ($outside > 0 && $outside >= InvoiceService::rmaCreditGross((int)$source['id'], $id, $quantities)) {
+                if (!Rma::closeWithoutPayout($id)) throw new LogicException(I18n::t('admin.rma.transition_refused'));
+                setFlash('ok', I18n::format('admin.rma.closed_without_payout', ['id' => $id]));
+                header('Location: admin.php?p=rma');
+                exit;
+            }
             // One key per attempt: a concurrent double submit shares it, a retry after a failed refund gets a new credit note.
-            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id));
+            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id), $outside > 0);
             if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
                 PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0));
             }

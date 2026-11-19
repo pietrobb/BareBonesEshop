@@ -181,52 +181,83 @@ try {
     $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $crm5Refund);
     assert_true(($r['flash']['type'] ?? '') !== 'ok' && $crm5Credits() === 2, $a071Label('CR-M5: a credit note beyond the refundable balance is refused', $r));
 
-    // R49 (review round 19, finding 3): money refunded outside the return (order page, provider dashboard) while the
-    // order could still refund more. "Refunded" paid the returned goods a second time with no warning, and the admin had
-    // no way to close the return without a payout. It now names that money; the admin closes or explicitly pays.
-    Cart::clear();
-    Cart::add(9711, null, 2);
-    $_SERVER['REQUEST_METHOD'] = 'POST';
-    $_SESSION['csrf_token'] = 'r49-checkout';
-    $_POST = ['csrf_token' => 'r49-checkout', 'name' => 'R49 Buyer', 'email' => 'r49-rma@example.com', 'country' => 'SK',
-        'street' => 'Return 49', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'packeta', 'payment_method' => 'bank_transfer'];
-    $r49Checkout = apiCheckout();
-    $_POST = [];
-    Cart::clear();
-    $r49OrderId = (int)($r49Checkout['order_id'] ?? 0);
-    $pdo->exec("UPDATE orders SET status='paid', payment_status='paid', payment_id='' WHERE id={$r49OrderId}");
-    InvoiceService::issue($r49OrderId);
-    $pdo->exec("UPDATE orders SET status='delivered' WHERE id={$r49OrderId}");
-    $r49Item = Orders::items($r49OrderId)[0];
-    $r49Return = static function (string $key) use ($r49OrderId, $r49Item): int {
-        [, $rmaId] = Rma::create($r49OrderId, null, 'R49 return', [(int)$r49Item['id'] => 1]);
+    // R49 (review round 19, finding 3, and its capability review): money refunded outside the return (order page,
+    // provider dashboard) while the order could still refund more. "Refunded" paid the returned goods again in full; then
+    // it could only close the return unpaid or pay it in full on top, and the same money closed the next return again.
+    // It now names that money and counts it as a balance: what is still owed is paid, the rest is used up once.
+    $r49Order = static function (string $email) use ($pdo): int {
+        Cart::clear();
+        Cart::add(9711, null, 2);
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SESSION['csrf_token'] = 'r49-checkout';
+        $_POST = ['csrf_token' => 'r49-checkout', 'name' => 'R49 Buyer', 'email' => $email, 'country' => 'SK',
+            'street' => 'Return 49', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'packeta', 'payment_method' => 'bank_transfer'];
+        $checkout = apiCheckout();
+        $_POST = [];
+        Cart::clear();
+        $orderId = (int)($checkout['order_id'] ?? 0);
+        $pdo->exec("UPDATE orders SET status='paid', payment_status='paid', payment_id='' WHERE id={$orderId}");
+        InvoiceService::issue($orderId);
+        $pdo->exec("UPDATE orders SET status='delivered' WHERE id={$orderId}");
+        return $orderId;
+    };
+    $r49Return = static function (int $orderId, string $key): int {
+        [, $rmaId] = Rma::create($orderId, null, 'R49 return', [(int)Orders::items($orderId)[0]['id'] => 1]);
         Rma::setStatus((int)$rmaId, 'approved');
         Rma::receive((int)$rmaId, [(int)Rma::items((int)$rmaId)[0]['id'] => ['quantity' => 1, 'disposition' => 'restock']], $key);
         return (int)$rmaId;
     };
-    $r49Rma = $r49Return('r49-receipt-1');
-    // The admin refunded one unit (1500) from the order page first: booked on the ledger, no item refund behind it.
-    $pdo->prepare("INSERT INTO payment_transactions (order_id, provider, status, amount, currency, idempotency_key, store_id) VALUES (?, 'manual', 'partially_refunded', 1500, 'eur', 'r49-order-page-refund', 'default')")
-        ->execute([$r49OrderId]);
-    assert_equals(1500, Rma::refundedOutsideReturns($r49OrderId), 'R49 RMA: the money refunded outside the return is counted');
-    $r49Refunds = static fn(): array => [(int)$a071Read('SELECT COUNT(*) FROM order_refunds WHERE order_id = ?', [$r49OrderId]),
-        (int)$a071Read("SELECT COUNT(*) FROM invoices WHERE order_id = ? AND type = 'credit_note'", [$r49OrderId])];
-    $r49Refund = ['__grants' => ['rma.manage', 'orders.refund'], 'rma_id' => (string)$r49Rma, 'status' => 'refunded'];
-    $r = $a071Run('direct', 'manager', 'rma', 'pageRma', ['__grants' => ['rma.manage', 'orders.refund'], '__get' => ['status' => 'received']]);
-    assert_true(str_contains($r['out'], 'data-rma-refunded-outside') && str_contains($r['out'], 'name="outside_refund" value="close"') && str_contains($r['out'], 'name="outside_refund" value="pay"'),
-        $a071Label('R49 RMA: the return list names the money refunded outside and offers close without payout / refund anyway', ['out' => ''] + $r));
+    $r49Outside = static fn(int $orderId, int $amount, string $key) => $pdo->prepare("INSERT INTO payment_transactions (order_id, provider, status, amount, currency, idempotency_key, store_id) VALUES (?, 'manual', 'partially_refunded', ?, 'eur', ?, 'default')")
+        ->execute([$orderId, $amount, $key]);
+    // [item refunds, credit notes, money the item refunds pay, gross the credit notes credit]
+    $r49Money = static fn(int $orderId): array => [(int)$a071Read('SELECT COUNT(*) FROM order_refunds WHERE order_id = ?', [$orderId]),
+        (int)$a071Read("SELECT COUNT(*) FROM invoices WHERE order_id = ? AND type = 'credit_note'", [$orderId]),
+        (int)$a071Read('SELECT COALESCE(SUM(amount), 0) FROM order_refunds WHERE order_id = ?', [$orderId]),
+        (int)$a071Read("SELECT COALESCE(SUM(-total_gross), 0) FROM invoices WHERE order_id = ? AND type = 'credit_note'", [$orderId])];
+    $r49Grants = ['__grants' => ['rma.manage', 'orders.refund']];
+    $r49Page = static fn(): string => (string)$a071Run('direct', 'manager', 'rma', 'pageRma', $r49Grants + ['__get' => ['status' => 'received']])['out'];
+
+    // (b) One unit's worth refunded outside: it closes the first return without payout, and is then used up.
+    $r49OrderId = $r49Order('r49-rma@example.com');
+    $r49Rma = $r49Return($r49OrderId, 'r49-receipt-1');
+    $r49Unit = InvoiceService::rmaCreditGross((int)InvoiceService::byOrderId($r49OrderId)['id'], $r49Rma, InvoiceService::creditableQuantities($r49Rma));
+    assert_true($r49Unit > 1000, "R49 RMA: one returned unit is worth more than 10 € (got {$r49Unit})");
+    $r49Outside($r49OrderId, $r49Unit, 'r49-order-page-refund');
+    assert_equals($r49Unit, Rma::refundedOutsideReturns($r49OrderId), 'R49 RMA: the money refunded outside the return is counted');
+    $r49Refund = $r49Grants + ['rma_id' => (string)$r49Rma, 'status' => 'refunded'];
+    $out = $r49Page();
+    assert_true(str_contains($out, 'data-rma-refunded-outside data-rma-due="0"') && str_contains($out, 'name="outside_refund" value="deduct"') && !str_contains($out, 'value="pay"'),
+        'R49 RMA: the return list names the money refunded outside, what "Refunded" still pays (nothing) and offers no payout on top');
     $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Refund);
-    assert_true(($r['flash']['type'] ?? '') === 'err' && str_contains((string)($r['flash']['msg'] ?? json_encode($r['flash'])), '15') && $r49Refunds() === [0, 0],
+    assert_true(($r['flash']['type'] ?? '') === 'err' && $r49Money($r49OrderId) === [0, 0, 0, 0],
         $a071Label('R49 RMA: "Refunded" after a refund outside the return pays nothing and says so (was: a second credit note and payout)', $r));
-    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Refund + ['outside_refund' => 'close']);
-    assert_true(($r['flash']['type'] ?? '') === 'ok' && $r49Refunds() === [0, 0] && $a071Read('SELECT status FROM rma_requests WHERE id = ?', [$r49Rma]) === 'refunded'
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Refund + ['outside_refund' => 'pay']);
+    assert_true(($r['flash']['type'] ?? '') === 'err' && $r49Money($r49OrderId) === [0, 0, 0, 0],
+        $a071Label('R49 RMA: no payout on top of the money refunded outside (was: "Refund anyway" paid the unit twice)', $r));
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Refund + ['outside_refund' => 'deduct']);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && $r49Money($r49OrderId) === [0, 0, 0, 0] && $a071Read('SELECT status FROM rma_requests WHERE id = ?', [$r49Rma]) === 'refunded'
         && (int)$a071Read('SELECT refunded_quantity FROM rma_items WHERE rma_id = ?', [$r49Rma]) === 1,
-        $a071Label('R49 RMA: the admin closes the return without a payout; its unit counts as refunded', $r));
-    // A second return of the other unit: the admin may still decide to pay it out on top, explicitly.
-    $r49Second = $r49Return('r49-receipt-2');
-    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', ['rma_id' => (string)$r49Second] + $r49Refund + ['outside_refund' => 'pay']);
-    assert_true(($r['flash']['type'] ?? '') === 'ok' && $r49Refunds() === [1, 1],
-        $a071Label('R49 RMA: "Refund anyway" issues the credit note and refund of the return', $r));
+        $a071Label('R49 RMA: the money refunded outside covers the return: closed without payout, its unit counts as refunded', $r));
+    assert_equals(0, Rma::refundedOutsideReturns($r49OrderId), 'R49 RMA: the closed return used that money up (was: still counted for the next return)');
+    $r49Second = $r49Return($r49OrderId, 'r49-receipt-2');
+    assert_true(!str_contains($r49Page(), 'data-rma-refunded-outside'), 'R49 RMA: the second return is not offered the used-up money again');
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', ['rma_id' => (string)$r49Second] + $r49Refund);
+    $r49Paid = $r49Money($r49OrderId);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && $r49Paid === [1, 1, $r49Unit, $r49Unit],
+        $a071Label('R49 RMA: the second unit is credited and refunded in full: two units, two units back (got ' . json_encode($r49Paid) . ')', $r));
+
+    // (a) A partial refund outside (5 €): "Refunded" pays only the rest of the unit, credited as such.
+    $r49PartOrder = $r49Order('r49-rma-part@example.com');
+    $r49PartRma = $r49Return($r49PartOrder, 'r49-receipt-part');
+    $r49Outside($r49PartOrder, 500, 'r49-order-page-part');
+    assert_true(str_contains($r49Page(), 'data-rma-due="' . ($r49Unit - 500) . '"'), 'R49 RMA partial: the return list says "Refunded" pays the unit less the 5 € refunded outside');
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Grants + ['rma_id' => (string)$r49PartRma, 'status' => 'refunded', 'outside_refund' => 'deduct']);
+    $r49Paid = $r49Money($r49PartOrder);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && $r49Paid === [1, 1, $r49Unit - 500, $r49Unit - 500]
+        && (int)$a071Read("SELECT COALESCE(SUM(cni.quantity), 0) FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id WHERE r.rma_id = ?", [$r49PartRma]) === 1
+        && $a071Read('SELECT status FROM rma_requests WHERE id = ?', [$r49PartRma]) === 'refunded',
+        $a071Label("R49 RMA partial: 5 € outside + the credit and refund of the unit less 5 € = one unit back (was: the unit again on top or nothing; got " . json_encode($r49Paid) . ')', $r));
+    assert_equals(0, Rma::refundedOutsideReturns($r49PartOrder), 'R49 RMA partial: the credited return used the 5 € up');
 } finally {
     $pdo->exec("DELETE FROM payment_methods WHERE code IN ('a071-editor', 'a071-manager')");
     $a071Tree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($a071Root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
