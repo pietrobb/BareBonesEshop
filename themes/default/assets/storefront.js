@@ -354,6 +354,23 @@
     const discountElement = document.getElementById('checkout-discount');
     const discount = discountElement ? parseInt(discountElement.value || '0', 10) : 0;
     document.getElementById('summary-total').textContent = formatCents(subtotal - discount + shipping + paymentFee);
+    quoteCheckoutTotal(subtotal - discount + shipping + paymentFee);
+  }
+
+  // R49 (review round 19, finding 2): the order posts the total on screen (quoted_total), as the no-JS form does in its
+  // <noscript>; a server total that differs (a price changed, the OSS threshold passed) is shown again, not charged.
+  function quoteCheckoutTotal(cents) {
+    const form = document.querySelector('form[data-checkout-form]');
+    if (!form || !Number.isInteger(cents)) return;
+    let input = form.querySelector('input[name="quoted_total"][data-js-quote]');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'quoted_total';
+      input.dataset.jsQuote = '1';
+      form.appendChild(input);
+    }
+    input.value = String(cents);
   }
 
   function setConsentCookie(categories) {
@@ -641,6 +658,8 @@
       if (residence) residence.addEventListener('change', reprice);
     }
     restoreCheckoutFocus();
+    const renderedTotal = document.getElementById('summary-total');
+    if (renderedTotal && renderedTotal.dataset.totalCents) quoteCheckoutTotal(parseInt(renderedTotal.dataset.totalCents, 10));
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
 
     const banner = document.getElementById('cc-banner');
