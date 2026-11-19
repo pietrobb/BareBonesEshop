@@ -69,10 +69,28 @@ final class ThemeUpgradeGate
                 $this->copyFile($item->getPathname(), $candidate, $relative);
             }
         }
-        // The stores the shop runs on (data directory copy or a root stores.json), not the package's example.
-        // The data directory is known only for the running installation (cli/update.php); another tree uses its own file.
-        $stores = DataOverrides::storesPath($root, realpath(dirname(__DIR__)) === $root ? null : []);
-        if (basename($stores) === 'stores.json') $this->copyFile($stores, $candidate, 'stores.json');
+        $this->copyStores($root, $candidate);
+    }
+
+    /**
+     * The stores the shop runs on (data directory copy or a root stores.json), not the package's example.
+     * The data directory is known only for the running installation (cli/update.php); another tree uses its own file.
+     */
+    private function copyStores(string $root, string $candidate): void
+    {
+        // R48 (review round 18, finding 1): private_runtime_dir/stores.json is the owner's file. Root copied it as root:
+        // a symlink there to a file only root may read went into the candidate (and its contents into the probe's error),
+        // a FIFO hung check and apply. It is read as the owner, non-blocking, and only as a regular file (like doctor, R47).
+        $config = realpath(dirname(__DIR__)) === $root ? null : [];
+        [$stores, $contents] = PrivateOwner::run(static function () use ($root, $config): array {
+            $path = DataOverrides::storesPath($root, $config);
+            return [$path, basename($path) === 'stores.json' ? DataOverrides::readRegularFile($path) : null];
+        });
+        if (basename($stores) !== 'stores.json') return;
+        if ($contents === null) {
+            throw new RuntimeException("{$stores} is not a regular file its owner can read; replace it with the shop's stores.json");
+        }
+        $this->writeFile($candidate, 'stores.json', $contents);
     }
 
     private function inCandidateScope(string $relative, bool $isDirectory): bool
@@ -113,16 +131,31 @@ final class ThemeUpgradeGate
 
     private function copyFile(string $source, string $candidate, string $relative): void
     {
-        $target = $candidate . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
-        $parent = dirname($target);
-        if (!is_dir($parent) && !mkdir($parent, 0700, true) && !is_dir($parent)) {
-            throw new RuntimeException("Cannot create candidate directory for {$relative}");
-        }
+        $target = $this->candidateTarget($candidate, $relative);
         if (!copy($source, $target)) {
             throw new RuntimeException("Cannot copy {$relative} into the theme candidate");
         }
         // R29: the probe of a root-only shop runs as root only in a candidate no other account can change (umask 0002 gave 0664).
         @chmod($target, 0600);
+    }
+
+    private function writeFile(string $candidate, string $relative, string $contents): void
+    {
+        $target = $this->candidateTarget($candidate, $relative);
+        if (file_put_contents($target, $contents) !== strlen($contents)) {
+            throw new RuntimeException("Cannot write {$relative} into the theme candidate");
+        }
+        @chmod($target, 0600);
+    }
+
+    private function candidateTarget(string $candidate, string $relative): string
+    {
+        $target = $candidate . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+        $parent = dirname($target);
+        if (!is_dir($parent) && !mkdir($parent, 0700, true) && !is_dir($parent)) {
+            throw new RuntimeException("Cannot create candidate directory for {$relative}");
+        }
+        return $target;
     }
 
     private function runProbe(string $candidate, string $installedRoot): array
