@@ -815,7 +815,7 @@ class VatService implements TaxProvider
         'invest', 'investment', 'investments', 'capital', 'consulting', 'consult', 'partners', 'logistics', 'logistik', 'solutions', 'systems',
         'technologies', 'technology', 'tech', 'software', 'media', 'studio', 'international', 'industries', 'industrie', 'market', 'shop',
         'store', 'stores', 'finance', 'bank', 'energy', 'energie', 'management', 'agency', 'agentura', 'center', 'centrum', 'zentrum', 'factory',
-        'motors', 'motor', 'garage', 'garages', 'auto', 'autos', 'cars', 'automotive', 'export', 'import', 'distribution', 'stiftung', 'nadacia',
+        'motors', 'motor', 'garage', 'garages', 'auto', 'autos', 'cars', 'export', 'import', 'distribution', 'stiftung', 'nadacia',
         'nadace', 'fundacja', 'alapitvany', 'fundacion', 'retail', 'wholesale', 'supply', 'supplies', 'products', 'brands', 'foods', 'food',
         'restaurant', 'hotel', 'travel', 'transport', 'construction', 'stavby', 'bau', 'design', 'labs', 'laboratories', 'electronics',
         'elektro', 'clinic', 'klinik', 'klinika', 'medical', 'dental', 'fashion', 'textil', 'publishing', 'verlag', 'online', 'digital'];

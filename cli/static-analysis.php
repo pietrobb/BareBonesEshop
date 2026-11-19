@@ -242,9 +242,11 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 125, 'functions' => 6, 'max_function_lines' => 34, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
     // +1 line R11: ?shipment= prints the delivery note of one parcel.
-    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 91, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
+    // +1 coupling R48: the audit entry of a sent payment link stores the masked e-mail (AuditLogLabels::maskEmail).
+    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 91, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 11],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
-    'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
+    // +1 coupling R48: top products link to the editor only for an admin with products.edit (Security::adminCan).
+    'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 5],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],
     // R8 complaints list and the written decision; the transitions live in Complaints.
     'src/Entrypoints/Admin/Complaints.php' => ['lines' => 70, 'functions' => 2, 'max_function_lines' => 55, 'coupling' => 4],
@@ -259,7 +261,8 @@ $architectureBudgets = [
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
-    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 95, 'functions' => 3, 'max_function_lines' => 67, 'coupling' => 7],
+    // +9 lines, +1 function R48: adminStoreIdentityIssue words the seller-identity badge in the admin's language.
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 104, 'functions' => 4, 'max_function_lines' => 67, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.
