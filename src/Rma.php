@@ -571,7 +571,8 @@ class Rma {
             if ($own) $db->commit();
             return $closable;
         } catch (Throwable $e) {
-            if ($own && $db->inTransaction()) $db->rollBack();
+            // Db::get(), not $db: PHPStan keeps $db->inTransaction() false from $own across the calls above.
+            if ($own && Db::get()->inTransaction()) Db::get()->rollBack();
             throw $e;
         }
     }
