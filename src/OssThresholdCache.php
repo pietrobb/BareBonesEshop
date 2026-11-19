@@ -1,48 +1,59 @@
 <?php
 
-/** Explicit maintenance audit only: never called by the dashboard's ordinary doctor. */
+/**
+ * Maintenance audit of the cached threshold totals. The whole history only on explicit request (doctor --oss-cache);
+ * R49 (low): the ordinary doctor audits the years the threshold decides on (this and last), issued_at-indexed.
+ */
 final class OssThresholdCache
 {
-    private static function source(PDO $db): string
+    private static function source(PDO $db, ?int $fromYear = null): string
     {
+        // A document counts in the year of its supply (or of its corrected invoice), never after its issue: one issued
+        // before $fromYear cannot count in it, so the issued_at index bounds the scan.
+        $recent = $fromYear === null ? '' : " AND invoices.issued_at >= '" . sprintf('%04d', $fromYear) . "-01-01'";
         // R38 (medium 4): a credit note in the year of the invoice it corrects (OssThreshold::documentYear()).
         $at = OssThreshold::documentDateSql('invoices', 'source_invoice');
         $year = $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? "CAST(substr({$at}, 1, 4) AS INTEGER)" : "YEAR({$at})";
         // R40: a document converted to EUR at its issue counts in the EUR total (OssThreshold::record()).
         [$currency, $net] = OssThreshold::storedNetSql($db, 'invoices');
-        return "SELECT orders.store_id, {$year} AS year, {$currency} AS currency, SUM({$net}) AS net
+        $sql = "SELECT orders.store_id, {$year} AS year, {$currency} AS currency, SUM({$net}) AS net
             FROM invoices JOIN orders ON orders.id = invoices.order_id LEFT JOIN invoices AS source_invoice ON source_invoice.id = invoices.refers_to_invoice_id
             WHERE invoices.status = 'issued' AND invoices.type IN ('invoice', 'credit_note')
-              AND invoices.oss_net IS NOT NULL AND invoices.oss_net <> 0
+              AND invoices.oss_net IS NOT NULL AND invoices.oss_net <> 0{$recent}
             GROUP BY orders.store_id, {$year}, {$currency}";
+        return $fromYear === null ? $sql : "SELECT * FROM ({$sql}) recent_totals WHERE year >= " . (int)$fromYear;
     }
 
     /** One statement/snapshot, constant-size result; SQL aggregates history only on explicit request.
      * Zero rows are equivalent to absent rows (record/forget may leave a zero). NULL nets belong to
      * the existing line-based fallback, not this cache; neither audit nor repair calculates them.
      */
-    public static function check(PDO $db): array
+    public static function check(PDO $db, ?int $fromYear = null): array
     {
-        $source = self::source($db);
+        $source = self::source($db, $fromYear);
+        [$cached, $fallbackRecent] = $fromYear === null ? ['', ''] : [' WHERE year >= ' . (int)$fromYear, " AND fallback_invoice.issued_at >= '" . sprintf('%04d', $fromYear) . "-01-01'"];
         $row = $db->query("SELECT
             (SELECT COUNT(*) FROM (
                 SELECT store_id, year, currency FROM (
                     SELECT store_id, year, currency, net AS expected, 0 AS actual FROM ({$source}) expected_totals
-                    UNION ALL SELECT store_id, year, currency, 0 AS expected, net AS actual FROM oss_threshold_totals
+                    UNION ALL SELECT store_id, year, currency, 0 AS expected, net AS actual FROM oss_threshold_totals{$cached}
                 ) contributions GROUP BY store_id, year, currency HAVING SUM(expected) <> SUM(actual)
             ) differences) AS mismatches,
             (SELECT COUNT(*) FROM invoices AS fallback_invoice JOIN orders AS fallback_order ON fallback_order.id = fallback_invoice.order_id
-                WHERE fallback_invoice.status = 'issued' AND fallback_invoice.type IN ('invoice', 'credit_note') AND fallback_invoice.oss_net IS NULL) AS null_nets")->fetch(PDO::FETCH_ASSOC);
+                WHERE fallback_invoice.status = 'issued' AND fallback_invoice.type IN ('invoice', 'credit_note') AND fallback_invoice.oss_net IS NULL{$fallbackRecent}) AS null_nets")->fetch(PDO::FETCH_ASSOC);
         return ['mismatches' => (int)$row['mismatches'], 'null_nets' => (int)$row['null_nets']];
     }
 
-    public static function doctorCheck(PDO $db): array
+    /** $recentOnly: this and last year's totals (the ordinary doctor), else the whole history (doctor --oss-cache). */
+    public static function doctorCheck(PDO $db, bool $recentOnly = false): array
     {
         $action = 'Stop and drain ALL web, queue, cron, import and invoice/order writers (maintenance mode alone is not enough), back up the database, then run php cli/setup.php repair-oss-cache --writers-stopped --json. This changes only cached totals, not financial documents or OSS activation facts.';
         try {
-            $result = self::check($db);
+            $fromYear = $recentOnly ? (int)ShopTime::date('Y') - 1 : null;
+            $result = self::check($db, $fromYear);
+            $scope = $fromYear === null ? '' : " in {$fromYear}–" . ($fromYear + 1);
             return ['status' => $result['mismatches'] === 0 ? 'pass' : 'fail', 'name' => 'database.oss_threshold_cache',
-                'message' => "OSS cache: {$result['mismatches']} inconsistent store/year/currency totals; {$result['null_nets']} issued documents with NULL nets remain in the separate fallback.",
+                'message' => "OSS cache{$scope}: {$result['mismatches']} inconsistent store/year/currency totals; {$result['null_nets']} issued documents with NULL nets remain in the separate fallback.",
                 'action' => $result['mismatches'] === 0 ? '' : $action];
         } catch (Throwable $e) {
             return ['status' => 'fail', 'name' => 'database.oss_threshold_cache', 'message' => 'OSS cache audit failed: ' . $e->getMessage(),
