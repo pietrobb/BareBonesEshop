@@ -28,9 +28,7 @@ register_shutdown_function(static function (): void {
     exit(1);
 });
 
-echo "========================================\n";
-echo "BareBones Shop — Test Suite\n";
-echo "========================================\n\n";
+echo "========================================\nBareBones Shop — Test Suite\n========================================\n\n";
 
 $unexpectedWarningFailed = false;
 try {
@@ -57,17 +55,19 @@ $suiteOnly = getopt('', ['only:'])['only'] ?? null;
 if (is_string($suiteOnly)) $scenarioFiles = array_map('basename', explode(',', $suiteOnly));
 // Scenarios may install their own exception handler (cli/worker.php does), so catch here as well.
 try {
-foreach ($scenarioFiles as $scenarioFile) {
+foreach ($scenarioFiles as $scenarioIndex => $scenarioFile) {
     require __DIR__ . '/tests/scenarios/' . $scenarioFile;
+    suite_progress('scenario', $scenarioIndex + 1, count($scenarioFiles), $scenarioFile);
     // R36 (low): --only=FoundationScenario.php,X.php runs X on every migration's schema (alone it lacked other scenarios' tables).
     if (is_string($suiteOnly) && $scenarioFile === 'FoundationScenario.php') (new Migrator(Db::get(), dirname(__DIR__) . '/migrations', test_fixture_path('only-migrate') . '.lock'))->apply();
 }
 if (!is_string($suiteOnly)) {
     // Every *Regression.php, historical order first, then auto-discovered (tests/RegressionSuite.php).
     require __DIR__ . '/tests/RegressionSuite.php';
-    require __DIR__ . '/test-update.php';
-    require __DIR__ . '/test-theme-contract.php';
-    require __DIR__ . '/test-theme-upgrade-gate.php';
+    foreach (suite_tier_regressions() !== null ? [] : ['test-update.php', 'test-theme-contract.php', 'test-theme-upgrade-gate.php'] as $suiteExtraIndex => $suiteExtraFile) {
+        require __DIR__ . '/' . $suiteExtraFile;
+        suite_progress('extra', $suiteExtraIndex + 1, 3, $suiteExtraFile);
+    }
 }
 } catch (Throwable $suiteAbort) {
     while (ob_get_level() > 0) ob_end_flush();

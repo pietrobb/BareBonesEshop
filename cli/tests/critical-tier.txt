@@ -1,0 +1,60 @@
+# php cli/test.php --tier=critical — the everyday check for a normal change (target: under 10 minutes).
+# All thematic scenarios run as in the full suite, then only the regressions listed here, in the suite's usual order;
+# the updater/theme extras are skipped. Run the full suite (php cli/test.php, SQLite and MySQL) before a release and
+# for any change to the database layer, migrations, the updater or the installer — see CONTRIBUTING.md.
+# One *Regression.php file name per line; '#' starts a comment.
+
+# Checkout and cart
+CheckoutConsentRegression.php
+AuditCheckoutMoneyRegression.php
+AuditCheckoutCouponRegression.php
+AuditCheckoutAddressRegression.php
+AuditCheckoutCompanyRegression.php
+AuditCheckoutBankTransferRegression.php
+AuditCheckoutCodRegression.php
+AuditCheckoutPickupRegression.php
+AuditCouponRaceRegression.php
+AuditCrFollowupCheckoutRegression.php
+CheckoutPaymentRedirectRegression.php
+SaveForLaterRegression.php
+
+# Payments, webhooks and refunds
+AuditPaymentsRegression.php
+AuditPaymentStateRegression.php
+AuditOrderPaymentLifecycleRegression.php
+AuditWebhookStoreRegression.php
+AuditWebhookClaimRegression.php
+AuditRefundRobustnessRegression.php
+AuditCrFollowupPaymentsRegression.php
+PaymentMonitoringRegression.php
+AuditGopayRegression.php
+AuditComgateRegression.php
+AuditThepayRegression.php
+
+# Orders, stock and invoices
+AuditOrderAdminRegression.php
+AuditOrderBulkRegression.php
+AuditShipmentAdminRegression.php
+AuditAccountOrderRegression.php
+AuditCustomerRegression.php
+AuditPricingAdminRegression.php
+AuditOfflineInventoryRegression.php
+AuditWarehouseFeedStockRegression.php
+AuditInvoiceMailFailureRegression.php
+
+# Permissions and security
+AuditRoleMatrixRegression.php
+AuditAdminUsersRegression.php
+AuditSessionHardeningRegression.php
+AuditPasswordResetRegression.php
+AuditBoundaryInputRegression.php
+AuditBoundaryOutputRegression.php
+AuditBoundaryRedirectHostRegression.php
+AuditCrFollowupSecurityRegression.php
+AuditEmailVerificationRegression.php
+AuditApiPatchRegression.php
+AuditApiDomainsRegression.php
+
+# Storefront and the test runner itself
+AuditStorefrontCoreRegression.php
+AuditSuiteProgressRegression.php
