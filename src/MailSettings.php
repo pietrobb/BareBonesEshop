@@ -27,12 +27,17 @@ final class MailSettings
         return $dir === null ? null : $dir . '/' . self::FILE;
     }
 
-    /** The saved file as stored (password still encrypted); [] when nothing was saved. */
+    /**
+     * The saved file as stored (password still encrypted); [] when nothing was saved.
+     * R49 (review round 19, finding 1): read as the private directory's owner, non-blocking and only as a regular file,
+     * like stores.json: root's update doctor otherwise followed a symlink to a root-only file (its address reached the
+     * output) or hung on a FIFO swapped in after is_file().
+     */
     public static function raw(?array $config = null): array
     {
         $path = self::path($config);
-        if ($path === null || !is_file($path)) return [];
-        $data = json_decode((string)@file_get_contents($path), true);
+        if ($path === null) return [];
+        $data = json_decode((string)PrivateOwner::run(static fn(): ?string => DataOverrides::readRegularFile($path)), true);
         return is_array($data) ? $data : [];
     }
 
