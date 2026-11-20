@@ -367,9 +367,29 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   (shared rate limits, no buyer IP or IP country). The 2.1.2 `update.php doctor` that installs this update does not
   check it: list each such range as its /16 (IPv6 /32) parts in `config.php` first; 2.1.2 accepts them as well. From
   this release `update.php doctor` fails `trusted_proxies` and names the ranges, and `apply` refuses until they are split.
+- **The shipped `pricing.json` no longer gives the coupon WELCOME10 and free shipping over 50 € (review round 20,
+  high 1).** Up to this release every shop applied them in checkout without a word in the admin: 10 % off from 50 €
+  for the first 1000 uses, and free shipping from 50 € on every method, Express and abroad included, ahead of a
+  method's own "free from" amount. The update replaces `pricing.json` with one without cart rules, so both stop. A
+  shop that wants them sets them up in Admin → Promotions (a cart promotion with the coupon code, and one with free
+  shipping and a minimum order, limited to the methods it should cover). A `pricing.json` with cart rules (yours, or a
+  store's `pricing` block in `stores.json`) still applies: `setup.php doctor` warns `pricing.cart_rules` and names
+  them, and Admin → Promotions lists them above the promotions.
+- **Check each store's "VAT payer" box after the update (review round 20, high 2).** A store whose seller has no
+  `vat_registered` in `stores.json` charges VAT at checkout, but the store form showed the box unticked and saving it
+  switched VAT off ("Prodávající není plátcem DPH" on every page and invoice). The box now shows what checkout
+  charges and a save without it keeps the setting. A store that was saved before this release while charging VAT
+  may now be a non-payer by mistake: open Admin → Stores and seller and tick the box (with the VAT ID) where it applies.
 
 ### Changes
 
+- **A product's VAT rate can be set (review round 20, high 3).** Books, food, medicines and other goods taxed at a
+  reduced rate were invoiced at the standard rate, since `products.vat_class` was in no form. The product editor has a
+  "VAT rate" select (standard, reduced, second reduced, zero, or a category: books, food, medicines, baby goods,
+  passenger transport — taxed at each country's rate for it); the CSV import and export have a `vat_class` column (an
+  unknown class fails the row; a row without the column keeps the product's class) and API v1 products read, create
+  and patch `vat_class`. Feeds and the ERP sync leave it as set. The bookshop demo sells its titles as books. Existing
+  products stay at the standard rate until you change them.
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

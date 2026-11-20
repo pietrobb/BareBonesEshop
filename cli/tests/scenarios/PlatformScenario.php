@@ -1493,7 +1493,7 @@ $rtOut = fopen($rtFile, 'w');
 exportProductsCsv($rtOut, 'SA-BOOK');
 fclose($rtOut);
 $rtCsv = (string)file_get_contents($rtFile);
-assert_true(str_starts_with($rtCsv, "sku,name,slug,product_type,price,compare_price,stock,status,summary,weight_g,stock_low_threshold,stock_critical_threshold\n")
+assert_true(str_starts_with($rtCsv, "sku,name,slug,product_type,price,compare_price,stock,status,summary,weight_g,stock_low_threshold,stock_critical_threshold,vat_class\n")
     && str_contains($rtCsv, ',23.98,29.99,'), 'CSV export: thresholds are exported and prices use the import format (euros)');
 $rtResult = Import::csv($rtFile);
 assert_true($rtResult['success'] && !$rtResult['errors'] && $rtResult['imported'] === 2, 'CSV round trip: the unchanged export imports cleanly');

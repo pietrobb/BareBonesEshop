@@ -67,7 +67,7 @@ function pageStoreSettings(): void {
                 <div class="form-row"><label for="store-<?= esc($storeId) ?>-payment_terms_days"><?= esc(I18n::t('admin.stores.field.payment_terms_days')) ?></label>
                     <input id="store-<?= esc($storeId) ?>-payment_terms_days" name="payment_terms_days" type="number" min="0" max="365" value="<?= esc((string)$value('payment_terms_days')) ?>"></div>
             </div>
-            <label style="display:block"><input type="checkbox" name="vat_registered" value="1"<?= ($draft !== null ? ($draft['vat_registered'] ?? '') === '1' : !empty($legal['vat_registered'])) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.vat_registered')) ?></label>
+            <input type="hidden" name="vat_registered" value="0"><label style="display:block"><input type="checkbox" name="vat_registered" value="1"<?= ($draft !== null ? ($draft['vat_registered'] ?? '') === '1' : StoreSettings::vatRegistered($legal)) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.vat_registered')) ?></label>
             <?php endif; ?>
             <label style="display:block"><input type="checkbox" name="oss_enabled" value="1"<?= ($draft !== null ? ($draft['oss_enabled'] ?? '') === '1' : !empty($store['oss_enabled'])) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.oss_enabled')) ?></label>
             <?php $pricing = (string)($draft['cross_border_pricing'] ?? (Cart::keepsNetAbroad($store) ? 'net' : 'gross')); ?>

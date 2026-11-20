@@ -345,7 +345,7 @@ final class StorefrontViewModel
     {
         $legal = StoreContext::current()->legal();
         if (!VatService::isEuCountry(strtoupper((string)($legal['country'] ?? '')))) return '';
-        $registered = !array_key_exists('vat_registered', $legal) || (bool)$legal['vat_registered'];
+        $registered = StoreSettings::vatRegistered($legal);
         return I18n::t($registered ? 'price_incl_vat' : 'price_no_vat');
     }
 

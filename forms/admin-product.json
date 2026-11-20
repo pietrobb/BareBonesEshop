@@ -60,6 +60,13 @@
             "size": "half"
         },
         {
+            "name": "vat_class",
+            "type": "select",
+            "label": "Sadzba DPH",
+            "options_from": "/api/v1/options/vat_classes",
+            "size": "half"
+        },
+        {
             "name": "price",
             "type": "number",
             "label": "Cena",

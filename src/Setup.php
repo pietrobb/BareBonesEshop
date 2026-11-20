@@ -323,7 +323,9 @@ class Setup
             $add(...array_values(self::digitalBundlesCheck($probe)));
             $add(...array_values(self::refundCreditNotesCheck($probe)));
             $pricingFile = $root . '/pricing.json';
-            $add(...array_values(self::legacyPricingCheck(is_file($pricingFile) ? (array)json_decode((string)file_get_contents($pricingFile), true) : [])));
+            $pricing = is_file($pricingFile) ? (array)json_decode((string)file_get_contents($pricingFile), true) : [];
+            $add(...array_values(self::legacyPricingCheck($pricing)));
+            $add(...array_values(self::pricingCartRulesCheck($pricing, is_array($stores) ? (array)($stores['stores'] ?? []) : [])));
             foreach (PaymentReadiness::checks($probe, $config, is_array($stores) ? (array)($stores['stores'] ?? []) : null) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
@@ -561,6 +563,31 @@ class Setup
             ? 'pricing.json configures no catalog rule or customer group discount (they are not applied).'
             : 'pricing.json discounts are not applied to any price: ' . implode(', ', array_slice($unused, 0, 5)) . '.',
             'action' => $unused === [] ? '' : 'Set catalog discounts up as promotions (Admin → Promotions) or price lists, then remove catalog_rules and the group discounts from pricing.json.'];
+    }
+
+    /**
+     * R50 (high 1): pricing.json cart rules (coupons, automatic free shipping) apply in checkout of every store that does
+     * not define its own, yet Admin → Promotions does not hold them. The shipped sample gave every new shop a public 10 %
+     * coupon and free shipping on every method; a rule still configured there is named so the merchant knows it applies.
+     * @param array<string, mixed> $stores stores.json "stores" (a store's "pricing" block replaces the shared one)
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function pricingCartRulesCheck(array $pricing, array $stores): array {
+        $applied = [];
+        foreach (Pricing::activeCartRules($pricing) as $rule) $applied[] = self::cartRuleLabel($rule, '');
+        foreach ($stores as $storeId => $store) {
+            if (!is_array($store) || !is_array($store['pricing']['cart_rules'] ?? null)) continue;
+            foreach (Pricing::activeCartRules(['cart_rules' => $store['pricing']['cart_rules']]) as $rule) $applied[] = self::cartRuleLabel($rule, (string)$storeId);
+        }
+        return ['status' => $applied === [] ? 'pass' : 'warn', 'name' => 'pricing.cart_rules', 'message' => $applied === []
+            ? 'pricing.json applies no coupon or automatic cart rule.'
+            : 'pricing.json cart rules apply in checkout but are not listed as promotions: ' . implode('; ', array_slice($applied, 0, 5)) . '.',
+            'action' => $applied === [] ? '' : 'Keep them only if every store should give them; otherwise set them up in Admin → Promotions and remove cart_rules from pricing.json (or the store\'s pricing block in stores.json).'];
+    }
+
+    /** @param array{name: string, type: string, code: string, effect: string} $rule */
+    private static function cartRuleLabel(array $rule, string $storeId): string {
+        return ($rule['code'] !== '' ? 'coupon ' . $rule['code'] : $rule['name']) . ' (' . $rule['effect'] . ')' . ($storeId !== '' ? " in store {$storeId}" : '');
     }
 
     /**

@@ -13,7 +13,7 @@ function db(...args) {
 }
 
 const kept = ['name', 'slug', 'product_type', 'category_id', 'price', 'compare_price', 'status', 'summary', 'description',
-  'images', 'tags', 'attrs', 'translations', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'];
+  'images', 'tags', 'attrs', 'translations', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold', 'vat_class'];
 const pick = (row, columns = kept) => Object.fromEntries(columns.map(c => [c, row[c] === null ? null : String(row[c])]));
 
 let sku = '';

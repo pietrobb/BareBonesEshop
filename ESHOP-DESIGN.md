@@ -1455,6 +1455,9 @@ Redis (including the completed ones it keeps) are neither exported nor scrubbed.
 
 Removed in round 13: the `cache/prices/{group}.json` maps were read by nothing. Shop prices come from price lists and
 promotions; `doctor` warns (`pricing.legacy_rules`) when `pricing.json` still configures catalog rules or group discounts.
+The example above is a format illustration: the shipped `pricing.json` has no cart rules (round 50). Active `cart_rules`
+do apply in checkout of every store without its own `pricing` block, so `doctor` names them (`pricing.cart_rules`) and
+Admin → Promotions lists them above the promotions.
 
 ### Rebuild vs runtime — clear boundaries
 

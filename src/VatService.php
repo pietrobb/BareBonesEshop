@@ -83,6 +83,29 @@ class VatService implements TaxProvider
         return in_array($iso2, $cfg['eu_countries'] ?? [], true);
     }
 
+    /**
+     * R50 (high 3): the values products.vat_class may hold — the four classes, the aliases (food, books, ...) and the
+     * categories a country prices on its own (vat-rates.json). Admin, CSV import and API v1 accept only these.
+     * @return list<string>
+     */
+    public static function productClasses(): array
+    {
+        $cfg = self::config();
+        $values = ['standard', 'reduced', 'reduced2', 'zero'];
+        foreach (array_keys((array)($cfg['product_class_aliases'] ?? [])) as $alias) $values[] = strtolower((string)$alias);
+        foreach ((array)($cfg['rates'] ?? []) as $row) {
+            foreach (array_keys((array)($row['categories'] ?? [])) as $category) $values[] = strtolower((string)$category);
+        }
+        return array_values(array_diff(array_unique($values), ['default', 'digital']));
+    }
+
+    /** A posted products.vat_class: lower-cased, '' (not given) or null (not a known class). */
+    public static function normalizeProductClass(mixed $value): ?string
+    {
+        $value = strtolower(trim(is_scalar($value) ? (string)$value : ''));
+        return $value === '' || in_array($value, self::productClasses(), true) ? $value : null;
+    }
+
     /** Map alias (food/books/...) to canonical class (standard/reduced/reduced2/zero). */
     public static function resolveClass(string $alias): string
     {

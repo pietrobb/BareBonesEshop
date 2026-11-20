@@ -8,24 +8,5 @@
 
     "catalog_rules": [],
 
-    "cart_rules": [
-        {
-            "name": "WELCOME10",
-            "type": "coupon",
-            "code": "WELCOME10",
-            "discount_type": "percent",
-            "discount_value": 10,
-            "min_subtotal": 5000,
-            "max_uses": 1000,
-            "per_customer": 1,
-            "active": true
-        },
-        {
-            "name": "Free Shipping over 50 EUR",
-            "type": "automatic",
-            "conditions": {"min_subtotal": 5000},
-            "action": "free_shipping",
-            "active": true
-        }
-    ]
+    "cart_rules": []
 }

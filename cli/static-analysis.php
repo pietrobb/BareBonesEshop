@@ -244,7 +244,8 @@ $architectureBudgets = [
     // +1 line R11: ?shipment= prints the delivery note of one parcel.
     // +1 coupling R48: the audit entry of a sent payment link stores the masked e-mail (AuditLogLabels::maskEmail).
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 91, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 11],
-    'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
+    // +1 coupling R50: Promotions lists the pricing.json cart rules that apply in checkout (Pricing::activeCartRules).
+    'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 6],
     // +1 coupling R48: top products link to the editor only for an admin with products.edit (Security::adminCan).
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 5],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],

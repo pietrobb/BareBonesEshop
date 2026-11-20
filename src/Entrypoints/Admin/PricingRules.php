@@ -79,6 +79,13 @@ function pagePromotions(): void {
             <?php if ($edit): ?><a href="admin.php?p=promotions" class="btn" style="margin-left:.5rem"><?= esc(I18n::t('admin.promo.new')) ?></a><?php endif; ?>
         </form>
     </div>
+    <?php if (($configRules = Pricing::activeCartRules()) !== []): // R50 (high 1): rules from pricing.json apply too ?>
+    <div class="card table-scroll" id="promo-config-rules"><h3><?= esc(I18n::t('admin.promo.config_rules_title')) ?></h3>
+        <p class="flash flash-err"><?= esc(I18n::t('admin.promo.config_rules_hint')) ?></p>
+        <table><thead><tr><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.promo.coupon')) ?></th><th><?= esc(I18n::t('admin.common.action')) ?></th></tr></thead><tbody>
+            <?php foreach ($configRules as $rule): ?><tr><td><?= esc($rule['name']) ?></td><td><?= $rule['code'] !== '' ? '<code>' . esc($rule['code']) . '</code>' : '' ?></td><td><?= esc($rule['effect']) ?></td></tr><?php endforeach; ?>
+        </tbody></table></div>
+    <?php endif; ?>
     <div class="card table-scroll">
         <table>
             <thead><tr><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.common.code')) ?></th><th><?= esc(I18n::t('admin.promo.scope')) ?></th><th><?= esc(I18n::t('admin.promo.coupon')) ?></th><th><?= esc(I18n::t('admin.common.action')) ?></th><th><?= esc(I18n::t('admin.common.priority')) ?></th><th><?= esc(I18n::t('admin.pricing.validity')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th></th></tr></thead>

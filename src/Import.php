@@ -252,7 +252,8 @@ class Import {
         foreach ($data as $key => $value) {
             if (str_starts_with($key, 'attr:') && $value !== '') $attrs[substr($key, 5)] = $value;
         }
-        self::upsertProduct([
+        $vatClass = self::vatClassCell($data);
+        self::upsertProduct(($vatClass !== null ? ['vat_class' => $vatClass] : []) + [
             'sku'           => $sku,
             'slug'          => trim($data['slug'] ?? '') ?: self::productSlug($name, $sku),
             'product_type'  => $productType,
@@ -295,6 +296,7 @@ class Import {
         if ($has('summary')) $set['summary'] = trim((string)$data['summary']);
         if ($has('description')) $set['description'] = Security::sanitizeRichHtml(trim((string)$data['description']));
         if ($has('weight_g') && trim((string)$data['weight_g']) !== '') $set['weight_g'] = (int)$data['weight_g'];
+        if (($vatClass = self::vatClassCell($data)) !== null) $set['vat_class'] = $vatClass;
 
         $lists = [];
         if ($has('image')) $lists['images'] = self::pipeList($data['image']);
@@ -347,6 +349,17 @@ class Import {
         return (string)($set['product_type'] ?? $existing['product_type'] ?? 'simple');
     }
 
+    /**
+     * R50 (high 3): the row's vat_class (books, food, reduced, ...), null when the column is absent or empty (a new
+     * product is "standard", an existing one keeps its class). An unknown class fails the row instead of taxing at 23 %.
+     */
+    private static function vatClassCell(array $data): ?string {
+        if (!array_key_exists('vat_class', $data)) return null;
+        $class = VatService::normalizeProductClass($data['vat_class']);
+        if ($class === null) throw new \InvalidArgumentException('Unknown vat_class "' . trim((string)$data['vat_class']) . '" (allowed: ' . implode(', ', VatService::productClasses()) . ')');
+        return $class === '' ? null : $class;
+    }
+
     /** "a.jpg|b.jpg" → ['a.jpg', 'b.jpg'] */
     private static function pipeList($value): array {
         return array_values(array_filter(array_map('trim', explode('|', (string)$value)), 'strlen'));
@@ -381,6 +394,8 @@ class Import {
             'compare_price' => 'cprice', 'stock' => 'stock', 'status' => 'status', 'summary' => 'summary', 'description' => 'desc',
             'images' => 'images', 'attrs' => 'attrs', 'tags' => 'tags', 'filter_tags' => 'ftags', 'weight_g' => 'weight',
             'translations' => 'translations'];
+        // R50 (high 3): vat_class only when the caller sets it — a feed or ERP sync without it keeps the merchant's class.
+        if (isset($data['vat_class'])) $columns['vat_class'] = 'vatclass';
         $sqlite = Db::isSqlite();
         $new = static fn(string $column): string => $sqlite ? "excluded.{$column}" : "VALUES({$column})";
         $same = static fn(string $column): string => $sqlite ? "products.{$column} IS {$new($column)}" : "{$column} <=> {$new($column)}";
@@ -417,7 +432,7 @@ class Import {
             ':ftags'        => $data['filter_tags'] ?? '',
             ':weight'       => $data['weight_g'] ?? 0,
             ':translations' => json_encode($data['translations'] ?? []),
-        ]);
+        ] + (isset($columns['vat_class']) ? [':vatclass' => (string)$data['vat_class']] : []));
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
         PriceHistory::record([(int)$id->fetchColumn()], $db);

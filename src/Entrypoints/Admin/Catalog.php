@@ -137,6 +137,7 @@ function adminFormValues(string $formId, ?array $row): array {
             'seo_title'     => (string)($row['seo_title'] ?? ''),
             'meta_description' => (string)($row['meta_description'] ?? ''),
             'product_type'  => $row['product_type'] ?? 'simple',
+            'vat_class'     => (string)($row['vat_class'] ?? 'standard'),
             // R16 low: prices are typed in the store's currency ("12.90"), stored in cents.
             'price'         => Money::adminValue((int)($row['price'] ?? 0), adminProductCurrency($row)),
             'compare_price' => isset($row['compare_price']) ? Money::adminValue((int)$row['compare_price'], adminProductCurrency($row)) : '',
@@ -886,6 +887,8 @@ function handleProductSave(): void {
         ':sku'           => $form['sku'],
         ':name'          => $form['name'],
         ':product_type'  => $form['product_type'] !== '' ? $form['product_type'] : 'simple',
+        // R50 (high 3): the VAT rate class (books, food, ... are taxed at a reduced rate); BBF checked it against the list.
+        ':vat_class'     => $form['vat_class'] !== '' ? strtolower($form['vat_class']) : (string)($old['vat_class'] ?? 'standard'),
         ':category_id'   => Security::int($form['category_id']),
         ':price'         => $price,
         ':compare_price' => $comparePrice ?: null,
@@ -943,7 +946,7 @@ function handleProductSave(): void {
                 // R18: a stock-only edit moves stock_updated_at, not updated_at (the feed and sitemap fingerprint).
                 $touched = array_diff($changed, ['stock']) ? "updated_at={$now}" : "stock_updated_at={$now}";
                 // Stock moves by the admin's change only: a sale committed after $old was read stays sold.
-                $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type, stock=CASE WHEN stock + :stock_delta < 0 THEN 0 ELSE stock + :stock_delta2 END,
+                $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type, vat_class=:vat_class, stock=CASE WHEN stock + :stock_delta < 0 THEN 0 ELSE stock + :stock_delta2 END,
                     category_id=:category_id, brand_id=:brand_id, gtin=:gtin, mpn=:mpn, seo_title=:seo_title, meta_description=:meta_description, translations=:translations, price=:price, compare_price=:compare_price,
                     status=:status, summary=:summary, description=:description, images=:images, image_alts=:image_alts, tags=:tags, weight_g=:weight_g,
                     stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, {$touched} WHERE id=:id AND store_id=:catalog");
@@ -959,8 +962,8 @@ function handleProductSave(): void {
                 setFlash('ok', I18n::t('admin.product.unchanged'));
             }
         } else {
-            $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, brand_id, gtin, mpn, seo_title, meta_description, translations, price, compare_price, stock, status, summary, description, images, image_alts, tags, weight_g, stock_low_threshold, stock_critical_threshold, store_id, currency)
-                VALUES (:sku, :name, :slug, :product_type, :category_id, :brand_id, :gtin, :mpn, :seo_title, :meta_description, :translations, :price, :compare_price, :stock, :status, :summary, :description, :images, :image_alts, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold, :catalog, :currency)");
+            $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, vat_class, category_id, brand_id, gtin, mpn, seo_title, meta_description, translations, price, compare_price, stock, status, summary, description, images, image_alts, tags, weight_g, stock_low_threshold, stock_critical_threshold, store_id, currency)
+                VALUES (:sku, :name, :slug, :product_type, :vat_class, :category_id, :brand_id, :gtin, :mpn, :seo_title, :meta_description, :translations, :price, :compare_price, :stock, :status, :summary, :description, :images, :image_alts, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold, :catalog, :currency)");
             $db->beginTransaction(); // R17: a new product is priced in the store's currency it was typed in, not in 'eur'.
             $stmt->execute($data + [':catalog' => StoreContext::current()->catalogId(), ':currency' => strtolower($currency)]);
             $id = (int)$db->lastInsertId();
@@ -1083,9 +1086,9 @@ function exportProductsCsv($out, string $search = '', string $statusFilter = '')
 
     // Unbuffered on MySQL: rows stream to the CSV instead of the whole catalog being held in memory.
     $stmt = Db::executeUnbuffered("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
-        stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id", $params);
+        stock_low_threshold, stock_critical_threshold, vat_class FROM products WHERE {$where} ORDER BY id", $params);
 
-    $header = ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'];
+    $header = ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold', 'vat_class'];
     // A failure mid-stream is logged, raised as an incident and thrown (CsvExportTruncated).
     CsvExport::stream($out, $stmt, $header, static function (array $row): array {
         $row['price'] = Import::formatCents((int)$row['price']);

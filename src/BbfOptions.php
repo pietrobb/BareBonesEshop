@@ -15,6 +15,7 @@ class BbfOptions {
             'bbf_attr_types' => self::labelled(['enum', 'number', 'boolean'], 'admin.attr.type.'),
             'bbf_page_statuses' => self::labelled(['active', 'draft'], 'admin.product.status.'),
             'bbf_product_statuses' => self::labelled(['active', 'draft', 'archived'], 'admin.product.status.'),
+            'bbf_vat_classes' => self::labelled(VatService::productClasses(), 'admin.product.vat_class.'),
             'bbf_payment_methods' => [
                 ['value' => 'cod', 'label' => I18n::t('methods.payment.cod')],
                 ['value' => 'transfer', 'label' => I18n::t('methods.payment.bank_transfer')],

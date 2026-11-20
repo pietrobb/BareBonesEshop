@@ -117,7 +117,7 @@ class CheckoutService {
         if ($vatIdValid && $vatIdOfSeller) $residence = $sellerCountry;
         $context = [
             'seller_country'        => $sellerCountry,
-            'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
+            'seller_vat_registered' => StoreSettings::vatRegistered((array)($store['legal'] ?? [])),
             // R39 (low): the VAT payer's OSS registration, whichever of its stores it was switched on in.
             'seller_oss_enabled'    => OssThreshold::sellerOssEnabled(StoreContext::current()->id(), $store),
             // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).

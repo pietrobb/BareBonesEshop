@@ -16,6 +16,11 @@ final class StoreSettings {
         self::$path = $path;
     }
 
+    /** Whether a legal block's seller charges VAT: a block without vat_registered is registered (checkout, storefront). */
+    public static function vatRegistered(array $legal): bool {
+        return !array_key_exists('vat_registered', $legal) || (bool)$legal['vat_registered'];
+    }
+
     public static function path(): string {
         return self::$path ?? DataOverrides::storesPath();
     }
@@ -163,7 +168,8 @@ final class StoreSettings {
             foreach (self::LEGAL_TEXT as $field) $legal[$field] = $text($field);
             $legal['country'] = strtoupper($legal['country']);
             $legal['email'] = strtolower($legal['email']);
-            $legal['vat_registered'] = ($input['vat_registered'] ?? '') === '1';
+            // R50 (high 2): a form without the field keeps the store's VAT status (no key = registered, as checkout reads it).
+            $legal['vat_registered'] = array_key_exists('vat_registered', $input) ? $input['vat_registered'] === '1' : self::vatRegistered($legal);
             $terms = $text('payment_terms_days');
             $legal['payment_terms_days'] = ctype_digit($terms) ? (int)$terms : -1;
 

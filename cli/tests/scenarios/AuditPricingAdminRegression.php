@@ -269,7 +269,9 @@ try {
                 $a125Json = static fn(string $code, string $column): mixed => json_decode((string)($a125Promos[$code][$column] ?? 'null'), true);
                 match ($a125Action) {
                     'promotions_page' => assert_true(str_contains($a125Output, "value=\"A125PROMO-{$a125Store}-NAME\"") && str_contains($a125Output, "A125LIVE-{$a125Up}") && str_contains($a125Output, 'name="csrf_token"')
-                        && str_contains($a125Output, "a125cat-{$a125Store}"), "{$a125Label}: own promotions, coupons and category options rendered"),
+                        && str_contains($a125Output, "a125cat-{$a125Store}")
+                        // R50 (high 1): the pricing.json coupon applies in checkout, so the page lists it.
+                        && preg_match('#id="promo-config-rules".*<code>JSONCODE</code>#s', $a125Output) === 1, "{$a125Label}: own promotions, coupons, category options and pricing.json rules rendered"),
                     'price_lists_page' => assert_true(str_contains($a125Output, "A125P-{$a125Store} | 1 | 9.00") && str_contains($a125Output, "A125GRP-{$a125Store}-NAME") && str_contains($a125Output, 'action=prices&id='),
                         "{$a125Label}: own price lines and customer groups rendered"),
                     'promo_catalog_create' => assert_equals([['type'=>'discount_percent', 'bps'=>1250], ['category_ids'=>[$a125Result['extra']['category_id'] ?? -1]],

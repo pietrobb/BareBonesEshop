@@ -343,6 +343,24 @@ switch ($action) {
         $_POST = $productPost('AAC-DEF-1', ['slug' => 'aac-def-1', 'price' => '1.00']);
         handleProductSave();
         break;
+    // R50 (high 3): the product's VAT rate class is set in the editor; a form without it keeps the stored class.
+    case 'product_vat_class_create':
+        $extra = static fn(): array => ['class' => $q("SELECT vat_class FROM products WHERE sku = 'AAC-VAT-1'")[0]['vat_class'] ?? null];
+        $_POST = $productPost('AAC-VAT-1', ['slug' => 'aac-vat-1', 'vat_class' => 'books']);
+        handleProductSave();
+        break;
+    case 'product_vat_class_keep':
+        $db->exec("UPDATE products SET vat_class = 'food' WHERE sku = 'AAC-DEF-2'");
+        $extra = static fn(): array => ['row' => $q("SELECT name, vat_class FROM products WHERE sku = 'AAC-DEF-2'")[0] ?? null];
+        $_GET = ['id' => (string)$productId('AAC-DEF-2')];
+        $_POST = $productPost('AAC-DEF-2', ['slug' => 'aac-def-2', 'name' => 'AAC-DEF-2 renamed']);
+        handleProductSave();
+        break;
+    case 'product_vat_class_unknown':
+        $extra = static fn(): array => ['row' => $q("SELECT vat_class FROM products WHERE sku = 'AAC-VAT-2'")[0] ?? null];
+        $_POST = $productPost('AAC-VAT-2', ['slug' => 'aac-vat-2', 'vat_class' => 'luxury']);
+        handleProductSave();
+        break;
     case 'cz_slug_import':
         Import::importProduct(['sku' => 'AAC-CZ-2', 'name' => 'Česká věc', 'slug' => 'aac-cz-2', 'price' => '3', 'name_en' => 'Czech thing', 'slug_en' => 'aac-czech-thing'], $db);
         $resolved = Products::bySlug('aac-czech-thing');
@@ -630,6 +648,12 @@ try {
         $r = $aac('product_price_floor');
         $refused($r, "AAC {$aacDriver}/product_price_floor");
         assert_equals([350, ['AAC-DEF-1' => 'refused', 'AAC-NEG-1' => 'refused']], [(int)$r['extra']['row']['price'], $r['extra']['import']], "AAC {$aacDriver}: editor and import refuse a price below the variant floor or below zero");
+        $r = $aac('product_vat_class_create');
+        assert_equals(['ok', 'books'], [$r['flash']['type'] ?? null, $r['extra']['class'] ?? null], "AAC {$aacDriver}: R50 a new product is saved with the chosen VAT rate class (books)");
+        $r = $aac('product_vat_class_keep');
+        assert_equals(['ok', ['name' => 'AAC-DEF-2 renamed', 'vat_class' => 'food']], [$r['flash']['type'] ?? null, $r['extra']['row'] ?? null], "AAC {$aacDriver}: R50 a form without the VAT class keeps the stored one");
+        $r = $aac('product_vat_class_unknown');
+        assert_equals(['err', null, []], [$r['flash']['type'] ?? null, $r['extra']['row'] ?? null, $r['audit']], "AAC {$aacDriver}: R50 an unknown VAT class is refused, nothing saved");
 
         // 9. Translated slugs of a non-default catalog are registered for that catalog (and the migration repairs old rows).
         $r = $aac('cz_slug_import');
