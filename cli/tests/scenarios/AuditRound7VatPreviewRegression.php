@@ -11,6 +11,20 @@ $r7vPricing = (new ReflectionProperty(Pricing::class, 'config'))->getValue();
 $r7vActivePromotions = $pdo->query("SELECT id FROM promotions WHERE active = 1")->fetchAll(PDO::FETCH_COLUMN);
 $pdo->exec("UPDATE promotions SET active = 0");
 Pricing::setConfig(['cart_rules' => []]);
+// R49 (low): the consumer previews assume the seller is under the OSS threshold, but earlier tests' distance sales
+// (invoices, open orders, the per-year totals) put it over in some test orders (MySQL VAT/VIES run: "oss" for a DE
+// consumer). Set them aside meanwhile, as R34 VAT does.
+$r7vSince = sprintf('%04d-01-01', (int)ShopTime::date('Y') - 1);
+$r7vStashedInvoices = $pdo->query("SELECT id, issued_at FROM invoices WHERE issued_at >= '{$r7vSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+$pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00' WHERE issued_at >= '{$r7vSince}'");
+$r7vStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$r7vSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
+$pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$r7vSince}'");
+$r7vTotals = Db::tableExists('oss_threshold_totals', $pdo) ? $pdo->query('SELECT store_id, year, currency, net FROM oss_threshold_totals')->fetchAll(PDO::FETCH_NUM) : null;
+if ($r7vTotals !== null) $pdo->exec('DELETE FROM oss_threshold_totals');
+// A year another test crossed the threshold in stays activated (oss_threshold_activations, R39) whatever its sales.
+$r7vActivations = Db::tableExists('oss_threshold_activations', $pdo) ? $pdo->query('SELECT * FROM oss_threshold_activations')->fetchAll(PDO::FETCH_ASSOC) : null;
+if ($r7vActivations !== null) $pdo->exec('DELETE FROM oss_threshold_activations');
+OssThreshold::reset();
 // 123 € goods (domestic VAT included), a parcel method free from 110 € that costs 6,15 €, and a fixed 1,23 € fee.
 // Exported to Norway the goods are charged net (100 € at 23 %), below the threshold, so shipping is charged too.
 $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
@@ -76,7 +90,7 @@ try {
         [$r7vRc['vat_scenario'] ?? null, $r7vRc['goods_subtotal'] ?? null, array_column($r7vRc['methods'] ?? [], 'price', 'method_code')['r7vship'] ?? null],
         'R7 VAT preview API: a valid VAT ID of another member state previews reverse charge with net goods and shipping');
     assert_true(($r7vB2c['vat_scenario'] ?? '') !== 'reverse_charge' && ($r7vB2c['goods_subtotal'] ?? null) === 12300,
-        'R7 VAT preview API: without a VAT ID the same cart keeps the VAT-inclusive price');
+        'R7 VAT preview API: without a VAT ID the same cart keeps the VAT-inclusive price (got ' . json_encode([$r7vB2c['vat_scenario'] ?? null, $r7vB2c['goods_subtotal'] ?? null, OssThreshold::lastReason()]) . ')');
 
     // 3. The HTML checkout summary (real renderCheckout, child process on this database) after the country refresh.
     $r7vRoot = test_fixture_path('r7-vat-preview');
@@ -173,4 +187,19 @@ PHP);
     if ($r7vActivePromotions) $pdo->exec('UPDATE promotions SET active = 1 WHERE id IN (' . implode(',', array_map('intval', $r7vActivePromotions)) . ')');
     $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
     $pdo->exec("DELETE FROM digital_assets WHERE sku = 'R7V-EBOOK'");
+    $r7vRestore = $pdo->prepare('UPDATE invoices SET issued_at = ? WHERE id = ?');
+    foreach ($r7vStashedInvoices as $r7vId => $r7vAt) $r7vRestore->execute([$r7vAt, $r7vId]);
+    $r7vRestore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
+    foreach ($r7vStashedOrders as $r7vId => $r7vAt) $r7vRestore->execute([$r7vAt, $r7vId]);
+    if ($r7vTotals !== null) {
+        $pdo->exec('DELETE FROM oss_threshold_totals');
+        $r7vRestore = $pdo->prepare('INSERT INTO oss_threshold_totals (store_id, year, currency, net) VALUES (?, ?, ?, ?)');
+        foreach ($r7vTotals as $r7vRow) $r7vRestore->execute($r7vRow);
+    }
+    if ($r7vActivations !== null) {
+        $pdo->exec('DELETE FROM oss_threshold_activations');
+        foreach ($r7vActivations as $r7vRow) $pdo->prepare('INSERT INTO oss_threshold_activations (' . implode(', ', array_keys($r7vRow)) . ') VALUES ('
+            . implode(', ', array_fill(0, count($r7vRow), '?')) . ')')->execute(array_values($r7vRow));
+    }
+    OssThreshold::reset();
 }

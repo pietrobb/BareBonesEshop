@@ -14,6 +14,7 @@ if (!function_exists('apiShippingRates')) require_once dirname(TEST_CLI_DIR) . '
 $r34lCart = $_SESSION['cart'] ?? null;
 $r34lGet = $_GET;
 try {
+    $pdo->exec('DELETE FROM products WHERE id = 99351'); // R49: R35 VAT reuses the id; either may run first
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (99351, 'default', 1, 'R34L book', 'r34l-book', 'R34L-BOOK', 'simple', 1230, 'eur', 'active', 10, 'continue')");
     $pdo->prepare("DELETE FROM vat_id_cache WHERE vat_id IN ('DE811907980', 'DE934343434')")->execute();
