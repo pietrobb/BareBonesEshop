@@ -50,8 +50,7 @@ try {
 
     // A complete counted download: no free "resume" may follow it.
     $r50xFull = $r50xEnt(1);
-    $r50xCounted = DigitalDelivery::beginTransfer($r50xRow($r50xFull), 0, $r50xSize, $r50xNow);
-    DigitalDelivery::recordProgress($r50xFull, (int)$r50xCounted, $r50xSize);
+    DigitalDelivery::endTransfer($r50xFull, DigitalDelivery::openTransfer($r50xRow($r50xFull), 0, $r50xSize, $r50xNow), $r50xSize);
     $r50xCopies = 0;
     for ($r50xTry = 0; $r50xTry < 8; $r50xTry++) if (DigitalDelivery::authorizeTransfer($r50xRow($r50xFull), 1, $r50xSize, $r50xNow + 10)) $r50xCopies++;
     assert_equals([1, 0], [(int)$r50xRow($r50xFull)['download_count'], $r50xCopies],
@@ -59,13 +58,12 @@ try {
 
     // An interrupted download: a resume continues near where it stopped, not from the start.
     $r50xCut = $r50xEnt(1);
-    $r50xCounted = DigitalDelivery::beginTransfer($r50xRow($r50xCut), 0, $r50xSize, $r50xNow);
-    DigitalDelivery::recordProgress($r50xCut, (int)$r50xCounted, $r50xSize - 1);
+    DigitalDelivery::endTransfer($r50xCut, DigitalDelivery::openTransfer($r50xRow($r50xCut), 0, $r50xSize, $r50xNow), $r50xSize - 1);
     assert_true(!DigitalDelivery::authorizeTransfer($r50xRow($r50xCut), 1, $r50xSize, $r50xNow + 10),
         'R50 download: a download cut one byte before the end cannot be "resumed" from byte 1 (a second near-complete copy)');
-    assert_true(DigitalDelivery::authorizeTransfer($r50xRow($r50xCut), $r50xSize - 101, $r50xSize, $r50xNow + 10),
-        'R50 download: a resume a little below the cut (data in flight) is still free');
-    DigitalDelivery::recordProgress($r50xCut, (int)$r50xCounted, $r50xSize);
+    $r50xResume = DigitalDelivery::openTransfer($r50xRow($r50xCut), $r50xSize - 101, $r50xSize, $r50xNow + 10);
+    assert_true($r50xResume !== null, 'R50 download: a resume a little below the cut (data in flight) is still free');
+    DigitalDelivery::endTransfer($r50xCut, $r50xResume, $r50xSize);
     assert_true(!DigitalDelivery::authorizeTransfer($r50xRow($r50xCut), $r50xSize - 101, $r50xSize, $r50xNow + 10)
         && (int)$r50xRow($r50xCut)['download_count'] === 1,
         'R50 download: once the resumed download served the whole file, a further range is a new download (limit spent, refused)');
@@ -73,23 +71,46 @@ try {
     // Capability review (run 617): "bytes=0-0" (counted, served 1 byte), then six concurrent "bytes=1-" before any of
     // them records progress: one continues the download, the others are no free copies (limit spent, refused).
     $r50xPar = $r50xEnt(1);
-    $r50xCounted = DigitalDelivery::beginTransfer($r50xRow($r50xPar), 0, $r50xSize, $r50xNow);
-    DigitalDelivery::recordProgress($r50xPar, (int)$r50xCounted, 1);
-    $r50xCopies = 0;
-    for ($r50xTry = 0; $r50xTry < 6; $r50xTry++) if (DigitalDelivery::authorizeTransfer($r50xRow($r50xPar), 1, $r50xSize, $r50xNow + 5)) $r50xCopies++;
-    assert_equals([1, 1], [(int)$r50xRow($r50xPar)['download_count'], $r50xCopies],
+    DigitalDelivery::endTransfer($r50xPar, DigitalDelivery::openTransfer($r50xRow($r50xPar), 0, $r50xSize, $r50xNow), 1);
+    $r50xResumes = [];
+    for ($r50xTry = 0; $r50xTry < 6; $r50xTry++) {
+        $r50xResume = DigitalDelivery::openTransfer($r50xRow($r50xPar), 1, $r50xSize, $r50xNow + 5);
+        if ($r50xResume !== null) $r50xResumes[] = $r50xResume;
+    }
+    assert_equals([1, 1], [(int)$r50xRow($r50xPar)['download_count'], count($r50xResumes)],
         'R50 download: concurrent resumes from one recorded offset — only one continues the download (was 5 free near-complete copies)');
-    DigitalDelivery::recordProgress($r50xPar, (int)$r50xCounted, 400);
+    DigitalDelivery::endTransfer($r50xPar, $r50xResumes[0], 400);
     assert_true(DigitalDelivery::authorizeTransfer($r50xRow($r50xPar), 400, $r50xSize, $r50xNow + 10),
-        'R50 download: once the resume recorded progress, a dropped client resumes again where it stopped');
+        'R50 download: once the resume stopped, a dropped client resumes again where it stopped');
+
+    // Capability review (run 620): a 128 MiB file, a counted "bytes=0-" that is still streaming records 8 MiB, then
+    // 16 MiB; a parallel "bytes=1-" each time was a free second near-complete copy (the slack reached byte 1).
+    $r50xRun = $r50xEnt(1);
+    $r50xRunSize = 128 * 1024 * 1024;
+    $r50xCounted = DigitalDelivery::beginTransfer($r50xRow($r50xRun), 0, $r50xRunSize, $r50xNow);
+    DigitalDelivery::recordProgress($r50xRun, (int)$r50xCounted, 8 * 1024 * 1024);
+    $r50xCopies = DigitalDelivery::authorizeTransfer($r50xRow($r50xRun), 1, $r50xRunSize, $r50xNow + 5) ? 1 : 0;
+    DigitalDelivery::recordProgress($r50xRun, (int)$r50xCounted, 16 * 1024 * 1024);
+    $r50xCopies += DigitalDelivery::authorizeTransfer($r50xRow($r50xRun), 1, $r50xRunSize, $r50xNow + 10) ? 1 : 0;
+    assert_equals([1, 0], [(int)$r50xRow($r50xRun)['download_count'], $r50xCopies],
+        'R50 download: while the counted download still streams, "Range: bytes=1-" is no free resume (was 2 free near-complete copies)');
+    // The same throttled download, now through openTransfer(): once the client drops (the transfer ends), it resumes.
+    $r50xRun = $r50xEnt(1);
+    $r50xTransfer = DigitalDelivery::openTransfer($r50xRow($r50xRun), 0, $r50xRunSize, $r50xNow);
+    DigitalDelivery::recordProgress($r50xRun, (int)$r50xTransfer['counted_at'], 8 * 1024 * 1024);
+    $r50xWhileRunning = DigitalDelivery::authorizeTransfer($r50xRow($r50xRun), 8 * 1024 * 1024, $r50xRunSize, $r50xNow + 5);
+    DigitalDelivery::endTransfer($r50xRun, $r50xTransfer, 16 * 1024 * 1024);
+    $r50xResume = DigitalDelivery::openTransfer($r50xRow($r50xRun), 15 * 1024 * 1024, $r50xRunSize, $r50xNow + 10);
+    $r50xBeside = DigitalDelivery::authorizeTransfer($r50xRow($r50xRun), 15 * 1024 * 1024, $r50xRunSize, $r50xNow + 10);
+    assert_equals([false, true, false, 1], [$r50xWhileRunning, $r50xResume !== null, $r50xBeside, (int)$r50xRow($r50xRun)['download_count']],
+        'R50 download: no free resume beside a running transfer; after it stops one resume continues it, and none beside that resume');
 
     // A large file keeps the 16 MiB in-flight allowance (R18).
     $r50xBig = $r50xEnt(1);
     $r50xBigSize = 256 * 1024 * 1024;
-    $r50xCounted = DigitalDelivery::beginTransfer($r50xRow($r50xBig), 0, $r50xBigSize, $r50xNow);
-    DigitalDelivery::recordProgress($r50xBig, (int)$r50xCounted, 64 * 1024 * 1024);
-    assert_true(DigitalDelivery::authorizeTransfer($r50xRow($r50xBig), 64 * 1024 * 1024 - 15 * 1024 * 1024, $r50xBigSize, $r50xNow + 10)
-        && !DigitalDelivery::authorizeTransfer($r50xRow($r50xBig), 64 * 1024 * 1024 - 17 * 1024 * 1024, $r50xBigSize, $r50xNow + 10),
+    DigitalDelivery::endTransfer($r50xBig, DigitalDelivery::openTransfer($r50xRow($r50xBig), 0, $r50xBigSize, $r50xNow), 64 * 1024 * 1024);
+    assert_true(!DigitalDelivery::authorizeTransfer($r50xRow($r50xBig), 64 * 1024 * 1024 - 17 * 1024 * 1024, $r50xBigSize, $r50xNow + 10)
+        && DigitalDelivery::authorizeTransfer($r50xRow($r50xBig), 64 * 1024 * 1024 - 15 * 1024 * 1024, $r50xBigSize, $r50xNow + 10),
         'R50 download: a large file still resumes up to 16 MiB below the served bytes, not further');
 
     // ── MFA lockout under concurrent attempts (SQLite here, native MySQL below) ─────────────────
