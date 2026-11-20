@@ -410,7 +410,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   brought back lower invoice and credit-note counters, so the next invoice took a number already issued and its PDF
   overwrote the other customer's. The counters now continue after the highest number issued before the restore, the
   restore warns which numbers' documents the backup does not have, and a newly numbered document never overwrites a PDF
-  already at its path (the old file is kept as `*.superseded-*.pdf`).
+  already at its path (the old file is kept as `*.superseded-*.pdf`). A restore onto a lost, empty or new database has
+  no counters to carry over, so the invoice storage counts as well: a number whose PDF is already there, in any month
+  of its year, is skipped (and logged) when the next document is numbered.
 - **Backups also cover `config.php`, the jobs not done yet and `themes/`; a restore works on a new MySQL server.** A
   restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run next to the
   live ones (`*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
@@ -429,6 +431,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Admin order lists and sales reports at 500 000 orders.** On MySQL the order lists and the CSV export read the
   index matching their filters in date order (MySQL sorted every order of the store), and a 7/30/90-day report reads
   only the paid orders of the period and sums only their refunds (it summed every refund of the store's history).
+- **Returns, confirmations and complaints as consumer law expects (review round 20).** A return request is confirmed
+  to the customer by e-mail and the merchant is told (it waited unseen in the admin queue); the return and withdrawal
+  forms no longer offer digital content whose right of withdrawal the customer waived. The order confirmation names
+  the payment and shipping method and repeats the recorded digital-content consent. A complaint can only be rejected
+  with an expert assessment, which the rejection e-mail names together with the out-of-court dispute body. The order
+  button has the terms, the right of withdrawal and the privacy notice linked right above it.
+- **The CZ store speaks Czech in the checkout and in search.** A store selling through a seller from another country
+  pre-selected the seller's country in the checkout, the manual order and the API; it now pre-selects the store's own
+  country (`country` in stores.json, else its default language's). Search finds products by their translated names, so
+  the CZ store finds the Czech titles.
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

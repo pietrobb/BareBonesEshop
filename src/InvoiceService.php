@@ -1734,8 +1734,37 @@ final class InvoiceService
         }
         $stmt = $db->prepare("SELECT last_number FROM invoice_number_counters WHERE {$where}");
         $stmt->execute($key);
-        $next = (int)$stmt->fetchColumn();
-        return sprintf('%s%d%04d', $prefix, $year, $next);
+        $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        while (self::pdfIssued($year, $number)) {
+            $increment->execute($key);
+            $stmt->execute($key);
+            $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        }
+        return $number;
+    }
+
+    /**
+     * R50: the invoice storage outlives the database. A number whose PDF is already there (in any month of its year) was
+     * issued, e.g. before an older backup was restored onto a lost, empty or new database whose counters are lower; it is
+     * skipped, so no number is issued twice whatever the restored counters say.
+     */
+    private static function pdfIssued(int $year, string $number): bool
+    {
+        try {
+            $yearDir = self::storageDir() . DIRECTORY_SEPARATOR . $year;
+        } catch (\RuntimeException $e) {
+            Logger::exception('invoice_number_storage_check', $e, ['number' => $number]);
+            return false;
+        }
+        if (!is_dir($yearDir)) return false;
+        $name = rawurlencode($number) . '.pdf';
+        foreach (scandir($yearDir) ?: [] as $month) {
+            if ($month === '.' || $month === '..' || !is_file($yearDir . DIRECTORY_SEPARATOR . $month . DIRECTORY_SEPARATOR . $name)) continue;
+            Logger::warning('invoice_number_skipped', ['number' => $number, 'pdf' => "{$year}/{$month}/{$name}",
+                'reason' => 'its PDF is already in invoice_storage_dir (restored older database?)']);
+            return true;
+        }
+        return false;
     }
 
     /** The seller whose series numbered the document (credit notes of it follow it); skipped before its migration ran. */
@@ -1757,7 +1786,13 @@ final class InvoiceService
         }
         $stmt = $db->prepare("SELECT MAX(last_number) FROM invoice_counters WHERE year = :y AND prefix = :p");
         $stmt->execute($key);
-        return sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        while (self::pdfIssued($year, $number)) {
+            $increment->execute($key);
+            $stmt->execute($key);
+            $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        }
+        return $number;
     }
 
     private static function sellerSnapshot(array $legal): array

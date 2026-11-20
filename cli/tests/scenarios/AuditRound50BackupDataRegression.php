@@ -64,7 +64,44 @@ try {
     gc_collect_cycles();
 }
 
-// 1b. An issued PDF already at the path of a newly numbered document is kept aside, never overwritten.
+// 1b. Capability review: the counters are only carried over from the replaced database. A restore onto a lost, empty
+//     or new database (nothing to carry over) numbered from the backup's lower counter and issued again the numbers
+//     whose PDFs are in the invoice storage, in another month folder unnoticed. The storage is the second record.
+$r50bNumDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$r50bNumDb->exec("CREATE TABLE invoice_number_counters (store_id TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'invoice', year INTEGER NOT NULL,
+    prefix TEXT NOT NULL DEFAULT '', last_number INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (store_id, type, year, prefix))");
+$r50bNumDb->exec("INSERT INTO invoice_number_counters VALUES ('default', 'invoice', 2091, 'FA', 3)");
+$r50bNumDb->exec("CREATE TABLE invoice_counters (year INTEGER NOT NULL, prefix TEXT NOT NULL DEFAULT '', last_number INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (year, prefix))");
+$r50bNumDb->exec("INSERT INTO invoice_counters VALUES (2091, 'LG', 3)");
+$r50bYearDir = null;
+try {
+    $r50bStorageRoot = new ReflectionMethod('InvoiceService', 'storageDir');
+    $r50bStorageRoot->setAccessible(true);
+    $r50bYearDir = rtrim((string)$r50bStorageRoot->invoke(null), '/\\') . '/2091';
+    // Issued after the backup: FA 4 in October, FA 5 in November; LG 4 (legacy series) in October.
+    foreach (['10/FA20910004', '11/FA20910005', '10/LG20910004'] as $r50bIssued) {
+        @mkdir(dirname($r50bYearDir . '/' . $r50bIssued), 0750, true);
+        file_put_contents($r50bYearDir . '/' . $r50bIssued . '.pdf', '%PDF issued after the backup');
+    }
+    $r50bAlloc = new ReflectionMethod('InvoiceService', 'allocateNumber');
+    $r50bAlloc->setAccessible(true);
+    $r50bNext = (string)$r50bAlloc->invoke(null, $r50bNumDb, 'default', 'invoice', 2091, 'FA');
+    assert_equals('FA20910006', $r50bNext,
+        'R50 restore onto an empty database: the next number skips the numbers whose PDFs are in the invoice storage, in any month');
+    assert_equals(6, (int)$r50bNumDb->query("SELECT last_number FROM invoice_number_counters WHERE year = 2091 AND prefix = 'FA'")->fetchColumn(),
+        'R50 restore onto an empty database: the counter continues after the skipped numbers');
+    $r50bLegacy = new ReflectionMethod('InvoiceService', 'allocateLegacyNumber');
+    $r50bLegacy->setAccessible(true);
+    assert_equals('LG20910005', (string)$r50bLegacy->invoke(null, $r50bNumDb, 2091, 'LG'),
+        'R50 restore onto an empty database: the legacy per-(year, prefix) series skips an issued number too');
+} catch (Throwable $e) {
+    $r50bFail('numbering after a restore onto an empty database', $e);
+} finally {
+    if ($r50bYearDir !== null) $r50bRm($r50bYearDir);
+    $r50bNumDb = null;
+}
+
+// 1c. Last line of defence: should a numbered document's PDF path still be taken, the file there is kept aside.
 try {
     $r50bStorage = new ReflectionMethod('InvoiceService', 'storageDir');
     $r50bStorage->setAccessible(true);
