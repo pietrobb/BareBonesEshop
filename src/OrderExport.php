@@ -15,7 +15,7 @@ final class OrderExport {
     /**
      * Normalized list filters (unknown values fall back to defaults) and the matching WHERE on alias o.
      *
-     * @return array{q: string, period: string, status: string, payment_status: string, where: string, params: array<string,string>}
+     * @return array{q: string, period: string, status: string, payment_status: string, where: string, params: array<string,string>, index: string}
      */
     public static function filters(array $input, string $defaultPeriod = '30'): array {
         $text = static fn(string $key): string => is_string($input[$key] ?? null) ? trim($input[$key]) : '';
@@ -43,7 +43,17 @@ final class OrderExport {
             $where[] = 'o.payment_status = :payment_status';
             $params[':payment_status'] = $filters['payment_status'];
         }
-        return $filters + ['where' => implode(' AND ', $where), 'params' => $params];
+        return $filters + ['where' => implode(' AND ', $where), 'params' => $params, 'index' => self::listIndex($filters['status'], $filters['payment_status'])];
+    }
+
+    /**
+     * R50 (review round 20, low): MySQL hint for a store's orders ordered by created_at (Db::forceIndex()): the index whose
+     * equality columns are the filters, so the newest page is read in order instead of sorting every order of the store.
+     */
+    public static function listIndex(string $status, string $paymentStatus): string {
+        $index = $status !== '' ? 'idx_orders_store_status_created'
+            : ($paymentStatus !== '' ? 'idx_orders_store_payment_created' : 'idx_orders_store_created');
+        return Db::forceIndex('orders', $index);
     }
 
     /** Write the filtered orders of the current store as CSV; returns the number of order rows. */
@@ -51,7 +61,7 @@ final class OrderExport {
         $filters = self::filters($input, 'all');
         // Unbuffered on MySQL: orders stream to the CSV, so memory stays flat however many orders match.
         $stmt = Db::executeUnbuffered("SELECT o.*, (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_quantity
-            FROM orders o WHERE {$filters['where']} ORDER BY o.created_at DESC, o.id DESC", $filters['params']);
+            FROM orders o{$filters['index']} WHERE {$filters['where']} ORDER BY o.created_at DESC, o.id DESC", $filters['params']);
         // A failure mid-stream is logged, raised as an incident and thrown (CsvExportTruncated).
         return CsvExport::stream($out, $stmt, self::COLUMNS, static function (array $order): array {
             $address = json_decode((string)($order['shipping_addr'] ?? ''), true);

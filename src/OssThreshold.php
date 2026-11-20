@@ -279,6 +279,48 @@ final class OssThreshold
         return false;
     }
 
+    /** Scenarios whose open orders count toward the threshold (orderNet()). */
+    private const OPEN_ORDER_SCENARIOS = [VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT];
+
+    /**
+     * R50 (review round 20, medium): orders placed before orders.oss_net existed got their net only when migration
+     * 20261113190000 ran with this release's Db; a signed update runs the migrations with the old release's Db, so it was
+     * skipped and every checkout counted those orders from their lines (6.7-8.8 s at 20 000 open orders of a store
+     * invoicing in its ERP, out of memory at 330 000). Stores the net of every order placed since $since (UTC) still
+     * without one, 500 per batch (one commit each on MySQL). Uses no Db method a released Db lacks. Returns the orders.
+     */
+    public static function backfillOrderNets(PDO $db, string $since): int
+    {
+        if (!self::hasColumn('orders', 'oss_net', $db)) return 0;
+        $marks = implode(', ', array_fill(0, count(self::OPEN_ORDER_SCENARIOS), '?'));
+        $settled = $db->prepare("UPDATE orders SET oss_net = 0 WHERE oss_net IS NULL AND created_at >= ? AND (status IN ('cancelled', 'refunded', 'failed')
+            OR vat_scenario IS NULL OR vat_scenario NOT IN ({$marks})
+            OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = orders.id AND i.type = 'invoice' AND i.status = 'issued'))");
+        $settled->execute([$since, ...self::OPEN_ORDER_SCENARIOS]);
+        $count = $settled->rowCount();
+        $next = $db->prepare('SELECT * FROM orders WHERE oss_net IS NULL AND created_at >= ? AND id > ? ORDER BY id LIMIT 500');
+        $store = $db->prepare('UPDATE orders SET oss_net = ? WHERE id = ? AND oss_net IS NULL');
+        $own = $db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite' && !$db->inTransaction();
+        $after = 0;
+        do {
+            $next->execute([$since, $after]);
+            $rows = $next->fetchAll(PDO::FETCH_ASSOC);
+            if ($own && $rows !== []) $db->beginTransaction();
+            try {
+                foreach ($rows as $order) {
+                    $store->execute([self::orderNet($db, $order), (int)$order['id']]);
+                    $count += $store->rowCount();
+                    $after = (int)$order['id'];
+                }
+                if ($own && $rows !== []) $db->commit();
+            } catch (\Throwable $e) {
+                if ($own && $db->inTransaction()) $db->rollBack();
+                throw $e;
+            }
+        } while (count($rows) === 500);
+        return $count;
+    }
+
     /** Distance-sale net of an order not invoiced yet, from its snapshot and lines. */
     public static function orderNet(PDO $db, array $order): int
     {
@@ -779,7 +821,14 @@ final class OssThreshold
      */
     private static function consistently(PDO $db, callable $read): mixed
     {
-        if ($db->inTransaction()) return $read();
+        self::$unstoredNets = [];
+        if ($db->inTransaction()) {
+            try {
+                return $read();
+            } finally {
+                self::$unstoredNets = []; // the caller's transaction may be read-only: stored by a later read
+            }
+        }
         if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
             $db->exec('BEGIN DEFERRED');
         } else {
@@ -789,11 +838,39 @@ final class OssThreshold
         try {
             $result = $read();
         } catch (\Throwable $e) {
+            self::$unstoredNets = [];
             $db->exec('ROLLBACK');
             throw $e;
         }
         $db->exec('COMMIT');
+        self::storeCountedNets($db);
         return $result;
+    }
+
+    /** @var array<int, int> order id => net of open orders yearSales() counted from their lines (no orders.oss_net yet) */
+    private static array $unstoredNets = [];
+
+    /**
+     * R50: stores the nets yearSales() computed for orders without one (backfillOrderNets() not run), after the read-only
+     * snapshot, so the next checkout reads them from orders.oss_net. Only a still missing net is written (an order placed,
+     * edited or invoiced meanwhile stored its own); 500 per commit.
+     */
+    private static function storeCountedNets(PDO $db): void
+    {
+        $pending = self::$unstoredNets;
+        self::$unstoredNets = [];
+        if ($pending === []) return;
+        $store = $db->prepare('UPDATE orders SET oss_net = ? WHERE id = ? AND oss_net IS NULL');
+        foreach (array_chunk($pending, 500, true) as $chunk) {
+            $db->beginTransaction();
+            try {
+                foreach ($chunk as $id => $net) $store->execute([$net, $id]);
+                $db->commit();
+            } catch (\Throwable $e) {
+                if ($db->inTransaction()) $db->rollBack();
+                throw $e;
+            }
+        }
     }
 
     /**
@@ -840,15 +917,27 @@ final class OssThreshold
             $inYear = implode(' OR ', array_fill(0, count($storeIds), '(o.store_id = ? AND o.created_at >= ? AND o.created_at < ?)'));
             $open = "FROM orders o WHERE ({$inYear}) AND o.status NOT IN ('cancelled', 'refunded', 'failed')
                   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.type = 'invoice' AND i.status = 'issued')";
-            if (Db::hasColumn('orders', 'oss_net', $db)) {
+            $storedOrders = Db::hasColumn('orders', 'oss_net', $db);
+            if ($storedOrders) {
                 $stmt = $db->prepare("SELECT LOWER(o.currency) AS currency, SUM(o.oss_net) AS net {$open} AND o.oss_net > 0 GROUP BY LOWER(o.currency)");
                 $stmt->execute($bounds);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $add((string)$row['currency'], (int)$row['net']);
                 $open .= ' AND o.oss_net IS NULL';
             }
-            $stmt = $db->prepare("SELECT o.* {$open} AND o.vat_scenario IN (?, ?, ?, ?)");
-            $stmt->execute([...$bounds, VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) $add((string)($order['currency'] ?? 'eur'), self::orderNet($db, $order));
+            // R50: an order still without its net (backfillOrderNets() not run yet) is counted from its lines once: by id,
+            // 500 rows at a time (not every row of the year in memory), and its net is stored for the next checkout.
+            $stmt = $db->prepare("SELECT o.* {$open} AND o.vat_scenario IN (?, ?, ?, ?) AND o.id > ? ORDER BY o.id LIMIT 500");
+            $after = 0;
+            do {
+                $stmt->execute([...$bounds, ...self::OPEN_ORDER_SCENARIOS, $after]);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($rows as $order) {
+                    $net = self::orderNet($db, $order);
+                    $add((string)($order['currency'] ?? 'eur'), $net);
+                    if ($storedOrders) self::$unstoredNets[(int)$order['id']] = $net;
+                    $after = (int)$order['id'];
+                }
+            } while (count($rows) === 500);
         }
         if ($saleNet > 0) $add($saleCurrency, $saleNet);
         $rates = EurRates::current()['rates'];

@@ -249,7 +249,7 @@ class GdprService {
         }
 
         $db = Db::get();
-        $stmt = $db->prepare("
+        $stmt = self::prepare($db, "
             INSERT INTO gdpr_events (action, customer_id, email_hash, ip_hash, actor, payload_hash, note, store_id)
             VALUES (:action, :customer_id, :email_hash, :ip_hash, :actor, :payload_hash, :note, :store)
         ");
@@ -289,7 +289,7 @@ class GdprService {
         $ipHash = $ip !== '' ? self::hashPii($ip) : null;
 
         $db = Db::get();
-        $stmt = $db->prepare("
+        $stmt = self::prepare($db, "
             INSERT INTO cookie_consent (session_id, customer_id, ip_hash, user_agent, categories_json, method, consent_version)
             VALUES (:session_id, :customer_id, :ip_hash, :user_agent, :cats, :method, :ver)
         ");
@@ -318,7 +318,7 @@ class GdprService {
     public static function exportCustomer(int $customerId): array {
         $db = Db::get();
 
-        $stmt = $db->prepare("SELECT * FROM customers WHERE id = ? AND store_id = ?");
+        $stmt = self::prepare($db, "SELECT * FROM customers WHERE id = ? AND store_id = ?");
         $stmt->execute([$customerId, StoreContext::current()->id()]);
         $customer = $stmt->fetch();
         if (!$customer) throw new RuntimeException("Customer #{$customerId} not found");
@@ -326,7 +326,7 @@ class GdprService {
         // Redact password_hash
         unset($customer['password_hash']);
 
-        $stmt = $db->prepare("SELECT * FROM customer_addresses WHERE customer_id = ? ORDER BY id");
+        $stmt = self::prepare($db, "SELECT * FROM customer_addresses WHERE customer_id = ? ORDER BY id");
         $stmt->execute([$customerId]);
         $addresses = $stmt->fetchAll();
 
@@ -351,35 +351,35 @@ class GdprService {
     /** Guest orders (no account) of the current store placed with exactly this address; 0 for a non-address. */
     public static function guestOrderCount(string $email): int {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return 0;
-        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?)");
+        $stmt = self::prepare(Db::get(), "SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?)");
         $stmt->execute([StoreContext::current()->id(), $email]);
         return (int)$stmt->fetchColumn();
     }
 
     private static function exportSubject(PDO $db, ?array $customer, int $customerId, array $addresses, array $ownership): array {
         $email = (string)$ownership[':owner_email'];
-        $stmt = $db->prepare("SELECT * FROM orders WHERE id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
+        $stmt = self::prepare($db, "SELECT * FROM orders WHERE id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
         $stmt->execute($ownership);
         $orders = [];
         $hasOrderConsents = self::hasTable($db, 'order_consents');
         foreach ($stmt->fetchAll() as $o) {
             $orderId = (int)$o['id'];
-            $itemsStmt = $db->prepare("SELECT * FROM order_items WHERE order_id = ? ORDER BY id");
+            $itemsStmt = self::prepare($db, "SELECT * FROM order_items WHERE order_id = ? ORDER BY id");
             $itemsStmt->execute([$orderId]);
-            $invStmt = $db->prepare("
+            $invStmt = self::prepare($db, "
                 SELECT id, number, issued_at, due_date, total_net, total_vat, total_gross, currency, status, type
                 FROM invoices WHERE order_id = ? AND store_id = ? ORDER BY id
             ");
             $invStmt->execute([$orderId, StoreContext::current()->id()]);
             // Redact payment_transactions raw_response
-            $payStmt = $db->prepare("
+            $payStmt = self::prepare($db, "
                 SELECT id, provider, provider_ref, status, amount, currency, idempotency_key, created_at, updated_at
                 FROM payment_transactions WHERE order_id = ? AND store_id = ? ORDER BY id
             ");
             $payStmt->execute([$orderId, StoreContext::current()->id()]);
             $consents = [];
             if ($hasOrderConsents) {
-                $consentStmt = $db->prepare("SELECT * FROM order_consents WHERE order_id = ? ORDER BY id");
+                $consentStmt = self::prepare($db, "SELECT * FROM order_consents WHERE order_id = ? ORDER BY id");
                 $consentStmt->execute([$orderId]);
                 $consents = $consentStmt->fetchAll();
             }
@@ -394,7 +394,7 @@ class GdprService {
 
         // Unverified accounts may see only mail linked to their own orders. R25: mail the log provider only wrote down
         // reached nobody; the export does not tell the customer it was sent.
-        $stmt = $db->prepare("
+        $stmt = self::prepare($db, "
             SELECT id, order_id, recipient, template, locale, subject, adapter,
                 CASE WHEN status = 'sent' AND adapter = 'log' THEN 'logged' ELSE status END AS status, sent_at, created_at
             FROM email_log WHERE store_id = :log_store AND LOWER(recipient) = LOWER(:recipient_email)
@@ -410,34 +410,34 @@ class GdprService {
         // Cookie consent history: the account's own records and those of its browser sessions.
         $consent = [];
         if (self::hasTable($db, 'cookie_consent')) {
-            $stmt = $db->prepare("SELECT * FROM cookie_consent WHERE customer_id = ?" . self::inList(' OR session_id', $sessionKeys) . " ORDER BY id ASC");
+            $stmt = self::prepare($db, "SELECT * FROM cookie_consent WHERE customer_id = ?" . self::inList(' OR session_id', $sessionKeys) . " ORDER BY id ASC");
             $stmt->execute(array_merge([$customerId], $sessionKeys));
             $consent = $stmt->fetchAll();
         }
 
-        $stmt = $db->prepare("SELECT id, store_id, order_id, coupon_code, customer_email, discount, created_at FROM coupon_uses
+        $stmt = self::prepare($db, "SELECT id, store_id, order_id, coupon_code, customer_email, discount, created_at FROM coupon_uses
             WHERE store_id = :coupon_store AND LOWER(customer_email) = LOWER(:coupon_email) AND order_id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
         $stmt->execute($ownership + [':coupon_store' => $store, ':coupon_email' => $email]);
         $couponUses = $stmt->fetchAll();
 
-        $stmt = $db->prepare("SELECT * FROM product_reviews WHERE customer_id = ? ORDER BY id ASC");
+        $stmt = self::prepare($db, "SELECT * FROM product_reviews WHERE customer_id = ? ORDER BY id ASC");
         $stmt->execute([$customerId]);
         $reviews = $stmt->fetchAll();
 
         $owners = array_merge(['c:' . $customerId], array_map(static fn(string $key): string => 's:' . $key, $sessionKeys));
-        $stmt = $db->prepare("SELECT * FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners) . " ORDER BY id ASC");
+        $stmt = self::prepare($db, "SELECT * FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners) . " ORDER BY id ASC");
         $stmt->execute(array_merge([$customerId], $owners));
         $wishlist = $stmt->fetchAll();
 
         // "Buy later" lines of the account (a guest's list never leaves the session).
         $savedForLater = [];
         if (self::hasTable($db, 'saved_for_later_items')) {
-            $stmt = $db->prepare("SELECT id, store_id, product_id, variant_id, qty, saved_price, saved_currency, created_at FROM saved_for_later_items WHERE customer_id = ? ORDER BY id ASC");
+            $stmt = self::prepare($db, "SELECT id, store_id, product_id, variant_id, qty, saved_price, saved_currency, created_at FROM saved_for_later_items WHERE customer_id = ? ORDER BY id ASC");
             $stmt->execute([$customerId]);
             $savedForLater = $stmt->fetchAll();
         }
 
-        $stmt = $db->prepare("SELECT id, session_id, customer_email, cart_data, cart_value, item_count, currency, locale, order_id,
+        $stmt = self::prepare($db, "SELECT id, session_id, customer_email, cart_data, cart_value, item_count, currency, locale, order_id,
                 created_at, updated_at, reminded_at, converted_at, reminder_status
             FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS . " ORDER BY id ASC");
         $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
@@ -446,22 +446,22 @@ class GdprService {
         // Anyone can type an address into the form: an unverified account does not own the requests under it.
         $stockNotifications = [];
         if ((string)$ownership[':verified'] === '1' && self::hasTable($db, 'back_in_stock_requests')) {
-            $stmt = $db->prepare("SELECT id, product_id, email, locale, created_at, confirmed_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
+            $stmt = self::prepare($db, "SELECT id, product_id, email, locale, created_at, confirmed_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
             $stmt->execute([$store, $email]);
             $stockNotifications = $stmt->fetchAll();
         }
 
-        $stmt = $db->prepare("SELECT * FROM rma_requests
+        $stmt = self::prepare($db, "SELECT * FROM rma_requests
             WHERE store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . ")) ORDER BY id ASC");
         $stmt->execute($ownership + [':rma_store' => $store, ':rma_customer' => $customerId]);
         $rmas = [];
         $hasReceipts = self::hasTable($db, 'return_receipts');
         foreach ($stmt->fetchAll() as $rma) {
-            $itemsStmt = $db->prepare("SELECT * FROM rma_items WHERE rma_id = ? ORDER BY id");
+            $itemsStmt = self::prepare($db, "SELECT * FROM rma_items WHERE rma_id = ? ORDER BY id");
             $itemsStmt->execute([(int)$rma['id']]);
             $receipts = [];
             if ($hasReceipts) {
-                $receiptStmt = $db->prepare("SELECT id, rma_item_id, quantity, disposition, note, created_at FROM return_receipts WHERE rma_id = ? AND store_id = ? ORDER BY id");
+                $receiptStmt = self::prepare($db, "SELECT id, rma_item_id, quantity, disposition, note, created_at FROM return_receipts WHERE rma_id = ? AND store_id = ? ORDER BY id");
                 $receiptStmt->execute([(int)$rma['id'], $store]);
                 $receipts = $receiptStmt->fetchAll();
             }
@@ -528,7 +528,7 @@ class GdprService {
      */
     public static function anonymizeCustomer(int $customerId, string $actor = 'self'): array {
         $db = Db::get();
-        $stmt = $db->prepare("SELECT * FROM customers WHERE id = ? AND store_id = ?");
+        $stmt = self::prepare($db, "SELECT * FROM customers WHERE id = ? AND store_id = ?");
         $stmt->execute([$customerId, StoreContext::current()->id()]);
         $customer = $stmt->fetch();
         if (!$customer) throw new RuntimeException("Customer #{$customerId} not found");
@@ -544,7 +544,7 @@ class GdprService {
         $db->beginTransaction();
         try {
             // 1) customers row → anonymize. Use '' (empty) for NOT NULL columns.
-            $stmt = $db->prepare("
+            $stmt = self::prepare($db, "
                 UPDATE customers
                 SET email = :email,
                     name = '', phone = '',
@@ -558,7 +558,7 @@ class GdprService {
             $rowsCust = $stmt->rowCount();
 
             // 2) addresses → hard DELETE (per design — no legal need)
-            $stmt = $db->prepare("DELETE FROM customer_addresses WHERE customer_id = ?");
+            $stmt = self::prepare($db, "DELETE FROM customer_addresses WHERE customer_id = ?");
             $stmt->execute([$customerId]);
             $rowsAddr = $stmt->rowCount();
 
@@ -651,7 +651,7 @@ class GdprService {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Invalid e-mail');
         // ':guest' owns the guest orders. Rows linked to no order (mail log, audit trail, carts, jobs) are only the
         // guest's ('verified') while no account of this store uses the address: otherwise they may be the account's.
-        $account = $db->prepare("SELECT COUNT(*) FROM customers WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+        $account = self::prepare($db, "SELECT COUNT(*) FROM customers WHERE store_id = ? AND LOWER(email) = LOWER(?)");
         $account->execute([StoreContext::current()->id(), $email]);
         $ownership = [':order_store' => StoreContext::current()->id(), ':customer_id' => 0, ':verified' => (int)$account->fetchColumn() > 0 ? 0 : 1,
             ':guest' => 1, ':owner_email' => $email];
@@ -663,11 +663,11 @@ class GdprService {
 
     /** Abandoned carts and back-in-stock requests of the address in the current store: erasure deletes both. */
     private static function guestCartsAndRequests(PDO $db, string $email): int {
-        $carts = $db->prepare("SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
+        $carts = self::prepare($db, "SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
         $carts->execute([$email, StoreContext::current()->id()]);
         $count = (int)$carts->fetchColumn();
         if (self::hasTable($db, 'back_in_stock_requests')) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+            $stmt = self::prepare($db, "SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
             $stmt->execute([StoreContext::current()->id(), $email]);
             $count += (int)$stmt->fetchColumn();
         }
@@ -686,11 +686,11 @@ class GdprService {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return null;
         $db = Db::get();
         $store = StoreContext::current()->id();
-        $stmt = $db->prepare("SELECT MAX(created_at) FROM gdpr_events WHERE store_id = ? AND action = 'erase' AND customer_id IS NULL AND email_hash = ?");
+        $stmt = self::prepare($db, "SELECT MAX(created_at) FROM gdpr_events WHERE store_id = ? AND action = 'erase' AND customer_id IS NULL AND email_hash = ?");
         $stmt->execute([$store, self::hashPii(strtolower($email))]);
         $erasedAt = $stmt->fetchColumn();
         if ($erasedAt === false || $erasedAt === null) return null;
-        $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?) AND created_at > ?");
+        $stmt = self::prepare($db, "SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?) AND created_at > ?");
         $stmt->execute([$store, $email, (string)$erasedAt]);
         return ['erased_at' => (string)$erasedAt, 'new_data' => (int)$stmt->fetchColumn() + self::guestCartsAndRequests($db, $email)];
     }
@@ -698,7 +698,7 @@ class GdprService {
     /** Erasure shared by accounts and guests: mail log, audit trail, coupon uses and eraseCustomerContent(). */
     private static function eraseSubject(PDO $db, int $customerId, string $origEmail, array $ownership, string $placeholder, string $erasureMarker): array {
         // 3) email_log → scrub PII fields, keep template+adapter+status for stats
-        $stmt = $db->prepare("
+        $stmt = self::prepare($db, "
             UPDATE email_log
             SET recipient = :placeholder,
                 subject = :marker,
@@ -721,7 +721,7 @@ class GdprService {
         $hasAudit = self::tableColumns($db, 'audit_log') !== [];
         $rowsAudit = 0;
         if ($hasAudit) {
-            $stmt = $db->prepare("
+            $stmt = self::prepare($db, "
                 UPDATE audit_log
                 SET old_value = :old_marker, new_value = :new_marker
                 WHERE store_id = :store AND (INSTR(old_value, :old_email) > 0 OR INSTR(new_value, :new_email) > 0)
@@ -750,7 +750,7 @@ class GdprService {
             if ($emailCol !== null) {
                 $hashed = self::hashPii(strtolower($origEmail));
                 $sql = "UPDATE coupon_uses SET {$emailCol} = :hashed WHERE store_id = :coupon_store AND LOWER({$emailCol}) = LOWER(:coupon_email) AND order_id IN (" . self::CUSTOMER_ORDERS . ")";
-                $stmt = $db->prepare($sql);
+                $stmt = self::prepare($db, $sql);
                 $stmt->execute($ownership + [':hashed' => $hashed, ':coupon_store' => StoreContext::current()->id(), ':coupon_email' => $origEmail]);
                 $rowsCoupon = $stmt->rowCount();
             }
@@ -767,7 +767,7 @@ class GdprService {
         // and address); the ones naming this e-mail go (a retried request is then executed again, idempotently).
         $rowsIdempotency = 0;
         if (self::tableColumns($db, 'api_idempotency') !== []) {
-            $stmt = $db->prepare('DELETE FROM api_idempotency WHERE store_id = :store AND INSTR(LOWER(response_body), :email) > 0');
+            $stmt = self::prepare($db, 'DELETE FROM api_idempotency WHERE store_id = :store AND INSTR(LOWER(response_body), :email) > 0');
             $stmt->execute([':store' => StoreContext::current()->id(), ':email' => strtolower($origEmail)]);
             $rowsIdempotency = $stmt->rowCount();
         }
@@ -788,9 +788,9 @@ class GdprService {
      */
     private static function erasePhoneFromInvoices(PDO $db, array $orderIds): int {
         if ($orderIds === [] || self::tableColumns($db, 'invoices') === []) return 0;
-        $stmt = $db->prepare('SELECT id, customer_snapshot FROM invoices WHERE 1 = 1' . self::inList(' AND order_id', $orderIds));
+        $stmt = self::prepare($db, 'SELECT id, customer_snapshot FROM invoices WHERE 1 = 1' . self::inList(' AND order_id', $orderIds));
         $stmt->execute($orderIds);
-        $update = $db->prepare('UPDATE invoices SET customer_snapshot = :snapshot WHERE id = :id');
+        $update = self::prepare($db, 'UPDATE invoices SET customer_snapshot = :snapshot WHERE id = :id');
         $changed = 0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
             $snapshot = json_decode((string)$invoice['customer_snapshot'], true);
@@ -800,6 +800,36 @@ class GdprService {
             $changed++;
         }
         return $changed;
+    }
+
+    /**
+     * R50 (review round 20, medium): LOWER(column) = LOWER(:email) cannot use the column's index, so on MySQL an erasure
+     * read every order of the shop, and its UPDATE ... IN (SELECT ... FROM orders) statements locked them: a payment
+     * webhook waited 4.6 s. A MySQL/MariaDB *_ci collation compares case-insensitively already (LOWER() on both sides
+     * was compared in that same collation), so there the plain comparison is the same match through the index. SQLite
+     * and a case-sensitive collation (_bin, _cs) keep LOWER().
+     */
+    private static function prepare(PDO $db, string $sql): PDOStatement {
+        if (self::collationMatchesEmails($db)) {
+            $sql = (string)preg_replace('/LOWER\(([A-Za-z_.]+)\) = LOWER\((:[A-Za-z_]+|\?)\)/', '$1 = $2', $sql);
+        }
+        return $db->prepare($sql);
+    }
+
+    /** @var WeakMap<PDO, bool>|null */
+    private static ?WeakMap $collationMatches = null;
+
+    private static function collationMatchesEmails(PDO $db): bool {
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') return false;
+        self::$collationMatches ??= new WeakMap();
+        if (!isset(self::$collationMatches[$db])) {
+            $columns = ['orders' => ['customer_email'], 'customers' => ['email']];
+            foreach (['coupon_uses' => 'customer_email', 'abandoned_carts' => 'customer_email', 'back_in_stock_requests' => 'email', 'email_log' => 'recipient'] as $table => $column) {
+                if (self::hasTable($db, $table)) $columns[$table] = [$column];
+            }
+            self::$collationMatches[$db] = Db::caseInsensitiveColumns($columns, $db);
+        }
+        return self::$collationMatches[$db];
     }
 
     /** @param 'erase'|'export' $kind */
@@ -833,36 +863,36 @@ class GdprService {
         // that selects from orders, error 1093).
         $rows['orders'] = 0;
         if ($orderIds !== []) {
-            $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = '', updated_at = " . Db::now() . "
+            $stmt = self::prepare($db, "UPDATE orders SET ip_address = '', customer_phone = '', notes = '', updated_at = " . Db::now() . "
                 WHERE (ip_address <> '' OR customer_phone <> '' OR notes <> '')" . self::inList(' AND id', $orderIds));
             $stmt->execute($orderIds);
             $rows['orders'] = $stmt->rowCount();
         }
         $rows['invoices'] = self::erasePhoneFromInvoices($db, $orderIds);
 
-        $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
+        $stmt = self::prepare($db, "DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);
         $rows['product_reviews'] = $stmt->rowCount();
 
         $owners = array_merge(['c:' . $customerId], array_map(static fn(string $key): string => 's:' . $key, $sessionKeys));
-        $stmt = $db->prepare("DELETE FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners));
+        $stmt = self::prepare($db, "DELETE FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners));
         $stmt->execute(array_merge([$customerId], $owners));
         $rows['wishlist_items'] = $stmt->rowCount();
 
         $rows['saved_for_later_items'] = 0;
         if (self::hasTable($db, 'saved_for_later_items')) {
-            $stmt = $db->prepare("DELETE FROM saved_for_later_items WHERE customer_id = ?");
+            $stmt = self::prepare($db, "DELETE FROM saved_for_later_items WHERE customer_id = ?");
             $stmt->execute([$customerId]);
             $rows['saved_for_later_items'] = $stmt->rowCount();
         }
 
-        $stmt = $db->prepare("DELETE FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
+        $stmt = self::prepare($db, "DELETE FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
         $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
         $rows['abandoned_carts'] = $stmt->rowCount();
 
         $rows['back_in_stock_requests'] = 0;
         if (self::hasTable($db, 'back_in_stock_requests')) {
-            $stmt = $db->prepare("DELETE FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+            $stmt = self::prepare($db, "DELETE FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
             $stmt->execute([$store, $email]);
             $rows['back_in_stock_requests'] = $stmt->rowCount();
         }
@@ -870,7 +900,7 @@ class GdprService {
         foreach (['password_reset_tokens', 'customer_email_verifications'] as $tokenTable) {
             $rows[$tokenTable] = 0;
             if (!self::hasTable($db, $tokenTable)) continue;
-            $stmt = $db->prepare("DELETE FROM {$tokenTable} WHERE customer_id = ?");
+            $stmt = self::prepare($db, "DELETE FROM {$tokenTable} WHERE customer_id = ?");
             $stmt->execute([$customerId]);
             $rows[$tokenTable] = $stmt->rowCount();
         }
@@ -878,7 +908,7 @@ class GdprService {
         // The consent choice itself stays as Art.7(1) evidence; nothing links it to the person any more.
         $rows['cookie_consent'] = 0;
         if (self::hasTable($db, 'cookie_consent')) {
-            $stmt = $db->prepare("UPDATE cookie_consent SET customer_id = NULL, session_id = NULL, ip_hash = NULL, user_agent = NULL
+            $stmt = self::prepare($db, "UPDATE cookie_consent SET customer_id = NULL, session_id = NULL, ip_hash = NULL, user_agent = NULL
                 WHERE customer_id = ?" . self::inList(' OR session_id', $sessionKeys));
             $stmt->execute(array_merge([$customerId], $sessionKeys));
             $rows['cookie_consent'] = $stmt->rowCount();
@@ -886,7 +916,7 @@ class GdprService {
 
         // Staff notes are free text that often quotes the customer: redacted like the reason, never kept.
         $rmaScope = "store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . "))";
-        $stmt = $db->prepare("UPDATE rma_requests SET reason = :marker,
+        $stmt = self::prepare($db, "UPDATE rma_requests SET reason = :marker,
                 admin_note = CASE WHEN admin_note IS NULL OR admin_note = '' THEN admin_note ELSE :note_marker END,
                 updated_at = " . Db::now() . "
             WHERE {$rmaScope}");
@@ -894,7 +924,7 @@ class GdprService {
         $rows['rma_requests'] = $stmt->rowCount();
         $rows['return_receipts'] = 0;
         if (self::hasTable($db, 'return_receipts')) {
-            $stmt = $db->prepare("UPDATE return_receipts SET note = :marker
+            $stmt = self::prepare($db, "UPDATE return_receipts SET note = :marker
                 WHERE store_id = :receipt_store AND note IS NOT NULL AND note <> '' AND rma_id IN (SELECT id FROM rma_requests WHERE {$rmaScope})");
             $stmt->execute($ownership + [':marker' => $marker, ':receipt_store' => $store, ':rma_store' => $store, ':rma_customer' => $customerId]);
             $rows['return_receipts'] = $stmt->rowCount();
@@ -902,16 +932,16 @@ class GdprService {
 
         $rows['withdrawal_requests'] = 0;
         if ($orderIds !== [] && self::hasTable($db, 'withdrawal_requests')) {
-            $stmt = $db->prepare("UPDATE withdrawal_requests SET reason = ? WHERE store_id = ? AND reason IS NOT NULL AND reason <> ''" . self::inList(' AND order_id', $orderIds));
+            $stmt = self::prepare($db, "UPDATE withdrawal_requests SET reason = ? WHERE store_id = ? AND reason IS NOT NULL AND reason <> ''" . self::inList(' AND order_id', $orderIds));
             $stmt->execute(array_merge([$marker, $store], $orderIds));
             $rows['withdrawal_requests'] = $stmt->rowCount();
         }
 
         $rows['payment_transactions'] = 0;
         if ($orderIds !== []) {
-            $stmt = $db->prepare("SELECT id, raw_response FROM payment_transactions WHERE store_id = ?" . self::inList(' AND order_id', $orderIds));
+            $stmt = self::prepare($db, "SELECT id, raw_response FROM payment_transactions WHERE store_id = ?" . self::inList(' AND order_id', $orderIds));
             $stmt->execute(array_merge([$store], $orderIds));
-            $update = $db->prepare("UPDATE payment_transactions SET raw_response = ? WHERE id = ?");
+            $update = self::prepare($db, "UPDATE payment_transactions SET raw_response = ? WHERE id = ?");
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tx) {
                 $raw = json_decode((string)$tx['raw_response'], true);
                 if (!is_array($raw) || ($scrubbed = self::scrubPaymentPayer($raw, $email, $placeholder)) === $raw) continue;
@@ -923,14 +953,14 @@ class GdprService {
         $payloads = self::customerPayloadRows($db, $customerId, $email, $ownership, $orderIds);
         $rows['event_outbox'] = 0;
         $erasedEvent = json_encode(['customer_id' => $customerId, 'erased' => true]);
-        $update = $db->prepare("UPDATE event_outbox SET payload = ? WHERE id = ?");
+        $update = self::prepare($db, "UPDATE event_outbox SET payload = ? WHERE id = ?");
         foreach ($payloads['event_outbox'] as $event) {
             $payload = $event['aggregate_type'] === 'customer' ? $erasedEvent : self::scrubPayloadJson((string)$event['payload'], $email, $placeholder);
             $update->execute([$payload, $event['id']]);
             $rows['event_outbox'] += $update->rowCount();
         }
         $rows['queue_jobs'] = 0;
-        $update = $db->prepare("UPDATE queue_jobs SET payload = ? WHERE id = ?");
+        $update = self::prepare($db, "UPDATE queue_jobs SET payload = ? WHERE id = ?");
         foreach ($payloads['queue_jobs'] as $job) {
             $update->execute([self::scrubPayloadJson((string)$job['payload'], $email, $placeholder), $job['id']]);
             $rows['queue_jobs'] += $update->rowCount();
@@ -942,7 +972,7 @@ class GdprService {
 
     /** @return list<string> ids of the orders the customer owns, as strings (see customerPayloadRows). */
     private static function customerOrderIds(PDO $db, array $ownership): array {
-        $stmt = $db->prepare(self::CUSTOMER_ORDERS);
+        $stmt = self::prepare($db, self::CUSTOMER_ORDERS);
         $stmt->execute($ownership);
         return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
@@ -950,7 +980,7 @@ class GdprService {
     /** Withdrawal statements or complaints of the customer's orders in the current store. */
     private static function orderRecords(PDO $db, string $table, array $orderIds): array {
         if ($orderIds === [] || !self::hasTable($db, $table)) return [];
-        $stmt = $db->prepare("SELECT * FROM {$table} WHERE store_id = ?" . self::inList(' AND order_id', $orderIds) . ' ORDER BY id');
+        $stmt = self::prepare($db, "SELECT * FROM {$table} WHERE store_id = ?" . self::inList(' AND order_id', $orderIds) . ' ORDER BY id');
         $stmt->execute(array_merge([StoreContext::current()->id()], $orderIds));
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -968,12 +998,12 @@ class GdprService {
     private static function customerSessionKeys(PDO $db, int $customerId, array $orderIds): array {
         $keys = [];
         if (self::hasTable($db, 'cookie_consent')) {
-            $stmt = $db->prepare("SELECT session_id FROM cookie_consent WHERE customer_id = ? AND session_id IS NOT NULL");
+            $stmt = self::prepare($db, "SELECT session_id FROM cookie_consent WHERE customer_id = ? AND session_id IS NOT NULL");
             $stmt->execute([$customerId]);
             $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
         }
         if ($orderIds !== [] && self::hasTable($db, 'checkout_sessions')) {
-            $stmt = $db->prepare("SELECT browser_session_hash FROM checkout_sessions WHERE browser_session_hash IS NOT NULL" . self::inList(' AND order_id', $orderIds));
+            $stmt = self::prepare($db, "SELECT browser_session_hash FROM checkout_sessions WHERE browser_session_hash IS NOT NULL" . self::inList(' AND order_id', $orderIds));
             $stmt->execute($orderIds);
             $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
         }
@@ -992,21 +1022,21 @@ class GdprService {
      */
     private static function customerPayloadRows(PDO $db, int $customerId, string $email, array $ownership, array $orderIds): array {
         $store = StoreContext::current()->id();
-        $stmt = $db->prepare("SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'customer' AND aggregate_id = ? ORDER BY id");
+        $stmt = self::prepare($db, "SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'customer' AND aggregate_id = ? ORDER BY id");
         $stmt->execute([$store, (string)$customerId]);
         $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $jobs = [];
         if ($email === '') return ['event_outbox' => $events, 'queue_jobs' => $jobs];
         // Order ids are bound as strings: a CAST(... AS CHAR) subquery mixes collations with aggregate_id on MySQL.
         if ($orderIds !== []) {
-            $stmt = $db->prepare("SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'order'" . self::inList(' AND aggregate_id', $orderIds) . " ORDER BY id");
+            $stmt = self::prepare($db, "SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'order'" . self::inList(' AND aggregate_id', $orderIds) . " ORDER BY id");
             $stmt->execute(array_merge([$store], $orderIds));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $event) {
                 if (self::payloadNamesEmail(json_decode((string)$event['payload'], true), $email)) $events[] = $event;
             }
         }
         if (!self::hasTable($db, 'queue_jobs')) return ['event_outbox' => $events, 'queue_jobs' => $jobs];
-        $stmt = $db->prepare("SELECT * FROM queue_jobs WHERE store_id = ? AND INSTR(LOWER(payload), ?) > 0 ORDER BY created_at, id");
+        $stmt = self::prepare($db, "SELECT * FROM queue_jobs WHERE store_id = ? AND INSTR(LOWER(payload), ?) > 0 ORDER BY created_at, id");
         $stmt->execute([$store, strtolower($email)]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $job) {
             if (self::jobBelongsToCustomer(json_decode((string)$job['payload'], true), $email, $ownership, $orderIds)) $jobs[] = $job;
@@ -1145,7 +1175,7 @@ class GdprService {
         $cutoff = self::computeCutoff($p);
         $params = [];
         $expired = self::expiredWhere($p, $field, $params);
-        $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$expired}");
+        $countStmt = self::prepare($db, "SELECT COUNT(*) AS c FROM {$table} WHERE {$expired}");
         $countStmt->execute($params);
         $affected = (int)$countStmt->fetch()['c'];
         $countStmt->closeCursor();
@@ -1223,7 +1253,7 @@ class GdprService {
         $where = "({$expired}) AND (" . implode(' OR ', $pending) . ')';
         foreach (array_values($statuses ?? []) as $i => $status) $params[":status{$i}"] = $status;
         if ($statuses !== null) $where .= ' AND status IN (' . implode(', ', array_map(static fn(int $i): string => ":status{$i}", array_keys(array_values($statuses)))) . ')';
-        $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$where}");
+        $countStmt = self::prepare($db, "SELECT COUNT(*) AS c FROM {$table} WHERE {$where}");
         $countStmt->execute($params);
         $affected = (int)$countStmt->fetch()['c'];
         $countStmt->closeCursor();
@@ -1247,8 +1277,8 @@ class GdprService {
      */
     private static function scrubKeepingLines(PDO $db, string $table, array $scrub, array $keepLines, string $where, array $params, string $marker, string $markerPrefix): int {
         $columns = implode(', ', $scrub);
-        $read = $db->prepare("SELECT id, {$columns} FROM {$table} WHERE id > :after AND {$where} ORDER BY id LIMIT 1000");
-        $update = $db->prepare("UPDATE {$table} SET " . implode(', ', array_map(static fn(string $f): string => "{$f} = :{$f}", $scrub)) . ' WHERE id = :id');
+        $read = self::prepare($db, "SELECT id, {$columns} FROM {$table} WHERE id > :after AND {$where} ORDER BY id LIMIT 1000");
+        $update = self::prepare($db, "UPDATE {$table} SET " . implode(', ', array_map(static fn(string $f): string => "{$f} = :{$f}", $scrub)) . ' WHERE id = :id');
         $count = 0;
         $after = 0;
         do {
@@ -1304,7 +1334,7 @@ class GdprService {
 
         $cutoff = self::computeCutoff($p);
         // count rows with email NOT already hashed AND older than cutoff
-        $countStmt = $db->prepare("
+        $countStmt = self::prepare($db, "
             SELECT COUNT(*) AS c FROM {$table}
             WHERE {$field} <= :cutoff
               AND {$emailCol} IS NOT NULL
@@ -1319,7 +1349,7 @@ class GdprService {
         if ($mode === 'apply' && $affected > 0) {
             // Fetch + hash + update per row (salt is in PHP, not SQL), in id-keyset chunks: all matching rows of a
             // large table at once did not fit in a 128 MB worker.
-            $rows = $db->prepare("
+            $rows = self::prepare($db, "
                 SELECT id, {$emailCol} AS email FROM {$table}
                 WHERE id > :after AND {$field} <= :cutoff
                   AND {$emailCol} IS NOT NULL
@@ -1328,7 +1358,7 @@ class GdprService {
                   AND length({$emailCol}) != 64
                 ORDER BY id LIMIT 1000
             ");
-            $upd = $db->prepare("UPDATE {$table} SET {$emailCol} = ? WHERE id = ?");
+            $upd = self::prepare($db, "UPDATE {$table} SET {$emailCol} = ? WHERE id = ?");
             $count = 0;
             $after = 0;
             do {
@@ -1417,7 +1447,7 @@ class GdprService {
     private static function recordRun(PDO $db, string $key, string $mode, int $affected, float $start, array $details): array {
         $duration = (int)round((microtime(true) - $start) * 1000);
         if ($mode === 'apply') {
-            $stmt = $db->prepare("
+            $stmt = self::prepare($db, "
                 INSERT INTO data_retention_runs (mode, policy_key, affected_rows, details, duration_ms)
                 VALUES (:mode, :key, :rows, :details, :dur)
             ");

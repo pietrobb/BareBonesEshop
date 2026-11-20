@@ -43,7 +43,8 @@ try {
 
     // Admin order list (src/Entrypoints/Admin/Orders.php pageOrders): filtered by status or payment status, newest first.
     $r8sOrders = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Orders.php');
-    assert_true(str_contains($r8sOrders, 'SELECT * FROM orders WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset'), 'R8 scaling: the admin order list query has the shape measured below');
+    // R50: {$index} is a MySQL FORCE INDEX hint (OrderExport::listIndex()), empty on SQLite where the plans below are read.
+    assert_true(str_contains($r8sOrders, 'SELECT * FROM orders{$index} WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset'), 'R8 scaling: the admin order list query has the shape measured below');
     $r8sCheck('R8 scaling: order list by status', $r8sPlan("SELECT * FROM orders WHERE store_id = ? AND status = ? ORDER BY created_at DESC LIMIT 25 OFFSET 0", [StoreContext::current()->id(), 'pending']), 'idx_orders_store_status_created');
     $r8sCheck('R8 scaling: order count by status', $r8sPlan("SELECT COUNT(*) FROM orders WHERE store_id = ? AND status = ?", [StoreContext::current()->id(), 'pending']), 'idx_orders_store_status_created');
     $r8sCheck('R8 scaling: order list by payment status', $r8sPlan("SELECT * FROM orders WHERE store_id = ? AND payment_status = ? ORDER BY created_at DESC LIMIT 25 OFFSET 0", [StoreContext::current()->id(), 'authorized']), 'idx_orders_store_payment_created');

@@ -418,6 +418,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
   (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the
   per-customer coupon counters keyed by an unsalted hash of the e-mail.
+- **The checkout no longer slows down on orders placed before the OSS update (review round 20).** A shop updated from
+  an older release by a signed update kept those orders without their stored distance-sale net, so every checkout of
+  a store invoicing in its ERP counted them from their lines (6.7–8.8 s at 20 000 open orders, out of memory at
+  330 000). A migration stores the missing nets now; until it has, a checkout counts such orders 500 at a time and
+  stores their nets, so the next one reads them (1 500 orders on MySQL: 2.6 s once, then 11 ms).
+- **A GDPR erasure on MySQL no longer holds up orders.** It looked the customer's orders up by `LOWER(e-mail)`, which
+  read and locked every order of the shop (a payment webhook waited 4.6 s). With the usual case-insensitive collation it
+  now compares the e-mail as stored, through its index; SQLite and a case-sensitive collation keep `LOWER()`.
+- **Admin order lists and sales reports at 500 000 orders.** On MySQL the order lists and the CSV export read the
+  index matching their filters in date order (MySQL sorted every order of the store), and a 7/30/90-day report reads
+  only the paid orders of the period and sums only their refunds (it summed every refund of the store's history).
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

@@ -297,6 +297,49 @@ class Db {
         return in_array($column, self::tableColumns($table, $db), true);
     }
 
+    /** @var WeakMap<PDO, array<string, true>>|null indexes found by forceIndex(), per connection */
+    private static ?WeakMap $indexCache = null;
+
+    /**
+     * R50 (review round 20, low): " FORCE INDEX ($index)" to put after "FROM $table [alias]" on MySQL/MariaDB when the
+     * index exists, else ''. At 500 000 orders MySQL took a store-wide index for a list ordered by created_at and sorted
+     * every order of the store. SQLite picks the right one by itself. A hit is cached per connection.
+     */
+    public static function forceIndex(string $table, string $index, ?PDO $db = null): string {
+        $db ??= self::get();
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') return '';
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $index)) throw new InvalidArgumentException('Invalid index name');
+        if (!isset(self::$indexCache[$db][$table . '.' . $index])) {
+            $stmt = $db->prepare('SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1');
+            $stmt->execute([$table, $index]);
+            if ($stmt->fetchColumn() === false) return '';
+            self::$indexCache ??= new WeakMap();
+            self::$indexCache[$db] = (self::$indexCache[$db] ?? []) + [$table . '.' . $index => true];
+        }
+        return " FORCE INDEX ({$index})";
+    }
+
+    /**
+     * R50: whether every listed column (table => columns) compares case-insensitively with "=": MySQL/MariaDB columns in
+     * a *_ci collation. False on SQLite (its = is case-sensitive) and when a column is missing or _bin/_cs.
+     * @param array<string, list<string>> $columns
+     */
+    public static function caseInsensitiveColumns(array $columns, ?PDO $db = null): bool {
+        $db ??= self::get();
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' || $columns === []) return false;
+        $found = 0;
+        $stmt = $db->prepare('SELECT COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        foreach ($columns as $table => $names) {
+            foreach ($names as $name) {
+                $stmt->execute([$table, $name]);
+                $collation = $stmt->fetchColumn();
+                if (!is_string($collation) || !str_ends_with(strtolower($collation), '_ci')) return false;
+                $found++;
+            }
+        }
+        return $found > 0;
+    }
+
     /**
      * The connection can write: a no-op UPDATE still fails on a read-only SQLite database, a read_only
      * MySQL server and a user without write grants (SELECT 1 succeeds on all of them).
@@ -350,8 +393,10 @@ class Db {
     public static function forgetSchema(?PDO $db = null): void {
         if ($db === null) {
             self::$schemaCache = null;
-        } elseif (self::$schemaCache !== null) {
-            unset(self::$schemaCache[$db]);
+            self::$indexCache = null;
+        } else {
+            if (self::$schemaCache !== null) unset(self::$schemaCache[$db]);
+            if (self::$indexCache !== null) unset(self::$indexCache[$db]);
         }
     }
 
