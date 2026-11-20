@@ -406,6 +406,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the confirmation with the new amount and payment details again; the refund credit-note job no longer leaves SQLite
   "database is locked"; an order locks its products' stock in SKU order, so two orders with the same products in a
   different order no longer deadlock on MySQL.
+- **Restoring an older backup no longer issues invoice numbers twice (review round 20).** The restored database
+  brought back lower invoice and credit-note counters, so the next invoice took a number already issued and its PDF
+  overwrote the other customer's. The counters now continue after the highest number issued before the restore, the
+  restore warns which numbers' documents the backup does not have, and a newly numbered document never overwrites a PDF
+  already at its path (the old file is kept as `*.superseded-*.pdf`).
+- **Backups also cover `config.php`, the jobs not done yet and `themes/`; a restore works on a new MySQL server.** A
+  restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run next to the
+  live ones (`*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
+  `db_name` before importing.
+- **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
+  (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the
+  per-customer coupon counters keyed by an unsalted hash of the e-mail.
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

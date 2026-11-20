@@ -1174,7 +1174,7 @@ final class InvoiceService
         }
         $pdfBin = self::renderPdf($invoice, $rows, $sellerSnap, $custSnap, $vatBreakdown);
         $absPath = self::resolvePdfPath((string)$invoice['pdf_path']);
-        self::writePdf($absPath, $pdfBin);
+        self::writePdf($absPath, $pdfBin, false);
         return $absPath;
     }
 
@@ -2117,7 +2117,11 @@ final class InvoiceService
         return $root . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $parts);
     }
 
-    private static function writePdf(string $path, string $contents): void
+    /**
+     * $fresh: the PDF of a document just numbered. R50: a file already there is an issued document of the same number
+     * (e.g. from before an older backup was restored); it is kept next to it as *.superseded-*.pdf, never overwritten.
+     */
+    private static function writePdf(string $path, string $contents, bool $fresh = true): void
     {
         $dir = dirname($path);
         if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
@@ -2127,6 +2131,13 @@ final class InvoiceService
         $realDir = realpath($dir);
         if ($root === false || $realDir === false || !self::pathIsWithin(self::normalizePath($realDir), self::normalizePath($root))) {
             throw new \RuntimeException('Invoice PDF path escapes invoice_storage_dir');
+        }
+        if ($fresh && (is_file($path) || is_link($path))) {
+            $aside = substr($path, 0, -4) . '.superseded-' . gmdate('Ymd\THis') . '-' . bin2hex(random_bytes(3)) . '.pdf';
+            if (!@rename($path, $aside)) {
+                throw new \RuntimeException("An issued PDF of this number exists and cannot be set aside: {$path}");
+            }
+            Logger::phpLog("[invoice] {$path} existed before its number was issued (restored older database?); kept as {$aside}");
         }
 
         $tmp = tempnam($dir, '.invoice-');

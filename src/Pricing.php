@@ -573,6 +573,13 @@ class Pricing {
         return $email === null ? '' : 'customer:' . hash('sha256', $email);
     }
 
+    /** R50 GDPR erasure: deletes $email's per-customer counters of $store and of the shared coupons; returns the rows. */
+    public static function forgetCustomerCounters(PDO $db, string $email, string $store): int {
+        $stmt = $db->prepare('DELETE FROM coupon_usage_counters WHERE store_id IN (:store, :all) AND subject = :subject');
+        $stmt->execute([':store' => $store, ':all' => self::ALL_STORES, ':subject' => self::couponSubject(self::normalizeEmail($email))]);
+        return $stmt->rowCount();
+    }
+
     /** Seed the counter from historic uses once, then claim one use only while below the limit. */
     private static function claimCouponUse(string $code, ?string $email, int $limit, string $store): bool {
         $db = Db::get();

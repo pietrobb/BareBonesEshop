@@ -48,6 +48,10 @@ class GdprService {
         'order_consents'               => ['columns' => ['ip_hash', 'user_agent'], 'erase' => 'retain', 'export' => 'orders',
             'reason' => 'proof of the consent given at checkout (Art.7(1)), kept with the retained order'],
         'coupon_uses'                  => ['columns' => ['customer_email'], 'erase' => 'scrub', 'export' => 'coupon_uses'],
+        'coupon_usage_counters'        => ['columns' => ['subject'], 'erase' => 'delete', 'export' => null,
+            'reason' => 'per-customer coupon counters keyed by an unsalted hash of the e-mail; the uses themselves are exported (coupon_uses)'],
+        'api_idempotency'              => ['columns' => ['response_body'], 'erase' => 'delete', 'export' => null,
+            'reason' => 'replay cache of /api/v1 responses; the orders and customers they returned are exported'],
         'email_log'                    => ['columns' => ['recipient', 'subject', 'payload'], 'erase' => 'scrub', 'export' => 'email_log'],
         'audit_log'                    => ['columns' => ['old_value', 'new_value'], 'erase' => 'scrub', 'export' => null,
             'reason' => 'staff accountability trail; the data it snapshots is exported from its source tables'],
@@ -510,9 +514,11 @@ class GdprService {
      *   - customer_addresses: hard DELETE
      *   - email_log: scrub PII (recipient→deleted-{id}@anonymized.local, subject→[erased], payload→[erased])
      *   - audit_log: scrub payload_json with placeholder
-     *   - coupon_uses: hash email
+     *   - coupon_uses: hash email; coupon_usage_counters of the e-mail: DELETE
+     *   - api_idempotency responses naming the e-mail: DELETE
      *   - everything else in PII_REGISTRY: see eraseCustomerContent()
-     *   - orders.customer_*, invoices.customer_snapshot: KEPT (10y legal retention)
+     *   - orders.customer_*, invoices.customer_snapshot: KEPT (10y legal retention), except the phone, IP and note
+     *     of the orders and the phone in their invoices' snapshot (the issued PDFs stay as sent)
      * Queued jobs are scrubbed in the queue_jobs table (database backend) and in the job files of the
      * file backend (jobs_dir, see JobQueue::rewriteFileJobs()). The Redis backend is NOT covered: the
      * QueueBackend contract cannot enumerate jobs, so jobs held in Redis (including the completed ones
@@ -750,11 +756,50 @@ class GdprService {
             }
         }
 
+        // R50: the per-customer coupon counters are keyed by an unsalted SHA-256 of the e-mail (anyone with the address
+        // could find them). Deleted: the uses above are hashed with the salt, so they are not counted for that address
+        // again; its uses in other stores still are (the counter is seeded from them).
+        $rowsCounters = 0;
+        if (self::tableColumns($db, 'coupon_usage_counters') !== []) {
+            $rowsCounters = Pricing::forgetCustomerCounters($db, $origEmail, StoreContext::current()->id());
+        }
+        // R50: an /api/v1 replay cache entry holds the full response (an order with the customer's name, e-mail, phone
+        // and address); the ones naming this e-mail go (a retried request is then executed again, idempotently).
+        $rowsIdempotency = 0;
+        if (self::tableColumns($db, 'api_idempotency') !== []) {
+            $stmt = $db->prepare('DELETE FROM api_idempotency WHERE store_id = :store AND INSTR(LOWER(response_body), :email) > 0');
+            $stmt->execute([':store' => StoreContext::current()->id(), ':email' => strtolower($origEmail)]);
+            $rowsIdempotency = $stmt->rowCount();
+        }
+
         return [
             'email_log'          => $rowsEmail,
             'audit_log'          => $rowsAudit,
             'coupon_uses'        => $rowsCoupon,
+            'coupon_usage_counters' => $rowsCounters,
+            'api_idempotency'    => $rowsIdempotency,
         ] + self::eraseCustomerContent($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
+    }
+
+    /**
+     * R50: the phone number erased from the orders (no accounting data) stayed in the customer snapshot of their invoices
+     * and credit notes, which the account, the admin and /api/v1 show. The issued PDF stays as it was sent: the accounting
+     * record is kept in its original form (docs/design/gdpr.md, section 4).
+     */
+    private static function erasePhoneFromInvoices(PDO $db, array $orderIds): int {
+        if ($orderIds === [] || self::tableColumns($db, 'invoices') === []) return 0;
+        $stmt = $db->prepare('SELECT id, customer_snapshot FROM invoices WHERE 1 = 1' . self::inList(' AND order_id', $orderIds));
+        $stmt->execute($orderIds);
+        $update = $db->prepare('UPDATE invoices SET customer_snapshot = :snapshot WHERE id = :id');
+        $changed = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
+            $snapshot = json_decode((string)$invoice['customer_snapshot'], true);
+            if (!is_array($snapshot) || trim((string)($snapshot['phone'] ?? '')) === '') continue;
+            $snapshot['phone'] = '';
+            $update->execute([':snapshot' => json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ':id' => (int)$invoice['id']]);
+            $changed++;
+        }
+        return $changed;
     }
 
     /** @param 'erase'|'export' $kind */
@@ -793,6 +838,7 @@ class GdprService {
             $stmt->execute($orderIds);
             $rows['orders'] = $stmt->rowCount();
         }
+        $rows['invoices'] = self::erasePhoneFromInvoices($db, $orderIds);
 
         $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);

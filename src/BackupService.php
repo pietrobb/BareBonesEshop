@@ -816,6 +816,8 @@ class BackupService
                 $filter = new RecursiveCallbackFilterIterator(
                     new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
                     static function (\SplFileInfo $file) use ($name, $relativeOf, &$skipped): bool {
+                        // R50: the jobs not done yet; completed jobs and the worker's lock are not worth restoring.
+                        if ($name === 'jobs' && !str_contains($relativeOf($file), '/') && !($file->isDir() && in_array($file->getFilename(), ['pending', 'processing', 'failed'], true))) return false;
                         if ($file->isLink() || !$file->isDir() || self::dirTraversable($file->getPathname())) return true;
                         $skipped[] = $name . '/' . $relativeOf($file) . '/';
                         self::log("CREATE WARN skipped unreadable directory {$name}/" . $relativeOf($file) . '/');
@@ -954,6 +956,7 @@ class BackupService
 
         $lockHandle = self::acquireLock();
         try {
+            $liveSeries = self::numberSeries(self::$db);
             // 3. close this process's connections to the live file; the gate proves no other process holds it
             self::$db = null;
             $sharedReleased = class_exists('Db', false) && Db::releaseSqliteFile($livePath);
@@ -1041,15 +1044,18 @@ class BackupService
                 $applied = null;
             }
             [$schemaWarnings, $appliedCount, $pendingCount] = self::migrationStatus($applied);
+            $numberingWarnings = self::continueNumberSeries($newDb, $liveSeries);
 
             self::log("RESTORE OK src={$remotePath} snapshot=" . ($snapshotPath ?: '-') .
                 " integrity={$integrity} applied={$appliedCount} pending={$pendingCount}");
+            foreach ($numberingWarnings as $warning) self::log('RESTORE WARNING ' . $warning);
 
             return [
                 'restored'        => $remotePath,
                 'snapshot'        => $snapshotPath,
                 'integrity'       => $integrity,
                 'schema_warnings' => $schemaWarnings,
+                'numbering_warnings' => $numberingWarnings,
                 'applied_count'   => $appliedCount,
                 'pending_count'   => $pendingCount,
                 'meta'            => $meta,
@@ -1136,6 +1142,74 @@ class BackupService
         return [$warnings, count($applied), $pendingCount];
     }
 
+    private const NUMBER_SERIES = [
+        'invoice_number_counters' => ['store_id', 'type', 'year', 'prefix'],
+        'invoice_counters' => ['year', 'prefix'],
+    ];
+
+    /** R50: last issued number per document series of $db, by counter table (null: the table is missing). */
+    private static function numberSeries(PDO $db): array
+    {
+        $series = [];
+        foreach (self::NUMBER_SERIES as $table => $columns) {
+            Db::forgetSchema($db);
+            if (!Db::tableExists($table, $db)) {
+                $series[$table] = null;
+                continue;
+            }
+            $rows = $db->query('SELECT ' . implode(', ', $columns) . ", last_number FROM {$table}")->fetchAll(PDO::FETCH_ASSOC);
+            $series[$table] = [];
+            foreach ($rows as $row) {
+                $key = implode("\x1f", array_map(static fn(string $c): string => (string)$row[$c], $columns));
+                $series[$table][$key] = max((int)$row['last_number'], $series[$table][$key] ?? 0);
+            }
+        }
+        return $series;
+    }
+
+    /**
+     * R50: an older backup brings back lower number counters, so the next document took a number already issued (and
+     * its PDF overwrote the other customer's). Every series of the replaced database continues after the higher of the
+     * two last numbers. Returns the warnings for the operator: the numbers whose documents the backup does not have.
+     */
+    private static function continueNumberSeries(PDO $db, array $live): array
+    {
+        $restored = self::numberSeries($db);
+        // An older schema numbers from the legacy per-(year, prefix) table only; its migration carries that over.
+        if ($restored['invoice_number_counters'] === null && $restored['invoice_counters'] !== null) {
+            foreach ($live['invoice_number_counters'] ?? [] as $key => $last) {
+                [, , $year, $prefix] = explode("\x1f", (string)$key);
+                $legacy = $year . "\x1f" . $prefix;
+                $live['invoice_counters'][$legacy] = max($last, $live['invoice_counters'][$legacy] ?? 0);
+            }
+        }
+        $warnings = [];
+        foreach (self::NUMBER_SERIES as $table => $columns) {
+            if ($restored[$table] === null) continue;
+            $where = implode(' AND ', array_map(static fn(string $c): string => "{$c} = ?", $columns));
+            foreach ($live[$table] ?? [] as $key => $last) {
+                $had = $restored[$table][$key] ?? null;
+                if ($had !== null && $had >= $last) continue;
+                $values = explode("\x1f", (string)$key);
+                if ($had === null) {
+                    $db->prepare("INSERT INTO {$table} (" . implode(', ', $columns) . ', last_number) VALUES (' . str_repeat('?, ', count($columns)) . '?)')
+                        ->execute([...$values, $last]);
+                } else {
+                    $db->prepare("UPDATE {$table} SET last_number = ? WHERE {$where}")->execute([$last, ...$values]);
+                }
+                // The legacy table only shadows the per-store series when both exist: one warning per series.
+                if ($table === 'invoice_counters' && $restored['invoice_number_counters'] !== null) continue;
+                $named = array_combine($columns, $values);
+                $series = $named['prefix'] . $named['year'] . (isset($named['store_id']) ? " ({$named['store_id']} {$named['type']})" : '');
+                $first = ($had ?? 0) + 1;
+                $warnings[] = sprintf('Number series %s: %s issued after this backup and %s not in the restored database (the PDFs stay in '
+                    . 'the invoice storage); numbering continues at %d.', $series, $first === $last ? "number {$last} was" : "numbers {$first}–{$last} were",
+                    $first === $last ? 'its document is' : 'their documents are', $last + 1);
+            }
+        }
+        return $warnings;
+    }
+
     /**
      * MySQL/MariaDB counterpart of the SQLite restore: the dump is downloaded and verified
      * (identity, size, sha256), imported into the scratch database and checked row-for-row against
@@ -1208,6 +1282,7 @@ class BackupService
 
             $lockHandle = self::acquireLock();
             try {
+                $liveSeries = self::numberSeries(self::$db);
                 $result = $mysql->restoreBackupDump($source, self::$mysqlScratchDatabase, $rollback, $schema, $ownSessions);
             } catch (\Throwable $e) {
                 if ($e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP) {
@@ -1230,14 +1305,17 @@ class BackupService
             }
 
             [$schemaWarnings, $appliedCount, $pendingCount] = self::migrationStatus($result['migrations']);
+            $numberingWarnings = self::continueNumberSeries(self::$db, $liveSeries);
             self::log("RESTORE OK driver=mysql src={$remotePath} snapshot=" . ($snapshotPath ?: '-')
                 . " tables={$result['tables']} rows={$result['rows']} applied={$appliedCount} pending={$pendingCount}");
+            foreach ($numberingWarnings as $warning) self::log('RESTORE WARNING ' . $warning);
 
             return [
                 'restored'        => $remotePath,
                 'snapshot'        => $snapshotPath,
                 'integrity'       => 'ok (scratch restore matched the dump row-for-row; live matches scratch)',
                 'schema_warnings' => $schemaWarnings,
+                'numbering_warnings' => $numberingWarnings,
                 'applied_count'   => $appliedCount,
                 'pending_count'   => $pendingCount,
                 'tables'          => $result['tables'],
@@ -1324,6 +1402,8 @@ class BackupService
             $skippedSources = [];
             $targets = [];
             $unchanged = 0;
+            $setAside = [];
+            $jobsRan = null;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
                 $root = (string)(self::$fileSources[$name] ?? '');
@@ -1340,6 +1420,16 @@ class BackupService
                     throw new RuntimeException("Restore: files archive entry {$entry} does not fit source {$name} ({$kind})");
                 }
                 $source = $stagingDir . '/' . $entry;
+                $isAside = false;
+                if (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
+                    $differs = is_file($target) && !hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target));
+                    if ($name === 'jobs' && !is_file($target)) $jobsRan ??= self::holdsAnyFile($root);
+                    if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan)) {
+                        $asideRoot = rtrim($root, '/\\') . '.from-backup';
+                        [$target, $base] = $kind === 'file' ? [$asideRoot, dirname($root)] : [$asideRoot . '/' . $rest, $asideRoot];
+                        $isAside = true;
+                    }
+                }
                 if (isset($targets[$target])) {
                     $refused[] = "{$entry} (same target as {$targets[$target]})";
                     continue;
@@ -1360,7 +1450,8 @@ class BackupService
                         $unchanged++;
                         continue;
                     }
-                    $conflicts[] = $entry;
+                    // A copy set aside by an earlier restore is replaced; it is not the shop's live file.
+                    if (!$isAside) $conflicts[] = $entry;
                     $overwrite = true;
                 }
                 if (!is_writable($directory['existing'])) {
@@ -1368,7 +1459,7 @@ class BackupService
                     continue;
                 }
                 $ownership = self::restoredFileOwnership($target, $directory['existing'], match ($name) {
-                    'gdpr_salt', 'stores' => 0640, 'mail' => 0600, default => 0666,
+                    'gdpr_salt', 'stores', 'config' => 0640, 'mail', 'jobs' => 0600, default => 0666,
                 });
                 // R27 (run 397): a file or directory this user cannot give the owner and group it must have is refused.
                 $keep = $ownership['uid'] !== null && $ownership['gid'] !== null ? FileOwnership::cannotKeep($target, $ownership['uid'], $ownership['gid']) : null;
@@ -1380,6 +1471,7 @@ class BackupService
                     continue;
                 }
                 $plan[] = [$entry, $source, $target, $base, $ownership, $overwrite];
+                if ($isAside) $setAside[] = $entry;
             }
             if ($refused !== []) {
                 throw new RuntimeException('Restore: ' . count($refused) . ' target(s) cannot be restored safely, nothing was written: '
@@ -1405,12 +1497,14 @@ class BackupService
                 if ($overwrite) $overwritten[] = $entry;
             }
             self::log("RESTORE FILES OK src={$archivePath} written=" . count($plan) . " unchanged={$unchanged} overwritten=" . count($overwritten)
-                . ($skippedSources !== [] ? ' skipped_sources=' . implode(',', array_keys($skippedSources)) : ''));
+                . ($skippedSources !== [] ? ' skipped_sources=' . implode(',', array_keys($skippedSources)) : '')
+                . ($setAside !== [] ? ' set_aside=' . count($setAside) : ''));
             return [
                 'archive'         => $archivePath,
                 'written'         => count($plan),
                 'unchanged'       => $unchanged,
                 'overwritten'     => $overwritten,
+                'set_aside'       => $setAside,
                 'skipped_sources' => array_keys($skippedSources),
             ];
         } finally {
@@ -1652,7 +1746,34 @@ class BackupService
             'downloads' => (string)($appCfg['digital_assets_base_dir'] ?? $private . '/downloads'),
             // R28: the e-mail delivery settings (Admin → E-mail delivery); a restored shop logged its mail instead of sending it.
             'mail'      => $runtime !== '' ? $runtime . '/' . MailSettings::FILE : '',
+            // R50: config.php (database, payment gateway and API secrets), the file job queue (mails and invoices not
+            // sent yet) and the themes the merchant created or edited were in no backup.
+            'config'    => AppConfig::path($rootDir),
+            'jobs'      => (string)($appCfg['jobs_dir'] ?? $private . '/jobs'),
+            'themes'    => $rootDir . '/themes',
         ];
+    }
+
+    /**
+     * R50: sources restored next to the live ones (<source>.from-backup) instead of over them: an older config.php
+     * would point the shop at another database, a theme file the release changed would go back to the old version,
+     * and a queue that has already run would send its mails again. Only missing files are restored in place.
+     */
+    private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
+
+    /** Whether directory $dir holds any file (a job queue that has already run). */
+    private static function holdsAnyFile(string $dir): bool
+    {
+        if (is_link($dir) || !is_dir($dir)) return false;
+        $entries = @scandir($dir);
+        // An unreadable queue counts as one that has run: its jobs are set aside, never sent twice.
+        if ($entries === false) return true;
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $path = $dir . '/' . $entry;
+            if (is_file($path) || self::holdsAnyFile($path)) return true;
+        }
+        return false;
     }
 
     /**

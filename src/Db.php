@@ -85,6 +85,31 @@ class Db {
         self::$pdo = null;
     }
 
+    /**
+     * R50: a restore onto a new MySQL/MariaDB server (disaster recovery) could not even connect: db_name did not exist
+     * ("Unknown database"). Creates it empty for cli/restore.php to import into (the restore recreates it with the
+     * backup's character set). False when it exists or the driver is SQLite.
+     */
+    public static function createMissingMysqlDatabase(): bool {
+        $cfg = require self::$configPath ?? AppConfig::path(dirname(__DIR__));
+        if (strtolower(trim((string)($cfg['db_driver'] ?? ''))) !== 'mysql') return false;
+        $name = (string)($cfg['db_name'] ?? '');
+        if (preg_match('/\A[A-Za-z0-9_$]{1,64}\z/', $name) !== 1) throw new RuntimeException('db_name is not a plain MySQL database name');
+        $server = new PDO(sprintf('mysql:host=%s;port=%d;charset=%s', $cfg['db_host'], $cfg['db_port'], $cfg['db_charset']),
+            $cfg['db_user'], $cfg['db_password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $exists = $server->prepare('SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?');
+        $exists->execute([$name]);
+        if ((int)$exists->fetchColumn() > 0) return false;
+        $server->exec('CREATE DATABASE `' . $name . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+        self::$pdo = null;
+        return true;
+    }
+
+    /** Whether $e is MySQL's "Unknown database" (1049) on connect. */
+    public static function isUnknownDatabase(\Throwable $e): bool {
+        return $e instanceof PDOException && ((int)$e->getCode() === 1049 || str_contains($e->getMessage(), '[1049]'));
+    }
+
     /** Initialize with an existing PDO (for testing) */
     public static function init(PDO $pdo, string $driver = 'sqlite'): void {
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') $pdo->exec("SET SESSION time_zone='+00:00'");

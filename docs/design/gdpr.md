@@ -114,11 +114,13 @@ Triggered by `account.php` "Delete my account" (Slovak UI: `Zmazať môj účet`
 | `password_reset_tokens` | DELETE all rows |
 | `abandoned_carts` | DELETE rows matching email |
 | `email_log` | scrub `recipient`, `payload` → `'[erased]'`; keep ID + template + timestamp |
-| `coupon_uses` | hash email → `sha256:abcd...` |
+| `coupon_uses` | hash email with the GDPR salt |
+| `coupon_usage_counters` | DELETE the per-customer counters (their `subject` is an unsalted SHA-256 of the e-mail); the shop-wide counter stays |
+| `api_idempotency` | DELETE the `/api/v1` replay responses that name the e-mail (a retried request then runs again) |
 | `audit_log` | scrub `actor`/`ip_address` for entries authored by this customer |
 | `cookie_consent` | DELETE rows by `customer_id` |
-| `orders.customer_*` | **KEEP** for 10y (legal). After 10y a separate retention job NULLs them. |
-| `invoices.customer_snapshot` | **KEEP** for 10y (immutable, legal). |
+| `orders.customer_*` | **KEEP** name, e-mail and addresses for 10y (legal); `customer_phone`, `ip_address` and `notes` (no accounting data) are emptied. After 10y a separate retention job NULLs the rest. |
+| `invoices.customer_snapshot` | **KEEP** for 10y (legal), except `phone`, which is emptied like the order's. The issued PDF is not changed (see below). |
 
 ### Tier B — hard delete
 Only via admin CLI `cli/gdpr-purge.php --customer-id=N --confirm` after legal retention expires (10y for orders/invoices). Logs to `gdpr_events`. Confirmation required + `--confirm` flag.
