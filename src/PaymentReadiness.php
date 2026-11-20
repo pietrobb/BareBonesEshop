@@ -33,7 +33,8 @@ final class PaymentReadiness
             $rows = array_values(array_filter($rows, static fn(array $row): bool => isset($scopes[(string)$row['store_id']])));
         }
         if ($rows === []) {
-            return [['warn', 'payment.online', 'No active online payment method: checkout offers only offline payment (bank transfer, cash on delivery, invoice).', 'Activate a card method in admin → Payments if the shop takes online payments.']];
+            // R50 (setup): an offline-only checkout is a choice, not a fault: 'info'.
+            return [['info', 'payment.online', 'No active online payment method: checkout offers only offline payment (bank transfer, cash on delivery, invoice).', 'Activate a card method in admin → Payments if the shop takes online payments.']];
         }
         $byProvider = [];
         foreach ($rows as $row) $byProvider[(string)$row['provider']][] = $row['store_id'] . ':' . $row['code'];

@@ -349,12 +349,16 @@ class StockAlerts {
             'admin_url' => $baseUrl . 'admin.php?p=products&stock=low',
         ];
 
+        // R50 (low): stock_alerts.locale, else the store's language as for the other merchant e-mails (was: English).
+        $locale = trim((string)$cfg['locale']);
+        if ($locale === '' && StoreContext::hasCurrent()) $locale = StoreContext::current()->defaultLocale();
+
         $sent = 0;
         $logged = 0;
         $errors = [];
         foreach ($recipients as $recipient) {
             try {
-                $mail = MailService::send('merchant_stock_low', $recipient, (string)$cfg['locale'], $vars);
+                $mail = MailService::send('merchant_stock_low', $recipient, $locale, $vars);
                 // R26: only written to the log (the provider configured), it reached nobody: not counted as delivered,
                 // nor retried as a failure.
                 if (MailService::logged($mail)) $logged++;

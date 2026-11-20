@@ -54,7 +54,7 @@ function renderStoreSwitcher(array $granted, array $storesCfg, string $page): vo
         <label for="admin-store"><?= esc(I18n::t('admin.store_switcher.label')) ?></label>
         <select id="admin-store" name="store" data-store-switcher>
             <?php foreach ($granted as $storeId): ?>
-            <option value="<?= esc($storeId) ?>"<?= $storeId === $current ? ' selected' : '' ?>><?= esc((string)($storesCfg['stores'][$storeId]['name'] ?? $storeId)) ?></option>
+            <option value="<?= esc($storeId) ?>"<?= $storeId === $current ? ' selected' : '' ?>><?= esc(AdminStoreScope::label($storeId, (array)($storesCfg['stores'][$storeId] ?? []))) ?></option>
             <?php endforeach; ?>
         </select>
         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.store_switcher.submit')) ?></button>

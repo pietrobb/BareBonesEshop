@@ -64,6 +64,7 @@ try {
     assert_true(!isset($wiDefault['legal']['ico']) && !isset($wiDefault['legal']['register_note']), 'Web installer: no example company number or register note survives');
     $wiStillPublic = array_keys(array_filter($wiStores['stores'], static fn(array $s): bool => StoreContext::isPublicConfig($s)));
     assert_equals([$wiExample['default_store']], $wiStillPublic, 'Web installer: only the store with the entered seller stays public');
+    assert_equals([$wiExample['default_store']], array_keys($wiStores['stores']), 'Web installer (R50): the sample stores cz/pl/hu/de/us are left out, not created hidden');
 
     // Payments: chosen offline methods in the default store; card only with Stripe keys, in every store.
     $wiDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -71,9 +72,9 @@ try {
     foreach (['default', 'cz'] as $wiScope) foreach (['card', 'cod', 'bank_transfer', 'invoice'] as $wiCode) $wiDb->exec("INSERT INTO payment_methods VALUES ('{$wiScope}', '{$wiCode}', 1)");
     $wiActive = static fn(): array => $wiDb->query("SELECT store_id || ':' || code FROM payment_methods WHERE active = 1 ORDER BY store_id, code")->fetchAll(PDO::FETCH_COLUMN);
     WebInstaller::configurePayments($wiDb, $wiStores, array_merge($wiValues, ['pay_bank' => false, 'stripe_secret_key' => '']));
-    assert_equals(['cz:bank_transfer', 'cz:cod', 'cz:invoice', 'default:cod'], $wiActive(), 'Web installer: without Stripe keys no store offers card; the default store offers just what was ticked');
+    assert_equals(['default:cod'], $wiActive(), 'Web installer: without Stripe keys no store offers card; the default store offers just what was ticked (R50: the left-out sample store cz offers nothing)');
     WebInstaller::configurePayments($wiDb, $wiStores, array_merge($wiValues, ['stripe_secret_key' => 'sk_test_' . str_repeat('a', 24)]));
-    assert_equals(['cz:bank_transfer', 'cz:card', 'cz:cod', 'cz:invoice', 'default:bank_transfer', 'default:card', 'default:cod'], $wiActive(), 'Web installer: with Stripe test keys card comes on');
+    assert_equals(['default:bank_transfer', 'default:card', 'default:cod'], $wiActive(), 'Web installer: with Stripe test keys card comes on');
 
     // config.php: the chosen private folder and the Stripe values; secrets are generated, never taken from the form.
     copy(dirname(TEST_CLI_DIR) . '/config.example.php', $wiRoot . '/config.example.php');

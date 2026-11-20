@@ -59,8 +59,12 @@ class Import {
         unset($content);
         fseek($handle, $encoding === 'utf-8' ? $dataStart : 0);
 
+        // R50 (setup): Excel in SK/CZ/DE/PL/HU locales saves "CSV" with semicolons; the header line decides the
+        // delimiter (an Excel "sep=;" first line names it). The result's 'delimiter' says which one was read.
+        [$delimiter, $sepLine] = self::detectDelimiter($handle);
+
         // Read header
-        $header = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '');
+        $header = fgetcsv($handle, self::MAX_ROW_BYTES, $delimiter, '"', '');
         if (!$header) {
             fclose($handle);
             return ['success' => false, 'imported' => 0, 'errors' => ['Empty CSV or invalid format']];
@@ -95,9 +99,9 @@ class Import {
         $heartbeat();
         $startedAt = self::dbNow($db);
         $db->beginTransaction();
-        $lineNum = 1; // header = line 1
+        $lineNum = $sepLine ? 2 : 1; // header = line 1 (2 after a "sep=" line)
 
-        while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '')) !== false) {
+        while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, $delimiter, '"', '')) !== false) {
             $lineNum++;
             // Commit in batches for performance (counting every row, so a run of bad rows heartbeats too)
             if (++$batch > $batchSize) {
@@ -145,7 +149,33 @@ class Import {
             'imported' => $imported,
             'errors'   => $errors,
             'encoding' => $encoding, // 'windows-1250' when the file was converted
+            'delimiter' => $delimiter,
         ];
+    }
+
+    /**
+     * The delimiter of the CSV whose header line starts at the handle's position: an Excel "sep=X" line names it (and is
+     * skipped); otherwise the most frequent of , ; and tab outside quotes in the header line ("," on a tie or none).
+     * Leaves the handle at the header line; [1] is true when a "sep=" line was skipped.
+     * @param resource $handle
+     * @return array{0: string, 1: bool}
+     */
+    private static function detectDelimiter($handle): array
+    {
+        $start = ftell($handle);
+        $line = (string)fgets($handle, self::MAX_ROW_BYTES);
+        if (preg_match('/^sep=([,;\t|])\r?\n?$/', $line, $m)) return [$m[1], true]; // the handle is past the sep= line
+        fseek($handle, (int)$start);
+        $counts = [',' => 0, ';' => 0, "\t" => 0];
+        $quoted = false;
+        for ($i = 0, $n = strlen($line); $i < $n; $i++) {
+            $char = $line[$i];
+            if ($char === '"') $quoted = !$quoted;
+            elseif (!$quoted && isset($counts[$char])) $counts[$char]++;
+        }
+        arsort($counts, SORT_NUMERIC); // stable: "," stays first on a tie
+        $best = (string)array_key_first($counts);
+        return [$counts[$best] > 0 ? $best : ',', false];
     }
 
     /**

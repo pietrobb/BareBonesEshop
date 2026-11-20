@@ -791,8 +791,8 @@ moderation, returns (RMA) and complaints, audit log; and **customer management**
 TOTP and role-based access control; statuses are shown translated, and the admin
 works on phones.
 
-**JSON API** (`/api/v1`) — 34 actions in the browser router (27 storefront, webhook and CSP
-actions and 7 BBF option lists; extensions add their own `<code>.<name>` actions) with rate
+**JSON API** (`/api/v1`) — 35 actions in the browser router (27 storefront, webhook and CSP
+actions and 8 BBF option lists; extensions add their own `<code>.<name>` actions) with rate
 limiting, CSRF on mutating requests and registry-routed payment/shipping webhooks, plus the
 external machine API:
 

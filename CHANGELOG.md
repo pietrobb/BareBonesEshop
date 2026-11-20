@@ -441,6 +441,26 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   pre-selected the seller's country in the checkout, the manual order and the API; it now pre-selects the store's own
   country (`country` in stores.json, else its default language's). Search finds products by their translated names, so
   the CZ store finds the Czech titles.
+- **The setup checklist can turn green, and it checks VAT (review round 20).** Integrations a shop may do without
+  (ERP, outbound webhooks, the HTTP carrier lifecycle, carrier labels, an offline-only checkout) are reported as `info`:
+  listed, but neither a warning nor a reason for `doctor` to stay "not ready". Each store with its own seller gets a
+  VAT check (`stores.vat.<store>`): a warning when stores.json never says whether the seller is a VAT payer, a failure
+  when a VAT payer in the EU has no rates in `config/vat-rates.json`, else an info line with the regime and the rates
+  checkout charges. pricing.json cart rules that apply in checkout link to Admin → Promotions. `doctor` counts show
+  `info` separately.
+- **CSV import reads semicolon files.** Excel in Slovak, Czech, German, Polish or Hungarian saves "CSV" with
+  semicolons; the importer now takes the delimiter from the header line (`,` `;` or tab, or Excel's `sep=` line).
+- **The admin says which store it is saving to.** The store switcher shows each store's code and domain (or URL
+  prefix) next to its name, and the promotion, price-list and price forms name their store and post it, so a form
+  opened before switching stores in another tab saves where it said.
+- **Smaller setup fixes (review round 20).** A shipping or payment method can carry its own name and description in
+  each further store language (Admin → Shipping / Payments, migration `20261120120400` adds `translations`). Stock
+  alerts are written in the store's language unless `stock_alerts.locale` says otherwise (they were English). Legal
+  pages drop an empty seller field with its label and comma ("Kontakt: info@…, ." / "IČ DPH: ."). The web installer
+  sets up the one store it asks about instead of five hidden sample stores. Promotion and price-list validity is typed
+  and shown on the store's clock (it was read as UTC, so "from 00:00" started at 01:00 or 02:00 in Bratislava). The
+  order-status page and the account list every shipped parcel's carrier and tracking number, with its https tracking
+  link.
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

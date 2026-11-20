@@ -432,15 +432,21 @@ final class PricingAdmin {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** UTC validity window from datetime-local values; a date alone means the start (from) or the end (to) of that day. @throws DomainException */
+    /**
+     * UTC validity window from datetime-local values typed on the active store's wall clock (R50: they were read as UTC,
+     * so "from 00:00" started at 01:00/02:00 in Bratislava); a date alone means the start (from) or the end (to) of that
+     * day. @throws DomainException
+     */
     private static function validity(string $from, string $to): array {
-        $parse = static function(string $value, bool $end, string $label): ?string {
+        $zone = ShopTime::zone();
+        $parse = static function(string $value, bool $end, string $label) use ($zone): ?string {
             $value = trim($value);
             if ($value === '') return null;
             foreach (['Y-m-d\TH:i:s', 'Y-m-d\TH:i', 'Y-m-d H:i:s', 'Y-m-d H:i', 'Y-m-d'] as $format) {
-                $date = DateTimeImmutable::createFromFormat('!' . $format, $value, new DateTimeZone('UTC'));
+                $date = DateTimeImmutable::createFromFormat('!' . $format, $value, $zone);
                 if ($date === false || $date->format($format) !== $value) continue;
-                return $format === 'Y-m-d' && $end ? $date->format('Y-m-d 23:59:59') : $date->format('Y-m-d H:i:s');
+                if ($format === 'Y-m-d' && $end) $date = $date->setTime(23, 59, 59);
+                return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
             }
             self::fail(I18n::format('admin.msg.promo.date_invalid', ['label' => $label]));
         };
@@ -450,8 +456,17 @@ final class PricingAdmin {
         return [$start, $finish];
     }
 
-    private static function formDate(?string $value): string {
-        return $value === null || $value === '' ? '' : str_replace(' ', 'T', substr($value, 0, 19));
+    /** A stored UTC validity bound as the store's wall clock: "Y-m-d\TH:i:s" for a datetime-local field ('' = none). */
+    public static function formDate(?string $value): string {
+        if ($value === null || trim($value) === '') return '';
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', substr($value, 0, 19), new DateTimeZone('UTC'));
+        return $date === false ? str_replace(' ', 'T', substr($value, 0, 19)) : $date->setTimezone(ShopTime::zone())->format('Y-m-d\TH:i:s');
+    }
+
+    /** A stored UTC validity bound for a list: the store's wall clock "Y-m-d H:i" ('—' = none). */
+    public static function listDate(?string $value): string {
+        $form = self::formDate($value);
+        return $form === '' ? '—' : substr(str_replace('T', ' ', $form), 0, 16);
     }
 
     /** "12,5" or "12.5" percent → 1250 basis points (0.01 % to 100 %). @throws DomainException */

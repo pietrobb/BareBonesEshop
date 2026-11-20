@@ -85,6 +85,14 @@ final class ConsumerNotice {
         // <!-- if:key -->…<!-- /if --> keeps its text (a label with the value) only when the store sets that key.
         $html = (string)preg_replace_callback('/<!--\s*if:([a-z_]+)\s*-->(.*?)<!--\s*\/if\s*-->/s',
             static fn(array $m): string => ($vars['{{' . $m[1] . '}}'] ?? '') !== '' ? $m[2] : '', $html);
+        // R50 (low): an empty field of a list ("…, IČ DPH: {{ic_dph}}." / "Kontakt: {{email}}, {{phone}}.") goes with its
+        // label and comma, never "IČ DPH: ." or "Kontakt: info@…, ." (also in a text the merchant saved before).
+        preg_match_all('/\{\{[a-z_]+\}\}/', $html, $placeholders);
+        foreach (array_unique($placeholders[0]) as $tag) {
+            if (($vars[$tag] ?? '') !== '') continue;
+            $q = preg_quote($tag, '/');
+            $html = (string)preg_replace(['/,[ \t]*[^,:;<>{}\n]{1,40}:[ \t]*' . $q . '/u', '/,[ \t]*' . $q . '/', '/' . $q . ',[ \t]*/'], '', $html);
+        }
         // A key the store's legal block does not set is left out, never printed as a placeholder.
         return (string)preg_replace('/\{\{[a-z_]+\}\}/', '', strtr($html, $vars));
     }

@@ -216,7 +216,7 @@ final class AccountViewModel
             'status_label' => OrderStatusLabels::order((string)$order['status']),
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
             'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
-            'tracking' => trim(MethodLabels::carrier((string)($order['carrier'] ?? '')) . ' ' . (string)($order['tracking_number'] ?? '')),
+            'tracking' => implode(', ', array_column(Fulfillment::customerTracking($order), 'label')), // R50: parcels shipped from Admin → Shipments too
             'invoice' => $invoice ? [
                 'number' => (string)$invoice['number'],
                 'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),

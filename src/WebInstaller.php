@@ -486,7 +486,7 @@ final class WebInstaller
         $doctor = $result['doctor'];
         $rows = '';
         foreach ($doctor['checks'] as $check) {
-            if ($check['status'] === 'pass') continue;
+            if ($check['status'] === 'pass' || $check['status'] === 'info') continue; // R50: optional items wait for the admin checklist
             // The check in the installer's language where the admin has a text for it; the doctor's own (English)
             // finding and remedy stay below it, as the technical detail to search for or to hand to the hosting.
             try {
@@ -628,8 +628,24 @@ final class WebInstaller
             if ((string)($v[$key] ?? '') !== '') $store['legal'][$key] = (string)$v[$key];
         }
         $stores['stores'][$id] = $store;
-        // The installer sets up one seller. Other stores still naming the example seller go offline until the merchant
-        // enters theirs in Admin → Stores and seller (as setup apply does with the hidden sample stores).
+        // The installer sets up one seller and one store. R50 (low): the example's sample stores (cz, pl, hu, de, us with
+        // made-up sellers) are left out instead of coming along hidden: the admin listed five stores the merchant never
+        // created. A store with its own real seller stays (and goes offline only while its seller is incomplete); a store
+        // sharing the seller, catalog or provider settings of a store left out goes with it. Admin → Stores adds more.
+        $dropped = [];
+        do {
+            $before = count($dropped);
+            foreach ((array)$stores['stores'] as $otherId => $other) {
+                $otherId = (string)$otherId;
+                if ($otherId === $id || isset($dropped[$otherId])) continue;
+                $legal = is_array($other) && is_array($other['legal'] ?? null) ? $other['legal'] : [];
+                $linked = array_filter([$legal['seller'] ?? null, $other['catalog_scope'] ?? null, $other['provider_scope'] ?? null],
+                    static fn(mixed $ref): bool => is_string($ref) && isset($dropped[$ref]));
+                $sample = !isset($legal['seller']) && (($other['sample'] ?? false) === true || !StoreContext::isPublicConfig((array)$other)) && Setup::legalIdentityProblems($legal) !== [];
+                if ($linked !== [] || $sample) $dropped[$otherId] = true;
+            }
+        } while (count($dropped) > $before);
+        foreach (array_keys($dropped) as $otherId) unset($stores['stores'][$otherId]);
         foreach ((array)$stores['stores'] as $otherId => $other) {
             if ((string)$otherId === $id || !is_array($other) || !is_array($other['legal'] ?? null) || isset($other['legal']['seller'])) continue;
             if (Setup::legalIdentityProblems($other['legal']) !== []) $stores['stores'][$otherId]['public'] = false;
@@ -645,11 +661,18 @@ final class WebInstaller
     {
         $default = (string)($stores['default_store'] ?? 'default');
         $set = $db->prepare('UPDATE payment_methods SET active = :active WHERE store_id = :scope AND code = :code');
+        $scopes = [];
         foreach ((array)($stores['stores'] ?? []) as $id => $store) {
             $scope = (string)(is_array($store) ? ($store['provider_scope'] ?? $id) : $id);
+            $scopes[] = $scope;
             $wanted = ['card' => ($v['stripe_secret_key'] ?? '') !== ''];
             if ((string)$id === $default) $wanted += ['cod' => (bool)$v['pay_cod'], 'bank_transfer' => (bool)$v['pay_bank'], 'invoice' => false];
             foreach ($wanted as $code => $active) $set->execute([':active' => $active ? 1 : 0, ':scope' => $scope, ':code' => $code]);
+        }
+        // The methods the migrations seeded for the sample stores the installer left out stay switched off.
+        $scopes = array_values(array_unique($scopes));
+        if ($scopes !== []) {
+            $db->prepare('UPDATE payment_methods SET active = 0 WHERE store_id NOT IN (' . implode(', ', array_fill(0, count($scopes), '?')) . ')')->execute($scopes);
         }
     }
 }

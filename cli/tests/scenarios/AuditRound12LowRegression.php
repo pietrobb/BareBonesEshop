@@ -106,6 +106,7 @@ try {
     $r12lDoctor = Setup::digitalFilesCheck($pdo);
     assert_true($r12lDoctor['status'] === 'warn' && (int)$r12lDoctor['message'] >= 1 && SetupChecklist::fixPage($r12lDoctor['name']) === 'digital_assets',
         'R12 low: the doctor (and the dashboard checklist, linking Digital files) names the e-book without a file');
+    if (!function_exists('adminCodeLabel')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php'; // a subset run loads no admin page first
     require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/CatalogEditor.php';
     $r12lEditor = productVariantsHtml(['id' => 97901]);
     assert_equals(1, substr_count($r12lEditor, 'data-variant-no-file'), 'R12 low: the variant editor flags the e-book row (and only it)');

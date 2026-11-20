@@ -27,7 +27,7 @@ function pagePromotions(): void {
         <h3><?= esc($edit ? I18n::format('admin.common.edit_named', ['name' => (string)$edit['name']]) : I18n::t('admin.promo.new')) ?></h3>
         <p class="muted"><?= esc(I18n::t('admin.promo.hint')) ?></p>
         <form method="post" action="admin.php?p=promotions&action=save<?= $edit ? '&id=' . (int)$edit['id'] : '' ?>">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><?= AdminStoreScope::targetField() ?>
             <div class="grid grid-4">
                 <?php $input('name', I18n::t('admin.th.name'), $f['name'], 'required maxlength="191"'); ?>
                 <?php $input('code', I18n::t('admin.taxonomy.code_hint'), $f['code'], 'maxlength="191"'); ?>
@@ -98,7 +98,7 @@ function pagePromotions(): void {
                 <td><?= $p['coupon_code'] !== null && $p['coupon_code'] !== '' ? '<code>' . esc($p['coupon_code']) . '</code>' : '' ?></td>
                 <td><?= esc(in_array($action['type'] ?? '', PricingAdmin::ACTION_TYPES, true) ? I18n::t('admin.promo.action.' . $action['type']) : (string)($action['type'] ?? '')) ?></td>
                 <td><?= (int)$p['priority'] ?></td>
-                <td><?= esc((string)($p['valid_from'] ?? '—')) ?> – <?= esc((string)($p['valid_to'] ?? '—')) ?></td>
+                <td><?= esc(PricingAdmin::listDate($p['valid_from'] ?? null)) ?> – <?= esc(PricingAdmin::listDate($p['valid_to'] ?? null)) ?></td>
                 <td><span class="badge badge-<?= $p['active'] ? 'active' : 'draft' ?>"><?= esc(I18n::t($p['active'] ? 'admin.common.status_active_f' : 'admin.common.status_inactive_f')) ?></span></td>
                 <td>
                     <form method="post" action="admin.php?p=promotions&action=delete" style="display:inline" data-confirm="<?= esc(I18n::t('admin.promo.delete_confirm')) ?>">
@@ -121,14 +121,14 @@ function pagePriceLists(): void {
     $edit = $id ? PricingAdmin::priceList($id) : null;
     $groups = PricingAdmin::customerGroups();
     $currencies = PricingAdmin::currencies();
-    $date = static fn(?string $v): string => $v === null || $v === '' ? '' : str_replace(' ', 'T', substr($v, 0, 19));
+    $date = static fn(?string $v): string => PricingAdmin::formDate($v); // R50: the store's wall clock, stored as UTC
     ?>
     <h1><?= esc(I18n::t('admin.title.price_lists')) ?></h1>
     <div class="card">
         <h3><?= esc($edit ? I18n::format('admin.common.edit_named', ['name' => (string)$edit['name']]) : I18n::t('admin.pricelist.new')) ?></h3>
         <p class="muted"><?= esc(I18n::t('admin.pricelist.hint')) ?></p>
         <form method="post" action="admin.php?p=price_lists&action=save<?= $edit ? '&id=' . (int)$edit['id'] : '' ?>">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><?= AdminStoreScope::targetField() ?>
             <div class="grid grid-4">
                 <div class="form-row"><label for="pl-name"><?= esc(I18n::t('admin.th.name')) ?></label><input id="pl-name" name="name" value="<?= esc((string)($edit['name'] ?? '')) ?>" required maxlength="191"></div>
                 <div class="form-row"><label for="pl-code"><?= esc(I18n::t('admin.taxonomy.code_hint')) ?></label><input id="pl-code" name="code" value="<?= esc((string)($edit['code'] ?? '')) ?>" maxlength="191"></div>
@@ -160,7 +160,7 @@ function pagePriceLists(): void {
     <div class="card">
         <h3><?= esc(I18n::format('admin.pricelist.prices_of', ['code' => (string)$edit['code']])) ?></h3>
         <form method="post" action="admin.php?p=price_lists&action=prices&id=<?= (int)$edit['id'] ?>">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><?= AdminStoreScope::targetField() ?>
             <div class="form-row"><label for="pl-prices"><?= esc(I18n::t('admin.pricelist.prices_hint')) ?></label>
                 <textarea id="pl-prices" name="prices" rows="10" style="width:100%;font-family:monospace"><?= esc(PricingAdmin::priceLines((int)$edit['id'])) ?></textarea>
             </div>
@@ -179,7 +179,7 @@ function pagePriceLists(): void {
                 <td><?= esc(strtoupper((string)$l['currency'])) ?></td>
                 <td><?= $l['customer_group_id'] === null ? esc(I18n::t('admin.pricelist.all')) : esc((string)($groupNames[(int)$l['customer_group_id']] ?? '#' . (int)$l['customer_group_id'])) ?></td>
                 <td><?= (int)$l['priority'] ?></td>
-                <td><?= esc((string)($l['valid_from'] ?? '—')) ?> – <?= esc((string)($l['valid_to'] ?? '—')) ?></td>
+                <td><?= esc(PricingAdmin::listDate($l['valid_from'] ?? null)) ?> – <?= esc(PricingAdmin::listDate($l['valid_to'] ?? null)) ?></td>
                 <td><?= (int)$l['price_count'] ?></td>
                 <td><span class="badge badge-<?= $l['active'] ? 'active' : 'draft' ?>"><?= esc(I18n::t($l['active'] ? 'admin.common.status_active_m' : 'admin.common.status_inactive_m')) ?></span></td>
                 <td>

@@ -7,7 +7,7 @@
 echo "\n--- R7 free shipping: admin action, coupon waives carriage, automatic rule, usage limit ---\n";
 ConsentService::setDefinitionsForTesting([]);
 I18n::setLocale('en');
-$r7fsPricing = (new ReflectionProperty(Pricing::class, 'config'))->getValue();
+$r7fsPricing = Pricing::config(); // loads it when no earlier test did (the raw property is null then)
 $r7fsActive = $pdo->query("SELECT id FROM promotions WHERE active = 1")->fetchAll(PDO::FETCH_COLUMN);
 $pdo->exec("UPDATE promotions SET active = 0");
 Pricing::setConfig(['cart_rules' => [

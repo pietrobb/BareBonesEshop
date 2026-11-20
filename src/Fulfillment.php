@@ -356,6 +356,29 @@ class Fulfillment {
         return $row ?: null;
     }
 
+    /**
+     * R50 (low): what the customer is told about the parcels of $order — carrier and tracking number of every shipped
+     * parcel with a number (a link only to an https tracking page), else the order's own number. The order-status page
+     * showed only orders.tracking_number, which a parcel shipped from Admin → Shipments never sets.
+     * @return list<array{label: string, url: string}>
+     */
+    public static function customerTracking(array $order): array {
+        $stmt = Db::get()->prepare("SELECT carrier, tracking_number, tracking_url FROM shipments
+            WHERE store_id = :store AND order_id = :order AND status = 'shipped' AND COALESCE(tracking_number, '') <> '' ORDER BY shipped_at, id");
+        $stmt->execute([':store' => (string)($order['store_id'] ?? 'default'), ':order' => (int)$order['id']]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === [] && trim((string)($order['tracking_number'] ?? '')) !== '') {
+            $rows = [['carrier' => $order['carrier'] ?? '', 'tracking_number' => $order['tracking_number'], 'tracking_url' => '']];
+        }
+        $parcels = [];
+        foreach ($rows as $row) {
+            $url = trim((string)($row['tracking_url'] ?? ''));
+            $parcels[] = ['label' => trim(MethodLabels::carrier((string)($row['carrier'] ?? '')) . ' ' . trim((string)$row['tracking_number'])),
+                'url' => str_starts_with(strtolower($url), 'https://') ? $url : ''];
+        }
+        return $parcels;
+    }
+
     public static function shipments(int $orderId): array {
         $stmt = Db::get()->prepare('SELECT * FROM shipments WHERE order_id = :order AND store_id = :store ORDER BY id');
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);

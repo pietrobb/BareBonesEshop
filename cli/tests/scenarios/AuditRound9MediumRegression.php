@@ -187,8 +187,8 @@ assert_true(str_contains($r9prChecks['payment.provider.payu'][1], 'payu_second_k
 $r9prKeyless = [];
 foreach (PaymentReadiness::checks($r9prDb, ['stripe_secret_key' => 'sk_test_...', 'stripe_webhook_secret' => ''] + $r9prCfg) as [$r9prStatus, $r9prName]) $r9prKeyless[$r9prName] = $r9prStatus;
 $r9prDb->exec('UPDATE payment_methods SET active = 0 WHERE requires_online = 1');
-assert_true($r9prKeyless['payment.provider.stripe'] === 'fail' && PaymentReadiness::checks($r9prDb, $r9prCfg)[0][0] === 'warn',
-    'R9 payments readiness: a placeholder Stripe key fails; with no online method it only warns that checkout is offline-only');
+assert_true($r9prKeyless['payment.provider.stripe'] === 'fail' && PaymentReadiness::checks($r9prDb, $r9prCfg)[0][0] === 'info',
+    'R9 payments readiness: a placeholder Stripe key fails; with no online method it only informs that checkout is offline-only (R50: info, not a warning)');
 $r9prDb = null;
 
 // Customer-visible payment/carrier codes: checkout printed a method's provider code ("stripe", "manual") when it had no
