@@ -461,6 +461,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   and shown on the store's clock (it was read as UTC, so "from 00:00" started at 01:00 or 02:00 in Bratislava). The
   order-status page and the account list every shipped parcel's carrier and tracking number, with its https tracking
   link.
+- **An e-book download limit holds against `Range` requests (review round 20, security).** A counted download that
+  had already served the whole file could be "resumed" from byte 1 for free five times, so a limit of 2 gave 12
+  near-complete copies. A free resume now continues only a download that has not served the whole file yet, at most an
+  eighth of the file (and never more than 16 MiB) below where it stopped; anything else counts as a new download.
+- **The admin MFA lockout holds against concurrent attempts.** The attempt is now counted, and from the fifth one the
+  account locked, in one statement before the code is checked, so at most five codes are checked however many
+  requests arrive at once from however many IPs (they all passed the lock check before, and a stale write could clear
+  the lock). The lock times are unchanged (1, 2, 4 … 32 minutes).
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

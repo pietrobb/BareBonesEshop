@@ -55,7 +55,7 @@ $length = $size > 0 ? $end - $start + 1 : 0;
 // download already served (DigitalDelivery::beginTransfer()). Anything else is a new download: refused once spent.
 $countedAt = null;
 if ($method !== 'HEAD') {
-    $countedAt = DigitalDelivery::beginTransfer($entitlement, $start);
+    $countedAt = DigitalDelivery::beginTransfer($entitlement, $start, (int)$size);
     if ($countedAt === null) {
         http_response_code(403);
         exit('Forbidden');

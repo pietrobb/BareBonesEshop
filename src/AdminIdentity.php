@@ -171,12 +171,15 @@ class AdminIdentity {
         if ((int)$account['mfa_required'] === 1) {
             $encrypted = (string)($account['totp_secret_encrypted'] ?? '');
             if ($encrypted === '') return null;
+            // R50: the attempt is counted (and the lock set) before the code is checked, atomically: concurrent attempts
+            // from several IPs all passed the lock read above, were all checked, and a stale write could clear the lock.
+            if (!self::claimMfaAttempt((int)$account['id'])) return null;
             $counter = Totp::matchedCounter(self::decrypt($encrypted), $mfaCode);
             $validMfa = $counter !== null
                 ? self::claimTotpCounter((int)$account['id'], $counter)
                 : self::consumeRecoveryCode((int)$account['id'], $mfaCode);
             if (!$validMfa) {
-                self::recordFailure((int)$account['id']);
+                Logger::warning('admin.login_failed', ['account_id' => (int)$account['id'], 'locked_until' => self::account((int)$account['id'])['locked_until'] ?? null]);
                 return null;
             }
         }
@@ -391,14 +394,26 @@ class AdminIdentity {
         return self::$dummyPasswordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
     }
 
-    private static function recordFailure(int $accountId): void {
-        $account = self::account($accountId);
-        if (!$account) return;
-        $attempts = (int)$account['failed_attempts'] + 1;
-        $lockedUntil = $attempts >= 5 ? gmdate('Y-m-d H:i:s', time() + min(3600, 60 * (2 ** min(5, $attempts - 5)))) : null;
-        Db::get()->prepare('UPDATE admin_accounts SET failed_attempts=:attempts, locked_until=:locked, updated_at=:updated WHERE id=:id')
-            ->execute([':attempts' => $attempts, ':locked' => $lockedUntil, ':updated' => gmdate('Y-m-d H:i:s'), ':id' => $accountId]);
-        Logger::warning('admin.login_failed', ['account_id' => $accountId, 'locked_until' => $lockedUntil]);
+    /**
+     * Count one MFA attempt unless the account is locked; from the 5th attempt on it locks the account (1, 2, 4 … 32
+     * minutes) in the same statement, so at most 5 codes are checked however many requests run at once. A sign-in
+     * clears the count (authenticate()). locked_until is assigned before failed_attempts: MySQL evaluates SET left to
+     * right with the new values, SQLite with the old ones — this order reads the old count on both.
+     */
+    private static function claimMfaAttempt(int $accountId): bool {
+        $now = time();
+        $locks = [];
+        $case = 'CASE';
+        for ($step = 0; $step <= 5; $step++) {
+            $locks[":lock{$step}"] = gmdate('Y-m-d H:i:s', $now + min(3600, 60 * (2 ** $step)));
+            $case .= $step < 5 ? ' WHEN failed_attempts + 1 = ' . (5 + $step) . " THEN :lock{$step}" : " ELSE :lock{$step}";
+        }
+        $stmt = Db::get()->prepare("UPDATE admin_accounts
+            SET locked_until = CASE WHEN failed_attempts + 1 < 5 THEN NULL ELSE ({$case} END) END,
+                failed_attempts = failed_attempts + 1, updated_at = :updated
+            WHERE id = :id AND (locked_until IS NULL OR locked_until <= :now)");
+        $stmt->execute($locks + [':updated' => gmdate('Y-m-d H:i:s', $now), ':id' => $accountId, ':now' => gmdate('Y-m-d H:i:s', $now)]);
+        return $stmt->rowCount() === 1;
     }
 
     /** Store grants of an account. An owner administers every configured store (a store added to stores.json
