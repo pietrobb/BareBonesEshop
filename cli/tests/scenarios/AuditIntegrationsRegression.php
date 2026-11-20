@@ -445,6 +445,12 @@ $aigAllocate = new ReflectionMethod(InvoiceService::class, 'allocateNumber');
 $aigSuiteDb = Db::get();
 $aigSuiteDriver = Db::driver();
 Db::init($aigLegacy, 'sqlite');
+// An empty invoice storage: the suite's PDFs (numbers allocateNumber() skips, R50) are not this database's.
+$aigStorage = new ReflectionProperty(InvoiceService::class, 'storageDir');
+$aigPrevStorage = $aigStorage->getValue();
+$aigStorageDir = test_fixture_path('aig-legacy-invoices');
+mkdir($aigStorageDir);
+$aigStorage->setValue(null, realpath($aigStorageDir));
 try {
     $aigLegacyEnt = $aigLegacy->query('SELECT * FROM digital_entitlements WHERE id = 1')->fetch();
     $aigLegacyResults = [DigitalDelivery::authorizeTransfer($aigLegacyEnt, 0, 1000), DigitalDelivery::authorizeTransfer($aigLegacyEnt, 100, 1000), (int)$aigLegacy->query('SELECT download_count FROM digital_entitlements')->fetchColumn()];
@@ -455,6 +461,7 @@ try {
     $aigLegacyNumbers[] = $aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, '');
 } finally {
     Db::init($aigSuiteDb, $aigSuiteDriver);
+    $aigStorage->setValue(null, $aigPrevStorage);
 }
 assert_equals([true, true, 2], $aigLegacyResults, '5 migration window: downloads work (each transfer counted) before the resume columns exist');
 assert_equals(['20260001', '20260002', '20260003'], $aigLegacyNumbers, '5 migration window: invoices are numbered from the legacy counters, and the migration continues that sequence');

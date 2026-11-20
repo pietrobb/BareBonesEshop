@@ -305,16 +305,17 @@ final class OssThreshold
         do {
             $next->execute([$since, $after]);
             $rows = $next->fetchAll(PDO::FETCH_ASSOC);
-            if ($own && $rows !== []) $db->beginTransaction();
+            $opened = $own && $rows !== [] && $db->beginTransaction();
             try {
                 foreach ($rows as $order) {
                     $store->execute([self::orderNet($db, $order), (int)$order['id']]);
                     $count += $store->rowCount();
                     $after = (int)$order['id'];
                 }
-                if ($own && $rows !== []) $db->commit();
+                if ($opened) $db->commit();
+                $opened = false;
             } catch (\Throwable $e) {
-                if ($own && $db->inTransaction()) $db->rollBack();
+                if ($opened) $db->rollBack();
                 throw $e;
             }
         } while (count($rows) === 500);

@@ -50,6 +50,16 @@ if ($driver === 'mysql') {
     $db->exec('PRAGMA foreign_keys = ON');
 }
 Db::init($db, $driver);
+// Each action numbers from rolled-back counters; its own empty invoice storage keeps PDFs of other actions and
+// scenarios (whose numbers allocateNumber() skips, R50) out of its gapless series.
+$aacInvoices = sys_get_temp_dir() . '/aac-invoices-' . bin2hex(random_bytes(6));
+mkdir($aacInvoices);
+(new ReflectionProperty(InvoiceService::class, 'storageDir'))->setValue(null, realpath($aacInvoices));
+register_shutdown_function(static function () use ($aacInvoices): void {
+    $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($aacInvoices, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($files as $file) $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+    @rmdir($aacInvoices);
+});
 $q = static function(string $sql, array $params = []) use ($db): array {
     $stmt = $db->prepare($sql);
     $stmt->execute($params);

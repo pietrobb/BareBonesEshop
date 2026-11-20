@@ -129,7 +129,8 @@ $r50bDsn = (string)(getenv('TEST_MYSQL_DSN') ?: '');
 if ($r50bDsn !== '' && method_exists('Db', 'createMissingMysqlDatabase')) {
     preg_match('/host=([^;]+)/', $r50bDsn, $r50bHost);
     preg_match('/port=(\d+)/', $r50bDsn, $r50bPort);
-    $r50bName = 'r50b_empty_' . bin2hex(random_bytes(4));
+    // bbe_ is a prefix CI's database user may create (GRANT ALL ON `bbe\_%`.*); it has no global CREATE.
+    $r50bName = 'bbe_r50b_empty_' . bin2hex(random_bytes(4));
     $r50bConfig = $r50bRoot . '/mysql-config.php';
     file_put_contents($r50bConfig, '<?php return ' . var_export(['db_driver' => 'mysql', 'db_host' => $r50bHost[1] ?? '127.0.0.1',
         'db_port' => (int)($r50bPort[1] ?? 3306), 'db_name' => $r50bName, 'db_charset' => 'utf8mb4',

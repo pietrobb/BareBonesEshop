@@ -1,6 +1,6 @@
 <?php
 
-// R50 (review round 20, medium): the search read only products.name/summary — a Czech store whose products carry
+// R50 (review round 50, medium): the search read only products.name/summary — a Czech store whose products carry
 // their Czech names in products.translations never found them. products.search_names holds those translated names
 // and summaries as plain text (Search::refreshNames()) and is part of the full-text index on both databases.
 return new class {

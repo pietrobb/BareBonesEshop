@@ -361,6 +361,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   A received return of an order that was already refunded (partly) outside its returns is no longer paid out in full
   again: "Refunded" asks first, then closes the return without payout when that money covers it, or credits and
   refunds it less that money; the amount a return used up is recorded so the next return does not count it again.
+- **Migration** `20261120120000_orders_oss_net_backfill` (review round 50): fills `orders.oss_net` for the orders a
+  signed update from an older release left empty, so checkout no longer counts them from their lines (slow, and out of
+  memory on large shops). It writes in batches; orders it does not reach are counted and stored by checkout.
+- **Migration** `20261120120200_complaint_assessment` (review round 50): adds `complaints.assessment`. A complaint is
+  rejected only with an expert assessment (who assessed the goods and the finding), which the rejection e-mail names.
+- **Migration** `20261120120300_product_search_names` (review round 50): adds `products.search_names` (the translated
+  names and summaries) and rebuilds the full-text index with it, so a store whose products carry their names in
+  `translations` finds them. On MySQL/MariaDB the index is rebuilt over the whole `products` table: a large catalogue
+  should run `apply` in its maintenance window (as above).
+- **Migration** `20261120120400_method_translations` (review round 50): adds `shipping_methods.translations` and
+  `payment_methods.translations`, the merchant's name and description of a method per further store language.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address

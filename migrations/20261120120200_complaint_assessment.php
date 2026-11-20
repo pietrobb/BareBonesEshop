@@ -1,6 +1,6 @@
 <?php
 
-// R50 (review round 20, medium): a complaint is rejected only on an expert assessment of the goods; the assessment
+// R50 (review round 50, medium): a complaint is rejected only on an expert assessment of the goods; the assessment
 // (who assessed them and the finding) is kept with the decision and named in the rejection e-mail.
 return new class {
     public function up(PDO $db, bool $isSqlite): void {

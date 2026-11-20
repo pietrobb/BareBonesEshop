@@ -7,7 +7,8 @@ test('admin store switcher offers granted stores only and refuses a foreign stor
   await adminSignIn(page, state.manager);
   await page.goto('/admin.php?p=orders');
   const switcher = page.getByLabel(/^(Store|Obchod)$/);
-  await expect(switcher.locator('option')).toHaveText(['Slovenský obchod', 'Český obchod']);
+  // R50: each option names the store with its code and where it is served ("Český obchod (cz · /cs)").
+  await expect(switcher.locator('option')).toHaveText([/^Slovenský obchod \(default\b/, /^Český obchod \(cz · \/cs\)$/]);
   await expect(switcher).toHaveValue('default');
   const result = await new AxeBuilder({ page }).include('nav').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
   const violations = result.violations.filter(({ impact }) => ['critical', 'serious'].includes(impact));
@@ -28,7 +29,7 @@ test('admin store switcher offers the owner every store', async ({ page }) => {
   await adminSignIn(page);
   await page.goto('/admin.php?p=orders');
   await expect(page.getByLabel(/^(Store|Obchod)$/).locator('option')).toHaveText([
-    'Slovenský obchod', 'Český obchod', 'Sklep polski', 'Magyar üzlet', 'Deutscher Shop', 'US Store',
+    /^Slovenský obchod \(default\b/, /^Český obchod \(cz\b/, /^Sklep polski \(pl\b/, /^Magyar üzlet \(hu\b/, /^Deutscher Shop \(de\b/, /^US Store \(us\b/,
   ]);
   const opened = await page.goto('/admin.php?p=orders&store=hu');
   expect(opened.status()).toBe(200);

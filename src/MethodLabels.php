@@ -101,7 +101,13 @@ final class MethodLabels {
             $stmt->execute([StoreContext::current()->providerId()]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $decoded = json_decode((string)$row['translations'], true);
-                if (is_array($decoded)) self::$merchant[$store][$kind][(string)$row['code']] = $decoded;
+                if (!is_array($decoded)) continue;
+                foreach ($decoded as $locale => $texts) {
+                    if (!is_array($texts)) continue;
+                    foreach (['name', 'description'] as $field) {
+                        if (is_string($texts[$field] ?? null)) self::$merchant[$store][$kind][(string)$row['code']][(string)$locale][$field] = $texts[$field];
+                    }
+                }
             }
         }
         return self::$merchant[$store][$kind][$code] ?? [];
@@ -115,7 +121,7 @@ final class MethodLabels {
 
     private static function translated(string $kind, string $code, string $value, int $field, string $suffix, ?string $locale): string {
         $own = self::translations($kind, $code)[$locale === null || $locale === '' ? I18n::locale() : $locale][$field === 0 ? 'name' : 'description'] ?? '';
-        if (is_string($own) && trim($own) !== '') return $own;
+        if (trim($own) !== '') return $own;
         $seeded = self::SEEDED[$kind][$code][$field] ?? null;
         $names = self::SEEDED_STORE_NAMES[$kind][$code] ?? [];
         if ($field === 0 && array_key_exists($value, $names)) {

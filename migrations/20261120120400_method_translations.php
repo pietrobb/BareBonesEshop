@@ -1,6 +1,6 @@
 <?php
 
-// R50 (review round 20, low): a shipping or payment method the merchant named had that one name in every language of
+// R50 (review round 50, low): a shipping or payment method the merchant named had that one name in every language of
 // the store. translations holds the merchant's name and description per further store language
 // ({"cs": {"name": "…", "description": "…"}}); MethodLabels shows them.
 return new class {

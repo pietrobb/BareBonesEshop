@@ -67,7 +67,7 @@ class Search {
     public static function refreshNames(array $productIds = [], ?PDO $db = null): int {
         $db ??= Db::get();
         // A signed update migrates under the old release's Db (v2.0.0 has no hasColumn()); its migration added the column.
-        if (method_exists(Db::class, 'hasColumn') && !Db::hasColumn('products', 'search_names', $db)) return 0;
+        if (in_array('hasColumn', get_class_methods(Db::class), true) && !Db::hasColumn('products', 'search_names', $db)) return 0;
         $ids = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn(int $id): bool => $id > 0)));
         $update = $db->prepare('UPDATE products SET search_names = ?, updated_at = updated_at WHERE id = ?');
         $changed = 0;
