@@ -79,6 +79,16 @@ try {
     $pdo->exec("UPDATE invoices SET issued_at = '2001-01-01 00:00:00', delivery_date = NULL WHERE issued_at >= '{$r34lSince}'");
     $r34lStashedOrders = $pdo->query("SELECT id, created_at FROM orders WHERE created_at >= '{$r34lSince}'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $pdo->exec("UPDATE orders SET created_at = '2001-01-01 00:00:00' WHERE created_at >= '{$r34lSince}'");
+    // R49 (low): the per-year totals other tests' issued documents added (oss_threshold_totals) count too; set them aside
+    // as well. A stray 20 EUR of this year stands in for whatever ran before, so the check holds in any test order.
+    $r34lTotals = Db::tableExists('oss_threshold_totals', $pdo);
+    if ($r34lTotals) {
+        $r34lHadRow = (bool)$pdo->query("SELECT 1 FROM oss_threshold_totals WHERE store_id = 'default' AND year = {$year} AND currency = 'eur'")->fetchColumn();
+        $pdo->prepare(Db::insertIgnore() . " INTO oss_threshold_totals (store_id, year, currency, net) VALUES ('default', ?, 'eur', 0)")->execute([$year]);
+        $pdo->prepare("UPDATE oss_threshold_totals SET net = net + 2000 WHERE store_id = 'default' AND year = ? AND currency = 'eur'")->execute([$year]);
+        $r34lStashedTotals = $pdo->query('SELECT store_id, year, currency, net FROM oss_threshold_totals')->fetchAll(PDO::FETCH_NUM);
+        $pdo->exec('DELETE FROM oss_threshold_totals');
+    }
     $r34lInvoice = static function (string $number, int $net, string $scenario, int $year, string $currency = 'eur') use ($pdo, &$r34lOrders): void {
         $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount,
                 total, currency, status, payment_status, payment_method, shipping_method, store_id, created_at)
@@ -112,6 +122,14 @@ foreach ($r34lStashedInvoices ?? [] as $r34lId => $r34lAt) $r34lRestore->execute
 foreach ($r34lStashedInvoicesDelivery ?? [] as $r38dId => $r38dDate) $pdo->prepare('UPDATE invoices SET delivery_date = ? WHERE id = ?')->execute([$r38dDate, $r38dId]);
 $r34lRestore = $pdo->prepare('UPDATE orders SET created_at = ? WHERE id = ?');
 foreach ($r34lStashedOrders ?? [] as $r34lId => $r34lAt) $r34lRestore->execute([$r34lAt, $r34lId]);
+if (isset($r34lStashedTotals)) {
+    $pdo->exec('DELETE FROM oss_threshold_totals');
+    $r34lRestore = $pdo->prepare('INSERT INTO oss_threshold_totals (store_id, year, currency, net) VALUES (?, ?, ?, ?)');
+    foreach ($r34lStashedTotals as $r34lRow) $r34lRestore->execute($r34lRow);
+    $pdo->prepare(empty($r34lHadRow)
+        ? "DELETE FROM oss_threshold_totals WHERE store_id = 'default' AND year = ? AND currency = 'eur'"
+        : "UPDATE oss_threshold_totals SET net = net - 2000 WHERE store_id = 'default' AND year = ? AND currency = 'eur'")->execute([$year]);
+}
 
 // 3. A mixed invoice states the legal ground of each scheme: export (§ 47 / Art. 146) and reverse charge (Art. 196).
 try {
