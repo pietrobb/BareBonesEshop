@@ -58,6 +58,11 @@ on:
       - '.github/workflows/payment-gateway.yml'
       - '.github/scripts/playwright-install.sh'
 
+# A new push to a PR cancels that PR's outdated run; nightly and main/master runs are kept (unique group per run).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
