@@ -320,9 +320,31 @@ class DigitalDelivery {
      * below where it stopped (resumeSlack()): a finished download "resumed" from byte 1 was a free near-complete copy.
      */
     public static function beginTransfer(array $entitlement, int $rangeStart, int $size, ?int $now = null): ?int {
+        return self::openTransfer($entitlement, $rangeStart, $size, $now)['counted_at'] ?? null;
+    }
+
+    /**
+     * beginTransfer() that also returns the transfer's lease: pass the result to endTransfer() when the transfer stops.
+     * R50 (capability review run 620): while a counted download or a free resume is still streaming, its lease is held
+     * and no free resume starts next to it ("Range: bytes=1-" beside a running download was a free second copy). A
+     * transfer that never ends (killed request) keeps its lease: later ranges of that download count as new downloads.
+     * @return array{counted_at:int, lease:string}|null
+     */
+    public static function openTransfer(array $entitlement, int $rangeStart, int $size, ?int $now = null): ?array {
         $now ??= time();
-        if ($rangeStart > 0 && self::claimResume($entitlement, $rangeStart, $size, $now)) return (int)$entitlement['last_download_at'];
-        return self::consume((int)$entitlement['id'], $now) ? $now : null;
+        $lease = bin2hex(random_bytes(16));
+        if ($rangeStart > 0 && self::claimResume($entitlement, $rangeStart, $size, $now, $lease)) {
+            return ['counted_at' => (int)$entitlement['last_download_at'], 'lease' => $lease];
+        }
+        return self::consume((int)$entitlement['id'], $now, $lease) ? ['counted_at' => $now, 'lease' => $lease] : null;
+    }
+
+    /** The transfer opened by openTransfer() stopped after serving the file up to byte $offset: record it, release the lease. */
+    public static function endTransfer(int $entitlementId, array $transfer, int $offset): void {
+        self::recordProgress($entitlementId, (int)$transfer['counted_at'], $offset);
+        if (!Db::hasColumn('digital_entitlements', 'transfer_lease')) return;
+        Db::get()->prepare("UPDATE digital_entitlements SET transfer_lease = NULL WHERE id = :id AND transfer_lease = :lease")
+            ->execute([':id' => $entitlementId, ':lease' => (string)$transfer['lease']]);
     }
 
     /**
@@ -338,17 +360,21 @@ class DigitalDelivery {
     }
 
     /** Take one free resume of the last counted download (atomic: the limit of free resumes holds under concurrency). */
-    private static function claimResume(array $entitlement, int $rangeStart, int $size, int $now): bool {
+    private static function claimResume(array $entitlement, int $rangeStart, int $size, int $now, string $lease): bool {
         $served = (int)($entitlement['last_download_offset'] ?? 0);
         $slack = self::resumeSlack($size);
         if (!self::canResume($entitlement, $now) || $served >= $size || $rangeStart > $served || $rangeStart < $served - $slack) return false;
         // R50: one free resume per recorded offset — concurrent resumes before any of them recorded progress are not
         // each a free copy (they count as new downloads instead). Before migration 20261120120500 only the cap holds.
         $claim = Db::hasColumn('digital_entitlements', 'resume_claimed_offset');
+        // R50 (run 620): and only once the transfer before it stopped (its lease released, see openTransfer()).
+        $leased = Db::hasColumn('digital_entitlements', 'transfer_lease');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
-            SET resume_count = resume_count + 1, " . ($claim ? 'resume_claimed_offset = last_download_offset, ' : '') . "updated_at = " . Db::now() . "
+            SET resume_count = resume_count + 1, " . ($claim ? 'resume_claimed_offset = last_download_offset, ' : '')
+              . ($leased ? 'transfer_lease = :lease, ' : '') . "updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since"
-              . ($claim ? ' AND (resume_claimed_offset IS NULL OR last_download_offset > resume_claimed_offset)' : '') . "
+              . ($claim ? ' AND (resume_claimed_offset IS NULL OR last_download_offset > resume_claimed_offset)' : '')
+              . ($leased ? ' AND transfer_lease IS NULL' : '') . "
               AND resume_count < :max_resumes AND last_download_offset >= :start AND last_download_offset <= :start_plus_slack
               AND last_download_offset < :size AND (expires_at IS NULL OR expires_at >= :now)
               AND EXISTS (
@@ -357,10 +383,12 @@ class DigitalDelivery {
                     AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
               )" . self::notCreditedLineSql());
-        $stmt->execute([
+        $params = [
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
             ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + $slack, ':size' => $size, ':now' => $now,
-        ]);
+        ];
+        if ($leased) $params[':lease'] = $lease;
+        $stmt->execute($params);
         return $stmt->rowCount() === 1;
     }
 
@@ -405,11 +433,14 @@ class DigitalDelivery {
             && array_key_exists('resume_count', $entitlement) && (int)$entitlement['resume_count'] < self::MAX_FREE_RESUMES;
     }
 
-    public static function consume(int $entitlementId, ?int $now = null): bool {
+    /** Count one download; its transfer holds $lease (a fresh one when null) until endTransfer(). */
+    public static function consume(int $entitlementId, ?int $now = null, ?string $lease = null): bool {
         // Before the resume migrations ran the columns are missing: count without resume tracking instead of failing.
+        $leased = self::resumeTracked() && Db::hasColumn('digital_entitlements', 'transfer_lease');
         $tracking = !Db::hasColumn('digital_entitlements', 'last_download_at') ? ''
             : (self::resumeTracked() ? 'last_download_at = :counted_at, last_download_offset = 0, resume_count = 0, '
-                . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? 'resume_claimed_offset = NULL, ' : '') : 'last_download_at = :counted_at, ');
+                . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? 'resume_claimed_offset = NULL, ' : '')
+                . ($leased ? 'transfer_lease = :lease, ' : '') : 'last_download_at = :counted_at, ');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET download_count = download_count + 1, {$tracking}updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active'
@@ -424,6 +455,7 @@ class DigitalDelivery {
         $now ??= time();
         $params = [':id' => $entitlementId, ':now' => $now];
         if ($tracking !== '') $params[':counted_at'] = $now;
+        if ($leased) $params[':lease'] = $lease ?? bin2hex(random_bytes(16));
         $stmt->execute($params);
         return $stmt->rowCount() === 1;
     }

@@ -379,26 +379,30 @@ $aigEntId = (int)$pdo->lastInsertId();
 $aigEnt = static fn(): array => $pdo->query("SELECT * FROM digital_entitlements WHERE id = {$aigEntId}")->fetch(PDO::FETCH_ASSOC) ?: [];
 $aigNow = time();
 $aigSize = 128 * 1024 * 1024; // the file: resumes may start up to 16 MiB below the served bytes
-$aigCounted = DigitalDelivery::beginTransfer($aigEnt(), 0, $aigSize, $aigNow);
+$aigTransfer = DigitalDelivery::openTransfer($aigEnt(), 0, $aigSize, $aigNow);
+$aigCounted = (int)($aigTransfer['counted_at'] ?? 0);
 assert_true($aigPaidOrder > 0 && $aigCounted === $aigNow, '18 download: the first transfer from byte 0 counts the download');
 assert_equals(1, (int)$aigEnt()['download_count'], '18 download: one download counted');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigSize, $aigNow + 30), '18 download: "Range: bytes=1-" before the counted download served anything is refused once the limit is spent');
 DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192);
 DigitalDelivery::recordProgress($aigEntId, $aigCounted, 4000);
 assert_equals(8192, (int)$aigEnt()['last_download_offset'], '18 download: the bytes served by the counted download are recorded (only ever growing)');
+DigitalDelivery::endTransfer($aigEntId, $aigTransfer, 8192); // the client dropped: the counted transfer stopped
 assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 8192, $aigSize, $aigNow + 60) && (int)$aigEnt()['download_count'] === 1, '18 download: a legit resume at the bytes already served is not counted again (limit 1 already used)');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 8193, $aigSize, $aigNow + 60), '18 download: a range starting past the bytes the counted download served is refused (a new download, limit spent)');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 0, $aigSize, $aigNow + 60), '18 download: a new download from byte 0 is refused once the limit is used');
 // A long partial transfer: "bytes=1-" is no resume (it would be a free near-complete copy), a resume near the cut is.
-$pdo->exec("UPDATE digital_entitlements SET last_download_offset = " . (64 * 1024 * 1024) . " WHERE id = {$aigEntId}");
+$aigNoLease = Db::hasColumn('digital_entitlements', 'transfer_lease') ? ', transfer_lease = NULL' : ''; // that resume stopped
+$pdo->exec("UPDATE digital_entitlements SET last_download_offset = " . (64 * 1024 * 1024) . "{$aigNoLease} WHERE id = {$aigEntId}");
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigSize, $aigNow + 60), '18 download: after 64 MiB served, "Range: bytes=1-" is not a free resume (limit spent, refused)');
 assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 64 * 1024 * 1024 - 1024 * 1024, $aigSize, $aigNow + 60), '18 download: a resume a little below the served bytes (data in flight) is free');
 $pdo->exec("UPDATE digital_entitlements SET last_download_offset = 8192, resume_count = 1"
-    . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? ', resume_claimed_offset = NULL' : '') . " WHERE id = {$aigEntId}");
-// Each resume follows progress of the one before (R50: concurrent resumes from one offset are one resume).
+    . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? ', resume_claimed_offset = NULL' : '') . "{$aigNoLease} WHERE id = {$aigEntId}");
+// Each resume follows progress of the one before, after it stopped (R50: concurrent resumes are one resume).
 for ($aigResume = 2; $aigResume <= DigitalDelivery::MAX_FREE_RESUMES; $aigResume++) {
     DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192 + $aigResume);
-    DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigSize, $aigNow + 60);
+    $aigTransfer = DigitalDelivery::openTransfer($aigEnt(), 4096, $aigSize, $aigNow + 60);
+    if ($aigTransfer !== null) DigitalDelivery::endTransfer($aigEntId, $aigTransfer, 4096);
 }
 DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192 + DigitalDelivery::MAX_FREE_RESUMES + 1);
 assert_equals(DigitalDelivery::MAX_FREE_RESUMES, (int)$aigEnt()['resume_count'], '18 download: each free resume is counted');

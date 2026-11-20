@@ -53,10 +53,10 @@ $length = $size > 0 ? $end - $start + 1 : 0;
 
 // A download counts once: from byte 0; a resume is free only inside the window and up to the bytes the counted
 // download already served (DigitalDelivery::beginTransfer()). Anything else is a new download: refused once spent.
-$countedAt = null;
+$transfer = null;
 if ($method !== 'HEAD') {
-    $countedAt = DigitalDelivery::beginTransfer($entitlement, $start, (int)$size);
-    if ($countedAt === null) {
+    $transfer = DigitalDelivery::openTransfer($entitlement, $start, (int)$size);
+    if ($transfer === null) {
         http_response_code(403);
         exit('Forbidden');
     }
@@ -82,13 +82,22 @@ if ($method === 'HEAD') exit;
 while (ob_get_level() > 0) ob_end_clean();
 // Keep running after a client abort, so the bytes served are recorded (they bound later free resumes).
 ignore_user_abort(true);
+$served = 0;
+$recorded = 0;
+// The transfer ends here (or in a shutdown after a fatal error): record the bytes served and release its lease, so
+// a dropped client may resume. While it streams, no free resume starts next to it (DigitalDelivery::openTransfer()).
+$ended = false;
+$endTransfer = static function () use (&$ended, &$served, $entitlement, $transfer, $start): void {
+    if ($ended) return;
+    $ended = true;
+    DigitalDelivery::endTransfer((int)$entitlement['id'], $transfer, $start + $served);
+};
+register_shutdown_function($endTransfer);
 $handle = fopen($path, 'rb');
 if ($handle === false) {
     http_response_code(503);
     exit('Temporarily Unavailable');
 }
-$served = 0;
-$recorded = 0;
 try {
     if ($start > 0) fseek($handle, $start);
     $remaining = $length;
@@ -102,11 +111,11 @@ try {
         $served += strlen($chunk);
         // A running offset (every 8 MiB) survives a killed request; the final one is written below.
         if ($served - $recorded >= 8388608) {
-            DigitalDelivery::recordProgress((int)$entitlement['id'], (int)$countedAt, $start + $served);
+            DigitalDelivery::recordProgress((int)$entitlement['id'], (int)$transfer['counted_at'], $start + $served);
             $recorded = $served;
         }
     }
 } finally {
     fclose($handle);
-    if ($served > $recorded) DigitalDelivery::recordProgress((int)$entitlement['id'], (int)$countedAt, $start + $served);
+    $endTransfer();
 }

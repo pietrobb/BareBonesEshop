@@ -375,6 +375,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261120120500_download_resume_claim` (review round 50): adds
   `digital_entitlements.resume_claimed_offset`, where the last free download resume started, so concurrent resumes
   from one point are one resume.
+- **Migration** `20261120120600_download_transfer_lease` (review round 50): adds `digital_entitlements.transfer_lease`,
+  held while a download or its free resume streams, so no free resume starts next to a transfer that is still running.
+  A resume after a dropped connection works once the server has noticed the drop; a request the server killed keeps
+  its lease, and further ranges of that download count as new downloads.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -480,7 +484,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   near-complete copies. A free resume now continues only a download that has not served the whole file yet, at most an
   eighth of the file (and never more than 16 MiB) below where it stopped; anything else counts as a new download.
   One recorded stopping point allows one free resume: concurrent `Range: bytes=1-` requests after a one-byte
-  download were each a free near-complete copy.
+  download were each a free near-complete copy. And a free resume starts only once the transfer it continues has
+  stopped: a `Range: bytes=1-` beside a large download that was still streaming was a free second copy.
 - **The admin MFA lockout holds against concurrent attempts.** The attempt is now counted, and from the fifth one the
   account locked, in one statement before the code is checked, so at most five codes are checked however many
   requests arrive at once from however many IPs (they all passed the lock check before, and a stale write could clear
