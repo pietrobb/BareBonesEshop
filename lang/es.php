@@ -2072,6 +2072,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.payment_unavailable' => 'El método de pago seleccionado no está disponible para este pedido.',
     'checkout.error.total_changed' => 'El importe del pedido se ha recalculado tras cambiar el envío, el pago o el país. Revise el nuevo importe y confirme el pedido de nuevo.',
     'checkout.error.vat_changed' => 'El IVA del pedido ha cambiado entretanto (se superó el umbral de 10 000 EUR de ventas a distancia). Revise el nuevo importe y confirme el pedido de nuevo.',
+    'checkout.error.credit_limit' => 'El pedido supera el crédito disponible de su empresa para compras a factura (otro pedido lo utilizó entretanto). Elija otro método de pago.',
     'checkout.error.vat_unavailable' => 'Ahora no se puede determinar el IVA de este pedido (no se pudo calcular el umbral de 10 000 EUR de ventas a distancia). El pedido no se ha realizado; inténtelo de nuevo en un momento.',
     'checkout.error.synthetic_requires_online' => 'El pedido sintético requiere un método de pago en línea.',
     'checkout.error.payment_session_failed' => 'El procesamiento del pago no está disponible. Inténtelo de nuevo.',

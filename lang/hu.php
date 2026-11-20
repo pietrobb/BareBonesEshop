@@ -2110,6 +2110,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.payment_unavailable' => 'A választott fizetési mód ennél a rendelésnél nem érhető el.',
     'checkout.error.total_changed' => 'A szállítás, a fizetés vagy az ország módosítása után a rendelés összege újraszámolódott. Ellenőrizze az új összeget, és erősítse meg újra a rendelést.',
     'checkout.error.vat_changed' => 'A rendelés áfája időközben megváltozott (túllépték a távértékesítés 10 000 EUR-s értékhatárát). Ellenőrizze az új összeget, és erősítse meg újra a rendelést.',
+    'checkout.error.credit_limit' => 'A rendelés meghaladja cége számlás vásárlásra elérhető hitelkeretét (időközben egy másik rendelés felhasználta). Válasszon másik fizetési módot.',
     'checkout.error.vat_unavailable' => 'A rendelés áfája most nem határozható meg (a távértékesítés 10 000 EUR-s értékhatárát nem sikerült kiszámítani). A rendelés nem jött létre; próbálja újra kicsit később.',
     'checkout.error.synthetic_requires_online' => 'A szintetikus rendeléshez online fizetési mód szükséges.',
     'checkout.error.payment_session_failed' => 'A fizetés feldolgozása jelenleg nem érhető el. Kérjük, próbálja újra.',

@@ -112,6 +112,8 @@ final class ManualOrder {
         ];
         try {
             $orderId = Orders::create($priced['items'], $customer, $priced['payment_code']);
+        } catch (CreditLimitExceededException $e) {
+            return self::refusal('checkout.error.credit_limit');
         } catch (OrderRejectedException $e) {
             return self::refusal('admin.order.edit.out_of_stock');
         } catch (VatChangedException $e) {
@@ -189,8 +191,22 @@ final class ManualOrder {
             return ['error' => 'admin.order.edit.vat_changed'];
         });
         if ($error !== null) return self::refusal($error, $detail);
+        self::resendTransferDetails($order);
         $limited = self::limitedDownloads($orderId, $lines);
         return ['ok' => true, 'error' => null] + ($limited === '' ? [] : ['notice' => $limited]);
+    }
+
+    /**
+     * R50: an edit that changed the amount of an order awaiting a bank transfer sends the confirmation again with the
+     * new amount and payment details (QR); the customer would transfer the old amount.
+     */
+    private static function resendTransferDetails(array $before): void {
+        $after = Orders::byId((int)$before['id']);
+        if ($after === null || (int)$after['total'] === (int)$before['total']) return;
+        $snapshot = json_decode((string)($after['payment_method_snapshot'] ?? ''), true);
+        if (!OfflinePaymentQueue::isOfflineTransfer($after, is_array($snapshot) ? $snapshot : [])) return;
+        JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => (string)$after['customer_email'], 'order_id' => (int)$after['id']]);
+        AuditLog::log('order', (int)$after['id'], null, ['total' => (int)$after['total']], 'New bank transfer details sent after the edit');
     }
 
     /** R34: the downloads asked for more than once and saved once (a download is sold one per order line), by SKU. */

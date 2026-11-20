@@ -1070,6 +1070,9 @@ final class InvoiceService
             AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        // R50 (low): every read here is closed before the credit note writes; an open SQLite cursor held the read lock
+        // and the job's own write waited on another connection's commit until "database is locked".
+        $stmt->closeCursor();
         if (!$row) return null;
         // R24: a refund event without refund ids books the item refund it settles under the event's key; that item refund is
         // named in the row (a Stripe charge.refunded without its refund list did so up to 2.1.2).
@@ -1080,7 +1083,9 @@ final class InvoiceService
         $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status <> 'failed'
             AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
         $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
-        if ($item->fetchColumn()) return null;
+        $isItem = $item->fetchColumn();
+        $item->closeCursor();
+        if ($isItem) return null;
         // R34 (capability review 437): the money of a released item refund credits the rates its reversed credit note did.
         $released = $db->prepare("SELECT i.vat_breakdown FROM order_refunds r JOIN invoices i ON i.id = r.credit_note_id
             WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'failed' AND r.rma_id IS NOT NULL
@@ -1088,7 +1093,9 @@ final class InvoiceService
             ORDER BY r.id DESC LIMIT 1");
         $released->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
         $itemRates = [];
-        foreach ((array)json_decode((string)$released->fetchColumn(), true) as $key => $rate) {
+        $releasedBreakdown = (string)$released->fetchColumn();
+        $released->closeCursor();
+        foreach ((array)json_decode($releasedBreakdown, true) as $key => $rate) {
             if (is_array($rate)) $itemRates[(string)$key] = ['gross' => -(int)($rate['net'] ?? 0) - (int)($rate['vat'] ?? 0), 'net' => -(int)($rate['net'] ?? 0)];
         }
         // R14 #2: an item refund of the same amount whose provider refund id is not noted yet may be this very refund (its
@@ -1102,7 +1109,9 @@ final class InvoiceService
         $inFlight = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending'
             AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
         $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
-        if ($inFlight->fetchColumn()) {
+        $waiting = $inFlight->fetchColumn();
+        $inFlight->closeCursor();
+        if ($waiting) {
             if (self::bookedRefundWaitedOut($deferrals)) {
                 if (!IncidentMonitor::reportedForOrder('payment.credit_note_stalled', $orderId)) {
                     IncidentMonitor::report('payment.credit_note_stalled', 'payment', 'critical', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals]);

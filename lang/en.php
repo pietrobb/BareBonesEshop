@@ -2131,6 +2131,7 @@ return [
     'checkout.error.payment_unavailable' => 'The selected payment method is not available for this order.',
     'checkout.error.total_changed' => 'The order total was recalculated after the change of shipping, payment or country. Check the new total and confirm the order again.',
     'checkout.error.vat_changed' => 'The VAT of the order changed in the meantime (the 10 000 EUR distance-sales threshold was passed). Check the new total and confirm the order again.',
+    'checkout.error.credit_limit' => 'The order exceeds your company\'s available credit for purchases on invoice (another order used it in the meantime). Choose another payment method.',
     'checkout.error.vat_unavailable' => 'The VAT of this order cannot be determined right now (the 10 000 EUR distance-sales threshold could not be counted). The order was not placed; please try again in a moment.',
     'checkout.error.synthetic_requires_online' => 'The synthetic checkout requires an online payment method.',
     'checkout.error.payment_session_failed' => 'Payment processing is unavailable. Please try again.',

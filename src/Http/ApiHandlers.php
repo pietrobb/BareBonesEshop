@@ -1024,6 +1024,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         }
 
         return $result;
+    } catch (CreditLimitExceededException $e) {
+        // R50: another order of the company used the credit meanwhile; the buyer picks another payment method.
+        return checkoutRefusal('checkout.error.credit_limit');
     } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
         return checkoutRefusal('stock_changed');

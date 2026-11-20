@@ -2110,6 +2110,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.payment_unavailable' => 'Zvolený způsob platby není pro tuto objednávku dostupný.',
     'checkout.error.total_changed' => 'Částka objednávky byla po změně dopravy, platby nebo země přepočítána. Zkontrolujte novou částku a objednávku potvrďte znovu.',
     'checkout.error.vat_changed' => 'DPH objednávky se mezitím změnila (překročen limit 10 000 EUR pro prodej na dálku). Zkontrolujte novou částku a objednávku potvrďte znovu.',
+    'checkout.error.credit_limit' => 'Objednávka překračuje volný úvěrový limit vaší firmy pro nákup na fakturu (mezitím ho využila jiná objednávka). Zvolte jiný způsob platby.',
     'checkout.error.vat_unavailable' => 'DPH této objednávky teď nelze určit (nepodařilo se spočítat limit 10 000 EUR pro prodej na dálku). Objednávka nebyla vytvořena; zkuste to za chvíli znovu.',
     'checkout.error.synthetic_requires_online' => 'Syntetická objednávka vyžaduje online platbu.',
     'checkout.error.payment_session_failed' => 'Zpracování platby je momentálně nedostupné. Zkuste to znovu.',

@@ -145,9 +145,25 @@ class Warehouse {
         if ($qty < 0) throw new InvalidArgumentException('Stock count cannot be negative');
         if (!self::byId($warehouseId)) throw new RuntimeException('Warehouse not found in active store');
         $db = Db::get();
-        $beforeStmt = $db->prepare('SELECT qty, reserved FROM warehouse_stock WHERE warehouse_id = :wh AND sku = :sku');
+        $ownsTransaction = !$db->inTransaction();
+        if ($ownsTransaction) $db->beginTransaction();
+        try {
+            self::writeStock($db, $warehouseId, $sku, $qty, $movementType, $referenceType, $referenceId, $idempotencyKey);
+            if ($ownsTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    private static function writeStock(PDO $db, int $warehouseId, string $sku, int $qty, string $movementType, ?string $referenceType,
+        string|int|null $referenceId, ?string $idempotencyKey): void {
+        // R50: a locking read on MySQL. A plain read returns the transaction's snapshot: a goods receipt committed
+        // meanwhile (feed sync next to it) was missing from "before", and the ledger booked a wrong delta.
+        $beforeStmt = $db->prepare('SELECT qty, reserved FROM warehouse_stock WHERE warehouse_id = :wh AND sku = :sku' . (Db::isMysql() ? ' FOR UPDATE' : ''));
         $beforeStmt->execute([':wh' => $warehouseId, ':sku' => $sku]);
         $before = $beforeStmt->fetch(PDO::FETCH_ASSOC) ?: ['qty' => 0, 'reserved' => 0];
+        $beforeStmt->closeCursor();
         if ($qty < (int)$before['reserved']) {
             throw new RuntimeException("Stock count {$qty} is below the {$before['reserved']} units reserved for SKU: {$sku}");
         }

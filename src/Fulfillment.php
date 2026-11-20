@@ -389,7 +389,11 @@ class Fulfillment {
         return $quantity;
     }
 
-    /** Units of an order line that left a warehouse: a bundle unit once every component of it shipped. */
+    /**
+     * Units of an order line that left a warehouse: a bundle unit once any component of it shipped. R50: a set split
+     * between warehouses whose first parcel left is with the customer (returnable, not refunded when the rest is
+     * cancelled); counting it only once every part shipped refunded the whole order and shipping on cancellation.
+     */
     public static function shippedUnits(array $orderItem): int {
         $stmt = Db::get()->prepare("SELECT si.sku, COALESCE(SUM(si.quantity), 0) AS quantity FROM shipment_items si
             WHERE si.order_item_id = :item AND si.status = 'shipped' GROUP BY si.sku");
@@ -397,11 +401,12 @@ class Fulfillment {
         $shipped = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $shipped[(string)$row['sku']] = (int)$row['quantity'];
         if (!$shipped) return 0;
-        $units = (int)$orderItem['quantity'];
+        $units = 0;
         foreach (Inventory::reservationLines($orderItem) as $line) {
-            $units = min($units, intdiv($shipped[(string)$line['sku']] ?? 0, max(1, (int)($line['quantity_per_bundle'] ?? 1))));
+            $perUnit = max(1, (int)($line['quantity_per_bundle'] ?? 1));
+            $units = max($units, intdiv(($shipped[(string)$line['sku']] ?? 0) + $perUnit - 1, $perUnit));
         }
-        return $units;
+        return min((int)$orderItem['quantity'], $units);
     }
 
     /**

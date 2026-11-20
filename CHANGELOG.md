@@ -390,6 +390,22 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   unknown class fails the row; a row without the column keeps the product's class) and API v1 products read, create
   and patch `vat_class`. Feeds and the ERP sync leave it as set. The bookshop demo sells its titles as books. Existing
   products stay at the standard rate until you change them.
+- **A company's credit limit holds when it orders twice at once (review round 20).** The limit was checked when
+  checkout offered "purchase on invoice", so two orders placed together (or one after the offer was shown) could
+  together exceed it. The order transaction now locks the company and checks its open invoices again; an order over
+  the limit is refused ("The order exceeds your company's available credit…") and the buyer can choose another
+  payment method.
+- **Cancelling the rest of an order whose set ships from two warehouses refunds only what did not ship.** A set
+  (bundle) counted as shipped only once all its parts had left, so cancelling after its first parcel refunded the
+  whole order and its shipping. A set with a part dispatched now counts as with the customer (returnable), and
+  shipping is refunded only when nothing was dispatched.
+- **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
+  reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
+- **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as
+  refunded and it can no longer be shipped; editing an order still awaiting a bank transfer to a different amount sends
+  the confirmation with the new amount and payment details again; the refund credit-note job no longer leaves SQLite
+  "database is locked"; an order locks its products' stock in SKU order, so two orders with the same products in a
+  different order no longer deadlock on MySQL.
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

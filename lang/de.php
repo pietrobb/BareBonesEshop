@@ -2110,6 +2110,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.payment_unavailable' => 'Die gewählte Zahlungsart ist für diese Bestellung nicht verfügbar.',
     'checkout.error.total_changed' => 'Der Bestellbetrag wurde nach der Änderung von Versand, Zahlung oder Land neu berechnet. Prüfen Sie den neuen Betrag und bestätigen Sie die Bestellung erneut.',
     'checkout.error.vat_changed' => 'Die Mehrwertsteuer der Bestellung hat sich inzwischen geändert (Schwelle von 10 000 EUR für Fernverkäufe überschritten). Prüfen Sie den neuen Betrag und bestätigen Sie die Bestellung erneut.',
+    'checkout.error.credit_limit' => 'Die Bestellung überschreitet das verfügbare Kreditlimit Ihrer Firma für den Kauf auf Rechnung (eine andere Bestellung hat es inzwischen genutzt). Wählen Sie eine andere Zahlungsart.',
     'checkout.error.vat_unavailable' => 'Die Mehrwertsteuer dieser Bestellung lässt sich gerade nicht bestimmen (die Schwelle von 10 000 EUR für Fernverkäufe konnte nicht berechnet werden). Die Bestellung wurde nicht angelegt; versuchen Sie es bitte gleich noch einmal.',
     'checkout.error.synthetic_requires_online' => 'Der synthetische Checkout erfordert eine Online-Zahlungsart.',
     'checkout.error.payment_session_failed' => 'Die Zahlungsabwicklung ist derzeit nicht verfügbar. Bitte versuchen Sie es erneut.',

@@ -858,16 +858,36 @@ class Customers {
     }
 
     /**
-     * Total of the company members' orders in this store that are neither cancelled nor paid (credit exposure).
-     * Only unpaid payments count: a paid order stays paid when part of it is refunded or disputed.
+     * R50: the credit limit again inside the order transaction, under the company's row lock, so concurrent orders on
+     * invoice of one company cannot together pass the limit (the payment offer checked each against the old total).
+     * SQLite orders are already serialised by the checkout lock file.
      */
-    public static function companyOpenTotal(int $companyId): int {
+    public static function assertInvoiceCredit(int $customerId, int $amount): void {
+        $profile = self::commerceProfile($customerId);
+        $companyId = (int)($profile['company_id'] ?? 0);
+        if ($companyId <= 0) return;
+        $db = Db::get();
+        $locking = !Db::isSqlite();
+        $stmt = $db->prepare('SELECT credit_limit FROM companies WHERE id = :id AND store_id = :store' . ($locking ? ' FOR UPDATE' : ''));
+        $stmt->execute([':id' => $companyId, ':store' => StoreContext::current()->id()]);
+        $creditLimit = max(0, (int)$stmt->fetchColumn());
+        if ($creditLimit > 0 && self::companyOpenTotal($companyId, $locking) + $amount > $creditLimit) {
+            throw new CreditLimitExceededException("Order exceeds the credit limit of company {$companyId}");
+        }
+    }
+
+    /**
+     * Total of the company members' orders in this store that are neither cancelled nor paid (credit exposure).
+     * Only unpaid payments count: a paid order stays paid when part of it is refunded or disputed. $locking reads the
+     * latest committed orders (a MySQL locking read), not the transaction's older snapshot.
+     */
+    public static function companyOpenTotal(int $companyId, bool $locking = false): int {
         $stmt = Db::get()->prepare("SELECT COALESCE(SUM(o.total), 0)
             FROM orders o
             JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
             WHERE o.store_id = :store AND c.company_id = :company
               AND o.status <> 'cancelled'
-              AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')");
+              AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')" . ($locking ? ' FOR UPDATE' : ''));
         $stmt->execute([
             ':store' => StoreContext::current()->id(),
             ':company' => $companyId,
