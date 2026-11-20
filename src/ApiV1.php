@@ -24,7 +24,7 @@ class ApiV1 {
 
         if ($method === 'GET' && $path === '/products') {
             ApiAuth::requireScope($client, 'products:read');
-            return self::ok(self::page('products', 'id, sku, slug, name, product_type, price, compare_price,
+            return self::ok(self::page('products', 'id, sku, slug, name, product_type, vat_class, price, compare_price,
                 currency, stock, status, weight_g, created_at, updated_at, stock_updated_at', $store->catalogId(), $query, [self::class, 'productDto'], true,
                 ['updated_at', 'stock_updated_at']));
         }
@@ -209,10 +209,11 @@ class ApiV1 {
 
     /** @return array{status:int,body:array} */
     private static function patchProduct(int $productId, array $body, string $key, array $client, string $path, string $ifMatch = ''): array {
-        $allowed = ['name', 'status', 'price', 'compare_price', 'stock', 'weight_g'];
+        $allowed = ['name', 'status', 'price', 'compare_price', 'stock', 'weight_g', 'vat_class'];
         if ($body === [] || array_diff(array_keys($body), $allowed)) {
             throw new InvalidArgumentException('Product patch contains unsupported fields');
         }
+        if (array_key_exists('vat_class', $body)) $body['vat_class'] = self::vatClass($body['vat_class']);
         // The columns are signed 32-bit INTEGER on MySQL: a larger value would fail the write (500) there.
         foreach (['price', 'stock', 'weight_g'] as $field) {
             if (array_key_exists($field, $body) && (!is_int($body[$field]) || $body[$field] < 0 || $body[$field] > self::MAX_INT)) {
@@ -293,8 +294,9 @@ class ApiV1 {
      * @return array{status:int,body:array}
      */
     private static function createProduct(array $body, string $key, array $client, string $path): array {
-        $allowed = ['sku', 'name', 'price', 'compare_price', 'stock', 'status', 'weight_g', 'slug', 'category_id'];
+        $allowed = ['sku', 'name', 'price', 'compare_price', 'stock', 'status', 'weight_g', 'slug', 'category_id', 'vat_class'];
         if (array_diff(array_keys($body), $allowed)) throw new InvalidArgumentException('Product contains unsupported fields');
+        if (array_key_exists('vat_class', $body)) $body['vat_class'] = self::vatClass($body['vat_class']);
         $sku = self::sku($body['sku'] ?? null);
         if (!is_string($body['name'] ?? null) || trim($body['name']) === '' || strlen($body['name']) > 191) {
             throw new InvalidArgumentException('name is required (at most 191 bytes)');
@@ -330,6 +332,7 @@ class ApiV1 {
                 'weight_g' => $body['weight_g'] ?? 0, 'stock' => (string)($body['stock'] ?? 0)];
             if ($comparePrice !== null) $row['compare_price'] = $comparePrice;
             if ($slug !== null) $row['slug'] = $slug;
+            if (isset($body['vat_class'])) $row['vat_class'] = $body['vat_class'];
             // R23: create only; a concurrent create of the same SKU (MySQL) waits and gets 409 instead of overwriting it.
             try {
                 Import::importProduct($row, $db, true);
@@ -547,6 +550,13 @@ class ApiV1 {
         return $id === false ? null : (int)$id;
     }
 
+    /** R50 (high 3): a product's VAT rate class (standard, reduced, books, food, ...); see VatService::productClasses(). */
+    private static function vatClass(mixed $value): string {
+        $class = is_string($value) ? VatService::normalizeProductClass($value) : null;
+        if ($class === null || $class === '') throw new InvalidArgumentException('vat_class must be one of: ' . implode(', ', VatService::productClasses()));
+        return $class;
+    }
+
     private static function sku(mixed $value): string {
         if (!is_string($value) || trim($value) === '' || strlen($value) > 191) throw new InvalidArgumentException('sku is required');
         return trim($value);
@@ -564,6 +574,7 @@ class ApiV1 {
             'stock' => (int)$row['stock'],
             'status' => (string)$row['status'],
             'weight_g' => (int)($row['weight_g'] ?? 0),
+            'vat_class' => (string)($row['vat_class'] ?? 'standard'),
             'created_at' => (string)($row['created_at'] ?? ''),
             // R17: a stock change moves stock_updated_at (not updated_at, which the feed cache reads); the API reports the later one.
             'updated_at' => max((string)($row['updated_at'] ?? ''), (string)($row['stock_updated_at'] ?? '')),

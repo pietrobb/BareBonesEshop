@@ -133,7 +133,8 @@ try {
             assert_equals($a061Ok, $a061Send($a061Refund('P1', 'R-CANCEL', '600', 'CANCELED')), "{$a061Tag}: canceled refund acknowledged");
             assert_equals(['partially_refunded', 'paid', 400], $a061State('P1'), "{$a061Tag}: canceled refund moves no money");
             assert_equals($a061Ok, $a061Send($a061Refund('P1', 'R-2', '600')), "{$a061Tag}: remaining refund accepted");
-            assert_equals(['refunded', 'paid', 1000], $a061State('P1'), "{$a061Tag}: cumulative refund reaching the total is refunded");
+            // R50 (low): the money is all back, so the unshipped order is closed as refunded (was: left paid and shippable).
+            assert_equals(['refunded', 'refunded', 1000], $a061State('P1'), "{$a061Tag}: cumulative refund reaching the total is refunded and closes the order");
             assert_equals($a061Ok, $a061Send($a061Refund('P2', 'R-WORKER', '400')), "{$a061Tag}: notification for a worker-executed refund accepted");
             assert_equals(['partially_refunded', 'paid', 400], $a061State('P2'), "{$a061Tag}: worker-executed refund is not counted twice");
             // R39 (low): a provider refund of a payment the shop still holds as pending is a capture it missed: the money

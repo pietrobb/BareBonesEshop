@@ -216,7 +216,7 @@ final class AccountViewModel
             'status_label' => OrderStatusLabels::order((string)$order['status']),
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
             'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
-            'tracking' => trim(MethodLabels::carrier((string)($order['carrier'] ?? '')) . ' ' . (string)($order['tracking_number'] ?? '')),
+            'tracking' => implode(', ', array_column(Fulfillment::customerTracking($order), 'label')), // R50: parcels shipped from Admin → Shipments too
             'invoice' => $invoice ? [
                 'number' => (string)$invoice['number'],
                 'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),
@@ -236,7 +236,7 @@ final class AccountViewModel
             'error' => isset($errors[$name]) ? I18n::t((string)$errors[$name]) : null,
         ];
         $country = strtoupper((string)($values['country'] ?? ''));
-        if ($country === '') $country = strtoupper((string)(StoreContext::current()->legal()['country'] ?? ''));
+        if ($country === '') $country = StoreContext::current()->marketCountry();
         $type = (string)($values['type'] ?? 'shipping');
         // R33: a billing address may be in any country checkout bills to (also outside the EU), not only where it delivers;
         // Customers::addressErrors() still limits a delivery address to the delivery countries.

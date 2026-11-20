@@ -16,13 +16,23 @@ final class SalesReport {
 
     /**
      * FROM clause of revenue orders `o` with `r.refunded` = what was refunded of each, and its parameters (merge them
-     * with :store of revenueCondition()).
+     * with :store of revenueCondition()). R50 (review round 20, low): with $sinceUtc only the refunds of orders placed
+     * since then are summed (was every refund of the store's history for a 90-day report, ~4.5 s at 500 000 orders), and
+     * MySQL reads the store's paid orders of the period through idx_orders_store_payment_created (store, the PAID states,
+     * then the created_at range) instead of a store-wide index.
      * @return array{0: string, 1: array<string, string>}
      */
-    public static function revenueSource(string $storeId): array {
-        if (!Db::tableExists('payment_transactions')) return ['orders o LEFT JOIN (SELECT 0 AS order_id, 0 AS refunded) r ON 1 = 0', []];
-        return ["orders o LEFT JOIN (SELECT order_id, SUM(amount) AS refunded FROM payment_transactions
-                WHERE store_id = :rstore AND status IN " . self::REFUNDED . " GROUP BY order_id) r ON r.order_id = o.id", [':rstore' => $storeId]];
+    public static function revenueSource(string $storeId, ?string $sinceUtc = null): array {
+        $orders = 'orders o' . Db::forceIndex('orders', 'idx_orders_store_payment_created');
+        if (!Db::tableExists('payment_transactions')) return ["{$orders} LEFT JOIN (SELECT 0 AS order_id, 0 AS refunded) r ON 1 = 0", []];
+        $params = [':rstore' => $storeId];
+        $bound = '';
+        if ($sinceUtc !== null) {
+            $bound = ' AND order_id IN (SELECT id FROM orders WHERE store_id = :rostore AND created_at >= :rsince)';
+            $params += [':rostore' => $storeId, ':rsince' => $sinceUtc];
+        }
+        return ["{$orders} LEFT JOIN (SELECT order_id, SUM(amount) AS refunded FROM payment_transactions
+                WHERE store_id = :rstore AND status IN " . self::REFUNDED . "{$bound} GROUP BY order_id) r ON r.order_id = o.id", $params];
     }
 
     /** WHERE condition of revenue orders `o` of :store. */
@@ -39,7 +49,7 @@ final class SalesReport {
 
     /** @return array<string, array{orders:int, revenue:int, aov:int}> currency => figures, sorted by currency */
     public static function totals(string $storeId, string $sinceUtc): array {
-        [$source, $params] = self::revenueSource($storeId);
+        [$source, $params] = self::revenueSource($storeId, $sinceUtc);
         $stmt = Db::get()->prepare("SELECT LOWER(o.currency) AS currency, COUNT(*) AS orders, COALESCE(SUM(o.total - COALESCE(r.refunded, 0)), 0) AS revenue
             FROM {$source} WHERE " . self::revenueCondition() . " AND o.created_at >= :since
             GROUP BY LOWER(o.currency)");
@@ -61,7 +71,7 @@ final class SalesReport {
     public static function trend(string $storeId, int $days, ?DateTimeImmutable $now = null): array {
         $since = self::sinceUtc($days, $now);
         // Hour buckets keep the SQL portable (SQLite/MySQL) and let PHP shift them into local days.
-        [$source, $params] = self::revenueSource($storeId);
+        [$source, $params] = self::revenueSource($storeId, $since);
         $stmt = Db::get()->prepare("SELECT LOWER(o.currency) AS currency, SUBSTR(o.created_at, 1, 13) AS hour_utc, COUNT(*) AS orders, COALESCE(SUM(o.total - COALESCE(r.refunded, 0)), 0) AS revenue
             FROM {$source} WHERE " . self::revenueCondition() . " AND o.created_at >= :since
             GROUP BY LOWER(o.currency), SUBSTR(o.created_at, 1, 13)");
@@ -94,14 +104,15 @@ final class SalesReport {
      * @return array<string, list<array{product_id:int, variant_id:?int, sku:string, name:string, quantity:int, revenue:int}>> currency => best sellers by revenue
      */
     public static function topProducts(string $storeId, string $sinceUtc, int $limit = 10): array {
-        [$source, $params] = self::revenueSource($storeId);
+        [$source, $params] = self::revenueSource($storeId, $sinceUtc);
         $credits = '';
         if (Db::tableExists('credit_note_items') && Db::tableExists('order_refunds')) {
             $credited = "SELECT %s, SUM(cni.gross) AS credited FROM credit_note_items cni JOIN order_refunds rf ON rf.id = cni.refund_id
-                WHERE rf.store_id = :cstore AND rf.status = 'succeeded' GROUP BY %s";
+                WHERE rf.store_id = :cstore AND rf.status = 'succeeded'
+                  AND rf.order_id IN (SELECT id FROM orders WHERE store_id = :cstore_o AND created_at >= :csince) GROUP BY %s";
             $credits = ' LEFT JOIN (' . sprintf($credited, 'cni.order_item_id', 'cni.order_item_id') . ') ci ON ci.order_item_id = oi.id'
-                . ' LEFT JOIN (' . sprintf(str_replace(':cstore', ':costore', $credited), 'rf.order_id', 'rf.order_id') . ') co ON co.order_id = o.id';
-            $params += [':cstore' => $storeId, ':costore' => $storeId];
+                . ' LEFT JOIN (' . sprintf(str_replace([':cstore', ':csince'], [':costore', ':cosince'], $credited), 'rf.order_id', 'rf.order_id') . ') co ON co.order_id = o.id';
+            $params += [':cstore' => $storeId, ':cstore_o' => $storeId, ':csince' => $sinceUtc, ':costore' => $storeId, ':costore_o' => $storeId, ':cosince' => $sinceUtc];
         }
         $line = $credits === '' ? 'oi.total' : '(oi.total - COALESCE(ci.credited, 0))';
         $order = $credits === '' ? 'o.total' : '(o.total - COALESCE(co.credited, 0))';

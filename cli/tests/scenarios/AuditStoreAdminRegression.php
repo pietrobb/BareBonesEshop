@@ -20,7 +20,7 @@ $db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE product
  id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL, category_id INTEGER NULL, sku VARCHAR(40) NOT NULL, name VARCHAR(100) NOT NULL,
  slug VARCHAR(100) NOT NULL, product_type VARCHAR(40) NOT NULL, price INTEGER NOT NULL, compare_price INTEGER NULL,
  stock INTEGER NOT NULL, status VARCHAR(20) NOT NULL, summary VARCHAR(100) NOT NULL, weight_g INTEGER NULL,
- stock_low_threshold INTEGER NULL, stock_critical_threshold INTEGER NULL, updated_at DATETIME NULL)");
+ stock_low_threshold INTEGER NULL, stock_critical_threshold INTEGER NULL, vat_class VARCHAR(20) NOT NULL DEFAULT \'standard\', updated_at DATETIME NULL)");
 $db->exec("INSERT INTO products (id,store_id,sku,name,slug,product_type,price,stock,status,summary)
  VALUES (5,\'default\',\'A05-DEFAULT\',\'Default private product\',\'a05-default\',\'physical\',1000,3,\'draft\',\'private default\'),
  (7,\'cz\',\'A05-CZ\',\'CZ private product\',\'a05-cz\',\'physical\',2000,4,\'draft\',\'private cz\')");

@@ -16,10 +16,13 @@ final class SetupChecklist
         'provider.shipping' => 'shipping',
         'provider.mail' => 'mail', // R29: the SMTP server and the sender are set in Admin → E-mail delivery (provider.mail, provider.mail_from)
         'catalog.digital_files' => 'digital_assets',
+        'pricing.cart_rules' => 'promotions',
     ];
 
     /**
-     * @return array{counts: array{fail: int, warn: int}, items: list<array{status: string, name: string, title: ?string, message: string, action: string, page: ?string}>}
+     * R50 (setup): 'info' items (optional integrations, the VAT regime to confirm) are listed after the problems but not
+     * counted: 'ok' is true once nothing fails or warns.
+     * @return array{ok: bool, counts: array{fail: int, warn: int}, items: list<array{status: string, name: string, title: ?string, message: string, action: string, page: ?string}>}
      */
     public static function summary(?array $doctor = null): array
     {
@@ -40,19 +43,20 @@ final class SetupChecklist
         foreach ((array)($doctor['checks'] ?? []) as $check) {
             $status = (string)($check['status'] ?? '');
             $name = (string)($check['name'] ?? '');
-            if (!isset($counts[$status]) || !self::concernsCurrentStore($name)) continue;
-            $counts[$status]++;
+            if ((!isset($counts[$status]) && $status !== 'info') || !self::concernsCurrentStore($name)) continue;
+            if ($status !== 'info') $counts[$status]++;
             $items[] = ['status' => $status, 'name' => $name, 'title' => self::title($name), 'message' => (string)($check['message'] ?? ''),
                 'action' => (string)($check['action'] ?? ''), 'page' => self::fixPage($name)];
         }
-        usort($items, static fn(array $a, array $b): int => [$a['status'] !== 'fail', $a['name']] <=> [$b['status'] !== 'fail', $b['name']]);
-        return ['counts' => $counts, 'items' => $items];
+        $rank = ['fail' => 0, 'warn' => 1, 'info' => 2];
+        usort($items, static fn(array $a, array $b): int => [$rank[$a['status']], $a['name']] <=> [$rank[$b['status']], $b['name']]);
+        return ['ok' => $counts['fail'] + $counts['warn'] === 0, 'counts' => $counts, 'items' => $items];
     }
 
     /** A per-store check (its SKUs, seller data) is shown only in the store the dashboard is switched to. */
     private static function concernsCurrentStore(string $checkName): bool
     {
-        if (!preg_match('/^stores\.(?:legal|currency_prices|oss_threshold)\.(.+)$/', $checkName, $m)) return true;
+        if (!preg_match('/^stores\.(?:legal|currency_prices|oss_threshold|vat)\.(.+)$/', $checkName, $m)) return true;
         return $m[1] === StoreContext::current()->id();
     }
 
@@ -73,14 +77,14 @@ final class SetupChecklist
         if ($item === '' && str_starts_with($checkName, 'runtime.') && !in_array($checkName, ['runtime.php', 'runtime.vendor_bbf'], true)) {
             [$group, $item] = ['runtime.path', substr($checkName, strlen('runtime.'))];
         }
-        if ($group === 'stores.oss_threshold') $item = trim((string)(Bootstrap::stores()['stores'][$item]['name'] ?? '')) ?: $item;
+        if ($group === 'stores.oss_threshold' || $group === 'stores.vat') $item = trim((string)(Bootstrap::stores()['stores'][$item]['name'] ?? '')) ?: $item;
         $key = 'admin.doctor.' . str_replace('.', '_', $group);
         $text = I18n::format($key, ['item' => $item]);
         return $text === $key ? null : $text;
     }
 
     /** Check-name prefixes followed by the store, provider or extension the check is about. */
-    private const ITEM_GROUPS = ['stores.legal.', 'stores.url_prefix.', 'stores.timezone.', 'stores.currency_prices.', 'stores.oss_threshold.', 'payment.provider.', 'runtime.extension.'];
+    private const ITEM_GROUPS = ['stores.legal.', 'stores.url_prefix.', 'stores.timezone.', 'stores.currency_prices.', 'stores.oss_threshold.', 'stores.vat.', 'payment.provider.', 'runtime.extension.'];
 
     public static function fixPage(string $checkName): ?string
     {

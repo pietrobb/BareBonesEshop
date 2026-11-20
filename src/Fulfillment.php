@@ -356,6 +356,29 @@ class Fulfillment {
         return $row ?: null;
     }
 
+    /**
+     * R50 (low): what the customer is told about the parcels of $order — carrier and tracking number of every shipped
+     * parcel with a number (a link only to an https tracking page), else the order's own number. The order-status page
+     * showed only orders.tracking_number, which a parcel shipped from Admin → Shipments never sets.
+     * @return list<array{label: string, url: string}>
+     */
+    public static function customerTracking(array $order): array {
+        $stmt = Db::get()->prepare("SELECT carrier, tracking_number, tracking_url FROM shipments
+            WHERE store_id = :store AND order_id = :order AND status = 'shipped' AND COALESCE(tracking_number, '') <> '' ORDER BY shipped_at, id");
+        $stmt->execute([':store' => (string)($order['store_id'] ?? 'default'), ':order' => (int)$order['id']]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === [] && trim((string)($order['tracking_number'] ?? '')) !== '') {
+            $rows = [['carrier' => $order['carrier'] ?? '', 'tracking_number' => $order['tracking_number'], 'tracking_url' => '']];
+        }
+        $parcels = [];
+        foreach ($rows as $row) {
+            $url = trim((string)($row['tracking_url'] ?? ''));
+            $parcels[] = ['label' => trim(MethodLabels::carrier((string)($row['carrier'] ?? '')) . ' ' . trim((string)$row['tracking_number'])),
+                'url' => str_starts_with(strtolower($url), 'https://') ? $url : ''];
+        }
+        return $parcels;
+    }
+
     public static function shipments(int $orderId): array {
         $stmt = Db::get()->prepare('SELECT * FROM shipments WHERE order_id = :order AND store_id = :store ORDER BY id');
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
@@ -389,7 +412,11 @@ class Fulfillment {
         return $quantity;
     }
 
-    /** Units of an order line that left a warehouse: a bundle unit once every component of it shipped. */
+    /**
+     * Units of an order line that left a warehouse: a bundle unit once any component of it shipped. R50: a set split
+     * between warehouses whose first parcel left is with the customer (returnable, not refunded when the rest is
+     * cancelled); counting it only once every part shipped refunded the whole order and shipping on cancellation.
+     */
     public static function shippedUnits(array $orderItem): int {
         $stmt = Db::get()->prepare("SELECT si.sku, COALESCE(SUM(si.quantity), 0) AS quantity FROM shipment_items si
             WHERE si.order_item_id = :item AND si.status = 'shipped' GROUP BY si.sku");
@@ -397,11 +424,12 @@ class Fulfillment {
         $shipped = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $shipped[(string)$row['sku']] = (int)$row['quantity'];
         if (!$shipped) return 0;
-        $units = (int)$orderItem['quantity'];
+        $units = 0;
         foreach (Inventory::reservationLines($orderItem) as $line) {
-            $units = min($units, intdiv($shipped[(string)$line['sku']] ?? 0, max(1, (int)($line['quantity_per_bundle'] ?? 1))));
+            $perUnit = max(1, (int)($line['quantity_per_bundle'] ?? 1));
+            $units = max($units, intdiv(($shipped[(string)$line['sku']] ?? 0) + $perUnit - 1, $perUnit));
         }
-        return $units;
+        return min((int)$orderItem['quantity'], $units);
     }
 
     /**

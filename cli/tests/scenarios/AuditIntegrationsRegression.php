@@ -378,28 +378,35 @@ $pdo->exec('PRAGMA foreign_keys = ON');
 $aigEntId = (int)$pdo->lastInsertId();
 $aigEnt = static fn(): array => $pdo->query("SELECT * FROM digital_entitlements WHERE id = {$aigEntId}")->fetch(PDO::FETCH_ASSOC) ?: [];
 $aigNow = time();
-$aigCounted = DigitalDelivery::beginTransfer($aigEnt(), 0, $aigNow);
+$aigSize = 128 * 1024 * 1024; // the file: resumes may start up to 16 MiB below the served bytes
+$aigCounted = DigitalDelivery::beginTransfer($aigEnt(), 0, $aigSize, $aigNow);
 assert_true($aigPaidOrder > 0 && $aigCounted === $aigNow, '18 download: the first transfer from byte 0 counts the download');
 assert_equals(1, (int)$aigEnt()['download_count'], '18 download: one download counted');
-assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigNow + 30), '18 download: "Range: bytes=1-" before the counted download served anything is refused once the limit is spent');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigSize, $aigNow + 30), '18 download: "Range: bytes=1-" before the counted download served anything is refused once the limit is spent');
 DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192);
 DigitalDelivery::recordProgress($aigEntId, $aigCounted, 4000);
 assert_equals(8192, (int)$aigEnt()['last_download_offset'], '18 download: the bytes served by the counted download are recorded (only ever growing)');
-assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 8192, $aigNow + 60) && (int)$aigEnt()['download_count'] === 1, '18 download: a legit resume at the bytes already served is not counted again (limit 1 already used)');
-assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 8193, $aigNow + 60), '18 download: a range starting past the bytes the counted download served is refused (a new download, limit spent)');
-assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 0, $aigNow + 60), '18 download: a new download from byte 0 is refused once the limit is used');
+assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 8192, $aigSize, $aigNow + 60) && (int)$aigEnt()['download_count'] === 1, '18 download: a legit resume at the bytes already served is not counted again (limit 1 already used)');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 8193, $aigSize, $aigNow + 60), '18 download: a range starting past the bytes the counted download served is refused (a new download, limit spent)');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 0, $aigSize, $aigNow + 60), '18 download: a new download from byte 0 is refused once the limit is used');
 // A long partial transfer: "bytes=1-" is no resume (it would be a free near-complete copy), a resume near the cut is.
 $pdo->exec("UPDATE digital_entitlements SET last_download_offset = " . (64 * 1024 * 1024) . " WHERE id = {$aigEntId}");
-assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigNow + 60), '18 download: after 64 MiB served, "Range: bytes=1-" is not a free resume (limit spent, refused)');
-assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 64 * 1024 * 1024 - 1024 * 1024, $aigNow + 60), '18 download: a resume a little below the served bytes (data in flight) is free');
-$pdo->exec("UPDATE digital_entitlements SET last_download_offset = 8192, resume_count = 1 WHERE id = {$aigEntId}");
-for ($aigResume = 2; $aigResume <= DigitalDelivery::MAX_FREE_RESUMES; $aigResume++) DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60);
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigSize, $aigNow + 60), '18 download: after 64 MiB served, "Range: bytes=1-" is not a free resume (limit spent, refused)');
+assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 64 * 1024 * 1024 - 1024 * 1024, $aigSize, $aigNow + 60), '18 download: a resume a little below the served bytes (data in flight) is free');
+$pdo->exec("UPDATE digital_entitlements SET last_download_offset = 8192, resume_count = 1"
+    . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? ', resume_claimed_offset = NULL' : '') . " WHERE id = {$aigEntId}");
+// Each resume follows progress of the one before (R50: concurrent resumes from one offset are one resume).
+for ($aigResume = 2; $aigResume <= DigitalDelivery::MAX_FREE_RESUMES; $aigResume++) {
+    DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192 + $aigResume);
+    DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigSize, $aigNow + 60);
+}
+DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192 + DigitalDelivery::MAX_FREE_RESUMES + 1);
 assert_equals(DigitalDelivery::MAX_FREE_RESUMES, (int)$aigEnt()['resume_count'], '18 download: each free resume is counted');
-assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60), '18 download: free resumes are capped');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigSize, $aigNow + 60), '18 download: free resumes are capped');
 $pdo->exec("UPDATE digital_entitlements SET resume_count = 0 WHERE id = {$aigEntId}");
-assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 3600), '18 download: after the resume window a resume counts as a new download (and the limit stops it)');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigSize, $aigNow + 3600), '18 download: after the resume window a resume counts as a new download (and the limit stops it)');
 $pdo->exec("UPDATE digital_entitlements SET download_limit = 3 WHERE id = {$aigEntId}");
-$aigRecount = DigitalDelivery::beginTransfer($aigEnt(), 1, $aigNow + 3600);
+$aigRecount = DigitalDelivery::beginTransfer($aigEnt(), 1, $aigSize, $aigNow + 3600);
 assert_true($aigRecount === $aigNow + 3600 && (int)$aigEnt()['download_count'] === 2 && (int)$aigEnt()['last_download_offset'] === 0 && (int)$aigEnt()['resume_count'] === 0,
     '18 download: with downloads left, a range that is no resume counts a new download and starts its own resume bound');
 $pdo->exec("DELETE FROM digital_entitlements WHERE id = {$aigEntId}");
@@ -444,9 +451,15 @@ $aigAllocate = new ReflectionMethod(InvoiceService::class, 'allocateNumber');
 $aigSuiteDb = Db::get();
 $aigSuiteDriver = Db::driver();
 Db::init($aigLegacy, 'sqlite');
+// An empty invoice storage: the suite's PDFs (numbers allocateNumber() skips, R50) are not this database's.
+$aigStorage = new ReflectionProperty(InvoiceService::class, 'storageDir');
+$aigPrevStorage = $aigStorage->getValue();
+$aigStorageDir = test_fixture_path('aig-legacy-invoices');
+mkdir($aigStorageDir);
+$aigStorage->setValue(null, realpath($aigStorageDir));
 try {
     $aigLegacyEnt = $aigLegacy->query('SELECT * FROM digital_entitlements WHERE id = 1')->fetch();
-    $aigLegacyResults = [DigitalDelivery::authorizeTransfer($aigLegacyEnt, 0), DigitalDelivery::authorizeTransfer($aigLegacyEnt, 100), (int)$aigLegacy->query('SELECT download_count FROM digital_entitlements')->fetchColumn()];
+    $aigLegacyResults = [DigitalDelivery::authorizeTransfer($aigLegacyEnt, 0, 1000), DigitalDelivery::authorizeTransfer($aigLegacyEnt, 100, 1000), (int)$aigLegacy->query('SELECT download_count FROM digital_entitlements')->fetchColumn()];
     $aigLegacyNumbers = [$aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, ''), $aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, '')];
     $aigLegacy->exec("INSERT INTO invoices (store_id, number, type) VALUES ('default', '20260001', 'invoice'), ('pl', '20260002', 'invoice')");
     (require TEST_CLI_DIR . '/../migrations/20261016140500_invoice_number_counters.php')->up($aigLegacy, true);
@@ -454,6 +467,7 @@ try {
     $aigLegacyNumbers[] = $aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, '');
 } finally {
     Db::init($aigSuiteDb, $aigSuiteDriver);
+    $aigStorage->setValue(null, $aigPrevStorage);
 }
 assert_equals([true, true, 2], $aigLegacyResults, '5 migration window: downloads work (each transfer counted) before the resume columns exist');
 assert_equals(['20260001', '20260002', '20260003'], $aigLegacyNumbers, '5 migration window: invoices are numbered from the legacy counters, and the migration continues that sequence');

@@ -361,15 +361,130 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   A received return of an order that was already refunded (partly) outside its returns is no longer paid out in full
   again: "Refunded" asks first, then closes the return without payout when that money covers it, or credits and
   refunds it less that money; the amount a return used up is recorded so the next return does not count it again.
+- **Migration** `20261120120000_orders_oss_net_backfill` (review round 50): fills `orders.oss_net` for the orders a
+  signed update from an older release left empty, so checkout no longer counts them from their lines (slow, and out of
+  memory on large shops). It writes in batches; orders it does not reach are counted and stored by checkout.
+- **Migration** `20261120120200_complaint_assessment` (review round 50): adds `complaints.assessment`. A complaint is
+  rejected only with an expert assessment (who assessed the goods and the finding), which the rejection e-mail names.
+- **Migration** `20261120120300_product_search_names` (review round 50): adds `products.search_names` (the translated
+  names and summaries) and rebuilds the full-text index with it, so a store whose products carry their names in
+  `translations` finds them. On MySQL/MariaDB the index is rebuilt over the whole `products` table: a large catalogue
+  should run `apply` in its maintenance window (as above).
+- **Migration** `20261120120400_method_translations` (review round 50): adds `shipping_methods.translations` and
+  `payment_methods.translations`, the merchant's name and description of a method per further store language.
+- **Migration** `20261120120500_download_resume_claim` (review round 50): adds
+  `digital_entitlements.resume_claimed_offset`, where the last free download resume started, so concurrent resumes
+  from one point are one resume.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
   (shared rate limits, no buyer IP or IP country). The 2.1.2 `update.php doctor` that installs this update does not
   check it: list each such range as its /16 (IPv6 /32) parts in `config.php` first; 2.1.2 accepts them as well. From
   this release `update.php doctor` fails `trusted_proxies` and names the ranges, and `apply` refuses until they are split.
+- **The shipped `pricing.json` no longer gives the coupon WELCOME10 and free shipping over 50 € (review round 20,
+  high 1).** Up to this release every shop applied them in checkout without a word in the admin: 10 % off from 50 €
+  for the first 1000 uses, and free shipping from 50 € on every method, Express and abroad included, ahead of a
+  method's own "free from" amount. The update replaces `pricing.json` with one without cart rules, so both stop. A
+  shop that wants them sets them up in Admin → Promotions (a cart promotion with the coupon code, and one with free
+  shipping and a minimum order, limited to the methods it should cover). A `pricing.json` with cart rules (yours, or a
+  store's `pricing` block in `stores.json`) still applies: `setup.php doctor` warns `pricing.cart_rules` and names
+  them, and Admin → Promotions lists them above the promotions.
+- **Check each store's "VAT payer" box after the update (review round 20, high 2).** A store whose seller has no
+  `vat_registered` in `stores.json` charges VAT at checkout, but the store form showed the box unticked and saving it
+  switched VAT off ("Prodávající není plátcem DPH" on every page and invoice). The box now shows what checkout
+  charges and a save without it keeps the setting. A store that was saved before this release while charging VAT
+  may now be a non-payer by mistake: open Admin → Stores and seller and tick the box (with the VAT ID) where it applies.
 
 ### Changes
 
+- **A product's VAT rate can be set (review round 20, high 3).** Books, food, medicines and other goods taxed at a
+  reduced rate were invoiced at the standard rate, since `products.vat_class` was in no form. The product editor has a
+  "VAT rate" select (standard, reduced, second reduced, zero, or a category: books, food, medicines, baby goods,
+  passenger transport — taxed at each country's rate for it); the CSV import and export have a `vat_class` column (an
+  unknown class fails the row; a row without the column keeps the product's class) and API v1 products read, create
+  and patch `vat_class`. Feeds and the ERP sync leave it as set. The bookshop demo sells its titles as books. Existing
+  products stay at the standard rate until you change them.
+- **A company's credit limit holds when it orders twice at once (review round 20).** The limit was checked when
+  checkout offered "purchase on invoice", so two orders placed together (or one after the offer was shown) could
+  together exceed it. The order transaction now locks the company and checks its open invoices again; an order over
+  the limit is refused ("The order exceeds your company's available credit…") and the buyer can choose another
+  payment method.
+- **Cancelling the rest of an order whose set ships from two warehouses refunds only what did not ship.** A set
+  (bundle) counted as shipped only once all its parts had left, so cancelling after its first parcel refunded the
+  whole order and its shipping. A set with a part dispatched now counts as with the customer (returnable), and
+  shipping is refunded only when nothing was dispatched.
+- **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
+  reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
+- **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as
+  refunded and it can no longer be shipped; editing an order still awaiting a bank transfer to a different amount sends
+  the confirmation with the new amount and payment details again; the refund credit-note job no longer leaves SQLite
+  "database is locked"; an order locks its products' stock in SKU order, so two orders with the same products in a
+  different order no longer deadlock on MySQL.
+- **Restoring an older backup no longer issues invoice numbers twice (review round 20).** The restored database
+  brought back lower invoice and credit-note counters, so the next invoice took a number already issued and its PDF
+  overwrote the other customer's. The counters now continue after the highest number issued before the restore, the
+  restore warns which numbers' documents the backup does not have, and a newly numbered document never overwrites a PDF
+  already at its path (the old file is kept as `*.superseded-*.pdf`). A restore onto a lost, empty or new database has
+  no counters to carry over, so the invoice storage counts as well: a number whose PDF is already there, in any month
+  of its year, is skipped (and logged) when the next document is numbered.
+- **Backups also cover `config.php`, the jobs not done yet and `themes/`; a restore works on a new MySQL server.** A
+  restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run next to the
+  live ones (`*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
+  `db_name` before importing.
+- **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
+  (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the
+  per-customer coupon counters keyed by an unsalted hash of the e-mail.
+- **The checkout no longer slows down on orders placed before the OSS update (review round 20).** A shop updated from
+  an older release by a signed update kept those orders without their stored distance-sale net, so every checkout of
+  a store invoicing in its ERP counted them from their lines (6.7–8.8 s at 20 000 open orders, out of memory at
+  330 000). A migration stores the missing nets now; until it has, a checkout counts such orders 500 at a time and
+  stores their nets, so the next one reads them (1 500 orders on MySQL: 2.6 s once, then 11 ms).
+- **A GDPR erasure on MySQL no longer holds up orders.** It looked the customer's orders up by `LOWER(e-mail)`, which
+  read and locked every order of the shop (a payment webhook waited 4.6 s). With the usual case-insensitive collation it
+  now compares the e-mail as stored, through its index; SQLite and a case-sensitive collation keep `LOWER()`.
+- **Admin order lists and sales reports at 500 000 orders.** On MySQL the order lists and the CSV export read the
+  index matching their filters in date order (MySQL sorted every order of the store), and a 7/30/90-day report reads
+  only the paid orders of the period and sums only their refunds (it summed every refund of the store's history).
+- **Returns, confirmations and complaints as consumer law expects (review round 20).** A return request is confirmed
+  to the customer by e-mail and the merchant is told (it waited unseen in the admin queue); the return and withdrawal
+  forms no longer offer digital content whose right of withdrawal the customer waived. The order confirmation names
+  the payment and shipping method and repeats the recorded digital-content consent. A complaint can only be rejected
+  with an expert assessment, which the rejection e-mail names together with the out-of-court dispute body. The order
+  button has the terms, the right of withdrawal and the privacy notice linked right above it.
+- **The CZ store speaks Czech in the checkout and in search.** A store selling through a seller from another country
+  pre-selected the seller's country in the checkout, the manual order and the API; it now pre-selects the store's own
+  country (`country` in stores.json, else its default language's). Search finds products by their translated names, so
+  the CZ store finds the Czech titles.
+- **The setup checklist can turn green, and it checks VAT (review round 20).** Integrations a shop may do without
+  (ERP, outbound webhooks, the HTTP carrier lifecycle, carrier labels, an offline-only checkout) are reported as `info`:
+  listed, but neither a warning nor a reason for `doctor` to stay "not ready". Each store with its own seller gets a
+  VAT check (`stores.vat.<store>`): a warning when stores.json never says whether the seller is a VAT payer, a failure
+  when a VAT payer in the EU has no rates in `config/vat-rates.json`, else an info line with the regime and the rates
+  checkout charges. pricing.json cart rules that apply in checkout link to Admin → Promotions. `doctor` counts show
+  `info` separately.
+- **CSV import reads semicolon files.** Excel in Slovak, Czech, German, Polish or Hungarian saves "CSV" with
+  semicolons; the importer now takes the delimiter from the header line (`,` `;` or tab, or Excel's `sep=` line).
+- **The admin says which store it is saving to.** The store switcher shows each store's code and domain (or URL
+  prefix) next to its name, and the promotion, price-list and price forms name their store and post it, so a form
+  opened before switching stores in another tab saves where it said.
+- **Smaller setup fixes (review round 20).** A shipping or payment method can carry its own name and description in
+  each further store language (Admin → Shipping / Payments, migration `20261120120400` adds `translations`). Stock
+  alerts are written in the store's language unless `stock_alerts.locale` says otherwise (they were English). Legal
+  pages drop an empty seller field with its label and comma ("Kontakt: info@…, ." / "IČ DPH: ."). The web installer
+  sets up the one store it asks about instead of five hidden sample stores. Promotion and price-list validity is typed
+  and shown on the store's clock (it was read as UTC, so "from 00:00" started at 01:00 or 02:00 in Bratislava). The
+  order-status page and the account list every shipped parcel's carrier and tracking number, with its https tracking
+  link.
+- **An e-book download limit holds against `Range` requests (review round 50, security).** A counted download that
+  had already served the whole file could be "resumed" from byte 1 for free five times, so a limit of 2 gave 12
+  near-complete copies. A free resume now continues only a download that has not served the whole file yet, at most an
+  eighth of the file (and never more than 16 MiB) below where it stopped; anything else counts as a new download.
+  One recorded stopping point allows one free resume: concurrent `Range: bytes=1-` requests after a one-byte
+  download were each a free near-complete copy.
+- **The admin MFA lockout holds against concurrent attempts.** The attempt is now counted, and from the fifth one the
+  account locked, in one statement before the code is checked, so at most five codes are checked however many
+  requests arrive at once from however many IPs (they all passed the lock check before, and a stale write could clear
+  the lock). The lock times are unchanged (1, 2, 4 … 32 minutes).
 - **`cli/test.php` reports its progress while it runs.** Its output stays buffered until the summary, so a failure in
   the tenth minute of a long MySQL run used to show only at the end. Every failed assertion is now written to STDERR
   at once (`[progress 10:42:07] FAILED #1 (assertion 5120): …`), and so is one line per finished scenario, regression

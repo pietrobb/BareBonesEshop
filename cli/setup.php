@@ -141,7 +141,7 @@ if ($command === 'install') {
         foreach ($doctor['checks'] ?? [] as $check) {
             if ($check['status'] !== 'pass') echo '[' . strtoupper($check['status']) . "] {$check['name']}: {$check['message']}" . ($check['action'] !== '' ? " -> {$check['action']}" : '') . "\n";
         }
-        echo "Installed. Doctor: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
+        echo "Installed. Doctor: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['info']} info, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
         foreach ($steps['config']['warnings'] ?? [] as $warning) echo "WARNING: {$warning}\n";
         echo implode("\n", Setup::nextSteps(require $root . '/config.php')) . "\n";
     }
@@ -184,7 +184,7 @@ try {
             // R38 (usability): a passing check needs no advice.
             if ($check['status'] !== 'pass' && $check['action'] !== '') echo "  -> {$check['action']}\n";
         }
-        echo "Result: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
+        echo "Result: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['info']} info, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
     }
     // A doctor that is not ready exits 1, so a deploy script stops on it (R16). apply reports what it changed: it fails
     // on an unready shop only with --strict, as install does.

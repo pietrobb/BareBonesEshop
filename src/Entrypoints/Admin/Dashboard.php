@@ -163,11 +163,11 @@ function dashboardChecklist(): void {
     ?>
     <div class="card" id="setup-checklist">
         <h2><?= esc(I18n::t('admin.dashboard.checklist')) ?></h2>
-        <p class="<?= $checklist['items'] === [] ? 'status-ok' : 'muted' ?>"><?= esc($checklist['items'] === [] ? I18n::t('admin.dashboard.checklist_ok') : I18n::format('admin.dashboard.checklist_counts', [
+        <p class="<?= $checklist['ok'] ? 'status-ok' : 'muted' ?>"><?= esc($checklist['ok'] ? I18n::t('admin.dashboard.checklist_ok') : I18n::format('admin.dashboard.checklist_counts', [
             'problems' => I18n::plural('admin.dashboard.checklist_problems', $checklist['counts']['fail']),
             'warnings' => I18n::plural('admin.dashboard.checklist_warnings', $checklist['counts']['warn'])])) ?></p>
         <?php if ($checklist['items']): ?><ul class="setup-checklist"><?php foreach ($checklist['items'] as $item): ?>
-            <li data-check="<?= esc($item['name']) ?>"><span class="badge badge-<?= $item['status'] === 'fail' ? 'failed' : 'pending' ?>"><?= esc(I18n::t('admin.dashboard.checklist_' . $item['status'])) ?></span>
+            <li data-check="<?= esc($item['name']) ?>"><span class="badge badge-<?= ['fail' => 'failed', 'warn' => 'pending'][$item['status']] ?? 'draft' ?>"><?= esc(I18n::t('admin.dashboard.checklist_' . $item['status'])) ?></span>
             <?php if ($item['title'] !== null): ?><strong><?= esc($item['title']) ?></strong>
             <?php if ($item['page'] !== null): ?><a class="btn btn-sm" href="admin.php?p=<?= esc($item['page']) ?>"><?= esc(I18n::t('admin.dashboard.checklist_fix')) ?></a><?php endif; ?>
             <details><summary class="muted"><?= esc(I18n::t('admin.dashboard.checklist_detail')) ?></summary><span lang="en"><?= esc($item['message']) ?><?php if ($item['action'] !== ''): ?><br><span class="muted"><?= esc($item['action']) ?></span><?php endif; ?></span></details>

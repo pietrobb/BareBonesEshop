@@ -13,6 +13,9 @@
 {{/each}}
 </table>
 <p><strong>Celkem: {{order_total}}</strong></p>
+{{#if payment_method}}<p>Způsob platby: {{payment_method}}</p>{{/if}}
+{{#if shipping_method}}<p>Způsob dopravy: {{shipping_method}}</p>{{/if}}
+{{#if digital_consent}}<p><strong>Váš souhlas s dodáním digitálního obsahu:</strong> {{digital_consent}}</p>{{/if}}
 {{#if delivery_address}}<h3>Doručovací adresa</h3>
 <p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if billing_address}}<h3>Fakturační adresa</h3>

@@ -11,5 +11,9 @@
 </table>
 <h3>Motivos y forma de resolución</h3>
 <p>{{decision_note}}</p>
+{{#if assessment}}<h3>Peritaje</h3>
+<p>{{assessment}}</p>{{/if}}
+{{#if adr_name}}<h3>Resolución extrajudicial de litigios</h3>
+<p>Si no está de acuerdo con la decisión, puede acudir a la entidad de resolución alternativa de litigios: {{adr_name}} ({{adr_url}}).</p>{{/if}}
 <p>Vendedor: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

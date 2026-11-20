@@ -1,0 +1,1 @@
+Rücksendeanfrage {{rma_number}} — Bestellung {{order_number}}

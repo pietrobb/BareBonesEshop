@@ -70,6 +70,27 @@ class Inventory {
     }
 
     /** Reserve a sellable line and return a frozen allocation snapshot. */
+    /**
+     * R50 (low): MySQL locks the stock rows of every SKU a cart reserves (bundle components included) up front, in SKU
+     * order. Reserved line by line in cart order, two carts holding the same items in reverse order deadlocked (503).
+     */
+    public static function lockCartSkus(array $cartItems): void {
+        if (!Db::isMysql()) return;
+        $skus = [];
+        foreach ($cartItems as $item) {
+            if (VariantAvailability::isDigitalItem($item)) continue;
+            $components = self::bundleComponents((int)($item['product_id'] ?? 0));
+            foreach ($components ?: [['sku' => (string)($item['sku'] ?? '')]] as $component) $skus[(string)$component['sku']] = true;
+        }
+        $skus = array_keys($skus);
+        sort($skus, SORT_STRING);
+        $stmt = Db::get()->prepare('SELECT id FROM warehouse_stock WHERE store_id = :store AND sku = :sku ORDER BY warehouse_id FOR UPDATE');
+        foreach ($skus as $sku) {
+            $stmt->execute([':store' => StoreContext::current()->catalogId(), ':sku' => $sku]);
+            $stmt->fetchAll();
+        }
+    }
+
     public static function reserveLine(array $item, int $quantity): array {
         $productId = (int)$item['product_id'];
         $variantId = !empty($item['variant_id']) ? (int)$item['variant_id'] : null;

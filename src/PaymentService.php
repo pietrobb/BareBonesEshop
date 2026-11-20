@@ -1745,7 +1745,9 @@ class PaymentService {
      */
     public static function bookProviderRefund(int $orderId, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload = []): bool {
         if ($refundId === '') throw new \InvalidArgumentException('A provider refund needs its refund id');
-        return self::withLockedOrder($orderId, static fn(array $order): bool => self::bookProviderRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload));
+        $booked = self::withLockedOrder($orderId, static fn(array $order): bool => self::bookProviderRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload));
+        if ($booked && !Db::get()->inTransaction()) self::closeRefundedOrder($orderId, 'Provider refund booked');
+        return $booked;
     }
 
     /**
@@ -2143,9 +2145,17 @@ class PaymentService {
         }
     }
 
-    /** A fully refunded payment closes its returned or cancelled order. */
+    /**
+     * A fully refunded payment closes its returned or cancelled order. R50: an order not shipped yet (paid, accepted)
+     * whose money all went back (a full manual refund, a refund in the PayU/GoPay dashboard) is cancelled first; it
+     * stayed paid and could still be shipped.
+     */
     private static function closeRefundedOrder(int $orderId, string $note): void {
         $order = Orders::byId($orderId);
+        if ($order && (string)($order['payment_status'] ?? '') === 'refunded' && in_array((string)$order['status'], ['paid', 'processing'], true)) {
+            OrderWorkflow::transition($orderId, 'cancelled', $note);
+            $order = Orders::byId($orderId);
+        }
         if ($order && (string)($order['payment_status'] ?? '') === 'refunded' && in_array((string)$order['status'], ['returned', 'cancelled'], true)
             && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', $note);

@@ -13,6 +13,9 @@
 {{/each}}
 </table>
 <p><strong>Total: {{order_total}}</strong></p>
+{{#if payment_method}}<p>Forma de pago: {{payment_method}}</p>{{/if}}
+{{#if shipping_method}}<p>Forma de envío: {{shipping_method}}</p>{{/if}}
+{{#if digital_consent}}<p><strong>Su consentimiento para el suministro de contenido digital:</strong> {{digital_consent}}</p>{{/if}}
 {{#if delivery_address}}<h3>Dirección de entrega</h3>
 <p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if billing_address}}<h3>Dirección de facturación</h3>

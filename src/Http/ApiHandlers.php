@@ -440,7 +440,7 @@ function apiShippingRates(): array {
         return ['error' => 'Method not allowed'];
     }
 
-    $country = strtoupper(trim(Security::str($_GET['country'] ?? 'SK')));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? StoreContext::current()->marketCountry())));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
@@ -533,7 +533,7 @@ function apiPaymentMethods(): array {
         return ['error' => 'Method not allowed'];
     }
 
-    $country = strtoupper(trim(Security::str($_GET['country'] ?? 'SK')));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? StoreContext::current()->marketCountry())));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
@@ -658,7 +658,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $name = trim(Security::str($input['name'] ?? ''));
     $email = Security::email($input['email'] ?? '');
     $phone = trim(Security::str($input['phone'] ?? ''));
-    $country = strtoupper(trim(Security::str($input['country'] ?? 'SK')));
+    $country = strtoupper(trim(Security::str($input['country'] ?? StoreContext::current()->marketCountry())));
     if (!preg_match('/^[A-Z]{2}$/', $country)) return checkoutRefusal('checkout.error.invalid_country');
     $shippingMethod = Security::slug($input['shipping_method'] ?? '');
     $paymentMethod = $input['payment_method'] ?? 'stripe';
@@ -1024,6 +1024,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         }
 
         return $result;
+    } catch (CreditLimitExceededException $e) {
+        // R50: another order of the company used the credit meanwhile; the buyer picks another payment method.
+        return checkoutRefusal('checkout.error.credit_limit');
     } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
         return checkoutRefusal('stock_changed');

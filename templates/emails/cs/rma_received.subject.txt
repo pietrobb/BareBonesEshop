@@ -1,0 +1,1 @@
+Přijali jsme vaši žádost o vrácení zboží — objednávka {{order_number}}

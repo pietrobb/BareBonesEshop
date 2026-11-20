@@ -60,7 +60,7 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             'product_specs' => apiProductSpecs(),
             'page' => apiPage(),
             'bbf_categories', 'bbf_brands', 'bbf_product_types', 'bbf_attr_types', 'bbf_page_statuses',
-            'bbf_product_statuses', 'bbf_payment_methods' => BbfOptions::forAction($action),
+            'bbf_product_statuses', 'bbf_vat_classes', 'bbf_payment_methods' => BbfOptions::forAction($action),
             '' => apiUnknownAction(),
             default => Extensions::api($action) ?? apiUnknownAction(),
         };

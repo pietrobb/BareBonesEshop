@@ -208,6 +208,8 @@ match ($action) {
 };
 PHP;
 file_put_contents($a125Fixture, $a125Source);
+// R50: validity is typed on the store's wall clock and stored as UTC.
+$a125Utc = static fn(string $local, string $store): string => (new DateTimeImmutable($local, ShopTime::zone($store)))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 $a125Run = static function(array $args) use ($a125Fixture): array {
     $process = proc_open(array_merge([PHP_BINARY, $a125Fixture], $args), [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']], $pipes);
     fclose($pipes[0]);
@@ -269,14 +271,16 @@ try {
                 $a125Json = static fn(string $code, string $column): mixed => json_decode((string)($a125Promos[$code][$column] ?? 'null'), true);
                 match ($a125Action) {
                     'promotions_page' => assert_true(str_contains($a125Output, "value=\"A125PROMO-{$a125Store}-NAME\"") && str_contains($a125Output, "A125LIVE-{$a125Up}") && str_contains($a125Output, 'name="csrf_token"')
-                        && str_contains($a125Output, "a125cat-{$a125Store}"), "{$a125Label}: own promotions, coupons and category options rendered"),
+                        && str_contains($a125Output, "a125cat-{$a125Store}")
+                        // R50 (high 1): the pricing.json coupon applies in checkout, so the page lists it.
+                        && preg_match('#id="promo-config-rules".*<code>JSONCODE</code>#s', $a125Output) === 1, "{$a125Label}: own promotions, coupons, category options and pricing.json rules rendered"),
                     'price_lists_page' => assert_true(str_contains($a125Output, "A125P-{$a125Store} | 1 | 9.00") && str_contains($a125Output, "A125GRP-{$a125Store}-NAME") && str_contains($a125Output, 'action=prices&id='),
                         "{$a125Label}: own price lines and customer groups rendered"),
                     'promo_catalog_create' => assert_equals([['type'=>'discount_percent', 'bps'=>1250], ['category_ids'=>[$a125Result['extra']['category_id'] ?? -1]],
-                        '2000-01-01 00:00:00', '2099-12-31 23:59:59', 'catalog', 787],
+                        $a125Utc('2000-01-01 00:00:00', $a125Store), $a125Utc('2099-12-31 23:59:59', $a125Store), 'catalog', 787],
                         [$a125Json('jesenna-zlava', 'actions'), $a125Json('jesenna-zlava', 'conditions'), substr((string)($a125Promos['jesenna-zlava']['valid_from'] ?? ''), 0, 19),
                             substr((string)($a125Promos['jesenna-zlava']['valid_to'] ?? ''), 0, 19), $a125Promos['jesenna-zlava']['scope'] ?? null, $a125Result['extra']['storefront_price'] ?? null],
-                        "{$a125Label}: 12,5 % stored as 1250 bps for the own category, UTC day bounds; guest product detail shows list price 900 − 12,5 % = 787 instead of the stale cache"),
+                        "{$a125Label}: 12,5 % stored as 1250 bps for the own category, the store's day bounds in UTC (R50); guest product detail shows list price 900 − 12,5 % = 787 instead of the stale cache"),
                     'promo_coupon_create' => (static function() use ($a125Promos, $a125Json, $a125Result, $a125Up, $a125Label): void {
                         assert_equals(["JESEN-{$a125Up}", 'cart', ['min_subtotal'=>500, 'max_uses'=>1], ['type'=>'discount_percent', 'bps'=>1000]],
                             [$a125Promos['jesen']['coupon_code'] ?? null, $a125Promos['jesen']['scope'] ?? null, $a125Json('jesen', 'conditions'), $a125Json('jesen', 'actions')],
@@ -292,8 +296,8 @@ try {
                         "{$a125Label}: rename, keep inactive, brand condition"),
                     'promo_delete' => assert_equals([false, true], [isset($a125Promos["a125promo-{$a125Store}"]), isset($a125Promos["a125used-{$a125Store}"])], "{$a125Label}: only the unused promotion deleted"),
                     'coupon_store_scope' => assert_equals(['own'=>300, 'foreign'=>'Invalid coupon'], $a125Result['extra'], "{$a125Label}: the store's coupon promotion redeems, another store's code does not"),
-                    'pricelist_create' => assert_equals(['EUR', 5, '2099-12-31 23:59:59', 1], [$a125Lists['velkoobchod']['currency'] ?? null, (int)($a125Lists['velkoobchod']['priority'] ?? 0),
-                        substr((string)($a125Lists['velkoobchod']['valid_to'] ?? ''), 0, 19), (int)($a125Lists['velkoobchod']['active'] ?? 0)], "{$a125Label}: currency normalized, priority and UTC end of day stored"),
+                    'pricelist_create' => assert_equals(['EUR', 5, $a125Utc('2099-12-31 23:59:59', $a125Store), 1], [$a125Lists['velkoobchod']['currency'] ?? null, (int)($a125Lists['velkoobchod']['priority'] ?? 0),
+                        substr((string)($a125Lists['velkoobchod']['valid_to'] ?? ''), 0, 19), (int)($a125Lists['velkoobchod']['active'] ?? 0)], "{$a125Label}: currency normalized, priority and the store's end of day stored as UTC (R50)"),
                     'pricelist_edit' => assert_equals(['Premenovaný', 0], [$a125Lists["a125pl-{$a125Store}"]['name'] ?? null, (int)($a125Lists["a125pl-{$a125Store}"]['active'] ?? 1)], "{$a125Label}: rename and deactivate"),
                     'pricelist_prices' => assert_equals([[[null, 1, 800, null], [true, 5, 700, 900]], ['storefront_price'=>800]],
                         [array_map(static fn(array $r): array => [$r['variant_id'] === null ? null : true, (int)$r['min_qty'], (int)$r['price'], $r['compare_price'] === null ? null : (int)$r['compare_price']], $a125Prices), $a125Result['extra']],

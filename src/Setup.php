@@ -251,6 +251,7 @@ class Setup
         // Invoice dates and number years, the VAT rate in force and consumer deadlines follow the store's wall clock.
         foreach (is_array($stores) ? ($stores['stores'] ?? []) : [] as $storeId => $store) {
             if (is_array($store)) $add(...array_values(self::storeTimezoneCheck((string)$storeId, $store)));
+            if (is_array($store) && ($vat = self::storeVatCheck((string)$storeId, $store)) !== null) $add(...array_values($vat));
         }
         $adminEmail = trim((string)($config['admin_email'] ?? ''));
         $add(filter_var($adminEmail, FILTER_VALIDATE_EMAIL) ? 'pass' : 'warn', 'config.admin_email', $adminEmail !== ''
@@ -323,7 +324,9 @@ class Setup
             $add(...array_values(self::digitalBundlesCheck($probe)));
             $add(...array_values(self::refundCreditNotesCheck($probe)));
             $pricingFile = $root . '/pricing.json';
-            $add(...array_values(self::legacyPricingCheck(is_file($pricingFile) ? (array)json_decode((string)file_get_contents($pricingFile), true) : [])));
+            $pricing = is_file($pricingFile) ? (array)json_decode((string)file_get_contents($pricingFile), true) : [];
+            $add(...array_values(self::legacyPricingCheck($pricing)));
+            $add(...array_values(self::pricingCartRulesCheck($pricing, is_array($stores) ? (array)($stores['stores'] ?? []) : [])));
             foreach (PaymentReadiness::checks($probe, $config, is_array($stores) ? (array)($stores['stores'] ?? []) : null) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
@@ -332,7 +335,9 @@ class Setup
         self::providerChecks($config, $add);
         self::operationsChecks($config, $root, $add);
 
-        $counts = ['pass' => 0, 'warn' => 0, 'fail' => 0];
+        // R50 (setup): 'info' is something optional or worth confirming (an integration not connected, the VAT regime):
+        // it neither blocks "ready" nor keeps the admin checklist from turning green.
+        $counts = ['pass' => 0, 'info' => 0, 'warn' => 0, 'fail' => 0];
         foreach ($checks as $check) $counts[$check['status']]++;
         return [
             'schema_version' => self::SCHEMA_VERSION,
@@ -418,6 +423,36 @@ class Setup
                 'action' => "Set stores.{$storeId}.timezone in stores.json (e.g. \"{$zone}\") so the shop's calendar does not depend on a guess."];
         }
         return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} runs on {$zone} (independent of php.ini and the container).", 'action' => ''];
+    }
+
+    /**
+     * R50 (setup): the VAT regime the checkout applies to a store's seller and the rates it charges — a warning when the
+     * store never said whether its seller is a VAT payer (checkout then charges VAT), a failure when a VAT payer in the
+     * EU has no rates (checkout would charge 0 %), otherwise an info line naming the regime and the domestic rates.
+     * Null for a store that shares another store's seller (legal.seller) or has no legal block.
+     * @return ?array{status: string, name: string, message: string, action: string}
+     */
+    public static function storeVatCheck(string $storeId, array $store): ?array {
+        $legal = is_array($store['legal'] ?? null) ? $store['legal'] : null;
+        if ($legal === null || isset($legal['seller'])) return null;
+        $name = 'stores.vat.' . $storeId;
+        $country = strtoupper(trim((string)($legal['country'] ?? '')));
+        $fix = "In Admin → Stores and seller, tick or untick \"VAT registered\" for store {$storeId} and save (stores.json stores.{$storeId}.legal.vat_registered).";
+        if (!array_key_exists('vat_registered', $legal)) {
+            return ['status' => 'warn', 'name' => $name, 'message' => "Store {$storeId} does not say whether its seller is a VAT payer: checkout charges VAT as for a payer.", 'action' => $fix];
+        }
+        if (!StoreSettings::vatRegistered($legal)) {
+            return ['status' => 'info', 'name' => $name, 'message' => "Store {$storeId}: the seller is not a VAT payer, prices carry no VAT and documents say so.", 'action' => $fix];
+        }
+        $rates = (array)(VatService::config()['rates'][$country] ?? []);
+        if ($rates === []) {
+            $eu = VatService::isEuCountry($country);
+            return ['status' => $eu ? 'fail' : 'info', 'name' => $name, 'message' => "Store {$storeId}: VAT payer in " . ($country !== '' ? $country : '(no country)') . ", but config/vat-rates.json has no rates for it: checkout charges 0 % VAT.",
+                'action' => $eu ? "Add the rates of {$country} to config/vat-rates.json, or correct the seller's country in Admin → Stores and seller." : $fix];
+        }
+        $band = static fn(string $class): string => rtrim(rtrim(number_format(VatService::rate($country, $class), 2, '.', ''), '0'), '.') . ' %';
+        return ['status' => 'info', 'name' => $name, 'message' => "Store {$storeId}: VAT payer in {$country}, standard rate {$band('standard')}, reduced {$band('reduced')} / {$band('reduced2')}"
+            . ' (a product\'s VAT class in the catalog picks the rate).', 'action' => ''];
     }
 
     /** A store sells only what has a price in its currency: list what the shared catalog leaves unpriced there. */
@@ -564,6 +599,31 @@ class Setup
     }
 
     /**
+     * R50 (high 1): pricing.json cart rules (coupons, automatic free shipping) apply in checkout of every store that does
+     * not define its own, yet Admin → Promotions does not hold them. The shipped sample gave every new shop a public 10 %
+     * coupon and free shipping on every method; a rule still configured there is named so the merchant knows it applies.
+     * @param array<string, mixed> $stores stores.json "stores" (a store's "pricing" block replaces the shared one)
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function pricingCartRulesCheck(array $pricing, array $stores): array {
+        $applied = [];
+        foreach (Pricing::activeCartRules($pricing) as $rule) $applied[] = self::cartRuleLabel($rule, '');
+        foreach ($stores as $storeId => $store) {
+            if (!is_array($store) || !is_array($store['pricing']['cart_rules'] ?? null)) continue;
+            foreach (Pricing::activeCartRules(['cart_rules' => $store['pricing']['cart_rules']]) as $rule) $applied[] = self::cartRuleLabel($rule, (string)$storeId);
+        }
+        return ['status' => $applied === [] ? 'pass' : 'warn', 'name' => 'pricing.cart_rules', 'message' => $applied === []
+            ? 'pricing.json applies no coupon or automatic cart rule.'
+            : 'pricing.json cart rules apply in checkout but are not listed as promotions: ' . implode('; ', array_slice($applied, 0, 5)) . '.',
+            'action' => $applied === [] ? '' : 'Keep them only if every store should give them; otherwise set them up in Admin → Promotions and remove cart_rules from pricing.json (or the store\'s pricing block in stores.json).'];
+    }
+
+    /** @param array{name: string, type: string, code: string, effect: string} $rule */
+    private static function cartRuleLabel(array $rule, string $storeId): string {
+        return ($rule['code'] !== '' ? 'coupon ' . $rule['code'] : $rule['name']) . ' (' . $rule['effect'] . ')' . ($storeId !== '' ? " in store {$storeId}" : '');
+    }
+
+    /**
      * Active bundles with a digital component (VariantAvailability::digitalComponentSql): not for sale, since the
      * download would never be delivered.
      * @return array{status: string, name: string, message: string, action: string}
@@ -653,7 +713,8 @@ class Setup
         $add($senderLevel === 'ok' ? 'pass' : $senderLevel, 'provider.mail_from', $senderMessage,
             $senderLevel === 'ok' ? '' : 'Enter a sender on the shop\'s own domain in Admin → E-mail delivery or MAIL_FROM (with SPF/DKIM for it).');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
-        $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
+        // R50 (setup): webhooks, the carrier lifecycle, carrier labels and the ERP are optional integrations: 'info'.
+        $add($webhooks === [] ? 'info' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured (optional).' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
         $invalidWebhooks = Webhook::invalidEndpoints($config);
         $add($invalidWebhooks === [] ? 'pass' : 'fail', 'provider.webhook_config', $invalidWebhooks === []
             ? 'Outbound webhook endpoints are valid.'
@@ -669,11 +730,11 @@ class Setup
 
         $shipping = (array)($config['integrations']['http_shipping'] ?? []);
         $shippingReady = self::integrationReady($shipping);
-        $add($shippingReady ? 'pass' : 'warn', 'provider.shipping_lifecycle', $shippingReady ? 'HTTP carrier lifecycle configured.' : 'HTTP carrier lifecycle not configured.', 'Configure integrations.http_shipping and run fixture/live sandbox smoke.');
+        $add($shippingReady ? 'pass' : 'info', 'provider.shipping_lifecycle', $shippingReady ? 'HTTP carrier lifecycle configured.' : 'HTTP carrier lifecycle not configured (optional).', 'Configure integrations.http_shipping and run fixture/live sandbox smoke.');
         // Carrier labels: a carrier whose API is not connected never invents a tracking number; say so before launch.
         try {
             $unavailable = array_filter(ShippingService::labelCarriers(), static fn(?string $reason): bool => $reason !== null);
-            $add($unavailable === [] ? 'pass' : 'warn', 'provider.shipping_labels', $unavailable === []
+            $add($unavailable === [] ? 'pass' : 'info', 'provider.shipping_labels', $unavailable === []
                 ? 'Carrier labels can be created for every enabled carrier.'
                 : 'Carrier labels not available: ' . implode(' ', array_map(static fn(string $carrier, string $reason): string => "{$carrier}: {$reason}", array_keys($unavailable), $unavailable)),
                 'Book these parcels in the carrier portal and enter the tracking number when shipping, or connect the carrier through integrations.http_shipping.');
@@ -682,7 +743,7 @@ class Setup
         }
         $erp = (array)($config['integrations']['http_erp'] ?? []);
         $erpReady = self::integrationReady($erp);
-        $add($erpReady ? 'pass' : 'warn', 'provider.erp', $erpReady ? 'HTTP ERP contract configured.' : 'HTTP ERP contract not configured.', 'Configure integrations.http_erp and verify create/status update in staging.');
+        $add($erpReady ? 'pass' : 'info', 'provider.erp', $erpReady ? 'HTTP ERP contract configured.' : 'HTTP ERP contract not configured (optional).', 'Configure integrations.http_erp and verify create/status update in staging.');
     }
 
     /** Settings that silently change behaviour after the upgrade (UpgradeChecks, CHANGELOG upgrade notes). */

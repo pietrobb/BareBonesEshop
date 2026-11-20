@@ -472,6 +472,26 @@ class Pricing {
         return $coupon >= $promotion ? ['coupon' => $coupon, 'promotion' => 0] : ['coupon' => 0, 'promotion' => $promotion];
     }
 
+    /**
+     * R50 (high 1): the active cart rules of a pricing.json config (coupons and automatic rules such as free shipping).
+     * They apply in checkout but are not promotions, so Admin → Promotions and the doctor list them from here.
+     * @return list<array{name: string, type: string, code: string, effect: string}>
+     */
+    public static function activeCartRules(?array $config = null): array {
+        $rules = [];
+        foreach ((array)(($config ?? self::config())['cart_rules'] ?? []) as $rule) {
+            if (!is_array($rule) || empty($rule['active'])) continue;
+            $type = (string)($rule['type'] ?? '');
+            if ($type !== 'coupon' && $type !== 'automatic') continue;
+            $effect = $type === 'automatic' ? (string)($rule['action'] ?? 'discount')
+                : (($rule['discount_type'] ?? '') === 'percent' ? (float)($rule['discount_value'] ?? 0) . ' %' : (string)($rule['discount_type'] ?? 'fixed'));
+            $min = (int)($rule['conditions']['min_subtotal'] ?? $rule['min_subtotal'] ?? 0);
+            if ($min > 0) $effect .= ', min ' . Money::decimal($min, $currency = self::cartRulesCurrency()) . ' ' . strtoupper($currency);
+            $rules[] = ['name' => (string)($rule['name'] ?? ''), 'type' => $type, 'code' => strtoupper(trim((string)($rule['code'] ?? ''))), 'effect' => $effect];
+        }
+        return $rules;
+    }
+
     /** Upper-case coupon codes that pricing.json defines for the active store. */
     public static function configCouponCodes(): array {
         $codes = [];
@@ -551,6 +571,13 @@ class Pricing {
     /** Counter subject: '' for all uses, a hash for one customer (no plain e-mail outside coupon_uses). */
     private static function couponSubject(?string $email): string {
         return $email === null ? '' : 'customer:' . hash('sha256', $email);
+    }
+
+    /** R50 GDPR erasure: deletes $email's per-customer counters of $store and of the shared coupons; returns the rows. */
+    public static function forgetCustomerCounters(PDO $db, string $email, string $store): int {
+        $stmt = $db->prepare('DELETE FROM coupon_usage_counters WHERE store_id IN (:store, :all) AND subject = :subject');
+        $stmt->execute([':store' => $store, ':all' => self::ALL_STORES, ':subject' => self::couponSubject(self::normalizeEmail($email))]);
+        return $stmt->rowCount();
     }
 
     /** Seed the counter from historic uses once, then claim one use only while below the limit. */

@@ -138,7 +138,8 @@ try {
             if ($hash % 7 === 0) $tags[] = 'bestseller';
             Import::importProduct([
                 'sku' => $sku, 'name' => $title, 'slug' => $slug, 'slug_en' => $slug, 'name_en' => $title,
-                'product_type' => 'simple', 'category' => $genreName, 'price' => $money($ebook), 'stock' => '',
+                // R50 (high 3): books are taxed at the reduced rate (the eBook variant at the country's e-book rate).
+                'product_type' => 'simple', 'vat_class' => 'books', 'category' => $genreName, 'price' => $money($ebook), 'stock' => '',
                 'summary' => $summary, 'description' => $description, 'image' => "/uploads/bookshop/covers/{$slug}.svg",
                 'tags' => implode('|', $tags), 'weight_g' => (string)$paperWeight, 'attr:Author' => $author,
             ], $db);

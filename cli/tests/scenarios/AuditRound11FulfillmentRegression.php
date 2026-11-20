@@ -170,8 +170,8 @@ try {
         'R11 H9: with a production key the admin is told the production Packeta API is not wired (no fake AWB)');
     unset($_ENV['SHIP_PACKETA_API_KEY']);
     $r11fDoctor = array_values(array_filter(Setup::doctor()['checks'] ?? [], static fn(array $c): bool => ($c['name'] ?? '') === 'provider.shipping_labels'));
-    assert_true(($r11fDoctor[0]['status'] ?? '') === 'warn' && str_contains((string)($r11fDoctor[0]['message'] ?? ''), 'packeta'),
-        'R11 H9: the doctor warns that Packeta labels are not available');
+    assert_true(($r11fDoctor[0]['status'] ?? '') === 'info' && str_contains((string)($r11fDoctor[0]['message'] ?? ''), 'packeta'),
+        'R11 H9: the doctor tells that Packeta labels are not available (R50: an optional integration is info, not a warning)');
 
     // Not connected = the parcel is booked in the carrier's portal: each parcel row still says what it collects.
     $r11fCodMigration = require TEST_CLI_DIR . '/../migrations/20261101140000_shipment_cod_amount.php';

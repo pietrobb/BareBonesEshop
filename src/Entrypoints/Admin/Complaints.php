@@ -31,7 +31,8 @@ function pageComplaints(): void {
                 <td><?= esc(I18n::t('complaint.remedy.' . $c['remedy'])) ?></td>
                 <td><span class="badge badge-<?= esc($c['status']) ?>"><?= esc(I18n::t('complaint.status.' . $c['status'])) ?></span>
                     <?php if (isset($next[$c['status']])): ?><br><span class="muted"><?= esc(I18n::format('admin.complaints.decide_by', ['date' => I18n::date(Complaints::decideBy($c))])) ?></span><?php endif; ?>
-                    <?php if ((string)($c['decision_note'] ?? '') !== ''): ?><br><span class="muted"><?= esc((string)$c['decision_note']) ?></span><?php endif; ?></td>
+                    <?php if ((string)($c['decision_note'] ?? '') !== ''): ?><br><span class="muted"><?= esc((string)$c['decision_note']) ?></span><?php endif; ?>
+                    <?php if ((string)($c['assessment'] ?? '') !== ''): ?><br><span class="muted"><?= esc(I18n::t('admin.complaints.assessment')) ?>: <?= esc((string)$c['assessment']) ?></span><?php endif; ?></td>
                 <td>
                     <?php if (isset($next[$c['status']])): ?>
                     <form method="post" action="admin.php?p=complaints&action=status">
@@ -41,6 +42,7 @@ function pageComplaints(): void {
                             <?php foreach ($next[$c['status']] as $to): ?><option value="<?= esc($to) ?>"><?= esc(I18n::t('complaint.status.' . $to)) ?></option><?php endforeach; ?>
                         </select>
                         <textarea name="note" rows="2" maxlength="4000" aria-label="<?= esc(I18n::t('admin.complaints.note')) ?>" placeholder="<?= esc(I18n::t('admin.complaints.note')) ?>"></textarea>
+                        <?php if (in_array('rejected', $next[$c['status']], true)): ?><textarea name="assessment" rows="2" maxlength="4000" aria-label="<?= esc(I18n::t('admin.complaints.assessment')) ?>" placeholder="<?= esc(I18n::t('admin.complaints.assessment')) ?>"></textarea><?php endif; ?>
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.complaints.save')) ?></button>
                     </form>
                     <?php endif; ?>
@@ -55,7 +57,7 @@ function pageComplaints(): void {
 
 function handleComplaintStatus(): void {
     Security::adminRequire('rma.manage');
-    $error = Complaints::setStatus(Security::int($_POST['complaint_id'] ?? 0), Security::clean($_POST['status'] ?? ''), Security::str($_POST['note'] ?? ''));
+    $error = Complaints::setStatus(Security::int($_POST['complaint_id'] ?? 0), Security::clean($_POST['status'] ?? ''), Security::str($_POST['note'] ?? ''), Security::str($_POST['assessment'] ?? ''));
     if ($error === null) setFlash('ok', I18n::t('admin.complaints.saved'));
     else setFlash('err', I18n::t('admin.complaints.error.' . $error));
     header('Location: admin.php?p=complaints');

@@ -305,8 +305,8 @@ class DigitalDelivery {
     /**
      * Whether this transfer may start (see beginTransfer()).
      */
-    public static function authorizeTransfer(array $entitlement, int $rangeStart, ?int $now = null): bool {
-        return self::beginTransfer($entitlement, $rangeStart, $now) !== null;
+    public static function authorizeTransfer(array $entitlement, int $rangeStart, int $size, ?int $now = null): bool {
+        return self::beginTransfer($entitlement, $rangeStart, $size, $now) !== null;
     }
 
     /**
@@ -316,10 +316,12 @@ class DigitalDelivery {
      * download: inside the resume window, starting at most RESUME_SLACK_BYTES below the bytes that download already
      * served and no later than them (last_download_offset, see recordProgress()), at most MAX_FREE_RESUMES times. Any other request counts as a new
      * download, so once the limit is spent it is refused ("Range: bytes=1-" is no free copy). HEAD never counts.
+     * R50: only a download that has not served the whole $size-byte file yet resumes, and at most an eighth of the file
+     * below where it stopped (resumeSlack()): a finished download "resumed" from byte 1 was a free near-complete copy.
      */
-    public static function beginTransfer(array $entitlement, int $rangeStart, ?int $now = null): ?int {
+    public static function beginTransfer(array $entitlement, int $rangeStart, int $size, ?int $now = null): ?int {
         $now ??= time();
-        if ($rangeStart > 0 && self::claimResume($entitlement, $rangeStart, $now)) return (int)$entitlement['last_download_at'];
+        if ($rangeStart > 0 && self::claimResume($entitlement, $rangeStart, $size, $now)) return (int)$entitlement['last_download_at'];
         return self::consume((int)$entitlement['id'], $now) ? $now : null;
     }
 
@@ -336,14 +338,19 @@ class DigitalDelivery {
     }
 
     /** Take one free resume of the last counted download (atomic: the limit of free resumes holds under concurrency). */
-    private static function claimResume(array $entitlement, int $rangeStart, int $now): bool {
+    private static function claimResume(array $entitlement, int $rangeStart, int $size, int $now): bool {
         $served = (int)($entitlement['last_download_offset'] ?? 0);
-        if (!self::canResume($entitlement, $now) || $rangeStart > $served || $rangeStart < $served - self::RESUME_SLACK_BYTES) return false;
+        $slack = self::resumeSlack($size);
+        if (!self::canResume($entitlement, $now) || $served >= $size || $rangeStart > $served || $rangeStart < $served - $slack) return false;
+        // R50: one free resume per recorded offset — concurrent resumes before any of them recorded progress are not
+        // each a free copy (they count as new downloads instead). Before migration 20261120120500 only the cap holds.
+        $claim = Db::hasColumn('digital_entitlements', 'resume_claimed_offset');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
-            SET resume_count = resume_count + 1, updated_at = " . Db::now() . "
-            WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since
+            SET resume_count = resume_count + 1, " . ($claim ? 'resume_claimed_offset = last_download_offset, ' : '') . "updated_at = " . Db::now() . "
+            WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since"
+              . ($claim ? ' AND (resume_claimed_offset IS NULL OR last_download_offset > resume_claimed_offset)' : '') . "
               AND resume_count < :max_resumes AND last_download_offset >= :start AND last_download_offset <= :start_plus_slack
-              AND (expires_at IS NULL OR expires_at >= :now)
+              AND last_download_offset < :size AND (expires_at IS NULL OR expires_at >= :now)
               AND EXISTS (
                   SELECT 1 FROM orders o
                   WHERE o.id = digital_entitlements.order_id
@@ -352,9 +359,14 @@ class DigitalDelivery {
               )" . self::notCreditedLineSql());
         $stmt->execute([
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
-            ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + self::RESUME_SLACK_BYTES, ':now' => $now,
+            ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + $slack, ':size' => $size, ':now' => $now,
         ]);
         return $stmt->rowCount() === 1;
+    }
+
+    /** How far below the served bytes a free resume may start: RESUME_SLACK_BYTES, at most an eighth of the file. */
+    private static function resumeSlack(int $size): int {
+        return min(self::RESUME_SLACK_BYTES, intdiv(max(0, $size), 8));
     }
 
     /** Resume tracking needs the columns of migrations 20261016142000 and 20261016161000 (before them every transfer counts). */
@@ -396,7 +408,8 @@ class DigitalDelivery {
     public static function consume(int $entitlementId, ?int $now = null): bool {
         // Before the resume migrations ran the columns are missing: count without resume tracking instead of failing.
         $tracking = !Db::hasColumn('digital_entitlements', 'last_download_at') ? ''
-            : (self::resumeTracked() ? 'last_download_at = :counted_at, last_download_offset = 0, resume_count = 0, ' : 'last_download_at = :counted_at, ');
+            : (self::resumeTracked() ? 'last_download_at = :counted_at, last_download_offset = 0, resume_count = 0, '
+                . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? 'resume_claimed_offset = NULL, ' : '') : 'last_download_at = :counted_at, ');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET download_count = download_count + 1, {$tracking}updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active'

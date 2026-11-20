@@ -148,9 +148,20 @@ class Withdrawal {
         foreach (self::forOrder((int)$order['id']) as $statement) {
             foreach ((array)(json_decode((string)$statement['items'], true) ?: []) as $itemId => $qty) $withdrawn[(int)$itemId] = true;
         }
-        $consented = in_array(ConsentService::DIGITAL_KEY, array_column(ConsentService::forOrder((int)$order['id']), 'consent_key'), true);
-        if ($consented) foreach (DigitalDelivery::forOrder((int)$order['id']) as $entitlement) $withdrawn[(int)$entitlement['order_item_id']] = true;
+        $withdrawn += self::waivedItemIds((int)$order['id']);
         return array_values(array_filter(Orders::items((int)$order['id']), static fn(array $item): bool => !isset($withdrawn[(int)$item['id']])));
+    }
+
+    /**
+     * Order lines (order_item id => true) of digital content supplied with the consumer's consent to lose the right of
+     * withdrawal (ConsentService::DIGITAL_KEY): neither withdrawn from nor returned (R50: the return form offered them).
+     * @return array<int, true>
+     */
+    public static function waivedItemIds(int $orderId): array {
+        if (!in_array(ConsentService::DIGITAL_KEY, array_column(ConsentService::forOrder($orderId), 'consent_key'), true)) return [];
+        $waived = [];
+        foreach (DigitalDelivery::forOrder($orderId) as $entitlement) $waived[(int)$entitlement['order_item_id']] = true;
+        return $waived;
     }
 
     public static function forOrder(int $orderId): array {

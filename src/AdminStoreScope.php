@@ -25,4 +25,29 @@ final class AdminStoreScope {
         }
         return $allowed[0] ?? null;
     }
+
+    /**
+     * R50 (setup): how the admin names a store — its name with the code and where it is served (first domain, else its
+     * URL prefix), e.g. "Slovenský obchod (default · shop.example.sk)": sample stores share names, and a coupon was
+     * created in the wrong one.
+     */
+    public static function label(string $storeId, array $store): string {
+        $name = trim((string)($store['name'] ?? ''));
+        $domains = array_values(array_filter(array_map(static fn($d): string => trim(is_string($d) ? $d : ''), (array)($store['domains'] ?? []))));
+        $prefix = trim((string)($store['url_prefix'] ?? ''), '/');
+        $where = $domains[0] ?? ($prefix !== '' ? '/' . $prefix : '');
+        $detail = $storeId . ($where !== '' ? ' · ' . $where : '');
+        return $name !== '' && $name !== $storeId ? "{$name} ({$detail})" : $detail;
+    }
+
+    /**
+     * R50 (setup): a form that creates something in the active store names that store, and posts it back (?store= is
+     * checked against the grants and activated by adminActivateStore()), so a form opened before switching stores in
+     * another tab still saves where it said it would.
+     */
+    public static function targetField(): string {
+        $store = StoreContext::current();
+        return '<input type="hidden" name="store" value="' . esc($store->id()) . '"><p class="muted" data-target-store>'
+            . esc(I18n::format('admin.store_switcher.target', ['store' => self::label($store->id(), $store->config())])) . '</p>';
+    }
 }

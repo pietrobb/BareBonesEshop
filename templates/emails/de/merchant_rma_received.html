@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Rücksendeanfrage</h2>
+<p>{{customer_name}} ({{customer_email}}) möchte Ware aus der Bestellung <strong>{{order_number}}</strong> zurücksenden (Rücksendung {{rma_number}}). Genehmigen oder lehnen Sie die Anfrage im Admin ab.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Grund: {{reason}}</p>{{/if}}
+{{#if admin_url}}<p><a href="{{admin_url}}">Rücksendung öffnen</a></p>{{/if}}
+</body></html>

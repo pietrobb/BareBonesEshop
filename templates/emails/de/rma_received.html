@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R50 return request acknowledgement on a durable medium; wording for lawyer review. -->
+<h2>Wir haben Ihre Rücksendeanfrage erhalten</h2>
+<p>Hallo {{customer_name}},</p>
+<p>wir bestätigen, dass wir am <strong>{{received_at}}</strong> Ihre Rücksendeanfrage <strong>{{rma_number}}</strong> zur Bestellung <strong>{{order_number}}</strong> erhalten haben:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Grund: {{reason}}</p>{{/if}}
+<p>Wir teilen Ihnen mit, ob die Rücksendung genehmigt wird und wie Sie die Ware zurücksenden. Bewahren Sie diese E-Mail als Nachweis Ihrer Anfrage auf.</p>
+<p>Verkäufer: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

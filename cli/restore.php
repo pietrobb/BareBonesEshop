@@ -26,7 +26,8 @@ require_once __DIR__ . '/cli-only.php';
  *         A `pre-restore-snapshot` backup of the current database is taken unless --skip-snapshot
  *         (retained, max 5 newest). Files are extracted into a private staging directory by a strict
  *         reader (regular files only, no absolute/../link entries); differing live files are only
- *         overwritten with --force, and files missing from the backup are kept.
+ *         overwritten with --force, and files missing from the backup are kept. config.php, themes and
+ *         the job queue are never overwritten: a differing file goes next to the live one as *.from-backup.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -62,7 +63,14 @@ try {
     // before the maintenance gate proves no other process holds the SQLite file.
     // R42 (review round 16): started as root in a tree root owns, the backups, the database and the restored files are the
     // private directory owner's work (PrivateOwner::run()); the maintenance window in the application root stays root's.
-    PrivateOwner::run(static fn() => BackupService::init(Db::get()));
+    try {
+        PrivateOwner::run(static fn() => BackupService::init(Db::get()));
+    } catch (\Throwable $e) {
+        // R50: a restore onto a new MySQL/MariaDB server: db_name is created empty and the backup imported into it.
+        if (!Db::isUnknownDatabase($e) || isset($flags['list']) || $filesOnly || !Db::createMissingMysqlDatabase()) throw $e;
+        $emit('Created the empty database db_name on this MySQL/MariaDB server for the restore.');
+        PrivateOwner::run(static fn() => BackupService::init(Db::get()));
+    }
 } catch (\Throwable $e) {
     fwrite(STDERR, 'Init failed: ' . $e->getMessage() . "\n");
     exit(3);
@@ -229,7 +237,7 @@ if (!$filesOnly) {
     $emit('  snapshot:     ' . ($res['snapshot'] ?? '(skipped)'));
     $emit('  applied:      ' . $res['applied_count']);
     $emit('  pending:      ' . $res['pending_count']);
-    foreach ($res['schema_warnings'] as $w) {
+    foreach ([...$res['schema_warnings'], ...($res['numbering_warnings'] ?? [])] as $w) {
         fwrite(STDERR, 'WARNING: ' . $w . "\n");
     }
 }
@@ -248,6 +256,10 @@ if ($withFiles) {
     $emit('  written:      ' . $files['written']);
     $emit('  unchanged:    ' . $files['unchanged']);
     $emit('  overwritten:  ' . count($files['overwritten']));
+    if ($files['set_aside'] !== []) {
+        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) from config.php, themes or the job queue differ from the live ones (or the queue"
+            . " has already run) and were written next to them as *.from-backup, not over them. Compare and move them in by hand.\n");
+    }
     foreach ($files['skipped_sources'] as $name) {
         fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");
     }

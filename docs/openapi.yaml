@@ -522,7 +522,7 @@ components:
     Product:
       type: object
       additionalProperties: false
-      required: [id, sku, slug, name, type, price, compare_price, stock, status, weight_g, created_at, updated_at]
+      required: [id, sku, slug, name, type, price, compare_price, stock, status, weight_g, vat_class, created_at, updated_at]
       properties:
         id: { type: integer }
         sku: { type: string }
@@ -534,6 +534,7 @@ components:
         stock: { type: integer, minimum: 0 }
         status: { type: string, enum: [active, draft, archived] }
         weight_g: { type: integer, minimum: 0 }
+        vat_class: { type: string, description: 'VAT rate class: standard, reduced, reduced2, zero, or a category alias (books, food, medicines, ...) that is taxed at its reduced rate.' }
         created_at: { type: string }
         updated_at: { type: string }
     ProductPatch:
@@ -547,6 +548,7 @@ components:
         compare_price: { type: [integer, 'null'], minimum: 0, maximum: 2000000000 }
         stock: { type: integer, minimum: 0, maximum: 2000000000, description: Available quantity; the difference is booked as an api_adjustment in the default warehouse ledger. }
         weight_g: { type: integer, minimum: 0, maximum: 2000000000 }
+        vat_class: { type: string, description: 'VAT rate class: standard, reduced, reduced2, zero, or a category alias (books, food, medicines, ...) that is taxed at its reduced rate.' }
     ProductCreate:
       type: object
       additionalProperties: false
@@ -561,6 +563,7 @@ components:
         weight_g: { type: integer, minimum: 0, maximum: 2000000000, default: 0 }
         slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 191, description: 'Derived from the name when omitted; a slug taken by another product gets a -2, -3… suffix.' }
         category_id: { type: integer, minimum: 1 }
+        vat_class: { type: string, description: 'VAT rate class: standard, reduced, reduced2, zero, or a category alias (books, food, medicines, ...) that is taxed at its reduced rate., default standard.' }
     Address:
       type: object
       required: [company, street, city, zip, country, ico, dic, ic_dph]

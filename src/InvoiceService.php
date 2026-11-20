@@ -1070,6 +1070,9 @@ final class InvoiceService
             AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        // R50 (low): every read here is closed before the credit note writes; an open SQLite cursor held the read lock
+        // and the job's own write waited on another connection's commit until "database is locked".
+        $stmt->closeCursor();
         if (!$row) return null;
         // R24: a refund event without refund ids books the item refund it settles under the event's key; that item refund is
         // named in the row (a Stripe charge.refunded without its refund list did so up to 2.1.2).
@@ -1080,7 +1083,9 @@ final class InvoiceService
         $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status <> 'failed'
             AND (idempotency_key IN (:key, :settles) OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
         $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
-        if ($item->fetchColumn()) return null;
+        $isItem = $item->fetchColumn();
+        $item->closeCursor();
+        if ($isItem) return null;
         // R34 (capability review 437): the money of a released item refund credits the rates its reversed credit note did.
         $released = $db->prepare("SELECT i.vat_breakdown FROM order_refunds r JOIN invoices i ON i.id = r.credit_note_id
             WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'failed' AND r.rma_id IS NOT NULL
@@ -1088,7 +1093,9 @@ final class InvoiceService
             ORDER BY r.id DESC LIMIT 1");
         $released->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':settles' => $settlesKey, ':ref' => (string)$row['provider_ref']]);
         $itemRates = [];
-        foreach ((array)json_decode((string)$released->fetchColumn(), true) as $key => $rate) {
+        $releasedBreakdown = (string)$released->fetchColumn();
+        $released->closeCursor();
+        foreach ((array)json_decode($releasedBreakdown, true) as $key => $rate) {
             if (is_array($rate)) $itemRates[(string)$key] = ['gross' => -(int)($rate['net'] ?? 0) - (int)($rate['vat'] ?? 0), 'net' => -(int)($rate['net'] ?? 0)];
         }
         // R14 #2: an item refund of the same amount whose provider refund id is not noted yet may be this very refund (its
@@ -1102,7 +1109,9 @@ final class InvoiceService
         $inFlight = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending'
             AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
         $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
-        if ($inFlight->fetchColumn()) {
+        $waiting = $inFlight->fetchColumn();
+        $inFlight->closeCursor();
+        if ($waiting) {
             if (self::bookedRefundWaitedOut($deferrals)) {
                 if (!IncidentMonitor::reportedForOrder('payment.credit_note_stalled', $orderId)) {
                     IncidentMonitor::report('payment.credit_note_stalled', 'payment', 'critical', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals]);
@@ -1165,7 +1174,7 @@ final class InvoiceService
         }
         $pdfBin = self::renderPdf($invoice, $rows, $sellerSnap, $custSnap, $vatBreakdown);
         $absPath = self::resolvePdfPath((string)$invoice['pdf_path']);
-        self::writePdf($absPath, $pdfBin);
+        self::writePdf($absPath, $pdfBin, false);
         return $absPath;
     }
 
@@ -1725,8 +1734,37 @@ final class InvoiceService
         }
         $stmt = $db->prepare("SELECT last_number FROM invoice_number_counters WHERE {$where}");
         $stmt->execute($key);
-        $next = (int)$stmt->fetchColumn();
-        return sprintf('%s%d%04d', $prefix, $year, $next);
+        $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        while (self::pdfIssued($year, $number)) {
+            $increment->execute($key);
+            $stmt->execute($key);
+            $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        }
+        return $number;
+    }
+
+    /**
+     * R50: the invoice storage outlives the database. A number whose PDF is already there (in any month of its year) was
+     * issued, e.g. before an older backup was restored onto a lost, empty or new database whose counters are lower; it is
+     * skipped, so no number is issued twice whatever the restored counters say.
+     */
+    private static function pdfIssued(int $year, string $number): bool
+    {
+        try {
+            $yearDir = self::storageDir() . DIRECTORY_SEPARATOR . $year;
+        } catch (\RuntimeException $e) {
+            Logger::exception('invoice_number_storage_check', $e, ['number' => $number]);
+            return false;
+        }
+        if (!is_dir($yearDir)) return false;
+        $name = rawurlencode($number) . '.pdf';
+        foreach (scandir($yearDir) ?: [] as $month) {
+            if ($month === '.' || $month === '..' || !is_file($yearDir . DIRECTORY_SEPARATOR . $month . DIRECTORY_SEPARATOR . $name)) continue;
+            Logger::warning('invoice_number_skipped', ['number' => $number, 'pdf' => "{$year}/{$month}/{$name}",
+                'reason' => 'its PDF is already in invoice_storage_dir (restored older database?)']);
+            return true;
+        }
+        return false;
     }
 
     /** The seller whose series numbered the document (credit notes of it follow it); skipped before its migration ran. */
@@ -1748,7 +1786,13 @@ final class InvoiceService
         }
         $stmt = $db->prepare("SELECT MAX(last_number) FROM invoice_counters WHERE year = :y AND prefix = :p");
         $stmt->execute($key);
-        return sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        while (self::pdfIssued($year, $number)) {
+            $increment->execute($key);
+            $stmt->execute($key);
+            $number = sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
+        }
+        return $number;
     }
 
     private static function sellerSnapshot(array $legal): array
@@ -2108,7 +2152,11 @@ final class InvoiceService
         return $root . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $parts);
     }
 
-    private static function writePdf(string $path, string $contents): void
+    /**
+     * $fresh: the PDF of a document just numbered. R50: a file already there is an issued document of the same number
+     * (e.g. from before an older backup was restored); it is kept next to it as *.superseded-*.pdf, never overwritten.
+     */
+    private static function writePdf(string $path, string $contents, bool $fresh = true): void
     {
         $dir = dirname($path);
         if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
@@ -2118,6 +2166,13 @@ final class InvoiceService
         $realDir = realpath($dir);
         if ($root === false || $realDir === false || !self::pathIsWithin(self::normalizePath($realDir), self::normalizePath($root))) {
             throw new \RuntimeException('Invoice PDF path escapes invoice_storage_dir');
+        }
+        if ($fresh && (is_file($path) || is_link($path))) {
+            $aside = substr($path, 0, -4) . '.superseded-' . gmdate('Ymd\THis') . '-' . bin2hex(random_bytes(3)) . '.pdf';
+            if (!@rename($path, $aside)) {
+                throw new \RuntimeException("An issued PDF of this number exists and cannot be set aside: {$path}");
+            }
+            Logger::phpLog("[invoice] {$path} existed before its number was issued (restored older database?); kept as {$aside}");
         }
 
         $tmp = tempnam($dir, '.invoice-');

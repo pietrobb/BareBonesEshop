@@ -82,18 +82,27 @@ class Complaints {
         return ['ok' => true, 'error' => null, 'id' => $id, 'number' => $number, 'received_at' => $receivedAt, 'confirmation' => $status];
     }
 
-    /** Merchant step; accepted / rejected / resolved need a note and are e-mailed to the consumer. Returns an error key or null. */
-    public static function setStatus(int $id, string $status, string $note): ?string {
+    /**
+     * Merchant step; accepted / rejected / resolved need a note and are e-mailed to the consumer. Returns an error key or null.
+     * R50 (review round 20, medium): a complaint is rejected only on an expert assessment of the goods ($assessment: who
+     * assessed them and the finding), which the decision e-mail names together with the ADR body of the seller's country.
+     */
+    public static function setStatus(int $id, string $status, string $note, string $assessment = ''): ?string {
         $complaint = self::byId($id);
         if ($complaint === null) return 'not_found';
         if (!in_array($status, self::NEXT[(string)$complaint['status']] ?? [], true)) return 'transition_refused';
         $note = mb_substr(trim($note), 0, 4000);
+        $assessment = mb_substr(trim($assessment), 0, 4000);
         $decision = in_array($status, self::DECISIONS, true);
         if ($decision && $note === '') return 'note_required';
-        $stmt = Db::get()->prepare('UPDATE complaints SET status = ?, decision_note = ?, decided_at = ' . ($decision ? Db::now() : 'decided_at') . ' WHERE id = ? AND status = ? AND store_id = ?');
-        $stmt->execute([$status, $decision ? $note : (string)($complaint['decision_note'] ?? ''), $id, (string)$complaint['status'], StoreContext::current()->id()]);
+        if ($status === 'rejected' && $assessment === '') return 'assessment_required';
+        $withAssessment = $status === 'rejected' && Db::hasColumn('complaints', 'assessment');
+        $stmt = Db::get()->prepare('UPDATE complaints SET status = ?, decision_note = ?, decided_at = ' . ($decision ? Db::now() : 'decided_at')
+            . ($withAssessment ? ', assessment = ?' : '') . ' WHERE id = ? AND status = ? AND store_id = ?');
+        $stmt->execute(array_merge([$status, $decision ? $note : (string)($complaint['decision_note'] ?? '')], $withAssessment ? [$assessment] : [],
+            [$id, (string)$complaint['status'], StoreContext::current()->id()]));
         if ($stmt->rowCount() !== 1) return 'transition_refused';
-        AuditLog::log('complaint', $id, ['status' => $complaint['status']], ['status' => $status, 'note' => $note]);
+        AuditLog::log('complaint', $id, ['status' => $complaint['status']], ['status' => $status, 'note' => $note] + ($assessment !== '' ? ['assessment' => $assessment] : []));
         if ($decision) {
             $order = Orders::byId((int)$complaint['order_id']) ?? [];
             self::mail('complaint_decided', self::byId($id) ?? [], $order);
@@ -124,6 +133,7 @@ class Complaints {
     private static function mail(string $template, array $complaint, array $order): string {
         $locale = (string)($order['locale'] ?? '');
         $seller = $order ? InvoiceService::sellerIdentity($order) : [];
+        $adr = ($complaint['status'] ?? '') === 'rejected' && $order ? ConsumerNotice::adr(ConsumerNotice::sellerLegal($order)) : ['name' => '', 'url' => ''];
         $result = MailService::send($template, (string)$complaint['customer_email'], $locale, [
             'customer_name' => (string)$complaint['customer_name'],
             'order_number' => (string)$complaint['order_number'],
@@ -135,6 +145,8 @@ class Complaints {
             'decide_by' => I18n::date(self::decideBy($complaint), $locale !== '' ? $locale : null),
             'status' => I18n::tIn('complaint.status.' . $complaint['status'], $locale),
             'decision_note' => (string)($complaint['decision_note'] ?? ''),
+            'assessment' => ($complaint['status'] ?? '') === 'rejected' ? (string)($complaint['assessment'] ?? '') : '',
+            'adr_name' => $adr['name'], 'adr_url' => $adr['url'],
             'seller_name' => (string)($seller['name'] ?? ''),
             'seller_email' => (string)($seller['email'] ?? ''),
         ], (int)$complaint['order_id']);

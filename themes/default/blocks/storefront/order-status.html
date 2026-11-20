@@ -7,7 +7,7 @@
     <dt>{{date_label}}</dt><dd>{{order.date}}</dd>
     <dt>{{status_label}}</dt><dd data-order-status-value>{{order.status}}</dd>
     <dt>{{payment_label}}</dt><dd>{{order.payment_status}}</dd>
-    {{#if order.tracking}}<dt>{{tracking_label}}</dt><dd>{{order.tracking}}</dd>{{/if}}
+    {{#if order.tracking}}<dt>{{tracking_label}}</dt><dd data-order-tracking>{{#each order.tracking}}{{#if url}}<a href="{{url}}" rel="noopener noreferrer" target="_blank">{{label}}</a>{{else}}{{label}}{{/if}}<br>{{/each}}</dd>{{/if}}
     <dt>{{items_label}}</dt><dd>{{#each order.items}}{{name}} × {{quantity}}<br>{{/each}}</dd>
     <dt>{{total_label}}</dt><dd>{{order.total}}</dd>
   </dl>

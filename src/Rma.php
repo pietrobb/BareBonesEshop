@@ -90,8 +90,9 @@ class Rma {
             }
             // Resolve which order_items are being returned and clamp quantities.
             $orderItems = [];
+            $waived = $customerId !== null && $customerId > 0 ? Withdrawal::waivedItemIds($orderId) : [];
             foreach (Orders::items($orderId) as $oi) {
-                $orderItems[(int)$oi['id']] = $oi;
+                if (!isset($waived[(int)$oi['id']])) $orderItems[(int)$oi['id']] = $oi;
             }
             $selected = self::normalizeItems($orderId, $items, $orderItems, $cancelled);
             if (!$selected) {
@@ -129,7 +130,30 @@ class Rma {
             throw $e;
         }
 
+        // R50 (review round 20, medium): a customer's return request is confirmed to them on a durable medium and the
+        // merchant is told (neither got an e-mail; the request waited unseen in the admin queue).
+        if ($customerId !== null && $customerId > 0) {
+            self::acknowledge($order, $rmaNumber, $reason, $selected);
+            JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'return:' . $rmaId], 6);
+        }
         return [true, $rmaId, null];
+    }
+
+    /** The return request as received and when, e-mailed to the customer. */
+    private static function acknowledge(array $order, string $rmaNumber, string $reason, array $selected): void {
+        $seller = InvoiceService::sellerIdentity($order);
+        $locale = (string)($order['locale'] ?? '');
+        MailService::send('rma_received', (string)$order['customer_email'], $locale, [
+            'customer_name' => (string)$order['customer_name'],
+            'order_number' => (string)$order['order_number'],
+            'rma_number' => $rmaNumber,
+            'received_at' => ShopTime::stamp(gmdate('Y-m-d H:i:s'), $locale, (string)($order['store_id'] ?? '') ?: null),
+            'items' => array_map(static fn(array $sel): array => ['name' => (string)($sel['order_item']['name'] ?? ''), 'sku' => (string)($sel['order_item']['sku'] ?? ''),
+                'quantity' => (int)$sel['qty']], array_values($selected)),
+            'reason' => $reason,
+            'seller_name' => (string)($seller['name'] ?? ''),
+            'seller_email' => (string)($seller['email'] ?? ''),
+        ], (int)$order['id']);
     }
 
     /**
@@ -231,8 +255,10 @@ class Rma {
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
         $claimed = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $claimed[(int)$row['order_item_id']] = (int)$row['claimed'];
+        $waived = Withdrawal::waivedItemIds($orderId);
         $result = [];
         foreach ($items as $item) {
+            if (isset($waived[(int)$item['id']])) continue;
             $item['returnable_quantity'] = max(0, (int)$item['quantity'] - ($claimed[(int)$item['id']] ?? 0));
             if ($item['returnable_quantity'] > 0) $result[] = $item;
         }

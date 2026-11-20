@@ -117,7 +117,7 @@ class CheckoutService {
         if ($vatIdValid && $vatIdOfSeller) $residence = $sellerCountry;
         $context = [
             'seller_country'        => $sellerCountry,
-            'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
+            'seller_vat_registered' => StoreSettings::vatRegistered((array)($store['legal'] ?? [])),
             // R39 (low): the VAT payer's OSS registration, whichever of its stores it was switched on in.
             'seller_oss_enabled'    => OssThreshold::sellerOssEnabled(StoreContext::current()->id(), $store),
             // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).
@@ -546,6 +546,12 @@ class CheckoutService {
         return $lines;
     }
 
+    /** R50 (review round 20, medium): the terms, the withdrawal information and the privacy notice linked at the order button. */
+    public static function legalView(): array {
+        return ['legal_intro' => I18n::t('checkout.legal_intro'), 'legal_links' => array_map(static fn(string $page): array => [
+            'label' => I18n::t('checkout.legal_' . $page), 'url' => Template::storeUrl('/?page=' . $page)], ['terms', 'withdrawal', 'privacy'])];
+    }
+
     /** Labels of the optional company part of the checkout form. */
     public static function companyLabels(): array {
         return ['company_heading' => I18n::t('checkout_company_heading'), 'company_label' => I18n::t('checkout_company'),
@@ -649,7 +655,7 @@ class CheckoutService {
         }
         $countries = ShippingService::destinationCountries();
         if (!isset($countries[$country])) {
-            $storeCountry = strtoupper((string)(StoreContext::current()->legal()['country'] ?? 'SK'));
+            $storeCountry = StoreContext::current()->marketCountry();
             $country = isset($countries[$storeCountry]) ? $storeCountry : (string)array_key_first($countries);
         }
         $billingCountries = ShippingService::billingCountries();

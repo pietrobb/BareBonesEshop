@@ -64,7 +64,64 @@ final class MethodLabels {
         ],
     ];
 
+    /** @var array<string, array<string, array<string, array<string, string>>>> provider store => kind => code => translations */
+    private static array $merchant = [];
+
+    /** Forget the merchant translations read in this request (after a method is saved). */
+    public static function forget(): void { self::$merchant = []; }
+
+    /**
+     * R50 (low): the translations the merchant entered for a method ({"cs": {"name": "…", "description": "…"}}) as JSON
+     * for the methods' translations column: only the given store languages, only non-empty texts; null when none.
+     */
+    public static function encodeTranslations(mixed $posted, array $languages): ?string {
+        $out = [];
+        foreach (is_array($posted) ? $posted : [] as $locale => $texts) {
+            if (!is_string($locale) || !in_array($locale, $languages, true) || !is_array($texts)) continue;
+            foreach (['name', 'description'] as $field) {
+                $text = trim(Security::str($texts[$field] ?? ''));
+                if ($text !== '') $out[$locale][$field] = mb_substr($text, 0, 191);
+            }
+        }
+        ksort($out);
+        return $out === [] ? null : json_encode($out, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    }
+
+    /** @return array<string, array<string, string>> locale => [name, description] of the method in the active store */
+    public static function translations(string $kind, string $code): array {
+        if (!StoreContext::hasCurrent() || !Db::connected()) return [];
+        $db = Db::get();
+        $store = spl_object_id($db) . ':' . StoreContext::current()->providerId();
+        if (!isset(self::$merchant[$store][$kind])) {
+            self::$merchant[$store][$kind] = [];
+            $table = $kind === 'payment' ? 'payment_methods' : 'shipping_methods';
+            // Before migration 20261120120400 (doctor, upgrade) there is no translations column yet.
+            if (!Db::hasColumn($table, 'translations', $db)) return [];
+            $stmt = $db->prepare("SELECT code, translations FROM {$table} WHERE store_id = ? AND translations IS NOT NULL AND translations <> ''");
+            $stmt->execute([StoreContext::current()->providerId()]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $decoded = json_decode((string)$row['translations'], true);
+                if (!is_array($decoded)) continue;
+                foreach ($decoded as $locale => $texts) {
+                    if (!is_array($texts)) continue;
+                    foreach (['name', 'description'] as $field) {
+                        if (is_string($texts[$field] ?? null)) self::$merchant[$store][$kind][(string)$row['code']][(string)$locale][$field] = $texts[$field];
+                    }
+                }
+            }
+        }
+        return self::$merchant[$store][$kind][$code] ?? [];
+    }
+
+    /** The active store's further languages, in which a method may carry the merchant's own name and description. */
+    public static function translationLanguages(): array {
+        $store = StoreContext::current();
+        return array_values(array_diff(array_unique(array_map('strval', (array)($store->config()['languages'] ?? []))), [$store->defaultLocale()]));
+    }
+
     private static function translated(string $kind, string $code, string $value, int $field, string $suffix, ?string $locale): string {
+        $own = self::translations($kind, $code)[$locale === null || $locale === '' ? I18n::locale() : $locale][$field === 0 ? 'name' : 'description'] ?? '';
+        if (trim($own) !== '') return $own;
         $seeded = self::SEEDED[$kind][$code][$field] ?? null;
         $names = self::SEEDED_STORE_NAMES[$kind][$code] ?? [];
         if ($field === 0 && array_key_exists($value, $names)) {

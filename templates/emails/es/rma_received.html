@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R50 return request acknowledgement on a durable medium; wording for lawyer review. -->
+<h2>Hemos recibido su solicitud de devolución</h2>
+<p>Hola, {{customer_name}}:</p>
+<p>confirmamos que el <strong>{{received_at}}</strong> recibimos su solicitud de devolución <strong>{{rma_number}}</strong> del pedido <strong>{{order_number}}</strong>:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Motivo: {{reason}}</p>{{/if}}
+<p>Le informaremos si aprobamos la devolución y cómo enviarnos los productos. Conserve este correo como constancia de su solicitud.</p>
+<p>Vendedor: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

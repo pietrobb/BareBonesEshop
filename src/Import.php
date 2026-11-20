@@ -59,8 +59,12 @@ class Import {
         unset($content);
         fseek($handle, $encoding === 'utf-8' ? $dataStart : 0);
 
+        // R50 (setup): Excel in SK/CZ/DE/PL/HU locales saves "CSV" with semicolons; the header line decides the
+        // delimiter (an Excel "sep=;" first line names it). The result's 'delimiter' says which one was read.
+        [$delimiter, $sepLine] = self::detectDelimiter($handle);
+
         // Read header
-        $header = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '');
+        $header = fgetcsv($handle, self::MAX_ROW_BYTES, $delimiter, '"', '');
         if (!$header) {
             fclose($handle);
             return ['success' => false, 'imported' => 0, 'errors' => ['Empty CSV or invalid format']];
@@ -95,9 +99,9 @@ class Import {
         $heartbeat();
         $startedAt = self::dbNow($db);
         $db->beginTransaction();
-        $lineNum = 1; // header = line 1
+        $lineNum = $sepLine ? 2 : 1; // header = line 1 (2 after a "sep=" line)
 
-        while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '')) !== false) {
+        while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, $delimiter, '"', '')) !== false) {
             $lineNum++;
             // Commit in batches for performance (counting every row, so a run of bad rows heartbeats too)
             if (++$batch > $batchSize) {
@@ -145,7 +149,33 @@ class Import {
             'imported' => $imported,
             'errors'   => $errors,
             'encoding' => $encoding, // 'windows-1250' when the file was converted
+            'delimiter' => $delimiter,
         ];
+    }
+
+    /**
+     * The delimiter of the CSV whose header line starts at the handle's position: an Excel "sep=X" line names it (and is
+     * skipped); otherwise the most frequent of , ; and tab outside quotes in the header line ("," on a tie or none).
+     * Leaves the handle at the header line; [1] is true when a "sep=" line was skipped.
+     * @param resource $handle
+     * @return array{0: string, 1: bool}
+     */
+    private static function detectDelimiter($handle): array
+    {
+        $start = ftell($handle);
+        $line = (string)fgets($handle, self::MAX_ROW_BYTES);
+        if (preg_match('/^sep=([,;\t|])\r?\n?$/', $line, $m)) return [$m[1], true]; // the handle is past the sep= line
+        fseek($handle, (int)$start);
+        $counts = [',' => 0, ';' => 0, "\t" => 0];
+        $quoted = false;
+        for ($i = 0, $n = strlen($line); $i < $n; $i++) {
+            $char = $line[$i];
+            if ($char === '"') $quoted = !$quoted;
+            elseif (!$quoted && isset($counts[$char])) $counts[$char]++;
+        }
+        arsort($counts, SORT_NUMERIC); // stable: "," stays first on a tie
+        $best = (string)array_key_first($counts);
+        return [$counts[$best] > 0 ? $best : ',', false];
     }
 
     /**
@@ -252,7 +282,8 @@ class Import {
         foreach ($data as $key => $value) {
             if (str_starts_with($key, 'attr:') && $value !== '') $attrs[substr($key, 5)] = $value;
         }
-        self::upsertProduct([
+        $vatClass = self::vatClassCell($data);
+        self::upsertProduct(($vatClass !== null ? ['vat_class' => $vatClass] : []) + [
             'sku'           => $sku,
             'slug'          => trim($data['slug'] ?? '') ?: self::productSlug($name, $sku),
             'product_type'  => $productType,
@@ -295,6 +326,7 @@ class Import {
         if ($has('summary')) $set['summary'] = trim((string)$data['summary']);
         if ($has('description')) $set['description'] = Security::sanitizeRichHtml(trim((string)$data['description']));
         if ($has('weight_g') && trim((string)$data['weight_g']) !== '') $set['weight_g'] = (int)$data['weight_g'];
+        if (($vatClass = self::vatClassCell($data)) !== null) $set['vat_class'] = $vatClass;
 
         $lists = [];
         if ($has('image')) $lists['images'] = self::pipeList($data['image']);
@@ -347,6 +379,17 @@ class Import {
         return (string)($set['product_type'] ?? $existing['product_type'] ?? 'simple');
     }
 
+    /**
+     * R50 (high 3): the row's vat_class (books, food, reduced, ...), null when the column is absent or empty (a new
+     * product is "standard", an existing one keeps its class). An unknown class fails the row instead of taxing at 23 %.
+     */
+    private static function vatClassCell(array $data): ?string {
+        if (!array_key_exists('vat_class', $data)) return null;
+        $class = VatService::normalizeProductClass($data['vat_class']);
+        if ($class === null) throw new \InvalidArgumentException('Unknown vat_class "' . trim((string)$data['vat_class']) . '" (allowed: ' . implode(', ', VatService::productClasses()) . ')');
+        return $class === '' ? null : $class;
+    }
+
     /** "a.jpg|b.jpg" → ['a.jpg', 'b.jpg'] */
     private static function pipeList($value): array {
         return array_values(array_filter(array_map('trim', explode('|', (string)$value)), 'strlen'));
@@ -381,6 +424,8 @@ class Import {
             'compare_price' => 'cprice', 'stock' => 'stock', 'status' => 'status', 'summary' => 'summary', 'description' => 'desc',
             'images' => 'images', 'attrs' => 'attrs', 'tags' => 'tags', 'filter_tags' => 'ftags', 'weight_g' => 'weight',
             'translations' => 'translations'];
+        // R50 (high 3): vat_class only when the caller sets it — a feed or ERP sync without it keeps the merchant's class.
+        if (isset($data['vat_class'])) $columns['vat_class'] = 'vatclass';
         $sqlite = Db::isSqlite();
         $new = static fn(string $column): string => $sqlite ? "excluded.{$column}" : "VALUES({$column})";
         $same = static fn(string $column): string => $sqlite ? "products.{$column} IS {$new($column)}" : "{$column} <=> {$new($column)}";
@@ -417,10 +462,12 @@ class Import {
             ':ftags'        => $data['filter_tags'] ?? '',
             ':weight'       => $data['weight_g'] ?? 0,
             ':translations' => json_encode($data['translations'] ?? []),
-        ]);
+        ] + (isset($columns['vat_class']) ? [':vatclass' => (string)$data['vat_class']] : []));
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
-        PriceHistory::record([(int)$id->fetchColumn()], $db);
+        $productId = (int)$id->fetchColumn();
+        PriceHistory::record([$productId], $db);
+        Search::refreshNames([$productId], $db);
         // R19: a stock-only change keeps updated_at (above); going in or out of stock is shown by the feeds.
         if ($stockBefore !== false && ((int)$stockBefore > 0) !== ((int)$data['stock'] > 0)) Cache::catalogChanged($catalog);
     }

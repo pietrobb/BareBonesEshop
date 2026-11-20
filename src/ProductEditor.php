@@ -240,6 +240,7 @@ final class ProductEditor {
      */
     public static function save(int $productId, array $validated, ?array $old = null): void {
         $db = Db::get();
+        Search::refreshNames([$productId], $db);
         $categories = [(int)($old['category_id'] ?? 0), ...CategoryCounts::ofProducts([$productId], $db)];
         if (self::categoriesChanged($productId, $validated)) {
             $db->prepare('DELETE FROM product_categories WHERE product_id = :id')->execute([':id' => $productId]);

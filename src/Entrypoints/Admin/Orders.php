@@ -34,7 +34,7 @@ function pageSalesOverview(): void {
     $pageNumber = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 30;
     $offset = ($pageNumber - 1) * $perPage;
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders o WHERE {$whereSql}");
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders o{$filters['index']} WHERE {$whereSql}");
     $stmt->execute($params);
     $total = (int)$stmt->fetchColumn();
     $pages = max(1, (int)ceil($total / $perPage));
@@ -44,7 +44,7 @@ function pageSalesOverview(): void {
             (SELECT COUNT(*) FROM digital_entitlements de WHERE de.order_id = o.id) AS entitlement_count,
             (SELECT COALESCE(SUM(de.download_count), 0) FROM digital_entitlements de WHERE de.order_id = o.id) AS order_download_count,
             (SELECT CASE WHEN el.status = 'sent' AND el.adapter = 'log' THEN 'logged' ELSE el.status END FROM email_log el WHERE el.order_id = o.id ORDER BY el.id DESC LIMIT 1) AS email_status
-        FROM orders o
+        FROM orders o{$filters['index']}
         WHERE {$whereSql}
         ORDER BY o.created_at DESC
         LIMIT :limit OFFSET :offset");
@@ -147,12 +147,12 @@ function pageOrders(): void {
         $params[':payment_status'] = $paymentStatusFilter;
     }
 
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE {$where}");
+    $stmt = $db->prepare('SELECT COUNT(*) FROM orders' . ($index = OrderExport::listIndex(is_string($statusFilter) ? $statusFilter : '', is_string($paymentStatusFilter) ? $paymentStatusFilter : '')) . " WHERE {$where}");
     $stmt->execute($params);
     $total = (int)$stmt->fetchColumn();
     $pages = max(1, (int)ceil($total / $perPage));
 
-    $stmt = $db->prepare("SELECT * FROM orders WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
+    $stmt = $db->prepare("SELECT * FROM orders{$index} WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
     foreach ($params as $key => $value) $stmt->bindValue($key, $value, PDO::PARAM_STR);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);

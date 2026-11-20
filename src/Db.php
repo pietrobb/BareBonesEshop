@@ -85,6 +85,31 @@ class Db {
         self::$pdo = null;
     }
 
+    /**
+     * R50: a restore onto a new MySQL/MariaDB server (disaster recovery) could not even connect: db_name did not exist
+     * ("Unknown database"). Creates it empty for cli/restore.php to import into (the restore recreates it with the
+     * backup's character set). False when it exists or the driver is SQLite.
+     */
+    public static function createMissingMysqlDatabase(): bool {
+        $cfg = require self::$configPath ?? AppConfig::path(dirname(__DIR__));
+        if (strtolower(trim((string)($cfg['db_driver'] ?? ''))) !== 'mysql') return false;
+        $name = (string)($cfg['db_name'] ?? '');
+        if (preg_match('/\A[A-Za-z0-9_$]{1,64}\z/', $name) !== 1) throw new RuntimeException('db_name is not a plain MySQL database name');
+        $server = new PDO(sprintf('mysql:host=%s;port=%d;charset=%s', $cfg['db_host'], $cfg['db_port'], $cfg['db_charset']),
+            $cfg['db_user'], $cfg['db_password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $exists = $server->prepare('SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?');
+        $exists->execute([$name]);
+        if ((int)$exists->fetchColumn() > 0) return false;
+        $server->exec('CREATE DATABASE `' . $name . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+        self::$pdo = null;
+        return true;
+    }
+
+    /** Whether $e is MySQL's "Unknown database" (1049) on connect. */
+    public static function isUnknownDatabase(\Throwable $e): bool {
+        return $e instanceof PDOException && ((int)$e->getCode() === 1049 || str_contains($e->getMessage(), '[1049]'));
+    }
+
     /** Initialize with an existing PDO (for testing) */
     public static function init(PDO $pdo, string $driver = 'sqlite'): void {
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') $pdo->exec("SET SESSION time_zone='+00:00'");
@@ -272,6 +297,49 @@ class Db {
         return in_array($column, self::tableColumns($table, $db), true);
     }
 
+    /** @var WeakMap<PDO, array<string, true>>|null indexes found by forceIndex(), per connection */
+    private static ?WeakMap $indexCache = null;
+
+    /**
+     * R50 (review round 20, low): " FORCE INDEX ($index)" to put after "FROM $table [alias]" on MySQL/MariaDB when the
+     * index exists, else ''. At 500 000 orders MySQL took a store-wide index for a list ordered by created_at and sorted
+     * every order of the store. SQLite picks the right one by itself. A hit is cached per connection.
+     */
+    public static function forceIndex(string $table, string $index, ?PDO $db = null): string {
+        $db ??= self::get();
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') return '';
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $index)) throw new InvalidArgumentException('Invalid index name');
+        if (!isset(self::$indexCache[$db][$table . '.' . $index])) {
+            $stmt = $db->prepare('SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1');
+            $stmt->execute([$table, $index]);
+            if ($stmt->fetchColumn() === false) return '';
+            self::$indexCache ??= new WeakMap();
+            self::$indexCache[$db] = (self::$indexCache[$db] ?? []) + [$table . '.' . $index => true];
+        }
+        return " FORCE INDEX ({$index})";
+    }
+
+    /**
+     * R50: whether every listed column (table => columns) compares case-insensitively with "=": MySQL/MariaDB columns in
+     * a *_ci collation. False on SQLite (its = is case-sensitive) and when a column is missing or _bin/_cs.
+     * @param array<string, list<string>> $columns
+     */
+    public static function caseInsensitiveColumns(array $columns, ?PDO $db = null): bool {
+        $db ??= self::get();
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' || $columns === []) return false;
+        $found = 0;
+        $stmt = $db->prepare('SELECT COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        foreach ($columns as $table => $names) {
+            foreach ($names as $name) {
+                $stmt->execute([$table, $name]);
+                $collation = $stmt->fetchColumn();
+                if (!is_string($collation) || !str_ends_with(strtolower($collation), '_ci')) return false;
+                $found++;
+            }
+        }
+        return $found > 0;
+    }
+
     /**
      * The connection can write: a no-op UPDATE still fails on a read-only SQLite database, a read_only
      * MySQL server and a user without write grants (SELECT 1 succeeds on all of them).
@@ -325,8 +393,10 @@ class Db {
     public static function forgetSchema(?PDO $db = null): void {
         if ($db === null) {
             self::$schemaCache = null;
-        } elseif (self::$schemaCache !== null) {
-            unset(self::$schemaCache[$db]);
+            self::$indexCache = null;
+        } else {
+            if (self::$schemaCache !== null) unset(self::$schemaCache[$db]);
+            if (self::$indexCache !== null) unset(self::$indexCache[$db]);
         }
     }
 

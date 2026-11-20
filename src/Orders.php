@@ -111,6 +111,7 @@ class Orders {
             $sysDefaultLocale = $stores['default_locale'] ?? 'en';
             $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
             $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
+            if ($customerId !== null && self::paysOnInvoice($paymentMethod, $customer)) Customers::assertInvoiceCredit($customerId, (int)$total);
             $orderParams = [
                 ':store'    => $storeContext->id(),
                 ':channel'  => $storeContext->channel(),
@@ -390,6 +391,11 @@ class Orders {
         return null;
     }
 
+    private static function paysOnInvoice(string $paymentMethod, array $customer): bool {
+        $snapshot = json_decode((string)($customer['payment_method_snapshot'] ?? ''), true);
+        return is_array($snapshot) && isset($snapshot['service_type']) ? $snapshot['service_type'] === 'invoice' : $paymentMethod === 'invoice';
+    }
+
     /** SQLite has no row locks: checkout and order edits serialise their stock reservation on a lock file. */
     private static function acquireCheckoutLock(): mixed {
         if (!Db::isSqlite()) return null;
@@ -426,6 +432,7 @@ class Orders {
         $outOfStock = [];
         $orderItems = [];
         $subtotal = 0;
+        Inventory::lockCartSkus($cartItems);
         foreach ($cartItems as $item) {
             // Reject non-positive quantity or negative price: a negative qty would
             // increase stock and lower the subtotal.
