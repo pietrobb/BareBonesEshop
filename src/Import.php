@@ -435,7 +435,9 @@ class Import {
         ] + (isset($columns['vat_class']) ? [':vatclass' => (string)$data['vat_class']] : []));
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
-        PriceHistory::record([(int)$id->fetchColumn()], $db);
+        $productId = (int)$id->fetchColumn();
+        PriceHistory::record([$productId], $db);
+        Search::refreshNames([$productId], $db);
         // R19: a stock-only change keeps updated_at (above); going in or out of stock is shown by the feeds.
         if ($stockBefore !== false && ((int)$stockBefore > 0) !== ((int)$data['stock'] > 0)) Cache::catalogChanged($catalog);
     }

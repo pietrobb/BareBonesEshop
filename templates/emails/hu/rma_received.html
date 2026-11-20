@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="hu"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R50 return request acknowledgement on a durable medium; wording for lawyer review. -->
+<h2>Megkaptuk visszaküldési kérelmét</h2>
+<p>Kedves {{customer_name}}!</p>
+<p>Visszaigazoljuk, hogy <strong>{{received_at}}</strong> időpontban megkaptuk a(z) <strong>{{order_number}}</strong> rendeléshez tartozó <strong>{{rma_number}}</strong> visszaküldési kérelmét:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Indok: {{reason}}</p>{{/if}}
+<p>Értesítjük, hogy jóváhagyjuk-e a visszaküldést, és hogyan küldheti vissza a terméket. Őrizze meg ezt az e-mailt kérelme igazolásaként.</p>
+<p>Eladó: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

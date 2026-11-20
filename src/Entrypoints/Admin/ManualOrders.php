@@ -36,7 +36,7 @@ function pageOrderNew(): void {
     $posted = is_array($_SESSION['manual_order_form'] ?? null) ? $_SESSION['manual_order_form'] : [];
     unset($_SESSION['manual_order_form']);
     $value = static fn(string $field, string $default = ''): string => (string)($posted[$field] ?? $default);
-    $country = strtoupper($value('country', (string)(StoreContext::current()->legal()['country'] ?? 'SK')));
+    $country = strtoupper($value('country', StoreContext::current()->marketCountry()));
     $options = ManualOrder::formOptions(preg_match('/^[A-Z]{2}$/', $country) ? $country : 'SK');
     $locales = array_map(static fn(string $file): string => basename($file, '.php'), glob(dirname(__DIR__, 3) . '/lang/*.php') ?: []);
     $field = static function (string $name, string $label, string $type = 'text', bool $required = false) use ($value): void { ?>

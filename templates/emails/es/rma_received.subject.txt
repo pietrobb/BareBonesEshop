@@ -1,0 +1,1 @@
+Hemos recibido su solicitud de devolución — pedido {{order_number}}

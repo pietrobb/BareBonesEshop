@@ -11,5 +11,9 @@
 </table>
 <h3>Indoklás és a rendezés módja</h3>
 <p>{{decision_note}}</p>
+{{#if assessment}}<h3>Szakértői vélemény</h3>
+<p>{{assessment}}</p>{{/if}}
+{{#if adr_name}}<h3>Bírósági eljáráson kívüli vitarendezés</h3>
+<p>Ha nem ért egyet a döntéssel, az alternatív vitarendezési testülethez fordulhat: {{adr_name}} ({{adr_url}}).</p>{{/if}}
 <p>Eladó: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

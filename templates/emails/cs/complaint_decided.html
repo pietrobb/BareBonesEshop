@@ -11,5 +11,9 @@
 </table>
 <h3>Odůvodnění a způsob vyřízení</h3>
 <p>{{decision_note}}</p>
+{{#if assessment}}<h3>Odborné posouzení</h3>
+<p>{{assessment}}</p>{{/if}}
+{{#if adr_name}}<h3>Mimosoudní řešení sporů</h3>
+<p>Pokud s rozhodnutím nesouhlasíte, můžete se obrátit na subjekt mimosoudního řešení spotřebitelských sporů: {{adr_name}} ({{adr_url}}).</p>{{/if}}
 <p>Prodávající: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

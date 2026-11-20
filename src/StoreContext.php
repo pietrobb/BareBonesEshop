@@ -206,6 +206,20 @@ class StoreContext {
     /** R19: the currency the provider scope's amounts are entered in (that of the store owning the scope). */
     public function providerCurrency(): string { return $this->providerCurrency; }
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
+
+    /** Countries of the store languages that name one country (en, de and es are spoken in several). */
+    private const LOCALE_COUNTRY = ['sk' => 'SK', 'cs' => 'CZ', 'pl' => 'PL', 'hu' => 'HU'];
+
+    /**
+     * R50 (review round 20, medium): the country a store sells to by default (checkout, manual orders): its own "country",
+     * else the country of its default language, else the seller's. A Czech store run by a Slovak seller pre-selected
+     * Slovakia and its Czech customers paid Slovak VAT.
+     */
+    public function marketCountry(): string {
+        $own = strtoupper(trim((string)($this->config['country'] ?? '')));
+        if (preg_match('/^[A-Z]{2}$/', $own)) return $own;
+        return self::LOCALE_COUNTRY[$this->defaultLocale()] ?? (strtoupper(trim((string)($this->legal()['country'] ?? ''))) ?: 'SK');
+    }
     public function config(): array { return $this->config; }
 
     /**

@@ -13,6 +13,9 @@
 {{/each}}
 </table>
 <p><strong>Összesen: {{order_total}}</strong></p>
+{{#if payment_method}}<p>Fizetési mód: {{payment_method}}</p>{{/if}}
+{{#if shipping_method}}<p>Szállítási mód: {{shipping_method}}</p>{{/if}}
+{{#if digital_consent}}<p><strong>Hozzájárulása a digitális tartalom szolgáltatásához:</strong> {{digital_consent}}</p>{{/if}}
 {{#if delivery_address}}<h3>Szállítási cím</h3>
 <p>{{#each delivery_address}}{{this}}<br>{{/each}}</p>{{/if}}
 {{#if billing_address}}<h3>Számlázási cím</h3>

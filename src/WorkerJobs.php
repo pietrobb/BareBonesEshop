@@ -258,6 +258,8 @@ final class WorkerJobs
 
     public static function handleSearchReindex(array $payload, array $job): void {
         $productId = $payload['product_id'] ?? null;
+        // R50: the translated names are derived text; a reindex also repairs them (rows written past ProductEditor/Import).
+        Search::refreshNames($productId ? [(int)$productId] : []);
 
         if (Db::isSqlite()) {
             if ($productId) {

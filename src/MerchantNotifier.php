@@ -19,8 +19,12 @@ class MerchantNotifier {
             'created' => 'merchant_order_created',
             'withdrawal' => 'merchant_withdrawal_received',
             'complaint' => 'merchant_complaint_received',
+            'return' => 'merchant_rma_received',
             default => 'merchant_order_paid',
         });
+        // R50: 'return:<rma id>' names that return request, its lines and the customer's reason.
+        $rma = $kind === 'return' ? Rma::byId((int)(explode(':', $event, 2)[1] ?? 0)) : null;
+        if ($kind === 'return' && ($rma === null || (int)$rma['order_id'] !== $orderId)) throw new RuntimeException("Return for order #{$orderId} not found");
         // R29: written for the merchant: merchant_notifications.locale, else the store's language (the admin's default), not
         // the language the customer ordered in (a German order told a Slovak shop about it in German).
         $locale = trim((string)($notificationCfg['locale'] ?? ''));
@@ -35,7 +39,12 @@ class MerchantNotifier {
                 $items = Orders::items($orderId);
                 // A withdrawal notice names only the lines of that statement and their sum, not the whole order.
                 if ($kind === 'withdrawal') $items = self::withdrawnItems($orderId, (int)(explode(':', $event, 2)[1] ?? 0), $items);
-                $result = MailService::send($template, $recipient, $locale, OrderAddress::mailVars($order, $locale) + [
+                if ($rma !== null) $items = self::returnedItems((int)$rma['id'], $items);
+                $result = MailService::send($template, $recipient, $locale, OrderAddress::mailVars($order, $locale) + ($rma === null ? [] : [
+                    'rma_number' => (string)$rma['rma_number'],
+                    'reason' => (string)$rma['reason'],
+                    'admin_url' => self::adminUrl($cfg, '/admin.php?p=rma&status=requested'),
+                ]) + [
                     'event' => $event,
                     'order_number' => (string)$order['order_number'],
                     'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),
@@ -86,9 +95,27 @@ class MerchantNotifier {
         return array_values(array_filter($items, static fn(array $item): bool => array_key_exists((string)$item['id'], $withdrawn)));
     }
 
+    /** The order lines of a return request with the quantity asked to be returned. */
+    private static function returnedItems(int $rmaId, array $items): array {
+        $quantities = array_column(Rma::items($rmaId), 'quantity', 'order_item_id');
+        $out = [];
+        foreach ($items as $item) {
+            if (!isset($quantities[$item['id']])) continue;
+            $returned = (int)$quantities[$item['id']];
+            $item['total'] = intdiv((int)$item['total'] * $returned, max(1, (int)$item['quantity']));
+            $item['quantity'] = $returned;
+            $out[] = $item;
+        }
+        return $out;
+    }
+
     private static function adminOrderUrl(array $cfg, int $orderId): string {
+        return self::adminUrl($cfg, '/admin.php?p=order&id=' . $orderId);
+    }
+
+    private static function adminUrl(array $cfg, string $path): string {
         try {
-            return Security::appUrl($cfg) . '/admin.php?p=order&id=' . $orderId;
+            return Security::appUrl($cfg) . $path;
         } catch (RuntimeException $e) {
             return '';
         }

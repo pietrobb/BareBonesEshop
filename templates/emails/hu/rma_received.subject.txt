@@ -1,0 +1,1 @@
+Megkaptuk visszaküldési kérelmét — {{order_number}} rendelés

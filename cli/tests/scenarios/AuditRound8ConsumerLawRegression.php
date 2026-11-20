@@ -178,6 +178,11 @@ assert_equals([0, ''], [$r8lExit, trim($r8lNoise)], 'R8 consumer law: migrated f
 $r8lButton = preg_match('~<button class="btn-checkout" type="submit">([^<]*)</button>~', (string)($r8lRes['output'] ?? ''), $r8lM) ? html_entity_decode($r8lM[1]) : '';
 assert_true($r8lExit === 0 && str_contains(mb_strtolower($r8lButton), $r8lButtonPhrase['sk']),
     "R8 order button: the real checkout page submit button states the payment obligation ('{$r8lButton}' " . trim($r8lNoise) . ')');
+// R50 (review round 20, medium): the terms, the withdrawal information and the privacy notice are linked at the button.
+$r8lLegal = preg_match('~<p class="checkout-legal" data-checkout-legal>(.*?)</p>\s*<button class="btn-checkout"~s', (string)($r8lRes['output'] ?? ''), $r8lM) ? $r8lM[1] : '';
+assert_true(str_contains($r8lLegal, '?page=terms"') && str_contains($r8lLegal, '?page=withdrawal"') && str_contains($r8lLegal, '?page=privacy"')
+    && str_contains(html_entity_decode($r8lLegal), 'Všeobecné obchodné podmienky'),
+    'R50 order button: the checkout links the terms, the right of withdrawal and the privacy notice right before the order button (' . substr(strip_tags($r8lLegal), 0, 200) . ')');
 
 // 2) Electronic withdrawal function (art. 11a): on the storefront, no login, no mandatory reason, also before delivery,
 //    a separate confirmation step, the statement recorded with its receipt time and acknowledged by e-mail.

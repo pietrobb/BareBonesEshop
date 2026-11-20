@@ -122,7 +122,30 @@ final class ConsumerNotice {
             'withdrawal_url' => Template::withOrderLang(self::absoluteUrl('/?page=withdrawal&order=' . rawurlencode((string)($order['order_number'] ?? ''))), $order),
             'terms_url' => Template::withOrderLang(self::absoluteUrl('/?page=terms'), $order),
             'complaint_url' => Template::withOrderLang(self::absoluteUrl('/?page=complaint'), $order),
+            // R50 (review round 20, medium): the confirmation names the chosen payment and delivery method and, for
+            // digital content, repeats the consent to lose the right of withdrawal as given (art. 8(7)(b)).
+            'payment_method' => PaymentService::orderLabel($order),
+            'shipping_method' => self::shippingMethod($order),
+            'digital_consent' => self::digitalConsent((int)($order['id'] ?? 0)),
         ];
+    }
+
+    /** The delivery method as the customer chose it ('' for an order with nothing to deliver). */
+    public static function shippingMethod(array $order): string {
+        $code = (string)($order['shipping_method'] ?? '');
+        if ($code === '') return '';
+        $rate = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
+        $rate = is_array($rate) ? $rate : [];
+        return MethodLabels::name('shipping', $code, (string)(($rate['label'] ?? '') ?: ($rate['name'] ?? '')) ?: ucfirst(str_replace('_', ' ', $code)),
+            (string)($order['locale'] ?? '') ?: null);
+    }
+
+    /** The text of the digital-content consent recorded with the order ('' when none was given). */
+    private static function digitalConsent(int $orderId): string {
+        foreach (ConsentService::forOrder($orderId) as $row) {
+            if ($row['consent_key'] === ConsentService::DIGITAL_KEY && (int)$row['accepted'] === 1) return (string)$row['consent_text'];
+        }
+        return '';
     }
 
     /** The terms valid when the order was confirmed, attached to the confirmation (durable medium). */

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="sk"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Žiadosť o vrátenie tovaru</h2>
+<p>{{customer_name}} ({{customer_email}}) žiada vrátiť tovar z objednávky <strong>{{order_number}}</strong> (vrátenie {{rma_number}}). Žiadosť schváľte alebo zamietnite v administrácii.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Dôvod: {{reason}}</p>{{/if}}
+{{#if admin_url}}<p><a href="{{admin_url}}">Otvoriť vrátenie</a></p>{{/if}}
+</body></html>

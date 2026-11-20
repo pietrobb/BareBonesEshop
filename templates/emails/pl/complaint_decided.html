@@ -11,5 +11,9 @@
 </table>
 <h3>Uzasadnienie i sposób załatwienia</h3>
 <p>{{decision_note}}</p>
+{{#if assessment}}<h3>Ekspertyza</h3>
+<p>{{assessment}}</p>{{/if}}
+{{#if adr_name}}<h3>Pozasądowe rozwiązywanie sporów</h3>
+<p>Jeśli nie zgadzasz się z decyzją, możesz zwrócić się do podmiotu pozasądowego rozwiązywania sporów: {{adr_name}} ({{adr_url}}).</p>{{/if}}
 <p>Sprzedawca: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

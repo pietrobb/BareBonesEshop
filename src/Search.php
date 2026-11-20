@@ -42,6 +42,69 @@ class Search {
         }
     }
 
+    /**
+     * R50 (review round 20, medium): the names and summaries of a product's translations as plain text — what
+     * products.search_names holds so the full-text index also finds the Czech name in the Czech store.
+     */
+    public static function translatedNames(mixed $translations): string {
+        $map = is_array($translations) ? $translations : json_decode((string)$translations, true);
+        if (!is_array($map)) return '';
+        $texts = [];
+        foreach ($map as $fields) {
+            if (!is_array($fields)) continue;
+            foreach (['name', 'summary'] as $key) {
+                $text = is_scalar($fields[$key] ?? null) ? trim((string)$fields[$key]) : '';
+                if ($text !== '') $texts[$text] = true;
+            }
+        }
+        return mb_substr(implode(' ', array_keys($texts)), 0, 60000);
+    }
+
+    /**
+     * Rewrite products.search_names of $productIds (every product when empty) from their translations; returns the rows
+     * changed. updated_at is kept: the text is derived, the product did not change for feeds and the API.
+     */
+    public static function refreshNames(array $productIds = [], ?PDO $db = null): int {
+        $db ??= Db::get();
+        if (!Db::hasColumn('products', 'search_names', $db)) return 0;
+        $ids = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn(int $id): bool => $id > 0)));
+        $update = $db->prepare('UPDATE products SET search_names = ?, updated_at = updated_at WHERE id = ?');
+        $changed = 0;
+        $after = 0;
+        while (true) {
+            if ($productIds !== []) {
+                $batch = array_splice($ids, 0, 500);
+                if ($batch === []) break;
+                $stmt = $db->prepare('SELECT id, translations, search_names FROM products WHERE id IN (' . implode(', ', array_fill(0, count($batch), '?')) . ')');
+                $stmt->execute($batch);
+            } else {
+                $stmt = $db->prepare('SELECT id, translations, search_names FROM products WHERE id > ? ORDER BY id LIMIT 500');
+                $stmt->execute([$after]);
+            }
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmt->closeCursor();
+            if ($rows === []) break;
+            foreach ($rows as $row) {
+                $after = max($after, (int)$row['id']);
+                $names = self::translatedNames($row['translations'] ?? '');
+                if ($names === (string)($row['search_names'] ?? '')) continue;
+                $update->execute([$names, (int)$row['id']]);
+                $changed++;
+            }
+        }
+        return $changed;
+    }
+
+    /** The columns of the full-text index the search reads (search_names once its migration has run). */
+    private static function textColumns(): array {
+        return Db::hasColumn('products', 'search_names') ? ['name', 'sku', 'summary', 'tags', 'search_names'] : ['name', 'sku', 'summary', 'tags'];
+    }
+
+    /** MATCH(...) over textColumns() (MySQL). */
+    private static function matchColumns(): string {
+        return implode(', ', array_map(static fn(string $c): string => 'p.' . $c, self::textColumns()));
+    }
+
     /** Highest result page a request may ask for; larger values only produce huge OFFSETs (or int overflow). */
     public const MAX_PAGE = 10000;
 
@@ -60,7 +123,7 @@ class Search {
             foreach (array_slice(preg_split('/\s+/u', $q) ?: [], 0, 8) as $i => $word) {
                 $pattern = '%' . Db::likeLiteral($word) . '%';
                 $alternatives = [];
-                foreach (['name', 'sku', 'summary', 'tags'] as $j => $column) {
+                foreach (self::textColumns() as $j => $column) {
                     $alternatives[] = "p.{$column} LIKE :like{$i}_{$j} ESCAPE '!'";
                     $params[":like{$i}_{$j}"] = $pattern;
                 }
@@ -80,7 +143,7 @@ class Search {
             $from = 'FROM products p';
             [$match, $params, $rank] = self::mysqlMatch($q, $params);
             $where = "{$match} AND p.store_id = :store AND p.status = 'active'";
-            $select = $rank === '' ? 'p.*' : 'p.*, MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q_rel) AS relevance';
+            $select = $rank === '' ? 'p.*' : 'p.*, MATCH(' . self::matchColumns() . ') AGAINST(:q_rel) AS relevance';
             $relevance = $rank === '' ? 'p.name ASC, p.id ASC' : 'relevance DESC';
         }
         if (isset($opts['price_min']) && $opts['price_min'] !== null) { $where .= ' AND p.price >= :pmin'; $params[':pmin'] = (int)$opts['price_min']; }
@@ -222,14 +285,14 @@ class Search {
             }
             $word = preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', $word) ?? $word;
             $alternatives = [];
-            foreach (['name', 'sku', 'summary', 'tags'] as $j => $column) {
+            foreach (self::textColumns() as $j => $column) {
                 $alternatives[] = "p.{$column} LIKE :mlike{$i}_{$j} ESCAPE '!'";
                 $params[":mlike{$i}_{$j}"] = '%' . Db::likeLiteral($word) . '%';
             }
             $conditions[] = '(' . implode(' OR ', $alternatives) . ')';
         }
         if ($required !== []) {
-            array_unshift($conditions, 'MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN BOOLEAN MODE)');
+            array_unshift($conditions, 'MATCH(' . self::matchColumns() . ') AGAINST(:q IN BOOLEAN MODE)');
             $params[':q'] = implode(' ', $required);
         }
         if ($conditions === []) $conditions[] = '1 = 0';

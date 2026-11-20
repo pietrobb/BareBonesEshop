@@ -1,0 +1,1 @@
+Otrzymaliśmy Twoje zgłoszenie zwrotu — zamówienie {{order_number}}

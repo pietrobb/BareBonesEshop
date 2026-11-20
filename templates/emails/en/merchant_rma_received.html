@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Return request</h2>
+<p>{{customer_name}} ({{customer_email}}) asked to return goods from order <strong>{{order_number}}</strong> (return {{rma_number}}). Approve or reject the request in the admin.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Reason: {{reason}}</p>{{/if}}
+{{#if admin_url}}<p><a href="{{admin_url}}">Open the return</a></p>{{/if}}
+</body></html>

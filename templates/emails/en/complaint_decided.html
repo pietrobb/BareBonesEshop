@@ -11,5 +11,9 @@
 </table>
 <h3>Reasons and how it was resolved</h3>
 <p>{{decision_note}}</p>
+{{#if assessment}}<h3>Expert assessment</h3>
+<p>{{assessment}}</p>{{/if}}
+{{#if adr_name}}<h3>Out-of-court dispute resolution</h3>
+<p>If you disagree with the decision, you may turn to the alternative dispute resolution body: {{adr_name}} ({{adr_url}}).</p>{{/if}}
 <p>Seller: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

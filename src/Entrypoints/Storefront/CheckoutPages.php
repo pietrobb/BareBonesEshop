@@ -158,7 +158,7 @@ function renderCheckout(): string {
         'coupon_code' => $couponCode, 'coupon_error' => $couponError,
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : ($preview['coupon_applied'] ? sprintf($t('coupon_applied_free_shipping'), $couponCode) : ''),
         't' => I18n::all(),
-    ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
+    ] + CheckoutService::legalView() + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
         + CheckoutService::billingView($state, $placed) + CheckoutService::residenceView($shownVat, $vat, $state['countries'], $form('residence_country'), $placed) + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
 }
 

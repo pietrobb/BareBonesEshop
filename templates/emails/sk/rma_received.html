@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="sk"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R50 return request acknowledgement on a durable medium; wording for lawyer review. -->
+<h2>Prijali sme vašu žiadosť o vrátenie tovaru</h2>
+<p>Dobrý deň, {{customer_name}},</p>
+<p>potvrdzujeme, že dňa <strong>{{received_at}}</strong> sme prijali vašu žiadosť o vrátenie tovaru <strong>{{rma_number}}</strong> k objednávke <strong>{{order_number}}</strong>:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Dôvod: {{reason}}</p>{{/if}}
+<p>Dáme vám vedieť, či vrátenie schvaľujeme a ako nám tovar poslať. Tento e-mail si uschovajte ako záznam o vašej žiadosti.</p>
+<p>Predávajúci: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

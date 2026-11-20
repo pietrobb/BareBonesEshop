@@ -236,7 +236,7 @@ final class AccountViewModel
             'error' => isset($errors[$name]) ? I18n::t((string)$errors[$name]) : null,
         ];
         $country = strtoupper((string)($values['country'] ?? ''));
-        if ($country === '') $country = strtoupper((string)(StoreContext::current()->legal()['country'] ?? ''));
+        if ($country === '') $country = StoreContext::current()->marketCountry();
         $type = (string)($values['type'] ?? 'shipping');
         // R33: a billing address may be in any country checkout bills to (also outside the EU), not only where it delivers;
         // Customers::addressErrors() still limits a delivery address to the delivery countries.

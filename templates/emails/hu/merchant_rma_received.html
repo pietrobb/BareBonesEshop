@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="hu"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Visszaküldési kérelem</h2>
+<p>{{customer_name}} ({{customer_email}}) termékeket szeretne visszaküldeni a(z) <strong>{{order_number}}</strong> rendelésből ({{rma_number}} visszaküldés). Hagyja jóvá vagy utasítsa el a kérelmet az adminban.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Indok: {{reason}}</p>{{/if}}
+{{#if admin_url}}<p><a href="{{admin_url}}">Visszaküldés megnyitása</a></p>{{/if}}
+</body></html>

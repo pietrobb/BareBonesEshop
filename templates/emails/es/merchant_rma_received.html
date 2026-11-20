@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Solicitud de devolución</h2>
+<p>{{customer_name}} ({{customer_email}}) solicita devolver productos del pedido <strong>{{order_number}}</strong> (devolución {{rma_number}}). Apruebe o rechace la solicitud en la administración.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Motivo: {{reason}}</p>{{/if}}
+{{#if admin_url}}<p><a href="{{admin_url}}">Abrir la devolución</a></p>{{/if}}
+</body></html>

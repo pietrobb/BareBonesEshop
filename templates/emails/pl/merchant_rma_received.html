@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="pl"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Zgłoszenie zwrotu</h2>
+<p>{{customer_name}} ({{customer_email}}) chce zwrócić towar z zamówienia <strong>{{order_number}}</strong> (zwrot {{rma_number}}). Zaakceptuj lub odrzuć zgłoszenie w panelu.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Powód: {{reason}}</p>{{/if}}
+{{#if admin_url}}<p><a href="{{admin_url}}">Otwórz zwrot</a></p>{{/if}}
+</body></html>
