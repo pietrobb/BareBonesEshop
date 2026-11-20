@@ -7,9 +7,10 @@
 // - low: method names in one language, stock alerts in English, legal pages "Kontakt: …, .", the web installer created
 //   five sample stores, price-list validity read as UTC, the order-status page without the tracking number.
 echo "\n--- Audit round 50: setup checklist, CSV delimiter, store labels, method translations, stock-alert language, legal lists, installer stores, validity zone, tracking ---\n";
-// The suite's schema may predate this round's migrations (as in R34): the method translations column is migrated first.
+// The suite's schema (not built by the Migrator, so it cannot replay them all) predates this round's migrations: the
+// method translations column is added by its own migration first.
 if (!Db::hasColumn('shipping_methods', 'translations')) {
-    (new Migrator($pdo, dirname(TEST_CLI_DIR) . '/migrations', test_fixture_path('r50s-migrate') . '.lock'))->apply();
+    (require TEST_CLI_DIR . '/../migrations/20261120120400_method_translations.php')->up($pdo, Db::driver() === 'sqlite');
     Db::forgetSchema($pdo);
 }
 $r50sFail = static fn(string $what, Throwable $e) => assert_true(false, "R50 setup {$what} (" . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
