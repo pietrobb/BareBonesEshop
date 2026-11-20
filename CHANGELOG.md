@@ -372,6 +372,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   should run `apply` in its maintenance window (as above).
 - **Migration** `20261120120400_method_translations` (review round 50): adds `shipping_methods.translations` and
   `payment_methods.translations`, the merchant's name and description of a method per further store language.
+- **Migration** `20261120120500_download_resume_claim` (review round 50): adds
+  `digital_entitlements.resume_claimed_offset`, where the last free download resume started, so concurrent resumes
+  from one point are one resume.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -472,10 +475,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   and shown on the store's clock (it was read as UTC, so "from 00:00" started at 01:00 or 02:00 in Bratislava). The
   order-status page and the account list every shipped parcel's carrier and tracking number, with its https tracking
   link.
-- **An e-book download limit holds against `Range` requests (review round 20, security).** A counted download that
+- **An e-book download limit holds against `Range` requests (review round 50, security).** A counted download that
   had already served the whole file could be "resumed" from byte 1 for free five times, so a limit of 2 gave 12
   near-complete copies. A free resume now continues only a download that has not served the whole file yet, at most an
   eighth of the file (and never more than 16 MiB) below where it stopped; anything else counts as a new download.
+  One recorded stopping point allows one free resume: concurrent `Range: bytes=1-` requests after a one-byte
+  download were each a free near-complete copy.
 - **The admin MFA lockout holds against concurrent attempts.** The attempt is now counted, and from the fifth one the
   account locked, in one statement before the code is checked, so at most five codes are checked however many
   requests arrive at once from however many IPs (they all passed the lock check before, and a stale write could clear

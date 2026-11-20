@@ -342,9 +342,13 @@ class DigitalDelivery {
         $served = (int)($entitlement['last_download_offset'] ?? 0);
         $slack = self::resumeSlack($size);
         if (!self::canResume($entitlement, $now) || $served >= $size || $rangeStart > $served || $rangeStart < $served - $slack) return false;
+        // R50: one free resume per recorded offset — concurrent resumes before any of them recorded progress are not
+        // each a free copy (they count as new downloads instead). Before migration 20261120120500 only the cap holds.
+        $claim = Db::hasColumn('digital_entitlements', 'resume_claimed_offset');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
-            SET resume_count = resume_count + 1, updated_at = " . Db::now() . "
-            WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since
+            SET resume_count = resume_count + 1, " . ($claim ? 'resume_claimed_offset = last_download_offset, ' : '') . "updated_at = " . Db::now() . "
+            WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since"
+              . ($claim ? ' AND (resume_claimed_offset IS NULL OR last_download_offset > resume_claimed_offset)' : '') . "
               AND resume_count < :max_resumes AND last_download_offset >= :start AND last_download_offset <= :start_plus_slack
               AND last_download_offset < :size AND (expires_at IS NULL OR expires_at >= :now)
               AND EXISTS (
@@ -404,7 +408,8 @@ class DigitalDelivery {
     public static function consume(int $entitlementId, ?int $now = null): bool {
         // Before the resume migrations ran the columns are missing: count without resume tracking instead of failing.
         $tracking = !Db::hasColumn('digital_entitlements', 'last_download_at') ? ''
-            : (self::resumeTracked() ? 'last_download_at = :counted_at, last_download_offset = 0, resume_count = 0, ' : 'last_download_at = :counted_at, ');
+            : (self::resumeTracked() ? 'last_download_at = :counted_at, last_download_offset = 0, resume_count = 0, '
+                . (Db::hasColumn('digital_entitlements', 'resume_claimed_offset') ? 'resume_claimed_offset = NULL, ' : '') : 'last_download_at = :counted_at, ');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET download_count = download_count + 1, {$tracking}updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active'

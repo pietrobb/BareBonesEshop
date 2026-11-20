@@ -1,6 +1,6 @@
 <?php
 
-// Review round 20 (R50, security, low):
+// Review round 50 (security, low):
 // - an e-book download limit was bypassed with "Range: bytes=1-": a counted download that had already served the whole
 //   file could be "resumed" for free five times (limit 2 → 12 near-complete copies); a resume may only continue a
 //   download that has not served the whole file yet, a little below where it stopped;
@@ -69,6 +69,19 @@ try {
     assert_true(!DigitalDelivery::authorizeTransfer($r50xRow($r50xCut), $r50xSize - 101, $r50xSize, $r50xNow + 10)
         && (int)$r50xRow($r50xCut)['download_count'] === 1,
         'R50 download: once the resumed download served the whole file, a further range is a new download (limit spent, refused)');
+
+    // Capability review (run 617): "bytes=0-0" (counted, served 1 byte), then six concurrent "bytes=1-" before any of
+    // them records progress: one continues the download, the others are no free copies (limit spent, refused).
+    $r50xPar = $r50xEnt(1);
+    $r50xCounted = DigitalDelivery::beginTransfer($r50xRow($r50xPar), 0, $r50xSize, $r50xNow);
+    DigitalDelivery::recordProgress($r50xPar, (int)$r50xCounted, 1);
+    $r50xCopies = 0;
+    for ($r50xTry = 0; $r50xTry < 6; $r50xTry++) if (DigitalDelivery::authorizeTransfer($r50xRow($r50xPar), 1, $r50xSize, $r50xNow + 5)) $r50xCopies++;
+    assert_equals([1, 1], [(int)$r50xRow($r50xPar)['download_count'], $r50xCopies],
+        'R50 download: concurrent resumes from one recorded offset — only one continues the download (was 5 free near-complete copies)');
+    DigitalDelivery::recordProgress($r50xPar, (int)$r50xCounted, 400);
+    assert_true(DigitalDelivery::authorizeTransfer($r50xRow($r50xPar), 400, $r50xSize, $r50xNow + 10),
+        'R50 download: once the resume recorded progress, a dropped client resumes again where it stopped');
 
     // A large file keeps the 16 MiB in-flight allowance (R18).
     $r50xBig = $r50xEnt(1);
