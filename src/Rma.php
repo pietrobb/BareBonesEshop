@@ -647,6 +647,7 @@ class Rma {
             if ($refund['status'] !== 'pending') throw new LogicException('Refund is not pending');
             $db->prepare("UPDATE order_refunds SET status='succeeded', payment_reference=:reference, updated_at=" . Db::now() . " WHERE id=:id")
                 ->execute([':reference' => $paymentReference, ':id' => $refundId]);
+            SalesDaily::touchOrders([(int)$refund['order_id']], $db);
             self::refundUnits($db, $refund);
             if ($own) $db->commit();
             return true;
@@ -757,6 +758,7 @@ class Rma {
             $claim->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
             $released = $refund !== false && $claim->rowCount() === 1;
             if ($released) {
+                SalesDaily::touchOrders([(int)$refund['order_id']], $db);
                 // R23: the numbered credit note is reversed by a new document (it may be in a filed VAT/OSS period), and the
                 // payment leaves refund_pending (it stayed there and refused the next refund from the admin).
                 // A credit note without its source invoice (none in practice) is still cancelled as before.

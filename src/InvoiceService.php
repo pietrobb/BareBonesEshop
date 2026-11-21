@@ -842,6 +842,7 @@ final class InvoiceService
                     WHERE id=:id AND store_id=:store AND payment_status IN ('paid','partially_refunded','disputed')")
                     ->execute([':id' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
             }
+            SalesDaily::touchOrders([(int)$order['id']], $db);
             AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => $sourceInvoiceId, 'refund_id' => $refundId, 'gross' => $totals['gross']], 'Item credit issued');
             Outbox::record(DomainEvents::ORDER_REFUND_REQUESTED, 'order', (int)$order['id'], [
                 'order_id' => (int)$order['id'], 'rma_id' => $rmaId, 'refund_id' => $refundId,

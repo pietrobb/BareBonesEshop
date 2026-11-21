@@ -583,6 +583,7 @@ class PaymentService {
             if ($claim->rowCount() !== 1 || self::transactionExists($idempotencyKey)) {
                 throw new \RuntimeException('Refund request state changed');
             }
+            SalesDaily::touchOrders([$orderId], $db);
 
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
             self::logTransaction(
@@ -1413,6 +1414,7 @@ class PaymentService {
             if ($expectedFrom !== null && $update->rowCount() !== 1) {
                 throw new RuntimeException("Payment status of order #{$orderId} changed concurrently");
             }
+            SalesDaily::touchOrders([$orderId], $db);
             if ($from !== $status) {
                 Outbox::record(DomainEvents::PAYMENT_STATUS_CHANGED, 'order', $orderId, array_merge([
                     'order_id' => $orderId,
