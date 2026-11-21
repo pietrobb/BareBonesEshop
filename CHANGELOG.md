@@ -382,6 +382,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   held while a download or its free resume streams, so no free resume starts next to a transfer that is still running.
   A resume after a dropped connection works once the server has noticed the drop; a request the server killed keeps
   its lease, and further ranges of that download count as new downloads.
+- **Migration** `20261121090000_report_and_credit_indexes` (review round 51): adds `customers (store_id, company_id)`,
+  `orders (store_id, payment_status, created_at, is_synthetic, currency, total)` and `order_items (order_id, product_id,
+  variant_id, quantity, total)`, and drops `idx_orders_store_payment_created` and `idx_oi_order`, which the new indexes
+  start with. On MySQL/MariaDB the two order indexes are built over the whole tables (about 8 s each at 500 000 orders):
+  a large shop should run `apply` in its maintenance window (as above).
+- **Migration** `20261121090100_drop_unused_product_fulltext` (review round 51, MySQL/MariaDB only): drops
+  `idx_ft_products`; the search reads `idx_ft_products_names`.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -451,6 +458,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   and explains how to raise the invoice counters after a restore onto a new server (the numbers issued after the
   backup would be issued again). The GDPR design notes no longer mention a `cli/gdpr-gc.php --dry-run` flag (a run
   without `--apply` is the dry run).
+- **MySQL: a B2B order on invoice locks only its company; sales reports read covering indexes (review round 51,
+  low).** The credit check of an order on invoice locked every customer row it scanned, through an index starting with
+  `customer_group_id`, so with MySQL choosing a scan the orders on invoice of all other companies waited on it; it now
+  reads the company's members first (`customers (store_id, company_id)`) and locks only their orders. A 365-day sales
+  report at 500 000 orders took 13 s (totals, trend and best sellers each joined every order and line of the period to
+  its refunds and credits): the orders and lines are summed from covering indexes and corrected only for the orders
+  with a refund or credit note, and the report page takes its totals from its trend (measured with a 128 MB buffer
+  pool: 3.8 s for 365 days, 1.5 s for the 90 days the page offers at most). Best sellers show the SKU and name of their
+  latest line (was: the alphabetically last). Filling `products.search_names` (migration
+  `20261120120300_product_search_names`) commits per 500 products, not per product: 100 000 products about 1 minute on
+  MySQL (was over 20), and the full-text index the search no longer reads is dropped.
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
   after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet

@@ -52,7 +52,7 @@ final class OrderExport {
      */
     public static function listIndex(string $status, string $paymentStatus): string {
         $index = $status !== '' ? 'idx_orders_store_status_created'
-            : ($paymentStatus !== '' ? 'idx_orders_store_payment_created' : 'idx_orders_store_created');
+            : ($paymentStatus !== '' ? 'idx_orders_store_payment_cover' : 'idx_orders_store_created');
         return Db::forceIndex('orders', $index);
     }
 

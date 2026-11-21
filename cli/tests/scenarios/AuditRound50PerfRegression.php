@@ -136,7 +136,7 @@ try {
         if ($driver === 'mysql') {
             $check(Db::forceIndex('orders', 'idx_orders_store_created') === ' FORCE INDEX (idx_orders_store_created)' && Db::forceIndex('orders', 'idx_r50p_missing') === '',
                 'MySQL: the list hint names an index only when it exists');
-            $check(str_contains(OrderExport::listIndex('pending', ''), 'idx_orders_store_status_created') && str_contains(OrderExport::listIndex('', 'paid'), 'idx_orders_store_payment_created')
+            $check(str_contains(OrderExport::listIndex('pending', ''), 'idx_orders_store_status_created') && str_contains(OrderExport::listIndex('', 'paid'), 'idx_orders_store_payment_cover')
                 && str_contains(OrderExport::filters(['period' => 'all'])['index'], 'idx_orders_store_created'),
                 'MySQL: the order list reads the index whose columns are its filters, in created_at order');
         } else {
@@ -152,7 +152,7 @@ try {
         $rows = $plan->fetchAll(PDO::FETCH_ASSOC);
         $text = json_encode($rows);
         $ranged = $driver === 'mysql'
-            ? array_filter($rows, static fn(array $r): bool => ($r['table'] ?? '') === 'o' && ($r['key'] ?? '') === 'idx_orders_store_payment_created' && ($r['type'] ?? '') === 'range') !== []
+            ? array_filter($rows, static fn(array $r): bool => ($r['table'] ?? '') === 'o' && ($r['key'] ?? '') === 'idx_orders_store_payment_cover' && ($r['type'] ?? '') === 'range') !== []
             : preg_match('/SEARCH o USING (COVERING )?INDEX idx_orders_store_\w+ \(store_id=\?.*created_at>\?\)/', $text) === 1;
         $check($ranged, 'the report reads only the store\'s orders of the period through an index range, not every order of the store (' . substr($text, 0, 600) . ')');
         SalesReport::totals('default', $since);
