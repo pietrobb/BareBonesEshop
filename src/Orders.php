@@ -339,6 +339,15 @@ class Orders {
             $db->prepare("UPDATE orders SET subtotal = :subtotal, discount_amount = :discount, shipping_cost = :shipping,
                     tax_amount = :tax, total = :total, vat_total = :vattotal, net_total = :nettotal, vat_scenario = :vatscen{$extra},
                     updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store")->execute($params);
+            // R51 (review round 51, low): an edit that raises an order on invoice checks the company's credit limit like
+            // checkout (under the company's row lock). The open total read there holds this order at its new total
+            // while its payment is open; a failed payment is not counted there, so its new total is added.
+            $customerId = (int)($order['customer_id'] ?? 0);
+            if ($customerId > 0 && (int)$totals['gross'] > (int)$order['total']
+                && self::paysOnInvoice((string)$order['payment_method'], ['payment_method_snapshot' => (string)($pricing['payment_method_snapshot'] ?? $order['payment_method_snapshot'] ?? '')])) {
+                $counted = in_array((string)($order['payment_status'] ?? 'pending'), ['pending', 'authorized'], true);
+                Customers::assertInvoiceCredit($customerId, $counted ? 0 : (int)$totals['gross']);
+            }
             self::insertItems($orderId, $orderItems);
             OssThreshold::recordOrder($db, $orderId);
             foreach ($orderItems as $item) {
@@ -362,6 +371,9 @@ class Orders {
             ]);
             $db->commit();
             return null;
+        } catch (CreditLimitExceededException $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            return 'checkout.error.credit_limit';
         } catch (OrderRejectedException $e) {
             if ($db->inTransaction()) $db->rollBack();
             return 'admin.order.edit.out_of_stock';

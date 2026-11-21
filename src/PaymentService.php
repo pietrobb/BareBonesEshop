@@ -1732,6 +1732,15 @@ class PaymentService {
                 return self::bookRefundWithin($order, $provider, '', $item['amount'], $eventType, $eventKey,
                     $payload + ['settles_refund_request' => $item['request_key']], $item['refund_id'], $eventKey);
             }
+            // R51 (review round 51, low): the whole payment refunded in the GoPay/ThePay dashboard, no refund of the shop
+            // in flight: the remaining balance is booked as a refund outside the shop (like a Stripe dashboard refund), so
+            // the order closes. Was: only logged, the order stayed paid. A partial refund there names no amount and stays a
+            // log entry.
+            $balance = self::refundableBalance($orderId);
+            if ($request === null && $item === null && strtolower((string)($data['state'] ?? '')) === 'refunded' && $currency === $orderCurrency
+                && in_array($from, ['paid', 'partially_refunded', 'disputed'], true) && $balance > 0) {
+                return self::bookRefundWithin($order, $provider, '', $balance, $eventType, $eventKey, $payload);
+            }
             self::recordEvent($orderId, $eventType, 'ignored', (int)($data['amount'] ?? 0), $currency ?: $orderCurrency, $eventKey,
                 $payload + ['payment_status' => $from], $provider, (string)($data['provider_ref'] ?? ''));
             return false;

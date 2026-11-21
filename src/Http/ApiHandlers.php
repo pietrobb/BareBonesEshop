@@ -665,7 +665,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
 
     if (!$name || !$email) return checkoutRefusal('checkout.error.name_email_required');
-    // Orders per buyer: 3 placed orders in 30 minutes. Only a created order counts (recorded after Orders::create), and a
+    // Orders per buyer: 3 placed orders in 30 minutes. Only a created order counts (its slot, reserved before Orders::create, is given back when that fails), and a
     // guest's e-mail is counted per IP: a stranger posting someone's address must not lock that buyer out of checkout.
     $checkoutSubjectIp = empty($_SESSION['customer_id']);
     $checkoutSubject = 'checkout_subject_' . ($checkoutSubjectIp ? 'email_' . hash('sha256', strtolower($email)) : 'customer_' . (int)$_SESSION['customer_id']);
@@ -929,9 +929,21 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         ? ['code' => $couponCode, 'discount' => $couponDiscount]
         : null;
 
+    // R51 (low): the order's slot is taken atomically before it is created and given back when it is not: two concurrent
+    // checkouts both passed the check above with 2 of 3 orders and placed a fourth (the hit was recorded after create).
+    $checkoutSlot = Security::rateLimitReserve($checkoutSubject, 3, 1800, $checkoutSubjectIp);
+    if ($checkoutSlot === null) {
+        http_response_code(429);
+        header('Retry-After: 1800');
+        return checkoutRefusal('checkout_too_many_attempts');
+    }
     try {
-        $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
-        Security::rateLimitRecord($checkoutSubject, $checkoutSubjectIp);
+        try {
+            $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
+        } catch (Throwable $e) {
+            Security::rateLimitRelease($checkoutSlot);
+            throw $e;
+        }
 
         if ($freeDigitalOrder) {
             PaymentService::updatePaymentStatus($orderId, 'paid');

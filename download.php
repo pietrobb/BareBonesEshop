@@ -84,6 +84,7 @@ while (ob_get_level() > 0) ob_end_clean();
 ignore_user_abort(true);
 $served = 0;
 $recorded = 0;
+$heartbeat = time();
 // The transfer ends here (or in a shutdown after a fatal error): record the bytes served and release its lease, so
 // a dropped client may resume. While it streams, no free resume starts next to it (DigitalDelivery::openTransfer()).
 $ended = false;
@@ -113,6 +114,11 @@ try {
         if ($served - $recorded >= 8388608) {
             DigitalDelivery::recordProgress((int)$entitlement['id'], (int)$transfer['counted_at'], $start + $served);
             $recorded = $served;
+        }
+        // R51 (low): the lease is renewed while the transfer streams; a killed request's lease lapses (DigitalDelivery::LEASE_SECONDS).
+        if (time() - $heartbeat >= DigitalDelivery::LEASE_RENEW_SECONDS) {
+            DigitalDelivery::holdTransfer((int)$entitlement['id'], $transfer);
+            $heartbeat = time();
         }
     }
 } finally {

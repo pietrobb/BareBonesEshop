@@ -474,6 +474,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet
   booked counted as returned. The money comes off the goods' value before the cap; while a refund is in flight
   "Refunded" waits for it (if it fails, the return pays in full).
+- **Smaller money and security fixes (review round 51, low).** An admin edit that raises an order on invoice checks
+  the company's credit limit, as checkout does (was: an edit could pass it). A payment refunded in full in the
+  GoPay/ThePay dashboard, with no refund of the shop in flight, books the remaining balance as a refund outside the
+  shop and closes the order (was: logged, the order stayed paid and shippable); a partial refund there names no amount
+  and stays a log entry. The checkout's estimate of the 10 000 EUR OSS threshold nets each cart line at the rate of its
+  category, as the order is priced (a book in SK at 5 %, was the reduced 19 %). `config/vat-rates.json`: HU medicines
+  5 % (were the reduced 18 %; prescription-only medicines are 0 % since 1 September 2026 — set `vat_class` `zero` on
+  them), HU e-books 27 % (were the printed books' 5 %), SK e-books 20 % before 2025. The limit of 3 placed orders per
+  buyer in 30 minutes takes the order's slot atomically before the order is created and gives it back when the order
+  fails (concurrent checkouts all passed it). A download whose request was killed without its shutdown (SIGKILL,
+  `request_terminate_timeout`) releases its transfer lease 5 minutes after its last heartbeat (a running transfer
+  renews it every minute); was: no free resume of that download ever again.
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

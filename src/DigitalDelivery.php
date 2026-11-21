@@ -297,6 +297,14 @@ class DigitalDelivery {
      */
     public const RESUME_SLACK_BYTES = 16 * 1024 * 1024;
 
+    /**
+     * R51 (low): a transfer's lease lapses this long after its last heartbeat (holdTransfer(), download.php renews it
+     * at least every LEASE_RENEW_SECONDS while it streams). A request killed without its shutdown function (SIGKILL,
+     * request_terminate_timeout) kept its lease for good: no free resume of that download was possible any more.
+     */
+    public const LEASE_SECONDS = 300;
+    public const LEASE_RENEW_SECONDS = 60;
+
     /** Seconds after a counted download in which Range requests resume it without counting again. */
     public static function resumeWindowSeconds(): int {
         return max(0, (int)(self::config()['digital_download_resume_minutes'] ?? 30)) * 60;
@@ -327,12 +335,12 @@ class DigitalDelivery {
      * beginTransfer() that also returns the transfer's lease: pass the result to endTransfer() when the transfer stops.
      * R50 (capability review run 620): while a counted download or a free resume is still streaming, its lease is held
      * and no free resume starts next to it ("Range: bytes=1-" beside a running download was a free second copy). A
-     * transfer that never ends (killed request) keeps its lease: later ranges of that download count as new downloads.
+     * transfer that never ends (killed request) holds its lease until it lapses (LEASE_SECONDS after its last heartbeat).
      * @return array{counted_at:int, lease:string}|null
      */
     public static function openTransfer(array $entitlement, int $rangeStart, int $size, ?int $now = null): ?array {
         $now ??= time();
-        $lease = bin2hex(random_bytes(16));
+        $lease = self::newLease($now);
         if ($rangeStart > 0 && self::claimResume($entitlement, $rangeStart, $size, $now, $lease)) {
             return ['counted_at' => (int)$entitlement['last_download_at'], 'lease' => $lease];
         }
@@ -343,8 +351,24 @@ class DigitalDelivery {
     public static function endTransfer(int $entitlementId, array $transfer, int $offset): void {
         self::recordProgress($entitlementId, (int)$transfer['counted_at'], $offset);
         if (!Db::hasColumn('digital_entitlements', 'transfer_lease')) return;
-        Db::get()->prepare("UPDATE digital_entitlements SET transfer_lease = NULL WHERE id = :id AND transfer_lease = :lease")
-            ->execute([':id' => $entitlementId, ':lease' => (string)$transfer['lease']]);
+        Db::get()->prepare("UPDATE digital_entitlements SET transfer_lease = NULL WHERE id = :id AND SUBSTR(transfer_lease, 11) = :secret")
+            ->execute([':id' => $entitlementId, ':secret' => substr((string)$transfer['lease'], 10)]);
+    }
+
+    /** Heartbeat of a transfer that is still streaming: its lease runs LEASE_SECONDS from $now (unless it ended or lapsed and was taken). */
+    public static function holdTransfer(int $entitlementId, array $transfer, ?int $now = null): void {
+        if (!Db::hasColumn('digital_entitlements', 'transfer_lease')) return;
+        $secret = substr((string)$transfer['lease'], 10);
+        Db::get()->prepare("UPDATE digital_entitlements SET transfer_lease = :lease WHERE id = :id AND SUBSTR(transfer_lease, 11) = :secret")
+            ->execute([':lease' => sprintf('%010d', $now ?? time()) . $secret, ':id' => $entitlementId, ':secret' => $secret]);
+    }
+
+    /**
+     * A lease: the 10-digit time of its last heartbeat, then a random secret (32 characters, the column's width). The
+     * time prefix makes a lapsed lease the one that sorts below the cut-off (claimResume()).
+     */
+    private static function newLease(int $now): string {
+        return sprintf('%010d', $now) . bin2hex(random_bytes(11));
     }
 
     /**
@@ -367,14 +391,15 @@ class DigitalDelivery {
         // R50: one free resume per recorded offset — concurrent resumes before any of them recorded progress are not
         // each a free copy (they count as new downloads instead). Before migration 20261120120500 only the cap holds.
         $claim = Db::hasColumn('digital_entitlements', 'resume_claimed_offset');
-        // R50 (run 620): and only once the transfer before it stopped (its lease released, see openTransfer()).
+        // R50 (run 620): and only once the transfer before it stopped (its lease released, see openTransfer()) or, R51,
+        // its lease lapsed (LEASE_SECONDS without a heartbeat: the request was killed).
         $leased = Db::hasColumn('digital_entitlements', 'transfer_lease');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET resume_count = resume_count + 1, " . ($claim ? 'resume_claimed_offset = last_download_offset, ' : '')
               . ($leased ? 'transfer_lease = :lease, ' : '') . "updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since"
               . ($claim ? ' AND (resume_claimed_offset IS NULL OR last_download_offset > resume_claimed_offset)' : '')
-              . ($leased ? ' AND transfer_lease IS NULL' : '') . "
+              . ($leased ? ' AND (transfer_lease IS NULL OR transfer_lease < :lapsed)' : '') . "
               AND resume_count < :max_resumes AND last_download_offset >= :start AND last_download_offset <= :start_plus_slack
               AND last_download_offset < :size AND (expires_at IS NULL OR expires_at >= :now)
               AND EXISTS (
@@ -387,7 +412,7 @@ class DigitalDelivery {
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
             ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + $slack, ':size' => $size, ':now' => $now,
         ];
-        if ($leased) $params[':lease'] = $lease;
+        if ($leased) $params += [':lease' => $lease, ':lapsed' => sprintf('%010d', $now - self::LEASE_SECONDS)];
         $stmt->execute($params);
         return $stmt->rowCount() === 1;
     }
@@ -455,7 +480,7 @@ class DigitalDelivery {
         $now ??= time();
         $params = [':id' => $entitlementId, ':now' => $now];
         if ($tracking !== '') $params[':counted_at'] = $now;
-        if ($leased) $params[':lease'] = $lease ?? bin2hex(random_bytes(16));
+        if ($leased) $params[':lease'] = $lease ?? self::newLease($now);
         $stmt->execute($params);
         return $stmt->rowCount() === 1;
     }

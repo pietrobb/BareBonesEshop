@@ -510,7 +510,10 @@ final class OssThreshold
         $net = 0;
         foreach ($items as $item) {
             if (!($item['digital'] ? $digital : $goods)) continue;
-            $rate = VatService::rate($sellerCountry, VatService::resolveClass((string)$item['vat_class']));
+            // R51 (low): the category itself (books 5 % in SK; a download its digital category, e-books 27 % in HU), as
+            // the snapshot prices it (VatService::buildSnapshot()); resolveClass() first gave the reduced 19 %.
+            $class = (string)$item['vat_class'];
+            $rate = VatService::rate($sellerCountry, $item['digital'] ? VatService::digitalCategory($class) : $class);
             $net += (int)round((int)$item['gross'] / (1 + $rate / 100));
         }
         return $net;
