@@ -38,6 +38,13 @@ $crfCheckout = static function(int $qty, array $extra = []) use ($pdo): array {
     $_POST = array_replace(['csrf_token' => 'crf-checkout', 'name' => 'CRF Buyer', 'email' => 'crf-buyer@example.com', 'phone' => '', 'country' => 'SK',
         'street' => 'Audit 9', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'crfship', 'payment_method' => 'crfpct'], $extra);
     $result = apiCheckout();
+    // R52 (idea 40): a failed checkout names its incident (exception type and where it was thrown), not only the
+    // shopper's generic message (once on PHP 8.1 in CI: "Skontrolujte údaje objednávky a skúste to znova.").
+    if (($result['error_code'] ?? '') === 'checkout.failed') {
+        $incident = $pdo->prepare("SELECT context_json FROM operational_incidents WHERE code = 'checkout.failed' AND correlation_id = ?");
+        $incident->execute([(string)($result['correlation_id'] ?? '')]);
+        $result['error'] .= ' — incident ' . ($incident->fetchColumn() ?: 'not recorded');
+    }
     $_POST = [];
     Cart::clear();
     $order = Orders::byId((int)($result['order_id'] ?? 0)) ?: [];
