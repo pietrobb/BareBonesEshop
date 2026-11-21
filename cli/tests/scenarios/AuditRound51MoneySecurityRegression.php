@@ -159,6 +159,9 @@ try {
 
 // --- Low: the transfer lease of a killed download lapses ------------------------------------------------------------
 try {
+    // The suite's shared database may predate the lease column (an earlier scenario rebuilt the table): add it as the
+    // migration does.
+    (require dirname(TEST_CLI_DIR) . '/migrations/20261120120600_download_transfer_lease.php')->up(Db::get(), Db::isSqlite());
     $pdo->exec("INSERT INTO orders (order_number, customer_name, customer_email, payment_method, subtotal, total, status, payment_status, store_id)
         VALUES ('R51S-DL', 'R51S', 'r51s-dl@example.test', 'card', 1000, 1000, 'completed', 'paid', 'default')");
     $r51sDlOrder = (int)$pdo->lastInsertId();

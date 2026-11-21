@@ -2247,6 +2247,23 @@ class PaymentService {
         return $generic !== '' ? $generic : (string)($order['payment_method'] ?? '');
     }
 
+    /**
+     * R51 (low): the payment method in a merchant e-mail, in $locale. The snapshot label was written in the customer's
+     * language ("Kreditkarte" of a German order told a Slovak shop in German): the method's current name in $locale
+     * (the merchant's translation, the translated seeded name, else the name as entered) when the method still exists.
+     */
+    public static function merchantLabel(array $order, string $locale): string {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        $code = is_array($snapshot) ? trim((string)($snapshot['code'] ?? '')) : '';
+        if ($code !== '' && StoreContext::hasCurrent() && self::hasMethodTables()) {
+            $stmt = Db::get()->prepare('SELECT name FROM payment_methods WHERE store_id = ? AND code = ?');
+            $stmt->execute([StoreContext::current()->providerId(), $code]);
+            $name = trim((string)$stmt->fetchColumn());
+            if ($name !== '') return MethodLabels::name('payment', $code, $name, $locale);
+        }
+        return self::orderLabel($order, $locale);
+    }
+
     private static function orderProvider(array $order): string {
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         return (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');

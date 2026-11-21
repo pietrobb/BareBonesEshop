@@ -486,6 +486,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   fails (concurrent checkouts all passed it). A download whose request was killed without its shutdown (SIGKILL,
   `request_terminate_timeout`) releases its transfer lease 5 minutes after its last heartbeat (a running transfer
   renews it every minute); was: no free resume of that download ever again.
+- **Smaller UI and text fixes (review round 51, low).** The price list and promotion forms say "store time" instead of
+  "(UTC)" (they take and show the store's wall clock). The merchant's payment e-mail names a payment method the
+  merchant named in the merchant's language (was: the customer's, frozen at checkout). The card of `pricing.json` rules
+  under Promotions says what a rule gives ("10 % off, from 50,00 €", "Free shipping"), not `free_shipping` / `fixed`.
+  A VAT-registered seller outside the EU needs no EU VAT ID, so the sample US store saves. The web installer asks for
+  the shop's language and currency (EUR, CZK, PLN, HUF, USD; was: always a Slovak shop in EUR). The return
+  acknowledgement within the withdrawal period says the return needs no approval (was: "we will let you know whether
+  the return is approved"). Checkout removes Unicode bidi controls (U+202E and the other overrides, embeddings,
+  isolates, marks) and C1 controls from names, addresses and notes.
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

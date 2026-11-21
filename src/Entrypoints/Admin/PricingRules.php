@@ -83,7 +83,7 @@ function pagePromotions(): void {
     <div class="card table-scroll" id="promo-config-rules"><h3><?= esc(I18n::t('admin.promo.config_rules_title')) ?></h3>
         <p class="flash flash-err"><?= esc(I18n::t('admin.promo.config_rules_hint')) ?></p>
         <table><thead><tr><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.promo.coupon')) ?></th><th><?= esc(I18n::t('admin.common.action')) ?></th></tr></thead><tbody>
-            <?php foreach ($configRules as $rule): ?><tr><td><?= esc($rule['name']) ?></td><td><?= $rule['code'] !== '' ? '<code>' . esc($rule['code']) . '</code>' : '' ?></td><td><?= esc($rule['effect']) ?></td></tr><?php endforeach; ?>
+            <?php foreach ($configRules as $rule): ?><tr><td><?= esc($rule['name']) ?></td><td><?= $rule['code'] !== '' ? '<code>' . esc($rule['code']) . '</code>' : '' ?></td><td><?= esc(Pricing::cartRuleEffectLabel($rule)) ?></td></tr><?php endforeach; ?>
         </tbody></table></div>
     <?php endif; ?>
     <div class="card table-scroll">

@@ -3,7 +3,7 @@
  * A12.5: admin CRUD for the active store's promotions (catalog and cart rules, coupon codes) and price lists.
  * Rows belong to the store (store_id = StoreContext id); products, variants, categories and brands named in a rule or a
  * price row must belong to the store's catalog, customer groups to the store. Money is integer cents, percentages are
- * entered in % and stored as basis points, validity is UTC. A coupon promotion is a cart rule redeemed only with its code
+ * entered in % and stored as basis points, validity is entered on the store's wall clock and stored as UTC. A coupon promotion is a cart rule redeemed only with its code
  * (Pricing::applyCoupon); a code that pricing.json already defines is refused so one code never means two discounts.
  * Every write is audited and marks the store's guest product and category caches stale, because they hold resolved prices.
  * Write methods return ['ok' => bool, 'id' => int, 'message' => flash text].
@@ -33,7 +33,7 @@ final class PricingAdmin {
         return self::storeRows('SELECT * FROM promotions WHERE id = :id AND store_id = :store', [':id' => $id])[0] ?? null;
     }
 
-    /** Form values of a stored promotion (product ids shown as SKUs, basis points as %, UTC dates for datetime-local). */
+    /** Form values of a stored promotion (product ids shown as SKUs, basis points as %, UTC dates as the store's wall clock for datetime-local). */
     public static function promotionForm(?array $row): array {
         $c = self::json($row['conditions'] ?? '{}');
         $a = self::json($row['actions'] ?? '{}');

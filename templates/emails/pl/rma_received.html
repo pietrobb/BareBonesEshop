@@ -8,6 +8,7 @@
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>
 {{#if reason}}<p>Powód: {{reason}}</p>{{/if}}
-<p>Poinformujemy Cię, czy zwrot został zaakceptowany i jak odesłać towar. Zachowaj tę wiadomość jako potwierdzenie zgłoszenia.</p>
+{{#if within_withdrawal}}<p>W terminie na odstąpienie od umowy możesz zwrócić towar bez podania przyczyny i bez naszej zgody. Poinformujemy Cię, jak go odesłać; płatność zwrócimy w ciągu 14 dni od otrzymania odstąpienia (możemy wstrzymać się do otrzymania towaru lub dowodu jego odesłania). Zachowaj tę wiadomość jako potwierdzenie zgłoszenia.</p>{{/if}}
+{{#if needs_approval}}<p>Poinformujemy Cię, czy zwrot został zaakceptowany i jak odesłać towar. Zachowaj tę wiadomość jako potwierdzenie zgłoszenia.</p>{{/if}}
 <p>Sprzedawca: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

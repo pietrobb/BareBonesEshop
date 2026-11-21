@@ -232,6 +232,7 @@ final class WebInstaller
         return [
             'shop_name' => $starter['name'] ?? (string)($store['name'] ?? ''), 'app_url' => $appUrl, 'private_parent' => $private,
             'country' => (string)($store['legal']['country'] ?? ''), 'timezone' => (string)($store['timezone'] ?? 'Europe/Bratislava'),
+            'shop_locale' => (string)($store['default_locale'] ?? 'sk'), 'currency' => (string)($store['currency'] ?? 'eur'),
             'admin_user' => 'owner', 'pay_cod' => '1', 'pay_bank' => '1',
         ];
     }
@@ -245,9 +246,10 @@ final class WebInstaller
         $text = static fn(string $key): string => trim((string)($input[$key] ?? ''));
         $v = [];
         foreach (['shop_name', 'app_url', 'private_parent', 'email', 'company', 'street', 'city', 'zip', 'country', 'vat_id', 'iban', 'timezone', 'admin_user', 'stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret',
-            'ico', 'dic', 'bic', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_user', 'mail_from'] as $key) {
+            'ico', 'dic', 'bic', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_user', 'mail_from', 'shop_locale', 'currency'] as $key) {
             $v[$key] = $text($key);
         }
+        $v['currency'] = strtolower($v['currency']);
         $v['country'] = strtoupper($v['country']);
         $v['iban'] = strtoupper((string)preg_replace('/\s+/', '', $v['iban']));
         $v['bic'] = strtoupper((string)preg_replace('/\s+/', '', $v['bic']));
@@ -265,6 +267,9 @@ final class WebInstaller
         if (!filter_var($v['email'], FILTER_VALIDATE_EMAIL)) $errors['email'] = I18n::t('install.err.email');
         if (preg_match('/^[A-Z]{2}$/', $v['country']) !== 1) $errors['country'] = I18n::t('install.err.country');
         if (!in_array($v['timezone'], DateTimeZone::listIdentifiers(), true)) $errors['timezone'] = I18n::t('install.err.timezone');
+        // R51 (low): the shop's language and currency ('' = keep the starter's / example's, an older form without them).
+        if ($v['shop_locale'] !== '' && !isset(self::LOCALES[$v['shop_locale']])) $errors['shop_locale'] = I18n::t('install.err.shop_locale');
+        if ($v['currency'] !== '' && !isset(self::CURRENCIES[$v['currency']])) $errors['currency'] = I18n::t('install.err.currency');
         if (!$v['pay_cod'] && !$v['pay_bank'] && $v['stripe_secret_key'] === '') $errors['payments'] = I18n::t('install.err.payments');
         if (($v['pay_bank'] || $v['iban'] !== '') && !BankTransferInstructions::validIban($v['iban'])) $errors['iban'] = I18n::t('install.err.iban');
         // R23 UX: the company and tax numbers and the BIC the invoices and the bank transfer instructions print.
@@ -434,6 +439,9 @@ final class WebInstaller
     }
 
     /** R38 UX: the installer's languages (lang/<code>.php), each named in itself for the language links. */
+    /** Currencies the installer offers for the shop (those of the sample stores; price formats and EUR rates exist). */
+    public const CURRENCIES = ['eur' => 'EUR (€)', 'czk' => 'CZK (Kč)', 'pln' => 'PLN (zł)', 'huf' => 'HUF (Ft)', 'usd' => 'USD ($)'];
+
     public const LOCALES = ['en' => 'English', 'sk' => 'Slovenčina', 'cs' => 'Čeština', 'de' => 'Deutsch', 'pl' => 'Polski', 'hu' => 'Magyar', 'es' => 'Español'];
 
     /**
@@ -455,6 +463,19 @@ final class WebInstaller
     }
 
     /** The language links above the form; the current language is not a link. */
+    /** A labelled <select> of the install form (with its hint and error, as the text fields). */
+    public static function selectField(string $name, array $options, string $selected, ?string $error): string
+    {
+        $id = 'f-' . $name;
+        $errorHtml = $error !== null ? '<p class="error" id="' . $id . '-error">' . self::h($error) . '</p>' : '';
+        $html = '<label for="' . $id . '">' . self::h(I18n::t('install.label.' . $name)) . '</label><p class="hint" id="' . $id . '-hint">' . self::h(I18n::t('install.hint.' . $name)) . '</p>'
+            . '<select id="' . $id . '" name="' . $name . '" aria-describedby="' . $id . '-hint' . ($error !== null ? ' ' . $id . '-error" aria-invalid="true' : '') . '">';
+        foreach ($options as $value => $label) {
+            $html .= '<option value="' . self::h($value) . '"' . ($selected === (string)$value ? ' selected' : '') . '>' . self::h($label) . '</option>';
+        }
+        return $html . '</select>' . $errorHtml;
+    }
+
     public static function languageLinks(): string
     {
         $links = [];
@@ -619,6 +640,15 @@ final class WebInstaller
         $legal = (array)($store['legal'] ?? []);
         $store['name'] = $v['shop_name'];
         $store['timezone'] = $v['timezone'];
+        // R51 (low): every install was a Slovak shop in EUR; the form now picks the default language and the currency.
+        if (($v['shop_locale'] ?? '') !== '') {
+            $store['default_locale'] = $v['shop_locale'];
+            $store['languages'] = array_values(array_unique([$v['shop_locale'], ...array_map('strval', (array)($store['languages'] ?? []))]));
+        }
+        if (($v['currency'] ?? '') !== '') {
+            $store['currency'] = $v['currency'];
+            $stores['default_currency'] = $v['currency'];
+        }
         $store['legal'] = [
             'name' => $v['company'], 'street' => $v['street'], 'city' => $v['city'], 'zip' => $v['zip'], 'country' => $v['country'],
             'vat_registered' => $v['vat_id'] !== '', 'ic_dph' => $v['vat_id'], 'iban' => $v['iban'], 'email' => $v['email'],

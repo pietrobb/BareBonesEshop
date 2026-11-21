@@ -83,6 +83,7 @@ $field = static function (string $name, string $type = 'text', bool $hint = fals
         . ($hintText !== '' || $error !== '' ? ' aria-describedby="' . trim(($hintText !== '' ? $id . '-hint ' : '') . ($error !== '' ? $id . '-error' : '')) . '"' : '')
         . ($error !== '' ? ' aria-invalid="true"' : '') . '>' . $error;
 };
+$select = static fn(string $name, array $options): string => WebInstaller::selectField($name, $options, (string)($values[$name] ?? ''), $errors[$name] ?? null);
 $checkbox = static fn(string $name, string $label): string => '<label class="check"><input type="checkbox" name="' . $name . '" value="1"' . (!empty($values[$name]) ? ' checked' : '') . '> ' . $h($label) . '</label>';
 $groupError = static fn(string $key): string => isset($errors[$key]) ? '<p class="error">' . $h($errors[$key]) . '</p>' : '';
 $legend = static fn(string $key): string => '<fieldset><legend>' . $h($t('install.legend.' . $key)) . '</legend>';
@@ -92,7 +93,7 @@ $page($values['shop_name'] !== '' ? $t('install.title.install', ['shop' => $valu
     . '<form method="post" action="install.php?lang=' . $h(I18n::locale()) . '" novalidate><input type="hidden" name="token" value="' . $h($_SESSION['install_token']) . '">'
     . ($exposed === null ? '<p>' . $checkbox('protection_checked', $t('install.protection_checked', ['file' => WebInstaller::PROBE_FILE])) . '</p>' : '')
     . $legend('key') . $field('install_key', 'text', true, 'off', ['file' => WebInstaller::KEY_FILE]) . '</fieldset>'
-    . $legend('shop') . $field('shop_name') . $field('app_url', 'url', true) . $field('timezone', 'text', true) . $field('private_parent', 'text', true) . '</fieldset>'
+    . $legend('shop') . $field('shop_name') . $field('app_url', 'url', true) . $field('timezone', 'text', true) . $select('shop_locale', WebInstaller::LOCALES) . $select('currency', WebInstaller::CURRENCIES) . $field('private_parent', 'text', true) . '</fieldset>'
     . $legend('seller') . $field('company', 'text', false, 'organization') . $field('street', 'text', false, 'street-address')
     . $field('city', 'text', false, 'address-level2') . $field('zip', 'text', false, 'postal-code') . $field('country', 'text', true, 'country')
     . $field('email', 'email', true, 'email') . $field('vat_id', 'text', true) . $field('ico', 'text', true) . $field('dic', 'text', true) . '</fieldset>'

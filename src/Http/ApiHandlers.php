@@ -647,6 +647,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                 + checkoutRefusal('checkout.error.field_invalid', 422, ['field' => $field]);
         }
     }
+    $input = CheckoutService::withoutBidiControls($input);
     // R18: unbounded lengths reached VARCHAR(191) columns (MySQL refused the order: an incident, not a message).
     foreach (CheckoutService::FIELD_MAX_LENGTH as $field => $max) {
         if (str_starts_with($field, 'billing_') && !OrderAddress::billingRequested($input)) continue;

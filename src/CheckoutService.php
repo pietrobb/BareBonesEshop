@@ -8,6 +8,20 @@ class CheckoutService {
     public const FIELD_MAX_LENGTH = ['name' => 191, 'email' => 191, 'phone' => 40, 'street' => 200, 'city' => 100, 'zip' => 20, 'company' => 255]
         + OrderAddress::BILLING_FIELDS;
 
+    /**
+     * R51 (low): Unicode bidi controls (U+202E RIGHT-TO-LEFT OVERRIDE and the other embeddings, overrides, isolates and
+     * marks) and C1 controls are removed from the buyer's fields: "Ján\u{202E}gnp.exe" reversed how a name read in the
+     * admin, e-mails and labels. A field that is not UTF-8 is left for the caller to refuse.
+     */
+    public static function withoutBidiControls(array $input): array {
+        foreach ([...array_keys(self::FIELD_MAX_LENGTH), 'note', 'vat_id', 'ico', 'dic'] as $field) {
+            if (is_string($input[$field] ?? null) && mb_check_encoding($input[$field], 'UTF-8')) {
+                $input[$field] = (string)preg_replace('/[\x{0080}-\x{009F}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]+/u', '', $input[$field]);
+            }
+        }
+        return $input;
+    }
+
     public static function isDigitalOnly(array $items): bool {
         if (!function_exists('cartIsDigitalOnly')) require_once __DIR__ . '/Http/ApiHandlers.php';
         return cartIsDigitalOnly($items);

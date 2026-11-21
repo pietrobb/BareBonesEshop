@@ -153,7 +153,9 @@ final class SalesReport {
             $currency = $row['currency'];
             $out[$currency] ??= $emptyDays;
             $localDay = (new DateTimeImmutable($row['hour_utc'] . ':00:00', $utc))->setTimezone($zone)->format('Y-m-d');
-            if (!isset($out[$currency][$localDay])) continue;
+            // An order stamped after today (a clock ahead, an import) counts today, as totals() counts it.
+            // The first hour of a zone off by a half hour starts before the first local day: it is that day.
+            if (!isset($out[$currency][$localDay])) $localDay = (string)($localDay < array_key_first($emptyDays) ? array_key_first($emptyDays) : array_key_last($emptyDays));
             $out[$currency][$localDay]['orders'] += $row['orders'];
             $out[$currency][$localDay]['revenue'] += $row['revenue'];
         }

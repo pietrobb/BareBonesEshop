@@ -8,6 +8,7 @@
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>
 {{#if reason}}<p>Grund: {{reason}}</p>{{/if}}
-<p>Wir teilen Ihnen mit, ob die Rücksendung genehmigt wird und wie Sie die Ware zurücksenden. Bewahren Sie diese E-Mail als Nachweis Ihrer Anfrage auf.</p>
+{{#if within_withdrawal}}<p>Innerhalb der Widerrufsfrist können Sie die Ware ohne Angabe von Gründen und ohne unsere Zustimmung zurückgeben. Wir teilen Ihnen mit, wie Sie sie zurücksenden; die Zahlung erstatten wir binnen 14 Tagen ab Eingang Ihres Widerrufs (wir können warten, bis die Ware zurück ist oder Sie die Rücksendung nachweisen). Bewahren Sie diese E-Mail als Nachweis Ihrer Anfrage auf.</p>{{/if}}
+{{#if needs_approval}}<p>Wir teilen Ihnen mit, ob die Rücksendung genehmigt wird und wie Sie die Ware zurücksenden. Bewahren Sie diese E-Mail als Nachweis Ihrer Anfrage auf.</p>{{/if}}
 <p>Verkäufer: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

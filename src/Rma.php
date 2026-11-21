@@ -143,7 +143,12 @@ class Rma {
     private static function acknowledge(array $order, string $rmaNumber, string $reason, array $selected): void {
         $seller = InvoiceService::sellerIdentity($order);
         $locale = (string)($order['locale'] ?? '');
+        // R51 (low): a return within the withdrawal period (or after a timely withdrawal statement) needs no approval —
+        // the e-mail no longer says "we will let you know whether the return is approved" there.
+        $withdrawal = Withdrawal::withinPeriod($order) || Withdrawal::forOrder((int)$order['id']) !== [];
         MailService::send('rma_received', (string)$order['customer_email'], $locale, [
+            'within_withdrawal' => $withdrawal,
+            'needs_approval' => !$withdrawal,
             'customer_name' => (string)$order['customer_name'],
             'order_number' => (string)$order['order_number'],
             'rma_number' => $rmaNumber,
