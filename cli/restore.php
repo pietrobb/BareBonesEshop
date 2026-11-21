@@ -67,7 +67,21 @@ try {
         PrivateOwner::run(static fn() => BackupService::init(Db::get()));
     } catch (\Throwable $e) {
         // R50: a restore onto a new MySQL/MariaDB server: db_name is created empty and the backup imported into it.
-        if (!Db::isUnknownDatabase($e) || isset($flags['list']) || $filesOnly || !Db::createMissingMysqlDatabase()) throw $e;
+        if (!Db::isUnknownDatabase($e) || isset($flags['list']) || $filesOnly) throw $e;
+        // R51 (low): nothing is created before the refusals and the confirmation below (was: an empty db_name stayed on
+        // the server after "no" or a refused run). A missing database is a MySQL/MariaDB restore, so their rules apply.
+        if (!$writersStopped || $skipSnapshot) {
+            fwrite(STDERR, "REFUSED: db_name does not exist on this MySQL/MariaDB server. A restore into it needs --i-stopped-writers\n"
+                . "(stop web traffic, workers and cron first) and keeps the pre-restore-snapshot (no --skip-snapshot).\n");
+            exit(1);
+        }
+        if (!$yes && !$quiet) {
+            echo "db_name does not exist on this MySQL/MariaDB server. Create it empty and restore "
+                . ($positional[0] ?? 'the latest backup') . " into it? Type 'yes' to continue: ";
+            if (strtolower(trim((string)fgets(STDIN))) !== 'yes') { $emit('Aborted.'); exit(1); }
+            $yes = true;
+        }
+        if (!Db::createMissingMysqlDatabase()) throw $e;
         $emit('Created the empty database db_name on this MySQL/MariaDB server for the restore.');
         PrivateOwner::run(static fn() => BackupService::init(Db::get()));
     }

@@ -436,6 +436,21 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   German store on a Slovak store's methods could not enter German (its page showed the Slovak name), and saving a
   method from one store dropped the translations entered from the other. The form offers the languages of all stores
   sharing the methods (less the language of the method's own name) and a save keeps any other saved translation.
+- **GDPR erasure: carrier labels, consent user-agent, no table-wide locks (review round 51, low).** The erasure kept
+  the carrier's printable label (`shipping_labels.label_data`: name, address, phone) and the link to a return label,
+  and the browser user-agent of the checkout consent, for the 10-year retention. They are erased; the parcel and
+  tracking numbers, carrier and the consent itself stay. On MySQL the API replay responses naming the customer were
+  deleted by a statement that locked every row of `api_idempotency` it scanned until the erasure committed (API
+  requests waited, up to a lock timeout); they are now found by a plain read and deleted by id.
+- **`cli/restore.php` creates a missing MySQL database only after the confirmation (review round 51, low).** On a new
+  server it created `db_name` before refusing a run without `--i-stopped-writers` or asking for `yes`, so a refused or
+  declined run left an empty database behind. The refusals and the question now come first.
+- **Backup runbook (review round 51, low).** It warned only about the GDPR salt; it now names `config.php` (database
+  password, `admin_identity_key`, gateway and API keys) and the executable `themes/` in the files archive, asks for
+  encrypted, write-protected storage and a SHA-256 list kept outside the backup storage to compare before a restore,
+  and explains how to raise the invoice counters after a restore onto a new server (the numbers issued after the
+  backup would be issued again). The GDPR design notes no longer mention a `cli/gdpr-gc.php --dry-run` flag (a run
+  without `--apply` is the dry run).
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
   after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet

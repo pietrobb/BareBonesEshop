@@ -45,8 +45,15 @@ class GdprService {
             'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards; ip_address, customer_phone and notes are no accounting data: erased with the customer and scrubbed after 180 days (orders_contact)'],
         'order_items'                  => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
         'invoices'                     => ['columns' => ['customer_snapshot'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
-        'order_consents'               => ['columns' => ['ip_hash', 'user_agent'], 'erase' => 'retain', 'export' => 'orders',
-            'reason' => 'proof of the consent given at checkout (Art.7(1)), kept with the retained order'],
+        // Proof of the consent given at checkout (Art.7(1)), kept with the retained order; R51 (low): the browser's
+        // user-agent proves nothing of it and is erased (was: kept for the 10 years).
+        'order_consents'               => ['columns' => ['ip_hash', 'user_agent'], 'erase' => 'scrub', 'export' => 'orders'],
+        // R51 (low): the carrier's printable label and its link repeat the name, address and phone; the parcel number,
+        // carrier and status stay for tracking and cash-on-delivery reconciliation.
+        'shipping_labels'              => ['columns' => ['label_data'], 'erase' => 'scrub', 'export' => null,
+            'reason' => 'carrier print data; the name and address on it are exported with the order'],
+        'return_labels'                => ['columns' => ['label_url'], 'erase' => 'scrub', 'export' => null,
+            'reason' => 'carrier link to the printable return label; the return itself is exported (rma_requests)'],
         'coupon_uses'                  => ['columns' => ['customer_email'], 'erase' => 'scrub', 'export' => 'coupon_uses'],
         'coupon_usage_counters'        => ['columns' => ['subject'], 'erase' => 'delete', 'export' => null,
             'reason' => 'per-customer coupon counters keyed by an unsalted hash of the e-mail; the uses themselves are exported (coupon_uses)'],
@@ -767,9 +774,15 @@ class GdprService {
         // and address); the ones naming this e-mail go (a retried request is then executed again, idempotently).
         $rowsIdempotency = 0;
         if (self::tableColumns($db, 'api_idempotency') !== []) {
-            $stmt = self::prepare($db, 'DELETE FROM api_idempotency WHERE store_id = :store AND INSTR(LOWER(response_body), :email) > 0');
+            // R51 (low): found by a plain (non-locking) read and deleted by id; a DELETE with this WHERE locked every row
+            // of the table it scanned on MySQL until the erasure committed, and API requests waited on them.
+            $stmt = self::prepare($db, 'SELECT id FROM api_idempotency WHERE store_id = :store AND INSTR(LOWER(response_body), :email) > 0');
             $stmt->execute([':store' => StoreContext::current()->id(), ':email' => strtolower($origEmail)]);
-            $rowsIdempotency = $stmt->rowCount();
+            foreach (array_chunk(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), 500) as $ids) {
+                $delete = self::prepare($db, 'DELETE FROM api_idempotency WHERE 1 = 1' . self::inList(' AND id', $ids));
+                $delete->execute($ids);
+                $rowsIdempotency += $delete->rowCount();
+            }
         }
 
         return [
@@ -935,6 +948,26 @@ class GdprService {
             $stmt = self::prepare($db, "UPDATE withdrawal_requests SET reason = ? WHERE store_id = ? AND reason IS NOT NULL AND reason <> ''" . self::inList(' AND order_id', $orderIds));
             $stmt->execute(array_merge([$marker, $store], $orderIds));
             $rows['withdrawal_requests'] = $stmt->rowCount();
+        }
+
+        $rows['order_consents'] = $rows['shipping_labels'] = $rows['return_labels'] = 0;
+        if ($orderIds !== []) {
+            if (self::hasTable($db, 'order_consents')) {
+                $stmt = self::prepare($db, "UPDATE order_consents SET user_agent = '' WHERE user_agent <> ''" . self::inList(' AND order_id', $orderIds));
+                $stmt->execute($orderIds);
+                $rows['order_consents'] = $stmt->rowCount();
+            }
+            if (self::hasTable($db, 'shipping_labels')) {
+                $stmt = self::prepare($db, "UPDATE shipping_labels SET label_data = '' WHERE label_data <> ''" . self::inList(' AND order_id', $orderIds));
+                $stmt->execute($orderIds);
+                $rows['shipping_labels'] = $stmt->rowCount();
+            }
+        }
+        if (self::hasTable($db, 'return_labels')) {
+            $stmt = self::prepare($db, "UPDATE return_labels SET label_url = NULL
+                WHERE store_id = :label_store AND label_url IS NOT NULL AND rma_id IN (SELECT id FROM rma_requests WHERE {$rmaScope})");
+            $stmt->execute($ownership + [':label_store' => $store, ':rma_store' => $store, ':rma_customer' => $customerId]);
+            $rows['return_labels'] = $stmt->rowCount();
         }
 
         $rows['payment_transactions'] = 0;
