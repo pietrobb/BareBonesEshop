@@ -306,7 +306,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `Mgr. art.` whole. A Stripe `charge.refunded` whose refunds cannot be listed is explained by an admin refund only once
   its job has reached Stripe; one still queued no longer hides a dashboard refund of the same money.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
-- **Theme assets:** the default theme is version 2.3.17 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.18 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
