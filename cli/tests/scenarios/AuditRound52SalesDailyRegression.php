@@ -95,6 +95,7 @@ try {
     $r52sDayBuilt = $r52sDb->prepare("SELECT COUNT(*) FROM sales_daily WHERE store_id = ? AND currency = 'xts'");
     $r52sDayBuilt->execute([$r52sStore]);
     assert_true((int)$r52sDayBuilt->fetchColumn() >= 120, 'R52 daily sales: the closed days of the year have their rows');
+    $r52sDayBuilt = null; // an open SQLite statement keeps the table from being dropped at the end
     // The report really reads the rows: one cent more in a built day shows in the 365-day total.
     $r52sBefore = SalesReport::totals($r52sStore, SalesReport::sinceUtc(365))['xts']['revenue'] ?? 0;
     $r52sDb->prepare("UPDATE sales_daily SET revenue = revenue + 1 WHERE store_id = ? AND currency = 'xts' AND day = ?")->execute([$r52sStore, SalesDaily::dayOf($r52sAt(60, 5))]);
@@ -112,11 +113,11 @@ try {
     // Rows written without the shop's code: a refund, a credit note of an old order, an imported order of last year.
     $r52sRefund($r52sByDay[150], 900);
     $r52sItem = (int)$r52sDb->query('SELECT MIN(id) FROM order_items WHERE order_id = ' . (int)$r52sByDay[210])->fetchColumn();
-    $r52sDb->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key) VALUES (?, ?, 0, 0, 500, 'XTS', 'succeeded', ?)")
+    $r52sDb->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key) VALUES (?, ?, 0, 952201, 500, 'XTS', 'succeeded', ?)")
         ->execute([$r52sStore, $r52sByDay[210], 'r52s-cn-' . bin2hex(random_bytes(4))]);
     $r52sRefunds[] = (int)$r52sDb->lastInsertId();
     $r52sDb->prepare("INSERT INTO credit_note_items (credit_note_id, refund_id, order_item_id, rma_item_id, sku, name, quantity, unit_gross, gross, net, vat, rate_basis_points)
-        VALUES (0, ?, ?, 0, 'R52S', 'R52S', 1, 500, 500, 500, 0, 0)")->execute([end($r52sRefunds), $r52sItem]);
+        VALUES (952201, ?, ?, 0, 'R52S', 'R52S', 1, 500, 500, 500, 0, 0)")->execute([end($r52sRefunds), $r52sItem]);
     $r52sRefund($r52sByDay[210], 500);
     $r52sAdd('delivered', 'paid', 0, $r52sAt(300, 720), [[952103, 3, 3300]]);
     $r52sCheck('after a refund, a credit note and an imported order of old days written by SQL');

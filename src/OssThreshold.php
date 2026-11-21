@@ -304,7 +304,8 @@ final class OssThreshold
         $count = $settled->rowCount();
         $next = $db->prepare('SELECT * FROM orders WHERE oss_net IS NULL AND created_at >= ? AND id > ? ORDER BY id LIMIT 500');
         $store = $db->prepare('UPDATE orders SET oss_net = ? WHERE id = ? AND oss_net IS NULL');
-        $own = $db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite' && !$db->inTransaction();
+        // R52: one commit per batch on SQLite too (500 commits of one row each outlasted the 10 s budget on a busy disk).
+        $own = !$db->inTransaction();
         $after = 0;
         do {
             $next->execute([$since, $after]);

@@ -441,6 +441,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   from their lines inside its snapshot and stored them only at the end, so 200 000 of them outlasted
   `max_execution_time = 30`: each checkout died and the next started over. They are now stored in committed batches of
   500 for at most 10 s per request before the count; until all are stored a distance-sale checkout asks to try again.
+  Round 52: on SQLite too (each order was its own commit there, and 500 of them outlasted the 10 s on a busy disk).
 - **Method names in every language of the stores sharing them (review round 51).** A store using another store's
   shipping and payment methods (`provider_scope`) was offered only its own further languages for their names, so a
   German store on a Slovak store's methods could not enter German (its page showed the Slovak name), and saving a
