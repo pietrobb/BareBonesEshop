@@ -431,6 +431,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   from their lines inside its snapshot and stored them only at the end, so 200 000 of them outlasted
   `max_execution_time = 30`: each checkout died and the next started over. They are now stored in committed batches of
   500 for at most 10 s per request before the count; until all are stored a distance-sale checkout asks to try again.
+- **Method names in every language of the stores sharing them (review round 51).** A store using another store's
+  shipping and payment methods (`provider_scope`) was offered only its own further languages for their names, so a
+  German store on a Slovak store's methods could not enter German (its page showed the Slovak name), and saving a
+  method from one store dropped the translations entered from the other. The form offers the languages of all stores
+  sharing the methods (less the language of the method's own name) and a save keeps any other saved translation.
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
   after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet
