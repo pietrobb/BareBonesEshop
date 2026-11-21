@@ -9,8 +9,10 @@
  * counts them). A day is built once it has ended and SETTLE_SECONDS have passed, so the checkouts started before
  * midnight have committed; reports sum the days still open from the orders. An order that changes later (a payment, a
  * refund, a cancellation, a credit note, an edit) is logged in sales_daily_changes by the code that writes it
- * (touchOrders(), in the same transaction) and its day is built again at the next refresh(). Rows inserted without it
- * (an import, SQL by hand) are found by their ids above the ones last seen. Orders deleted or changed by hand need
+ * (touchOrders(), in the same transaction; every payment_transactions row by PaymentService::logTransaction()) and its
+ * day is built again at the next refresh(). Rows inserted without it (an import, SQL by hand) are found by their ids
+ * above the ones last seen; on MySQL a row whose transaction commits after a higher id was seen is missed, so the
+ * shop's own writers never rely on it. Orders deleted or changed by hand need
  * `php cli/sales-daily.php --rebuild`. A store whose timezone changed is rebuilt.
  */
 final class SalesDaily {

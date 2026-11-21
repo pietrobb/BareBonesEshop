@@ -110,6 +110,31 @@ try {
     PaymentService::updatePaymentStatus($r52sPending, 'paid');
     $r52sCheck('after an old order is cancelled and another one paid (Orders::updateStatus(), PaymentService::updatePaymentStatus())');
 
+    // A second provider refund of an old order books only a ledger row (the payment stays partially_refunded). On MySQL
+    // its id is taken at INSERT and seen at COMMIT: a refresh() while it is in flight and a higher id has committed moves
+    // the id watcher past it. The booking logs its order itself, in its own transaction.
+    $r52sTwice = $r52sByDay[120];
+    assert_true(PaymentService::bookProviderRefund($r52sTwice, 'stripe', 're_r52s_1', 300, 'charge.refunded', 'evt_r52s_1'), 'R52 daily sales: a first provider refund of an old order is booked');
+    SalesReport::totals($r52sStore, SalesReport::sinceUtc(7));
+    $r52sChanges = $r52sDb->prepare('SELECT COUNT(*) FROM sales_daily_changes WHERE store_id = ?');
+    $r52sDb->beginTransaction();
+    try {
+        assert_true(PaymentService::bookProviderRefund($r52sTwice, 'stripe', 're_r52s_2', 400, 'charge.refunded', 'evt_r52s_2'), 'R52 daily sales: a second provider refund of the old order is booked');
+        $r52sChanges->execute([$r52sStore]);
+        $r52sLogged = (int)$r52sChanges->fetchColumn();
+        $r52sChanges->closeCursor();
+        $r52sDb->commit();
+    } catch (Throwable $e) {
+        if ($r52sDb->inTransaction()) $r52sDb->rollBack();
+        throw $e;
+    }
+    assert_equals(['partially_refunded', 1], [(string)$r52sDb->query('SELECT payment_status FROM orders WHERE id = ' . (int)$r52sTwice)->fetchColumn(), $r52sLogged],
+        'R52 daily sales: the second refund leaves the payment partially_refunded and logs its order in the transaction that books it');
+    // The id watcher already past the refund's row, as after the race above.
+    $r52sDb->prepare("UPDATE sales_daily_state SET value = ? WHERE state_key = 'max_payment_transactions'")
+        ->execute([(string)$r52sDb->query('SELECT MAX(id) FROM payment_transactions')->fetchColumn()]);
+    $r52sCheck('after a second provider refund of an old order that the id watcher did not see (PaymentService::bookProviderRefund())');
+
     // Rows written without the shop's code: a refund, a credit note of an old order, an imported order of last year.
     $r52sRefund($r52sByDay[150], 900);
     $r52sItem = (int)$r52sDb->query('SELECT MIN(id) FROM order_items WHERE order_id = ' . (int)$r52sByDay[210])->fetchColumn();
@@ -140,6 +165,13 @@ try {
     }
     $r52sDb->exec('DELETE FROM products WHERE id IN (952101, 952102, 952103)');
     if ($r52sCreated) {
+        // SQLite drops no table while a statement of the connection is mid-read: earlier scenarios of the full suite
+        // leave some in the global scope.
+        $r52sOpen = [];
+        foreach ($GLOBALS as $r52sName => $r52sValue) {
+            if ($r52sValue instanceof PDOStatement && $r52sValue->closeCursor()) $r52sOpen[] = '$' . $r52sName;
+        }
+        if ($r52sOpen !== []) echo '  (statements closed before the drop: ' . implode(', ', $r52sOpen) . ")\n";
         foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes', 'sales_daily_state'] as $r52sTable) $r52sDb->exec("DROP TABLE IF EXISTS {$r52sTable}");
         Db::forgetSchema($r52sDb);
     } else {
