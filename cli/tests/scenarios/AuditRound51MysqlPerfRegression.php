@@ -159,9 +159,12 @@ if (getenv('TEST_MYSQL_DSN')) {
     assert_equals(['idx_customers_store_company', 'idx_oi_order_cover', 'idx_orders_store_payment_cover'], $r51pResult['indexes'] ?? null,
         'R51 mysql: the credit-check and covering report indexes exist and replace the narrower ones they start with');
     // The refunds are summed from the refunds (a separate statement), not joined as a derived table to each order.
-    assert_equals(['o:idx_orders_store_payment_cover'], $r51pResult['plans']['totals'] ?? null,
+    // MariaDB reads the orders from the index alone (":covering"), MySQL 8.4 also looks at the row: both use the index.
+    $r51pOrders = static fn(?array $plan): ?array => $plan === null ? null
+        : array_map(static fn(string $row): string => $row === 'o:idx_orders_store_payment_cover:covering' ? 'o:idx_orders_store_payment_cover' : $row, $plan);
+    assert_equals(['o:idx_orders_store_payment_cover'], $r51pOrders($r51pResult['plans']['totals'] ?? null),
         'R51 mysql reports: the totals read the paid orders of the period through the covering index and join no refund table to every order');
-    assert_equals(['o:idx_orders_store_payment_cover', 'oi:idx_oi_order_cover:covering'], $r51pResult['plans']['top'] ?? null,
+    assert_equals(['o:idx_orders_store_payment_cover', 'oi:idx_oi_order_cover:covering'], $r51pOrders($r51pResult['plans']['top'] ?? null),
         'R51 mysql reports: the best sellers read the order lines from the index alone and join no refund or credit table to every line');
     assert_equals([1200, 3], $r51pResult['names'] ?? null,
         'R51 mysql search names: filling products.search_names for 1200 products takes 3 transactions of 500 (was: an autocommit per product, minutes at 100 000)');
