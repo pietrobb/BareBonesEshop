@@ -506,6 +506,10 @@ class CheckoutService {
             return checkoutExecute($input, $runtimeConfig);
         } catch (Throwable $e) {
             IncidentMonitor::report('checkout.failed', 'checkout', 'error', ['exception' => $e]);
+            // R52 (idea 40): the cause, under the correlation ID the shopper's error carries, with e-mails and secrets
+            // masked, as the other unexpected faults log it. Was: the incident's exception type only, so a checkout that
+            // failed once in CI (PHP 8.1) could not be traced to what threw.
+            Logger::phpLog('Checkout failed [' . Logger::correlationId() . '] ' . get_debug_type($e) . ' @' . basename($e->getFile()) . ':' . $e->getLine() . ': ' . $e->getMessage());
             http_response_code(503);
             return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.failed', 'correlation_id' => Logger::correlationId()];
         }
