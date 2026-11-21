@@ -82,7 +82,26 @@ class Inventory {
             $components = self::bundleComponents((int)($item['product_id'] ?? 0));
             foreach ($components ?: [['sku' => (string)($item['sku'] ?? '')]] as $component) $skus[(string)$component['sku']] = true;
         }
-        $skus = array_keys($skus);
+        self::lockSkus(array_keys($skus));
+    }
+
+    /**
+     * R51: a cancellation or return locks the stock rows of its lines the way checkout does (lockCartSkus()), up front
+     * in SKU order. Released line by line in order-line order, a cancellation running against a checkout of the same
+     * items in another order deadlocked on MySQL, and the checkout answered 500.
+     */
+    public static function lockOrderSkus(array $orderItems): void {
+        if (!Db::isMysql()) return;
+        $skus = [];
+        foreach ($orderItems as $item) {
+            if (self::isDigitalLine($item)) continue;
+            foreach (self::reservationLines($item) as $line) $skus[(string)$line['sku']] = true;
+        }
+        self::lockSkus(array_keys($skus));
+    }
+
+    /** @param list<string> $skus */
+    private static function lockSkus(array $skus): void {
         sort($skus, SORT_STRING);
         $stmt = Db::get()->prepare('SELECT id FROM warehouse_stock WHERE store_id = :store AND sku = :sku ORDER BY warehouse_id FOR UPDATE');
         foreach ($skus as $sku) {
@@ -175,12 +194,13 @@ class Inventory {
 
     public static function releaseOrderItem(array $orderItem, string|int $referenceId): void {
         $hasAllocationSnapshot = false;
+        $shippedLeft = [];
         foreach (self::reservationLines($orderItem) as $line) {
             foreach ($line['allocations'] ?? [] as $allocation) {
                 $hasAllocationSnapshot = true;
                 $status = (string)($allocation['status'] ?? 'reserved');
                 $warehouseId = empty($allocation['warehouse_id']) ? null : (int)$allocation['warehouse_id'];
-                $remaining = (int)$allocation['qty'] - self::shippedQuantity((int)$orderItem['id'], (string)$line['sku'], $warehouseId);
+                $remaining = (int)$allocation['qty'] - self::takeShipped($shippedLeft, (int)$orderItem['id'], (string)$line['sku'], $warehouseId, (int)$allocation['qty']);
                 if ($remaining <= 0) continue;
                 $allocation['qty'] = $remaining;
                 if ($status === 'reserved' && $warehouseId !== null) {
@@ -203,6 +223,7 @@ class Inventory {
         $hasShipmentHistory = self::hasShipmentHistory((int)$orderItem['id']);
         $rmaReceived = self::rmaReceivedQuantity((int)$orderItem['id']);
         $hasAllocationSnapshot = false;
+        $shippedLeft = [];
         foreach (self::reservationLines($orderItem) as $line) {
             $skip = $rmaReceived * max(1, (int)($line['quantity_per_bundle'] ?? 1));
             foreach ($line['allocations'] ?? [] as $allocation) {
@@ -210,7 +231,7 @@ class Inventory {
                 $status = (string)($allocation['status'] ?? 'reserved');
                 $warehouseId = empty($allocation['warehouse_id']) ? null : (int)$allocation['warehouse_id'];
                 $quantity = $hasShipmentHistory
-                    ? min((int)$allocation['qty'], self::shippedQuantity((int)$orderItem['id'], (string)$line['sku'], $warehouseId))
+                    ? self::takeShipped($shippedLeft, (int)$orderItem['id'], (string)$line['sku'], $warehouseId, (int)$allocation['qty'])
                     : (int)$allocation['qty'];
                 if ($skip >= $quantity) { $skip -= $quantity; continue; }
                 $quantity -= $skip;
@@ -254,12 +275,25 @@ class Inventory {
             $multiplier = max(1, (int)($line['quantity_per_bundle'] ?? 1));
             $remaining = $quantity * $multiplier;
             $skip = $alreadyRestocked * $multiplier;
+            if ($hasShipmentHistory && count($lines) > 1) {
+                // R51: a set split between warehouses whose rest was cancelled came back with only its shipped parts;
+                // the part that never left was released on cancellation (was: "exceeds shipped allocation", no restock).
+                $shippedOfLine = 0;
+                $probe = [];
+                foreach ($line['allocations'] ?? [] as $allocation) {
+                    $shippedOfLine += self::takeShipped($probe, (int)$orderItem['id'], (string)$line['sku'],
+                        empty($allocation['warehouse_id']) ? null : (int)$allocation['warehouse_id'], (int)$allocation['qty']);
+                }
+                $remaining = min($remaining, max(0, $shippedOfLine - $skip));
+                if ($remaining === 0) continue;
+            }
+            $shippedLeft = [];
             foreach ($line['allocations'] ?? [] as $allocation) {
                 $hasAllocationSnapshot = true;
                 $status = (string)($allocation['status'] ?? 'reserved');
                 $warehouseId = empty($allocation['warehouse_id']) ? null : (int)$allocation['warehouse_id'];
                 $available = $hasShipmentHistory
-                    ? min((int)$allocation['qty'], self::shippedQuantity((int)$orderItem['id'], (string)$line['sku'], $warehouseId))
+                    ? self::takeShipped($shippedLeft, (int)$orderItem['id'], (string)$line['sku'], $warehouseId, (int)$allocation['qty'])
                     : (int)$allocation['qty'];
                 if ($skip >= $available) { $skip -= $available; continue; }
                 $available -= $skip;
@@ -537,6 +571,20 @@ class Inventory {
         $stmt = $db->prepare('SELECT stock FROM variants WHERE id = :id');
         $stmt->execute([':id' => $variantId]);
         self::movement(null, (string)$line['sku'], $type, $quantity, 0, (int)$stmt->fetchColumn(), 0, 'order', $referenceId, null, ['variant_id' => $variantId]);
+    }
+
+    /**
+     * R51: the shipped units of a warehouse are shared by the line's allocations in that warehouse, in allocation order.
+     * Each allocation subtracted all of them: two reservations in one warehouse (one allocated after a restock) with one
+     * unit shipped released neither, and a unit stayed reserved for good; a return counted the shipped unit twice.
+     * @param array<string, int> $left shipped units not yet taken, per SKU and warehouse (filled on first use)
+     */
+    private static function takeShipped(array &$left, int $orderItemId, string $sku, ?int $warehouseId, int $quantity): int {
+        $key = $sku . "\0" . ($warehouseId ?? '');
+        $left[$key] ??= self::shippedQuantity($orderItemId, $sku, $warehouseId);
+        $take = max(0, min($quantity, $left[$key]));
+        $left[$key] -= $take;
+        return $take;
     }
 
     private static function shippedQuantity(int $orderItemId, string $sku, ?int $warehouseId): int {

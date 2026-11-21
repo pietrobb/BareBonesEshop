@@ -39,6 +39,7 @@ final class OssThreshold
     public static function reset(): void
     {
         self::$years = [];
+        self::$netsStored = false;
         EurRates::reset();
     }
 
@@ -292,7 +293,7 @@ final class OssThreshold
      * invoicing in its ERP, out of memory at 330 000). Stores the net of every order placed since $since (UTC) still
      * without one, 500 per batch (one commit each on MySQL). Uses no Db method a released Db lacks. Returns the orders.
      */
-    public static function backfillOrderNets(PDO $db, string $since): int
+    public static function backfillOrderNets(PDO $db, string $since, ?float $deadline = null): int
     {
         if (!self::hasColumn('orders', 'oss_net', $db)) return 0;
         $marks = implode(', ', array_fill(0, count(self::OPEN_ORDER_SCENARIOS), '?'));
@@ -321,7 +322,7 @@ final class OssThreshold
                 if ($opened) $db->rollBack();
                 throw $e;
             }
-        } while (count($rows) === 500);
+        } while (count($rows) === 500 && ($deadline === null || microtime(true) < $deadline));
         return $count;
     }
 
@@ -807,12 +808,39 @@ final class OssThreshold
     {
         $year = (int)ShopTime::date('Y');
         $sameSeller = self::sellerStores($storeId, $store, $stores);
+        self::storeMissingNets($db, $year);
         return self::consistently($db, static function () use ($db, $sameSeller, $year): array {
             $previous = self::yearSales($db, $sameSeller, $year - 1, false)['sum'];
             // Past the threshold last year: this year does not matter (art. 59c), nothing more to read.
             if ($previous > self::EUR_CENTS) return ['previous' => $previous, 'current' => 0];
             return ['previous' => $previous, 'current' => self::yearSales($db, $sameSeller, $year, true)['sum']];
         });
+    }
+
+    private const MISSING_NETS_SECONDS = 10.0;
+    private static bool $netsStored = false;
+
+    /**
+     * R51 (review round 21, medium): open orders still without orders.oss_net (backfillOrderNets() not run) get it before
+     * the count, 500 per committed batch, for at most MISSING_NETS_SECONDS of this request. Counted inside the snapshot and
+     * stored only at its end, 200 000 such orders outlasted max_execution_time = 30: each checkout died and the next one
+     * started over. With orders still missing after the budget the count is refused (the checkout asks to retry); the
+     * next request goes on where this one stopped.
+     */
+    private static function storeMissingNets(PDO $db, int $year): void
+    {
+        if (self::$netsStored || $db->inTransaction() || !self::hasColumn('orders', 'oss_net', $db)) return;
+        $since = sprintf('%04d-12-31', $year - 2); // a day before the previous year, in any store's time zone
+        $missing = $db->prepare('SELECT 1 FROM orders WHERE oss_net IS NULL AND created_at >= ? LIMIT 1');
+        for ($pass = 0; ; $pass++) {
+            $missing->execute([$since]);
+            $found = (bool)$missing->fetchColumn();
+            $missing->closeCursor();
+            if (!$found) break;
+            if ($pass > 0) throw new RuntimeException('Open orders without their stored OSS net are being stored; retry shortly');
+            self::backfillOrderNets($db, $since, microtime(true) + self::MISSING_NETS_SECONDS);
+        }
+        self::$netsStored = true;
     }
 
     /**

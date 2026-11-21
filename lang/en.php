@@ -894,6 +894,7 @@ return [
     'admin.rma.no_source_invoice' => 'The order has no source invoice.',
     'admin.rma.nothing_to_credit' => 'Nothing left to credit on this return.',
     'admin.rma.refunded_outside' => '{amount} of this order was already refunded outside the return (order page or the provider\'s dashboard). "Refunded" counts that money: confirm it to close the return without payout, or to refund only what is still owed.',
+    'admin.rma.refund_in_flight' => 'A refund of this order is still in progress. Mark the return refunded once it is booked (if it fails, the return pays in full).',
     'admin.rma.refunded_outside_hint' => 'Already refunded outside this return: {amount}. "Refunded" counts it and pays {due}.',
     'admin.rma.refund_less_outside' => 'Refunded (count the refunded money)',
     'admin.rma.closed_without_payout' => 'Return #{id} closed without payout.',

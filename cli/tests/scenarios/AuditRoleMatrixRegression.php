@@ -220,7 +220,7 @@ try {
     // (b) One unit's worth refunded outside: it closes the first return without payout, and is then used up.
     $r49OrderId = $r49Order('r49-rma@example.com');
     $r49Rma = $r49Return($r49OrderId, 'r49-receipt-1');
-    $r49Unit = InvoiceService::rmaCreditGross((int)InvoiceService::byOrderId($r49OrderId)['id'], $r49Rma, InvoiceService::creditableQuantities($r49Rma));
+    $r49Unit = InvoiceService::rmaCreditOwed((int)InvoiceService::byOrderId($r49OrderId)['id'], $r49Rma, InvoiceService::creditableQuantities($r49Rma), 0)[1];
     assert_true($r49Unit > 1000, "R49 RMA: one returned unit is worth more than 10 € (got {$r49Unit})");
     $r49Outside($r49OrderId, $r49Unit, 'r49-order-page-refund');
     assert_equals($r49Unit, Rma::refundedOutsideReturns($r49OrderId), 'R49 RMA: the money refunded outside the return is counted');
@@ -258,6 +258,33 @@ try {
         && $a071Read('SELECT status FROM rma_requests WHERE id = ?', [$r49PartRma]) === 'refunded',
         $a071Label("R49 RMA partial: 5 € outside + the credit and refund of the unit less 5 € = one unit back (was: the unit again on top or nothing; got " . json_encode($r49Paid) . ')', $r));
     assert_equals(0, Rma::refundedOutsideReturns($r49PartOrder), 'R49 RMA partial: the credited return used the 5 € up');
+
+    // R51 (review round 21, open from R49): money refunded outside with its own credit note lowered what the invoice
+    // has uncredited; "Refunded" capped the return's credit at that rest and then took the money off again.
+    $r51Order = $r49Order('r51-rma-credited@example.com');
+    [, $r51Rma] = Rma::create($r51Order, null, 'R51 return', [(int)Orders::items($r51Order)[0]['id'] => 2]);
+    Rma::setStatus((int)$r51Rma, 'approved');
+    Rma::receive((int)$r51Rma, [(int)Rma::items((int)$r51Rma)[0]['id'] => ['quantity' => 2, 'disposition' => 'restock']], 'r51-receipt-both');
+    $r51Source = (int)InvoiceService::byOrderId($r51Order)['id'];
+    $r51Goods = InvoiceService::rmaCreditOwed($r51Source, (int)$r51Rma, InvoiceService::creditableQuantities((int)$r51Rma), 0)[1];
+    $r49Outside($r51Order, 500, 'r51-order-page-credited');
+    InvoiceService::creditRefund($r51Order, 500, 'r51-order-page-credited');
+    assert_equals([500, $r51Goods - 500], Rma::owedAfterOutside((int)$r51Rma, $r51Order),
+        "R51 RMA: both units back after 5 € refunded and credited outside: \"Refunded\" pays the goods less 5 € once (was: less 10 €)");
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Grants + ['rma_id' => (string)$r51Rma, 'status' => 'refunded', 'outside_refund' => 'deduct']);
+    $r51Paid = (int)$a071Read('SELECT COALESCE(SUM(amount), 0) FROM order_refunds WHERE rma_id = ?', [$r51Rma]);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && $r51Paid === $r51Goods - 500 && $a071Read('SELECT status FROM rma_requests WHERE id = ?', [$r51Rma]) === 'refunded',
+        $a071Label("R51 RMA: the return refunds the goods less the 5 € once (got {$r51Paid} of " . ($r51Goods - 500) . ')', $r));
+
+    // R51 (open from R49): a refund still in flight is not money returned (it may fail); the return waits for it.
+    $r51Flight = $r49Order('r51-rma-flight@example.com');
+    $r51FlightRma = $r49Return($r51Flight, 'r51-receipt-flight');
+    PaymentService::requestRefund($r51Flight, 500, 'r51-in-flight');
+    assert_equals([0, true], [Rma::refundedOutsideReturns($r51Flight), Rma::refundInFlight($r51Flight)],
+        'R51 RMA: a refund requested and not booked yet is not counted as refunded (was: counted, the return closed on money that may never leave)');
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $r49Grants + ['rma_id' => (string)$r51FlightRma, 'status' => 'refunded', 'outside_refund' => 'deduct']);
+    assert_true(($r['flash']['type'] ?? '') === 'err' && $r49Money($r51Flight) === [0, 0, 0, 0] && $a071Read('SELECT status FROM rma_requests WHERE id = ?', [$r51FlightRma]) === 'received',
+        $a071Label('R51 RMA: "Refunded" waits until the refund in flight is booked or failed', $r));
 } finally {
     $pdo->exec("DELETE FROM payment_methods WHERE code IN ('a071-editor', 'a071-manager')");
     $a071Tree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($a071Root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);

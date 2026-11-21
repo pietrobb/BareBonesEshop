@@ -98,6 +98,21 @@ try {
         $db->prepare("UPDATE orders SET status = 'cancelled' WHERE order_number LIKE 'R50P-B%'")->execute();
     });
 
+    // --- R51: open orders without a net get it in committed batches before the count ----------------------------------
+    $section('oss_net filled before the count', static function () use ($db, $place, $check): void {
+        $db->beginTransaction();
+        for ($i = 0; $i < 1200; $i++) $place('R51P-' . $i);
+        $db->exec("UPDATE orders SET oss_net = NULL WHERE order_number LIKE 'R51P-%'");
+        $db->commit();
+        $left = static fn(): int => (int)$db->query("SELECT COUNT(*) FROM orders WHERE oss_net IS NULL AND order_number LIKE 'R51P-%'")->fetchColumn();
+        OssThreshold::backfillOrderNets($db, '2000-01-01', microtime(true) - 1);
+        $check($left() === 700, 'past its time budget the fill keeps the batch of 500 it committed and stops (a web request limit loses no work; left ' . $left() . ')');
+        OssThreshold::reset();
+        (new ReflectionMethod(OssThreshold::class, 'storeMissingNets'))->invoke(null, $db, (int)ShopTime::date('Y'));
+        $check($left() === 0 && !$db->inTransaction(), 'the next count stores the rest before its read-only snapshot (was: counted inside it and stored only at its end)');
+        $db->prepare("UPDATE orders SET status = 'cancelled' WHERE order_number LIKE 'R51P-%'")->execute();
+    });
+
     // --- GDPR e-mail lookups ------------------------------------------------------------------------------------------
     $section('GDPR e-mail lookup', static function () use ($db, $driver, $place, $check): void {
         $order = $place('R50P-GDPR', 'cancelled', 'domestic', 'R50P-Mixed@Example.TEST');

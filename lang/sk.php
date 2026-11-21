@@ -899,6 +899,7 @@ return [
     'admin.rma.no_source_invoice' => 'Objednávka nemá zdrojovú faktúru.',
     'admin.rma.nothing_to_credit' => 'Pri tomto vrátení už nezostáva nič na dobropis.',
     'admin.rma.refunded_outside' => 'Z tejto objednávky už bolo mimo vrátenia vrátených {amount} (stránka objednávky alebo dashboard platobnej brány). „Vrátené“ tieto peniaze započíta: potvrďte ho a vrátenie sa uzavrie bez výplaty alebo vyplatí len to, čo ešte zostáva.',
+    'admin.rma.refund_in_flight' => 'Refundácia tejto objednávky ešte prebieha. Vrátenie označte ako vrátené, keď bude zaúčtovaná (ak zlyhá, vrátenie sa vyplatí celé).',
     'admin.rma.refunded_outside_hint' => 'Už vrátené mimo tohto vrátenia: {amount}. „Vrátené“ ich započíta a vyplatí {due}.',
     'admin.rma.refund_less_outside' => 'Vrátené (započítať vrátené peniaze)',
     'admin.rma.closed_without_payout' => 'Vrátenie #{id} uzavreté bez výplaty.',

@@ -2394,6 +2394,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.to' => 'A',
     'admin.rma.nothing_to_credit' => 'No queda nada por abonar en esta devolución.',
     'admin.rma.refunded_outside' => 'De este pedido ya se reembolsaron {amount} fuera de la devolución (página del pedido o panel del proveedor de pago). «Reembolsado» descuenta ese dinero: confírmelo y la devolución se cierra sin pago o se reembolsa solo lo que aún se debe.',
+    'admin.rma.refund_in_flight' => 'Un reembolso de este pedido sigue en curso. Marque la devolución como reembolsada cuando esté registrado (si falla, la devolución se paga entera).',
     'admin.rma.refunded_outside_hint' => 'Ya reembolsado fuera de esta devolución: {amount}. «Reembolsado» lo descuenta y paga {due}.',
     'admin.rma.refund_less_outside' => 'Reembolsado (descontar el dinero reembolsado)',
     'admin.rma.closed_without_payout' => 'Devolución #{id} cerrada sin pago.',

@@ -892,6 +892,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.no_source_invoice' => 'Objednávka nemá zdrojovou fakturu.',
     'admin.rma.nothing_to_credit' => 'U tohoto vrácení již nezbývá nic k dobropisu.',
     'admin.rma.refunded_outside' => 'Z této objednávky už bylo mimo vrácení vráceno {amount} (stránka objednávky nebo dashboard platební brány). „Vráceno“ tyto peníze započítá: potvrďte ho a vrácení se uzavře bez výplaty, nebo se vyplatí jen to, co ještě zbývá.',
+    'admin.rma.refund_in_flight' => 'Refundace této objednávky ještě probíhá. Vratku označte jako vrácenou, až bude zaúčtována (pokud selže, vratka se vyplatí celá).',
     'admin.rma.refunded_outside_hint' => 'Již vráceno mimo toto vrácení: {amount}. „Vráceno“ je započítá a vyplatí {due}.',
     'admin.rma.refund_less_outside' => 'Vráceno (započítat vrácené peníze)',
     'admin.rma.closed_without_payout' => 'Vrácení #{id} uzavřeno bez výplaty.',

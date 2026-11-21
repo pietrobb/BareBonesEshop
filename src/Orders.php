@@ -43,208 +43,16 @@ class Orders {
             $ossSnapshot = $customer['financial_snapshot'] ?? null;
             if (is_string($ossSnapshot) && $ossSnapshot !== '') $ossSnapshot = json_decode($ossSnapshot, true);
             if (is_array($ossSnapshot)) $ossLock = OssThreshold::guardOrder($db, $ossSnapshot, $customer, array_values($cartItems));
-            $db->beginTransaction();
-            // 1. Atomically reserve stock for each item and freeze its exact allocation.
-            ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($cartItems);
-
-            // 2. Freeze the canonical checkout calculation. New checkout calls must
-            // provide this snapshot; direct/legacy callers retain the old path so
-            // existing integrations and historical imports remain readable.
-            $financialSnapshot = $customer['financial_snapshot'] ?? null;
-            if (is_string($financialSnapshot) && $financialSnapshot !== '') {
-                $financialSnapshot = json_decode($financialSnapshot, true, 512, JSON_THROW_ON_ERROR);
-            }
-            $financialSnapshotJson = null;
-            if (is_array($financialSnapshot)) {
-                $taxProvider = Adapters::tax((string)($financialSnapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));
-                $taxProvider::validateSnapshot($financialSnapshot);
-                self::assertSnapshotItems($financialSnapshot, $orderItems);
-                $snapshotTotals = $financialSnapshot['totals'];
-                $shippingCost = (int)$snapshotTotals['shipping'];
-                $taxAmount = (int)$snapshotTotals['vat'];
-                $couponDiscount = (int)$snapshotTotals['discount'];
-                $paymentFee = (int)$snapshotTotals['payment_fee'];
-                $total = (int)$snapshotTotals['gross'];
-                $vatTotal = $taxAmount;
-                $netTotal = (int)$snapshotTotals['net'];
-                $vatScenario = (string)$financialSnapshot['scenario'];
-                if ((int)$snapshotTotals['subtotal'] !== $subtotal
-                    || strtolower((string)$financialSnapshot['currency']) !== strtolower((string)($customer['currency'] ?? 'eur'))
-                    || $shippingCost !== (int)($customer['shipping_cost'] ?? 0)
-                    || $couponDiscount !== (int)($customer['coupon_discount'] ?? 0)
-                    || $paymentFee !== (int)($customer['payment_fee'] ?? 0)) {
-                    throw new \InvalidArgumentException('Financial snapshot does not match order inputs');
-                }
-                $financialSnapshotJson = json_encode($financialSnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-            } else {
-                $shippingCost = $customer['shipping_cost'] ?? 0;
-                $taxAmount = $customer['tax_amount'] ?? 0;
-                $couponDiscount = $customer['coupon_discount'] ?? 0;
-                $paymentFee = $customer['payment_fee'] ?? 0;
-                // Legacy direct callers may still supply net prices. The storefront
-                // always uses the snapshot path and therefore never reads prices_include_tax here.
-                $taxInTotal = (Security::config()['prices_include_tax'] ?? true) ? 0 : $taxAmount;
-                $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxInTotal + $paymentFee;
-
-                $vatTotal = 0;
-                $netTotal = 0;
-                $hasVat = false;
-                foreach ($orderItems as $oi) {
-                    if ($oi['vat_amount'] !== null) { $hasVat = true; $vatTotal += (int)$oi['vat_amount']; }
-                    if ($oi['net_amount'] !== null) { $netTotal += (int)$oi['net_amount']; }
-                }
-                $vatScenario = $customer['vat_scenario'] ?? null;
-                if (!$hasVat) {
-                    $vatTotal = 0; $netTotal = 0;
-                } elseif ($couponDiscount > 0 && $subtotal > 0) {
-                    $discountedGross = max(0, $subtotal - $couponDiscount);
-                    $vatTotal = (int) round($vatTotal * $discountedGross / $subtotal);
-                    $netTotal = $discountedGross - $vatTotal;
-                }
-            }
-
-            // 3. Create order (retry on unique constraint collision)
-            $orderNumber = null;
-            $orderId = null;
-            // Resolve locale: explicit customer arg wins; else current I18n locale; else system default.
-            $stores = json_decode(@file_get_contents(DataOverrides::storesPath()) ?: '{}', true) ?: [];
-            $sysDefaultLocale = $stores['default_locale'] ?? 'en';
-            $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
-            $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
-            if ($customerId !== null && self::paysOnInvoice($paymentMethod, $customer)) Customers::assertInvoiceCredit($customerId, (int)$total);
-            $orderParams = [
-                ':store'    => $storeContext->id(),
-                ':channel'  => $storeContext->channel(),
-                ':cid'      => $customerId,
-                ':name'     => $customer['name'],
-                ':email'    => $customer['email'],
-                ':phone'    => $customer['phone'] ?? '',
-                ':addr'     => json_encode($customer['address'] ?? []),
-                ':method'   => $paymentMethod,
-                ':subtotal' => $subtotal,
-                ':discount' => $couponDiscount,
-                ':shipping' => $shippingCost,
-                ':tax'      => $taxAmount,
-                ':total'    => $total,
-                ':currency' => $customer['currency'] ?? 'eur',
-                ':locale'   => $orderLocale,
-                ':notes'    => $customer['notes'] ?? '',
-                ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : Security::clientIp(),
-                ':vatscen'  => $vatScenario,
-                ':vattotal' => $vatTotal,
-                ':nettotal' => $netTotal,
-                ':shipmethod' => $customer['shipping_method'] ?? null,
-                ':shipzone' => $customer['shipping_zone'] ?? null,
-                ':shipweight' => (int)($customer['shipping_weight_g'] ?? 0),
-                ':shipsnapshot' => $customer['shipping_rate_snapshot'] ?? null,
-                ':paymentfee' => (int)($customer['payment_fee'] ?? 0),
-                ':paymentsnapshot' => $customer['payment_method_snapshot'] ?? null,
-                ':financialsnapshot' => $financialSnapshotJson,
-            ];
-            $paymentColumns = self::hasColumn('orders', 'payment_method_snapshot');
-            $shippingColumns = self::hasColumn('orders', 'shipping_method');
-            $financialColumns = self::hasColumn('orders', 'financial_snapshot');
-            $extraColumns = $shippingColumns ? ', shipping_method, shipping_zone, shipping_weight_g, shipping_rate_snapshot' : '';
-            $extraValues = $shippingColumns ? ', :shipmethod, :shipzone, :shipweight, :shipsnapshot' : '';
-            if ($paymentColumns) {
-                $extraColumns .= ', payment_fee, payment_method_snapshot';
-                $extraValues .= ', :paymentfee, :paymentsnapshot';
-            }
-            if ($financialColumns) {
-                $extraColumns .= ', financial_snapshot';
-                $extraValues .= ', :financialsnapshot';
-            }
-            if (!$shippingColumns) {
-                unset($orderParams[':shipmethod'], $orderParams[':shipzone'], $orderParams[':shipweight'], $orderParams[':shipsnapshot']);
-            }
-            if (!$paymentColumns) {
-                unset($orderParams[':paymentfee'], $orderParams[':paymentsnapshot']);
-            }
-            if (!$financialColumns) {
-                unset($orderParams[':financialsnapshot']);
-            }
-            // R31: billed to another address than delivered to; without one billing_addr stays NULL (= delivery address).
-            if (!empty($customer['billing_address']) && is_array($customer['billing_address'])) {
-                if (!self::hasColumn('orders', 'billing_addr')) throw new \RuntimeException('A billing address needs the order billing address migration');
-                $extraColumns .= ', billing_addr';
-                $extraValues .= ', :billingaddr';
-                $orderParams[':billingaddr'] = json_encode($customer['billing_address'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-            }
-            $synthetic = !empty($customer['is_synthetic']);
-            if ($synthetic) {
-                if (!self::hasColumn('orders', 'is_synthetic')) throw new \RuntimeException('Synthetic orders need the payment monitoring migration');
-                $extraColumns .= ', is_synthetic';
-                $extraValues .= ', 1';
-            }
-            $orderStmt = $db->prepare("
-                INSERT INTO orders (order_number, store_id, channel_id, status, customer_id, customer_name, customer_email, customer_phone,
-                    shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
-                    locale, notes, ip_address, vat_scenario, vat_total, net_total{$extraColumns})
-                VALUES (:num, :store, :channel, 'pending', :cid, :name, :email, :phone, :addr, :method,
-                    :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip,
-                    :vatscen, :vattotal, :nettotal{$extraValues})
-            ");
-            for ($attempt = 0; $attempt < 5; $attempt++) {
-                $orderNumber = self::generateOrderNumber();
+            // R51: MySQL may pick the checkout as the victim of a deadlock (it rolled back everything): try again.
+            for ($attempt = 1; ; $attempt++) {
                 try {
-                    $orderStmt->execute(array_merge([':num' => $orderNumber], $orderParams));
-                    $orderId = (int)$db->lastInsertId();
-                    break;
+                    return self::createWithin($db, $storeContext, $cartItems, $customer, $paymentMethod, $coupon);
                 } catch (\PDOException $e) {
-                    $message = strtolower($e->getMessage());
-                    $orderNumberCollision = $e->getCode() === '23000'
-                        && (str_contains($message, 'unique') || str_contains($message, 'duplicate'))
-                        && str_contains($message, 'order_number');
-                    if (!$orderNumberCollision || $attempt >= 4) throw $e;
+                    if ($db->inTransaction()) $db->rollBack();
+                    if ($attempt >= 3 || !Db::deadlocked($e)) throw $e;
+                    usleep(random_int(5_000, 40_000) * $attempt);
                 }
             }
-
-            // 4. Insert order items (with per-line VAT snapshot when available)
-            self::insertItems($orderId, $orderItems);
-            OssThreshold::recordOrder($db, $orderId); // R36: what it adds to the OSS threshold until invoiced
-
-            // 5. Record coupon use atomically within the order transaction
-            // A free-shipping coupon discounts no goods (discount 0) but is still a use against its limits.
-            if ($coupon && !empty($coupon['code'])) {
-                Pricing::recordCouponUse(
-                    $coupon['code'], $orderId,
-                    $customer['email'], max(0, (int)($coupon['discount'] ?? 0))
-                );
-            }
-
-            if (isset($customer['consents'])) {
-                ConsentService::record($orderId, $customer['consents'], $customer['consent_context'], Security::clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
-            }
-
-            // 6. Audit log
-            AuditLog::log('order', $orderId, null, [
-                'order_number' => $orderNumber,
-                'total'        => $total,
-                'items'        => count($orderItems),
-            ], $synthetic ? 'Synthetic smoke order created' : 'Order created');
-            // A synthetic smoke order never leaves the shop: no ERP/webhook/stock integration events.
-            if (!$synthetic) {
-                Outbox::record(DomainEvents::ORDER_CREATED, 'order', $orderId, [
-                    'order_id' => $orderId,
-                    'order_number' => $orderNumber,
-                    'status' => 'pending',
-                    'total' => $total,
-                    'currency' => strtolower((string)($customer['currency'] ?? 'eur')),
-                    'customer_id' => $customerId,
-                ]);
-                Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
-                    'order_id' => $orderId,
-                    'items' => array_map(static fn(array $item): array => [
-                        'product_id' => (int)$item['product_id'],
-                        'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
-                        'sku' => (string)$item['sku'],
-                        'quantity' => (int)$item['quantity'],
-                    ], $orderItems),
-                ]);
-            }
-
-            $db->commit();
-            return $orderId;
 
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
@@ -253,6 +61,212 @@ class Orders {
             OssThreshold::releaseOrderLock($db, $ossLock);
             self::releaseCheckoutLock($sqliteLock);
         }
+    }
+
+    /** The order transaction of create(), run again when MySQL picked it as a deadlock victim. */
+    private static function createWithin(PDO $db, StoreContext $storeContext, array $cartItems, array $customer, string $paymentMethod, ?array $coupon): int {
+        $db->beginTransaction();
+        // 1. Atomically reserve stock for each item and freeze its exact allocation.
+        ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($cartItems);
+
+        // 2. Freeze the canonical checkout calculation. New checkout calls must
+        // provide this snapshot; direct/legacy callers retain the old path so
+        // existing integrations and historical imports remain readable.
+        $financialSnapshot = $customer['financial_snapshot'] ?? null;
+        if (is_string($financialSnapshot) && $financialSnapshot !== '') {
+            $financialSnapshot = json_decode($financialSnapshot, true, 512, JSON_THROW_ON_ERROR);
+        }
+        $financialSnapshotJson = null;
+        if (is_array($financialSnapshot)) {
+            $taxProvider = Adapters::tax((string)($financialSnapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));
+            $taxProvider::validateSnapshot($financialSnapshot);
+            self::assertSnapshotItems($financialSnapshot, $orderItems);
+            $snapshotTotals = $financialSnapshot['totals'];
+            $shippingCost = (int)$snapshotTotals['shipping'];
+            $taxAmount = (int)$snapshotTotals['vat'];
+            $couponDiscount = (int)$snapshotTotals['discount'];
+            $paymentFee = (int)$snapshotTotals['payment_fee'];
+            $total = (int)$snapshotTotals['gross'];
+            $vatTotal = $taxAmount;
+            $netTotal = (int)$snapshotTotals['net'];
+            $vatScenario = (string)$financialSnapshot['scenario'];
+            if ((int)$snapshotTotals['subtotal'] !== $subtotal
+                || strtolower((string)$financialSnapshot['currency']) !== strtolower((string)($customer['currency'] ?? 'eur'))
+                || $shippingCost !== (int)($customer['shipping_cost'] ?? 0)
+                || $couponDiscount !== (int)($customer['coupon_discount'] ?? 0)
+                || $paymentFee !== (int)($customer['payment_fee'] ?? 0)) {
+                throw new \InvalidArgumentException('Financial snapshot does not match order inputs');
+            }
+            $financialSnapshotJson = json_encode($financialSnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        } else {
+            $shippingCost = $customer['shipping_cost'] ?? 0;
+            $taxAmount = $customer['tax_amount'] ?? 0;
+            $couponDiscount = $customer['coupon_discount'] ?? 0;
+            $paymentFee = $customer['payment_fee'] ?? 0;
+            // Legacy direct callers may still supply net prices. The storefront
+            // always uses the snapshot path and therefore never reads prices_include_tax here.
+            $taxInTotal = (Security::config()['prices_include_tax'] ?? true) ? 0 : $taxAmount;
+            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxInTotal + $paymentFee;
+
+            $vatTotal = 0;
+            $netTotal = 0;
+            $hasVat = false;
+            foreach ($orderItems as $oi) {
+                if ($oi['vat_amount'] !== null) { $hasVat = true; $vatTotal += (int)$oi['vat_amount']; }
+                if ($oi['net_amount'] !== null) { $netTotal += (int)$oi['net_amount']; }
+            }
+            $vatScenario = $customer['vat_scenario'] ?? null;
+            if (!$hasVat) {
+                $vatTotal = 0; $netTotal = 0;
+            } elseif ($couponDiscount > 0 && $subtotal > 0) {
+                $discountedGross = max(0, $subtotal - $couponDiscount);
+                $vatTotal = (int) round($vatTotal * $discountedGross / $subtotal);
+                $netTotal = $discountedGross - $vatTotal;
+            }
+        }
+
+        // 3. Create order (retry on unique constraint collision)
+        $orderNumber = null;
+        $orderId = null;
+        // Resolve locale: explicit customer arg wins; else current I18n locale; else system default.
+        $stores = json_decode(@file_get_contents(DataOverrides::storesPath()) ?: '{}', true) ?: [];
+        $sysDefaultLocale = $stores['default_locale'] ?? 'en';
+        $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
+        $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
+        if ($customerId !== null && self::paysOnInvoice($paymentMethod, $customer)) Customers::assertInvoiceCredit($customerId, (int)$total);
+        $orderParams = [
+            ':store'    => $storeContext->id(),
+            ':channel'  => $storeContext->channel(),
+            ':cid'      => $customerId,
+            ':name'     => $customer['name'],
+            ':email'    => $customer['email'],
+            ':phone'    => $customer['phone'] ?? '',
+            ':addr'     => json_encode($customer['address'] ?? []),
+            ':method'   => $paymentMethod,
+            ':subtotal' => $subtotal,
+            ':discount' => $couponDiscount,
+            ':shipping' => $shippingCost,
+            ':tax'      => $taxAmount,
+            ':total'    => $total,
+            ':currency' => $customer['currency'] ?? 'eur',
+            ':locale'   => $orderLocale,
+            ':notes'    => $customer['notes'] ?? '',
+            ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : Security::clientIp(),
+            ':vatscen'  => $vatScenario,
+            ':vattotal' => $vatTotal,
+            ':nettotal' => $netTotal,
+            ':shipmethod' => $customer['shipping_method'] ?? null,
+            ':shipzone' => $customer['shipping_zone'] ?? null,
+            ':shipweight' => (int)($customer['shipping_weight_g'] ?? 0),
+            ':shipsnapshot' => $customer['shipping_rate_snapshot'] ?? null,
+            ':paymentfee' => (int)($customer['payment_fee'] ?? 0),
+            ':paymentsnapshot' => $customer['payment_method_snapshot'] ?? null,
+            ':financialsnapshot' => $financialSnapshotJson,
+        ];
+        $paymentColumns = self::hasColumn('orders', 'payment_method_snapshot');
+        $shippingColumns = self::hasColumn('orders', 'shipping_method');
+        $financialColumns = self::hasColumn('orders', 'financial_snapshot');
+        $extraColumns = $shippingColumns ? ', shipping_method, shipping_zone, shipping_weight_g, shipping_rate_snapshot' : '';
+        $extraValues = $shippingColumns ? ', :shipmethod, :shipzone, :shipweight, :shipsnapshot' : '';
+        if ($paymentColumns) {
+            $extraColumns .= ', payment_fee, payment_method_snapshot';
+            $extraValues .= ', :paymentfee, :paymentsnapshot';
+        }
+        if ($financialColumns) {
+            $extraColumns .= ', financial_snapshot';
+            $extraValues .= ', :financialsnapshot';
+        }
+        if (!$shippingColumns) {
+            unset($orderParams[':shipmethod'], $orderParams[':shipzone'], $orderParams[':shipweight'], $orderParams[':shipsnapshot']);
+        }
+        if (!$paymentColumns) {
+            unset($orderParams[':paymentfee'], $orderParams[':paymentsnapshot']);
+        }
+        if (!$financialColumns) {
+            unset($orderParams[':financialsnapshot']);
+        }
+        // R31: billed to another address than delivered to; without one billing_addr stays NULL (= delivery address).
+        if (!empty($customer['billing_address']) && is_array($customer['billing_address'])) {
+            if (!self::hasColumn('orders', 'billing_addr')) throw new \RuntimeException('A billing address needs the order billing address migration');
+            $extraColumns .= ', billing_addr';
+            $extraValues .= ', :billingaddr';
+            $orderParams[':billingaddr'] = json_encode($customer['billing_address'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        }
+        $synthetic = !empty($customer['is_synthetic']);
+        if ($synthetic) {
+            if (!self::hasColumn('orders', 'is_synthetic')) throw new \RuntimeException('Synthetic orders need the payment monitoring migration');
+            $extraColumns .= ', is_synthetic';
+            $extraValues .= ', 1';
+        }
+        $orderStmt = $db->prepare("
+            INSERT INTO orders (order_number, store_id, channel_id, status, customer_id, customer_name, customer_email, customer_phone,
+                shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
+                locale, notes, ip_address, vat_scenario, vat_total, net_total{$extraColumns})
+            VALUES (:num, :store, :channel, 'pending', :cid, :name, :email, :phone, :addr, :method,
+                :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip,
+                :vatscen, :vattotal, :nettotal{$extraValues})
+        ");
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $orderNumber = self::generateOrderNumber();
+            try {
+                $orderStmt->execute(array_merge([':num' => $orderNumber], $orderParams));
+                $orderId = (int)$db->lastInsertId();
+                break;
+            } catch (\PDOException $e) {
+                $message = strtolower($e->getMessage());
+                $orderNumberCollision = $e->getCode() === '23000'
+                    && (str_contains($message, 'unique') || str_contains($message, 'duplicate'))
+                    && str_contains($message, 'order_number');
+                if (!$orderNumberCollision || $attempt >= 4) throw $e;
+            }
+        }
+
+        // 4. Insert order items (with per-line VAT snapshot when available)
+        self::insertItems($orderId, $orderItems);
+        OssThreshold::recordOrder($db, $orderId); // R36: what it adds to the OSS threshold until invoiced
+
+        // 5. Record coupon use atomically within the order transaction
+        // A free-shipping coupon discounts no goods (discount 0) but is still a use against its limits.
+        if ($coupon && !empty($coupon['code'])) {
+            Pricing::recordCouponUse(
+                $coupon['code'], $orderId,
+                $customer['email'], max(0, (int)($coupon['discount'] ?? 0))
+            );
+        }
+
+        if (isset($customer['consents'])) {
+            ConsentService::record($orderId, $customer['consents'], $customer['consent_context'], Security::clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+        }
+
+        // 6. Audit log
+        AuditLog::log('order', $orderId, null, [
+            'order_number' => $orderNumber,
+            'total'        => $total,
+            'items'        => count($orderItems),
+        ], $synthetic ? 'Synthetic smoke order created' : 'Order created');
+        // A synthetic smoke order never leaves the shop: no ERP/webhook/stock integration events.
+        if (!$synthetic) {
+            Outbox::record(DomainEvents::ORDER_CREATED, 'order', $orderId, [
+                'order_id' => $orderId,
+                'order_number' => $orderNumber,
+                'status' => 'pending',
+                'total' => $total,
+                'currency' => strtolower((string)($customer['currency'] ?? 'eur')),
+                'customer_id' => $customerId,
+            ]);
+            Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
+                'order_id' => $orderId,
+                'items' => array_map(static fn(array $item): array => [
+                    'product_id' => (int)$item['product_id'],
+                    'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
+                    'sku' => (string)$item['sku'],
+                    'quantity' => (int)$item['quantity'],
+                ], $orderItems),
+            ]);
+        }
+
+        $db->commit();
+        return $orderId;
     }
 
     /**
@@ -703,6 +717,7 @@ class Orders {
                 if ($ownTransaction) $db->rollBack();
                 return; // already restored (or order does not exist)
             }
+            Inventory::lockOrderSkus($items);
             $skus = [];
             foreach ($items as $item) {
                 if (Inventory::isDigitalLine($item)) continue;

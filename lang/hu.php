@@ -892,6 +892,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.no_source_invoice' => 'A rendeléshez nincs forrásszámla.',
     'admin.rma.nothing_to_credit' => 'Ennél a visszaküldésnél már nincs mit jóváírni.',
     'admin.rma.refunded_outside' => 'Ebből a rendelésből már {amount} visszatérítésre került a visszaküldésen kívül (rendelés oldala vagy a fizetési szolgáltató felülete). A „Visszatérítve” beszámítja ezt az összeget: erősítse meg, és a visszaküldés kifizetés nélkül lezárul, vagy csak a még fennmaradó összeg kerül kifizetésre.',
+    'admin.rma.refund_in_flight' => 'A rendelés egyik visszatérítése még folyamatban van. A visszaküldést akkor jelölje visszatérítettnek, ha az már könyvelve van (ha meghiúsul, a visszaküldés teljes összege jár).',
     'admin.rma.refunded_outside_hint' => 'A visszaküldésen kívül már visszatérítve: {amount}. A „Visszatérítve” beszámítja, és {due} összeget fizet ki.',
     'admin.rma.refund_less_outside' => 'Visszatérítve (visszatérített összeg beszámítása)',
     'admin.rma.closed_without_payout' => 'A(z) #{id} visszaküldés kifizetés nélkül lezárva.',

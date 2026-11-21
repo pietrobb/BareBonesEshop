@@ -78,8 +78,9 @@ try {
     assert_true(count($r50mParcels) === 2 && $r50mParcelA > 0, 'R50 split set: the set ships in two parcels, one per warehouse');
     Fulfillment::ship($r50mParcelA);
     $r50mSetItem = Orders::items($r50mSetOrder)[0];
-    assert_equals([1, 0], [Fulfillment::shippedUnits($r50mSetItem), Fulfillment::unshippedGross($r50mSetOrder)],
-        'R50 split set: with its first parcel shipped the set is with the customer; cancelling the rest refunds no goods and no shipping (was: nothing shipped, the whole 35 € refunded)');
+    // R51 (review round 21): half of the set left; cancelling the rest refunds that half (R50 refunded nothing of it).
+    assert_equals([1, 1500], [Fulfillment::shippedUnits($r50mSetItem), Fulfillment::unshippedGross($r50mSetOrder)],
+        'R50 split set: with its first parcel shipped the set is returnable; cancelling the rest refunds the unshipped half and no shipping (was: nothing shipped, the whole 35 € refunded)');
     $r50mNormalize = new ReflectionMethod(Rma::class, 'normalizeItems');
     $r50mReturnable = $r50mNormalize->invoke(null, $r50mSetOrder, [(int)$r50mSetItem['id'] => 1], [(int)$r50mSetItem['id'] => $r50mSetItem], true);
     assert_equals(1, (int)($r50mReturnable[0]['qty'] ?? 0),

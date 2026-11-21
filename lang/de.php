@@ -892,6 +892,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.no_source_invoice' => 'Die Bestellung hat keine Ausgangsrechnung.',
     'admin.rma.nothing_to_credit' => 'Für diese Rücksendung ist nichts mehr gutzuschreiben.',
     'admin.rma.refunded_outside' => 'Von dieser Bestellung wurden bereits {amount} außerhalb der Rücksendung erstattet (Bestellseite oder Dashboard des Zahlungsanbieters). „Erstattet“ rechnet dieses Geld an: Bestätigen Sie, dann wird die Rücksendung ohne Auszahlung geschlossen oder nur der noch offene Betrag erstattet.',
+    'admin.rma.refund_in_flight' => 'Eine Erstattung dieser Bestellung läuft noch. Markieren Sie die Rücksendung als erstattet, sobald sie gebucht ist (schlägt sie fehl, wird die Rücksendung voll erstattet).',
     'admin.rma.refunded_outside_hint' => 'Bereits außerhalb dieser Rücksendung erstattet: {amount}. „Erstattet“ rechnet es an und zahlt {due} aus.',
     'admin.rma.refund_less_outside' => 'Erstattet (erstattetes Geld anrechnen)',
     'admin.rma.closed_without_payout' => 'Rücksendung #{id} ohne Auszahlung geschlossen.',

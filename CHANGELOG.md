@@ -418,8 +418,24 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   payment method.
 - **Cancelling the rest of an order whose set ships from two warehouses refunds only what did not ship.** A set
   (bundle) counted as shipped only once all its parts had left, so cancelling after its first parcel refunded the
-  whole order and its shipping. A set with a part dispatched now counts as with the customer (returnable), and
-  shipping is refunded only when nothing was dispatched.
+  whole order and its shipping. A set with a part dispatched is returnable, the cancellation refunds the share of the
+  set that did not leave (review round 51: it refunded nothing of it) and its return credits and restocks the share
+  that came back; shipping is refunded only when nothing was dispatched.
+- **Cancellations and returns no longer deadlock against checkout, and a deadlock no longer fails checkout (review
+  round 51).** A cancellation released its lines in order-line order while a checkout locked the same SKUs in SKU
+  order, so on MySQL the two could deadlock and the buyer got a 500. A cancellation and a return now lock the stock of
+  all their SKUs in SKU order first, and a checkout MySQL picks as a deadlock victim runs its order again (up to three
+  times). A line reserved twice in one warehouse (a backorder allocated after a restock) with one unit shipped kept the
+  other unit reserved for good when the rest was cancelled; it is released.
+- **Open orders without a stored OSS net are filled in before the count (review round 51).** Checkout counted them
+  from their lines inside its snapshot and stored them only at the end, so 200 000 of them outlasted
+  `max_execution_time = 30`: each checkout died and the next started over. They are now stored in committed batches of
+  500 for at most 10 s per request before the count; until all are stored a distance-sale checkout asks to try again.
+- **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
+  open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
+  after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet
+  booked counted as returned. The money comes off the goods' value before the cap; while a refund is in flight
+  "Refunded" waits for it (if it fails, the return pays in full).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

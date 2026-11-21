@@ -892,6 +892,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.no_source_invoice' => 'Zamówienie nie ma faktury źródłowej.',
     'admin.rma.nothing_to_credit' => 'W tym zwrocie nie pozostało nic do skorygowania.',
     'admin.rma.refunded_outside' => 'Z tego zamówienia zwrócono już {amount} poza zwrotem (strona zamówienia lub panel operatora płatności). „Zwrócono” uwzględni te pieniądze: potwierdź, a zwrot zostanie zamknięty bez wypłaty albo wypłacona zostanie tylko pozostała kwota.',
+    'admin.rma.refund_in_flight' => 'Zwrot płatności za to zamówienie wciąż trwa. Oznacz zwrot towaru jako rozliczony, gdy zostanie zaksięgowany (jeśli się nie powiedzie, zwrot zostanie wypłacony w całości).',
     'admin.rma.refunded_outside_hint' => 'Już zwrócono poza tym zwrotem: {amount}. „Zwrócono” uwzględni to i wypłaci {due}.',
     'admin.rma.refund_less_outside' => 'Zwrócono (uwzględnij zwrócone pieniądze)',
     'admin.rma.closed_without_payout' => 'Zwrot #{id} zamknięty bez wypłaty.',
