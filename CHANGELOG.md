@@ -97,6 +97,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   indexes (review round 36): the threshold's year totals per store, filled for the current and the previous year, and
   what each order of those years adds until it is invoiced. On a large shop it reads two years of orders once: both
   migrations originally took 7.7 minutes for 200 000 invoices on MySQL 8.4. The new prerequisite `20261113175959_oss_physical_backfill` bulk-fills physical invoices before those unchanged migrations; digital invoices and credit notes still use their original batched calculation. It is a no-op on stores with existing OSS totals.
+  Review round 51: its open orders are stored in one pass (each order no longer sums every other open order of the year):
+  3 000 open orders take under a second on SQLite and about 11 s on MySQL (were 143 s and, for 1 000, 500 s); expect
+  roughly 1 minute per 20 000 open orders on MySQL.
 - **Migration** `20261114210000_oss_threshold_activations` records historical OSS crossings per seller and year from issued documents and still-open orders. A later credit reduces the accounting turnover, but no longer removes OSS for that year and the next; checkout previews do not activate it. The doctor distinguishes this obligation from the reduced turnover.
 - **Migration** `20261114200000_oss_open_orders` removes already-invoiced and closed orders from the OSS open-order
   index. Issuing an invoice now clears its order's contribution; cancelling it restores a still-live order. The
@@ -432,8 +435,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   no counters to carry over, so the invoice storage counts as well: a number whose PDF is already there, in any month
   of its year, is skipped (and logged) when the next document is numbered.
 - **Backups also cover `config.php`, the jobs not done yet and `themes/`; a restore works on a new MySQL server.** A
-  restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run next to the
-  live ones (`*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
+  restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run into the
+  private directory `<backup_recovery_dir>/from-backup/` (never the web root; the web server rules also deny
+  `*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
   `db_name` before importing.
 - **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
   (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the

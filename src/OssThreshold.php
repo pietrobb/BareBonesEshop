@@ -233,7 +233,10 @@ final class OssThreshold
         $db->prepare("UPDATE orders SET oss_net = CASE WHEN status IN ('cancelled', 'refunded', 'failed') OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = orders.id AND i.type = 'invoice' AND i.status = 'issued') THEN 0 ELSE :net END WHERE id = :id")->execute([':net' => $net, ':id' => $orderId]);
         $year = self::orderYear((string)$order['store_id'], (string)$order['created_at']);
         $reason = self::snapshotReason($order);
-        self::rememberCrossing($db, (string)$order['store_id'], $year, $net > 0 && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order)
+        // R51 (high 2): decided only when an activation can still be recorded; evaluated eagerly it summed the year's open
+        // orders for every order, and migration 20261113190000 (every open order, table not created yet) went quadratic.
+        self::rememberCrossing($db, (string)$order['store_id'], $year, static fn(): bool => $net > 0
+            && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order)
             && ($reason === null ? self::crossesAtHome($db, $order, $year, $net) : $reason === self::REASON_CURRENT));
     }
 
@@ -686,11 +689,12 @@ final class OssThreshold
     }
 
     // Persist only actual sales, in the writer's transaction. A speculative checkout must never activate OSS.
-    private static function rememberCrossing(PDO $db, string $storeId, int $year, bool $decided = false): void
+    private static function rememberCrossing(PDO $db, string $storeId, int $year, bool|\Closure $decided = false): void
     {
         if (!Db::tableExists('oss_threshold_activations', $db)) return;
         $store = self::storeConfig($storeId);
         if (self::activated($db, $storeId, $store, $year, false)) return;
+        if ($decided instanceof \Closure) $decided = $decided();
         $stores = self::sellerStores($storeId, $store, (array)(Bootstrap::stores()['stores'] ?? []));
         if (!$decided && self::yearSales($db, $stores, $year, $year === (int)ShopTime::date('Y'))['sum'] <= self::EUR_CENTS) return;
         $db->prepare(Db::insertIgnore() . ' INTO oss_threshold_activations (seller_key, year) VALUES (?, ?)')->execute([self::sellerKey($storeId, $store), $year]);

@@ -1425,8 +1425,12 @@ class BackupService
                     $differs = is_file($target) && !hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target));
                     if ($name === 'jobs' && !is_file($target)) $jobsRan ??= self::holdsAnyFile($root);
                     if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan)) {
-                        $asideRoot = rtrim($root, '/\\') . '.from-backup';
-                        [$target, $base] = $kind === 'file' ? [$asideRoot, dirname($root)] : [$asideRoot . '/' . $rest, $asideRoot];
+                        // R51: in the private recovery directory, never next to the live source: config.php.from-backup
+                        // and themes.from-backup/ in the web root were served (database password, gateway keys).
+                        $asideDir = self::asideDirectory();
+                        [$target, $base] = $kind === 'file'
+                            ? [$asideDir . '/' . basename($root), $asideDir]
+                            : [$asideDir . '/' . $name . '/' . $rest, $asideDir . '/' . $name];
                         $isAside = true;
                     }
                 }
@@ -1760,6 +1764,17 @@ class BackupService
      * and a queue that has already run would send its mails again. Only missing files are restored in place.
      */
     private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
+
+    /** R51: where restored copies are set aside — <backup_recovery_dir>/from-backup, private (0700), outside the web root. */
+    public static function asideDirectory(): string
+    {
+        $dir = self::$recoveryDir;
+        if ($dir === '') {
+            throw new RuntimeException('BackupService: no private recovery directory configured for the copies set aside');
+        }
+        self::assertPrivateAbsolutePath($dir, 'backup_recovery_dir');
+        return rtrim(str_replace('\\', '/', $dir), '/') . '/from-backup';
+    }
 
     /** Whether directory $dir holds any file (a job queue that has already run). */
     private static function holdsAnyFile(string $dir): bool

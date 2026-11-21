@@ -27,7 +27,7 @@ require_once __DIR__ . '/cli-only.php';
  *         (retained, max 5 newest). Files are extracted into a private staging directory by a strict
  *         reader (regular files only, no absolute/../link entries); differing live files are only
  *         overwritten with --force, and files missing from the backup are kept. config.php, themes and
- *         the job queue are never overwritten: a differing file goes next to the live one as *.from-backup.
+ *         the job queue are never overwritten: a differing file goes to <backup_recovery_dir>/from-backup/.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -258,7 +258,7 @@ if ($withFiles) {
     $emit('  overwritten:  ' . count($files['overwritten']));
     if ($files['set_aside'] !== []) {
         fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) from config.php, themes or the job queue differ from the live ones (or the queue"
-            . " has already run) and were written next to them as *.from-backup, not over them. Compare and move them in by hand.\n");
+            . " has already run) and were written to the private directory " . BackupService::asideDirectory() . ", not over them. Compare and move them in by hand.\n");
     }
     foreach ($files['skipped_sources'] as $name) {
         fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");
