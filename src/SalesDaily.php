@@ -122,7 +122,7 @@ final class SalesDaily {
         if ($rebuild) {
             self::transaction($db, static function () use ($db): void {
                 foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes'] as $table) $db->exec("DELETE FROM {$table}");
-                $db->exec("DELETE FROM sales_daily_state WHERE name LIKE 'timezone:%' OR name LIKE 'built_until:%'");
+                $db->exec("DELETE FROM sales_daily_state WHERE state_key LIKE 'timezone:%' OR state_key LIKE 'built_until:%'");
             });
         }
         $previous = date_default_timezone_get();
@@ -184,11 +184,11 @@ final class SalesDaily {
     /** @return array<string, string> */
     private static function state(PDO $db): array {
         if (!self::available($db)) return [];
-        return array_map('strval', $db->query('SELECT name, value FROM sales_daily_state')->fetchAll(PDO::FETCH_KEY_PAIR));
+        return array_map('strval', $db->query('SELECT state_key, value FROM sales_daily_state')->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
     private static function setState(PDO $db, string $name, string $value): void {
-        $db->prepare('INSERT INTO sales_daily_state (name, value) VALUES (?, ?) ' . Db::upsertClause('name', 'value = excluded.value', 'value = VALUES(value)'))->execute([$name, $value]);
+        $db->prepare('INSERT INTO sales_daily_state (state_key, value) VALUES (?, ?) ' . Db::upsertClause('state_key', 'value = excluded.value', 'value = VALUES(value)'))->execute([$name, $value]);
     }
 
     /** Forget $storeId's built days (for PHP's current timezone): the next refresh() builds them all again. */
@@ -289,7 +289,7 @@ final class SalesDaily {
         }
         $db->beginTransaction();
         try {
-            if (!Db::isSqlite()) $db->query("SELECT value FROM sales_daily_state WHERE name = 'lock' FOR UPDATE")->fetchAll();
+            if (!Db::isSqlite()) $db->query("SELECT value FROM sales_daily_state WHERE state_key = 'lock' FOR UPDATE")->fetchAll();
             $work();
             $db->commit();
         } catch (Throwable $e) {

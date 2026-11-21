@@ -29,11 +29,12 @@ return new class {
             : 'CREATE TABLE IF NOT EXISTS sales_daily_changes (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, store_id VARCHAR(64) NOT NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB');
         MigrationSql::index($db, $isSqlite, 'sales_daily_changes', 'idx_sales_daily_changes_store', 'store_id, id');
         $name = $isSqlite ? 'TEXT' : 'VARCHAR(191)';
-        $db->exec("CREATE TABLE IF NOT EXISTS sales_daily_state (name {$name} NOT NULL PRIMARY KEY, value {$short} NOT NULL){$engine}");
+        $db->exec("CREATE TABLE IF NOT EXISTS sales_daily_state (state_key {$name} NOT NULL PRIMARY KEY, value {$short} NOT NULL){$engine}");
         // The row SalesDaily's writers lock on MySQL.
-        $db->exec(($isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE') . " INTO sales_daily_state (name, value) VALUES ('lock', '')");
+        $db->exec(($isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE') . " INTO sales_daily_state (state_key, value) VALUES ('lock', '')");
         if (method_exists('Db', 'forgetSchema')) Db::forgetSchema($db);
         if (!method_exists('SalesDaily', 'refreshAll') || !method_exists('SalesReport', 'revenueRows') || Db::get() !== $db) return;
+        foreach (['tableExists', 'forceIndex', 'rollBackOpen', 'transactionOpen'] as $method) if (!method_exists('Db', $method)) return;
         SalesDaily::refreshAll();
     }
 };

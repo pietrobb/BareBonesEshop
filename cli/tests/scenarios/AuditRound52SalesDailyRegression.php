@@ -11,7 +11,10 @@ $r52sZone = date_default_timezone_get();
 $r52sOrders = [];
 $r52sRefunds = [];
 $r52sStore = StoreContext::current()->id();
+// The full suite's database has no migrations applied; the tables of this one are created here and dropped after.
+$r52sCreated = !SalesDaily::available($r52sDb);
 try {
+    if ($r52sCreated) (require TEST_CLI_DIR . '/../migrations/20261121120000_sales_daily.php')->up($r52sDb, Db::isSqlite());
     $r52sCategory = (int)$r52sDb->query('SELECT MIN(id) FROM categories')->fetchColumn();
     $r52sProduct = $r52sDb->prepare("INSERT INTO products (id, category_id, name, slug, sku, price, store_id) VALUES (?, ?, ?, ?, ?, 1000, ?)");
     foreach ([952101 => 'R52S-A', 952102 => 'R52S-B', 952103 => 'R52S-C'] as $r52sId => $r52sSku) {
@@ -135,5 +138,10 @@ try {
         $r52sDb->exec("DELETE FROM orders WHERE id IN ({$r52sIds})");
     }
     $r52sDb->exec('DELETE FROM products WHERE id IN (952101, 952102, 952103)');
-    if (class_exists('SalesDaily')) SalesDaily::refreshAll(true);
+    if ($r52sCreated) {
+        foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes', 'sales_daily_state'] as $r52sTable) $r52sDb->exec("DROP TABLE IF EXISTS {$r52sTable}");
+        Db::forgetSchema($r52sDb);
+    } else {
+        SalesDaily::refreshAll(true);
+    }
 }
