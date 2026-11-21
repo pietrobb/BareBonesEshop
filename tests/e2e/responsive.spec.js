@@ -40,6 +40,40 @@ test.describe('responsive cart, checkout and product detail', () => {
   }
 });
 
+// R52 (idea 50): the home page's Lighthouse CLS reached 0.113 in CI once the admin-catalog spec had pointed a
+// listed product at missing photos (/images/e2e-a.jpg): a broken card image dropped its square to the height of
+// its alt text and pulled the cards below it up. And on a phone the cookie banner grew when the script showed its
+// "Settings" button after the first paint.
+test.describe('home page layout does not shift', () => {
+  test('a product photo that fails to load keeps its square', async ({ page }) => {
+    await page.route(/\/(assets\/img|images|media)\//, route => route.fulfill({ status: 404, body: '' }));
+    await page.goto('/');
+    const image = page.locator('#home-latest .card-img').first();
+    await image.scrollIntoViewIfNeeded();
+    await image.evaluate(el => el.complete || new Promise(done => el.addEventListener('error', done, { once: true })));
+    expect(await image.evaluate(el => el.naturalWidth), 'the photo really failed to load').toBe(0);
+    const box = await image.boundingBox();
+    expect(Math.abs(box.height - box.width), `the broken card image is ${box.width}×${box.height}, not square`).toBeLessThanOrEqual(1);
+  });
+
+  test('the cookie banner on a phone keeps its height when the script shows its Settings button', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    // The storefront script is held back until the banner has been painted without it, as on a slow connection.
+    let release;
+    const held = new Promise(done => { release = done; });
+    await page.route(/storefront\.js/, async route => { await held; await route.continue(); });
+    await page.goto('/', { waitUntil: 'commit' });
+    const banner = page.locator('#cc-banner');
+    await expect(banner).toBeVisible();
+    await expect(page.locator('#cc-prefs-toggle')).toBeHidden();
+    const before = await banner.boundingBox();
+    release();
+    await expect(page.locator('#cc-prefs-toggle')).toBeVisible();
+    const after = await banner.boundingBox();
+    expect([after.y, after.height], 'the banner does not grow or move when the Settings button appears').toEqual([before.y, before.height]);
+  });
+});
+
 test.describe('category navigation without hover', () => {
   test('subcategories open by keyboard and close with Escape', async ({ page, isMobile }) => {
     test.skip(isMobile, 'iOS Safari does not Tab to links');

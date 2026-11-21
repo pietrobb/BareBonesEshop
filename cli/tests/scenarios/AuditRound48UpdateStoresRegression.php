@@ -68,8 +68,16 @@ try {
 [, $app, $private, $base, $expected] = $argv;
 DataOverrides::setDirForTesting($private);
 PrivateOwner::record(PrivateOwner::find([$private]));
-$null = [0 => ["file", "/dev/null", "r"], 1 => ["file", "/dev/null", "w"], 2 => ["file", "/dev/null", "w"]];
-$racer = proc_open([PHP_BINARY, "-r", \'posix_setgid(65534); posix_setuid(65534); $d = $argv[1]; $end = microtime(true) + 60; while (microtime(true) < $end) { @link("$d/plain.json", "$d/a"); @rename("$d/a", "$d/stores.json"); usleep(20); @posix_mkfifo("$d/b", 0600); @rename("$d/b", "$d/stores.json"); }\', $private], $null, $pipes);
+$null = [0 => ["file", "/dev/null", "r"], 1 => ["pipe", "w"], 2 => ["file", "/dev/null", "w"]];
+// R52 (idea 59): the racer says when its first regular file is in place, so no copy runs before the race has begun.
+$racer = proc_open([PHP_BINARY, "-r", \'posix_setgid(65534); posix_setuid(65534); $d = $argv[1]; $end = microtime(true) + 60; for ($n = 0; microtime(true) < $end; $n++) { @link("$d/plain.json", "$d/a"); @rename("$d/a", "$d/stores.json"); if ($n === 0) { fwrite(STDOUT, "ready"); fflush(STDOUT); } usleep(20); @posix_mkfifo("$d/b", 0600); @rename("$d/b", "$d/stores.json"); }\', $private], $null, $pipes);
+$ready = [$pipes[1]];
+$none = null;
+if (stream_select($ready, $none, $none, 20) !== 1 || fread($pipes[1], 5) !== "ready") {
+    proc_terminate($racer, 9);
+    echo json_encode(["racer did not start" => 1]);
+    exit;
+}
 $gate = new ThemeUpgradeGate($base . "/updates");
 $copy = new ReflectionMethod(ThemeUpgradeGate::class, "copyStores");
 $seen = [];
@@ -77,6 +85,10 @@ try {
     for ($i = 0; $i < 2000; $i++) {
         $candidate = $base . "/race/" . $i;
         mkdir($candidate, 0700, true);
+        // R52 (idea 59): each copy stands for one update run, a process of its own. Was: one probe process, and PHP\'s
+        // stat cache kept storesPath()\'s FIFO verdict for stores.json, so after the first FIFO every copy saw no regular
+        // file ({"example":2000}, about 1 run in 5 under load).
+        clearstatcache();
         try {
             $copy->invoke($gate, $app, $candidate);
             $kind = !is_file($candidate . "/stores.json") ? "example" : (file_get_contents($candidate . "/stores.json") === $expected ? "copied" : "wrong");

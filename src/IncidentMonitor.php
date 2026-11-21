@@ -13,7 +13,12 @@ class IncidentMonitor {
             }
             // R38 (medium 6): the order number the merchant looks up (a shop-generated reference, no personal data).
             if (isset($context['order_number']) && is_string($context['order_number']) && preg_match('/^[A-Za-z0-9._\/-]{1,64}$/D', $context['order_number'])) $safe['order_number'] = $context['order_number'];
-            if (($context['exception'] ?? null) instanceof Throwable) $safe['exception_type'] = get_debug_type($context['exception']);
+            if (($context['exception'] ?? null) instanceof Throwable) {
+                $safe['exception_type'] = get_debug_type($context['exception']);
+                // R52: where it was thrown (a code location, never the message, which may carry customer data). Was: the
+                // type alone, so an intermittent checkout.failed could not be traced to its cause.
+                $safe['exception_at'] = basename($context['exception']->getFile()) . ':' . $context['exception']->getLine();
+            }
             Logger::safeWrite($severity, $code, ['phase' => $phase] + $safe);
             $db = Db::get();
             $store = StoreContext::current()->id();

@@ -101,9 +101,42 @@ function suite_record_failure(string $detail): void {
     exit(1);
 }
 
+/**
+ * R52 (idea 25): true on Linux when this process has $dbPath open (an SQLite connection) but holds no POSIX lock on it.
+ * A WAL connection keeps a shared lock on the database file while it is open; closing any other descriptor of the same
+ * file in this process (PHP's copy(), fopen()/fclose()) releases it. A child process closing the database then gets
+ * the exclusive lock, takes itself for the last connection and deletes the -wal: the suite writes on into the unlinked
+ * file and later children no longer see its rows (was: wal_checkpoint workarounds before such children).
+ */
+function suite_sqlite_lock_lost(string $dbPath): bool {
+    if (PHP_OS_FAMILY !== 'Linux' || !is_readable('/proc/locks') || !is_dir('/proc/self/fd')) return false;
+    $real = realpath($dbPath);
+    $stat = $real === false ? false : @stat($real);
+    if ($stat === false) return false;
+    $open = false;
+    foreach (glob('/proc/self/fd/*') ?: [] as $fd) {
+        if (@readlink($fd) === $real) { $open = true; break; }
+    }
+    if (!$open) return false;
+    $pid = (string)getmypid();
+    foreach (@file('/proc/locks') ?: [] as $line) {
+        // "12: POSIX  ADVISORY  READ 4242 08:20:1234567 1073741826 1073741826" (a blocked waiter adds "->" after the number)
+        $fields = preg_split('/\s+/', trim(str_replace('->', '', $line)));
+        if (($fields[4] ?? '') === $pid && str_ends_with((string)($fields[5] ?? ''), ':' . $stat['ino'])) return false;
+    }
+    return true;
+}
+
 /** One STDERR line per finished scenario/regression file: where the run is, how many assertions ran and failed. */
 function suite_progress(string $phase, int $index, int $count, string $file): void {
-    global $tests, $failed;
+    global $tests, $failed, $testDbPath;
+    static $lockLost = false;
+    if (!$lockLost && is_string($testDbPath ?? null) && suite_sqlite_lock_lost($testDbPath)) {
+        $lockLost = true;
+        assert_true(false, 'Suite database: ' . basename($file) . ' closed a descriptor of the suite database outside SQLite (copy(), fopen(), '
+            . 'file_get_contents() ...), which drops the SQLite locks of this process; the next child process to close the database then '
+            . 'deletes its -wal under the suite. Copy it with VACUUM INTO or read it through PDO.');
+    }
     $minutes = (microtime(true) - (float)($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) / 60;
     suite_progress_write(sprintf('%s %d/%d %s done: %d assertions, %d failed, %.1f min', $phase, $index, $count, basename($file), $tests, $failed, $minutes));
 }

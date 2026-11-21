@@ -28,7 +28,8 @@ file_put_contents(dirname(__DIR__) . '/worker-started.json', json_encode([
     'time_limit' => (int)ini_get('max_execution_time'),
     'web_worker' => defined('BBE_WEB_WORKER'),
 ]));
-sleep(3);
+// R52 (idea 60): the pass lasts until the test has both responses (at most 20 s), not a fixed 3 s a slow runner overran.
+for ($i = 0; $i < 200 && !is_file(dirname(__DIR__) . '/worker-release'); $i++) usleep(100000);
 file_put_contents(dirname(__DIR__) . '/worker-done', '1');
 PHP);
     file_put_contents($r12wRoot . '/router.php', <<<'PHP'
@@ -89,16 +90,18 @@ PHP);
         'R20 web worker: the php -S server reads the suite\'s config, not the developer\'s config.php (' . $r12wConfig . ')');
     assert_true(str_contains($r12wFirst['body'], 'page login') && $r12wFirst['length'] === strlen($r12wFirst['body']),
         'R12 web worker: the response that triggers the pass carries its exact Content-Length (complete without FastCGI)');
-    assert_true($r12wFirst['elapsed'] < 2.0 && !is_file($r12wRoot . '/worker-done'),
-        sprintf('R12 web worker: the visitor (or a webhook) gets the whole response before the 3 s pass ends (took %.2f s)', $r12wFirst['elapsed']));
+    // The pass cannot end before the test releases it, so a whole response here arrived while the pass was still running.
+    assert_true($r12wFirst['length'] === strlen($r12wFirst['body']) && !is_file($r12wRoot . '/worker-done'),
+        sprintf('R12 web worker: the visitor (or a webhook) gets the whole response before the pass ends (took %.2f s)', $r12wFirst['elapsed']));
     assert_true(str_contains((string)@file_get_contents($r12wRoot . '/apache-env.json'), '{"no-gzip":"1"}'),
         'R12 web worker: a browser asking for gzip still gets the early end on Apache (mod_deflate off for that response, it would drop the Content-Length)');
-    for ($i = 0; $i < 50 && !is_file($r12wRoot . '/worker-started.json'); $i++) usleep(100000);
+    for ($i = 0; $i < 200 && !is_file($r12wRoot . '/worker-started.json'); $i++) usleep(100000);
     $r12wSecond = $r12wGet('/?p=again', $r12wFirst['cookie']);
-    assert_true($r12wSecond['elapsed'] < 2.0 && !is_file($r12wRoot . '/worker-done'),
+    assert_true(is_file($r12wRoot . '/worker-started.json') && str_ends_with($r12wSecond['body'], str_repeat('.', 20000)) && !is_file($r12wRoot . '/worker-done'),
         sprintf('R12 web worker: the same visitor\'s next click is not blocked by the session lock while the pass runs (took %.2f s)', $r12wSecond['elapsed']));
     assert_true(str_contains($r12wSecond['body'], 'admin=r12w-admin'), 'R12 web worker: the session written before the pass keeps the login');
-    for ($i = 0; $i < 80 && !is_file($r12wRoot . '/worker-done'); $i++) usleep(100000);
+    touch($r12wRoot . '/worker-release');
+    for ($i = 0; $i < 250 && !is_file($r12wRoot . '/worker-done'); $i++) usleep(100000);
     $r12wSeen = json_decode((string)@file_get_contents($r12wRoot . '/worker-started.json'), true) ?: [];
     assert_true(($r12wSeen['web_worker'] ?? false) === true && ($r12wSeen['session_status'] ?? null) !== PHP_SESSION_ACTIVE && ($r12wSeen['session'] ?? null) === [],
         'R12 web worker: the pass runs with the session closed and no visitor data');

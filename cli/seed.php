@@ -28,6 +28,7 @@ if ($fresh) {
     $db->exec("DELETE FROM products");
     $db->exec("DELETE FROM warehouse_stock");
     $db->exec("DELETE FROM categories");
+    SalesDaily::refreshAll(true);
     echo "Done.\n\n";
 }
 

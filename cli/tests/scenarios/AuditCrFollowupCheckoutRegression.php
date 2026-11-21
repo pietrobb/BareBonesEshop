@@ -37,7 +37,21 @@ $crfCheckout = static function(int $qty, array $extra = []) use ($pdo): array {
     $_SESSION['csrf_token'] = 'crf-checkout';
     $_POST = array_replace(['csrf_token' => 'crf-checkout', 'name' => 'CRF Buyer', 'email' => 'crf-buyer@example.com', 'phone' => '', 'country' => 'SK',
         'street' => 'Audit 9', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'crfship', 'payment_method' => 'crfpct'], $extra);
-    $result = apiCheckout();
+    $phpLog = test_fixture_path('crf-checkout-php.log');
+    $phpLogBefore = ini_set('error_log', $phpLog);
+    try {
+        $result = apiCheckout();
+    } finally {
+        ini_set('error_log', (string)$phpLogBefore);
+    }
+    // R52 (idea 40): a failed checkout names its incident and the exception it logged (type, where, message), not only
+    // the shopper's generic message (once on PHP 8.1 in CI: "Skontrolujte údaje objednávky a skúste to znova.").
+    if (($result['error_code'] ?? '') === 'checkout.failed') {
+        $incident = $pdo->prepare("SELECT context_json FROM operational_incidents WHERE code = 'checkout.failed' AND correlation_id = ?");
+        $incident->execute([(string)($result['correlation_id'] ?? '')]);
+        $result['error'] .= ' — incident ' . ($incident->fetchColumn() ?: 'not recorded') . ' — ' . trim((string)@file_get_contents($phpLog));
+    }
+    @unlink($phpLog);
     $_POST = [];
     Cart::clear();
     $order = Orders::byId((int)($result['order_id'] ?? 0)) ?: [];

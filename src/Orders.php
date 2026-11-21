@@ -339,6 +339,7 @@ class Orders {
             $db->prepare("UPDATE orders SET subtotal = :subtotal, discount_amount = :discount, shipping_cost = :shipping,
                     tax_amount = :tax, total = :total, vat_total = :vattotal, net_total = :nettotal, vat_scenario = :vatscen{$extra},
                     updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store")->execute($params);
+            SalesDaily::touchOrders([$orderId], $db);
             // R51 (review round 51, low): an edit that raises an order on invoice checks the company's credit limit like
             // checkout (under the company's row lock). The open total read there holds this order at its new total
             // while its payment is open; a failed payment is not counted there, so its new total is added.
@@ -623,7 +624,9 @@ class Orders {
         $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = " . Db::now() . "{$delivered} WHERE id = :id AND store_id = :store"
             . ($expectedFrom !== null ? ' AND status = :from' : ''));
         $stmt->execute($params);
-        return $stmt->rowCount() === 1;
+        if ($stmt->rowCount() !== 1) return false;
+        SalesDaily::touchOrders([$orderId]);
+        return true;
     }
 
     /**
@@ -863,6 +866,7 @@ class Orders {
                 $db->rollBack();
                 return false;
             }
+            SalesDaily::touchOrders([$orderId], $db);
 
             self::restoreStock($orderId, 'release');
             Pricing::releaseCouponUse($orderId);

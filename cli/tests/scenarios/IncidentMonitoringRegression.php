@@ -100,8 +100,19 @@ try {
     $imInput = ['name' => 'PrivateName', 'email' => 'fault-buyer@example.test', 'country' => 'SK', 'payment_method' => 'incidentpay', 'consents' => ['digital_delivery' => true]];
     $imDb->exec("CREATE TRIGGER im_checkout_fault BEFORE INSERT ON orders BEGIN SELECT RAISE(ABORT, 'PrivateName private@example.test token=secret-value'); END");
     $imOrderCount = (int)$imDb->query('SELECT COUNT(*) FROM orders')->fetchColumn();
-    $imResult = CheckoutService::execute($imInput);
+    $imPhpLogFile = $imRoot . '/php-error.log';
+    $imPhpLogBefore = ini_set('error_log', $imPhpLogFile);
+    try {
+        $imResult = CheckoutService::execute($imInput);
+    } finally {
+        ini_set('error_log', (string)$imPhpLogBefore);
+    }
     assert_equals('checkout.failed', $imResult['error_code'], 'Incident: actual checkout database fault returns stable failure');
+    // R52 (idea 40): the PHP error log names the cause under the shopper's correlation ID, e-mail and secret masked.
+    $imPhpLog = (string)@file_get_contents($imPhpLogFile);
+    assert_true(str_contains($imPhpLog, 'Checkout failed [' . ($imResult['correlation_id'] ?? '?') . '] PDOException @') && str_contains($imPhpLog, 'PrivateName'),
+        'Incident: a failed checkout logs its exception, where it was thrown and its message (' . trim($imPhpLog) . ')');
+    assert_true(!str_contains($imPhpLog, 'private@example.test') && !str_contains($imPhpLog, 'secret-value'), 'Incident: the logged message masks e-mail and secrets');
     assert_equals(503, http_response_code(), 'Incident: technical checkout fault returns 503');
     assert_equals($imOrderCount, (int)$imDb->query('SELECT COUNT(*) FROM orders')->fetchColumn(), 'Incident: failed create rolls back order');
     assert_true(!str_contains(json_encode($imResult), 'private@example.test'), 'Incident: public checkout error does not expose exception data');

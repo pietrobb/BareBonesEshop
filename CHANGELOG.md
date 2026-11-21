@@ -306,7 +306,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `Mgr. art.` whole. A Stripe `charge.refunded` whose refunds cannot be listed is explained by an admin refund only once
   its job has reached Stripe; one still queued no longer hides a dashboard refund of the same money.
 - **Admin layout and audit (review round 37):** desktop pages shrink around their scrollable tables instead of widening the window. Checkout radio controls keep their own width. Item-refund audit states describe refunds, not incoming payments, and the checkout-session event has a translated label.
-- **Theme assets:** the default theme is version 2.3.17 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
+- **Theme assets:** the default theme is version 2.3.18 (bookshop 1.0.2), so browsers fetch the changed `storefront.css` and
   `storefront.js` (served with a year of cache under `?v=<theme version>`). A theme copied from the default one that
   takes over these changes bumps its own `version`.
 - **Customer sign-in needs a confirmed e-mail address.** A customer who never confirmed the address is sent the
@@ -389,6 +389,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   a large shop should run `apply` in its maintenance window (as above).
 - **Migration** `20261121090100_drop_unused_product_fulltext` (review round 51, MySQL/MariaDB only): drops
   `idx_ft_products`; the search reads `idx_ft_products_names`.
+- **Migration** `20261121120000_sales_daily` (round 52): adds the daily sales totals of the reports (`sales_daily`,
+  `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`) and builds them from the existing orders:
+  about 30 s at 500 000 orders over two years on MySQL (a large shop runs `apply` in its maintenance window, as above).
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -438,6 +441,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   from their lines inside its snapshot and stored them only at the end, so 200 000 of them outlasted
   `max_execution_time = 30`: each checkout died and the next started over. They are now stored in committed batches of
   500 for at most 10 s per request before the count; until all are stored a distance-sale checkout asks to try again.
+  Round 52: on SQLite too (each order was its own commit there, and 500 of them outlasted the 10 s on a busy disk).
 - **Method names in every language of the stores sharing them (review round 51).** A store using another store's
   shipping and payment methods (`provider_scope`) was offered only its own further languages for their names, so a
   German store on a Slovak store's methods could not enter German (its page showed the Slovak name), and saving a
@@ -469,6 +473,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   latest line (was: the alphabetically last). Filling `products.search_names` (migration
   `20261120120300_product_search_names`) commits per 500 products, not per product: 100 000 products about 1 minute on
   MySQL (was over 20), and the full-text index the search no longer reads is dropped.
+- **Sales reports read the days that have ended from daily totals (round 52, idea 61).** A 365-day report at 500 000
+  orders still took 3.8 s on MySQL. The totals, trend and best sellers of each store's closed local days (15 minutes
+  after midnight) are kept in `sales_daily` and `sales_daily_products`, computed by the report's own queries for each
+  day; only today is summed from the orders. At 500 000 orders (128 MB buffer pool) the Reports page takes 0.1 s for 365
+  days and 0.05 s for 90 (the same 365 days summed from the orders: 2.7 s); after ten older orders changed, 0.6 s
+  once. A day's refunds and credit notes are read from that day's orders, not from every refunded order of the store.
+  The days are built when a report is opened (and by the
+  migration and `php cli/sales-daily.php`); a later payment, cancellation, edit, refund or credit note of an older order
+  builds its day again, also one written by an import or by SQL (new rows are found by id). Orders deleted or changed by
+  hand need `php cli/sales-daily.php --rebuild`. A store whose timezone changes is built again for its new calendar.
+  The Reports page offers 365 days.
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
   after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet

@@ -583,6 +583,7 @@ class PaymentService {
             if ($claim->rowCount() !== 1 || self::transactionExists($idempotencyKey)) {
                 throw new \RuntimeException('Refund request state changed');
             }
+            SalesDaily::touchOrders([$orderId], $db);
 
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
             self::logTransaction(
@@ -1413,6 +1414,7 @@ class PaymentService {
             if ($expectedFrom !== null && $update->rowCount() !== 1) {
                 throw new RuntimeException("Payment status of order #{$orderId} changed concurrently");
             }
+            SalesDaily::touchOrders([$orderId], $db);
             if ($from !== $status) {
                 Outbox::record(DomainEvents::PAYMENT_STATUS_CHANGED, 'order', $orderId, array_merge([
                     'order_id' => $orderId,
@@ -1540,6 +1542,10 @@ class PaymentService {
                 ':raw'    => json_encode($rawResponse, JSON_UNESCAPED_UNICODE),
                 ':correlation' => Logger::correlationId(),
             ]);
+            // R52: a ledger row changes the order's day in the sales totals (a refund booked with the payment status
+            // unchanged writes nothing else). Logged here, in the row's transaction: SalesDaily's id watcher can pass an
+            // id whose transaction commits after a higher one (MySQL).
+            if ($stmt->rowCount() === 1) SalesDaily::touchOrders([$orderId], $db);
             // Money returned to the customer: the customer is told, once per ledger row.
             if ($stmt->rowCount() === 1 && $amount > 0 && in_array($status, self::REFUNDED_STATUSES, true)) {
                 self::queueRefundMail($orderId, $amount, $idempotencyKey);
