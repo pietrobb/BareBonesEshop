@@ -880,19 +880,25 @@ class Customers {
      * Total of the company members' orders in this store that are neither cancelled nor paid (credit exposure).
      * Only unpaid payments count: a paid order stays paid when part of it is refunded or disputed. $locking reads the
      * latest committed orders (a MySQL locking read), not the transaction's older snapshot.
+     * R51 (review round 51, low): the members are read first (idx_customers_store_company, no lock) and only their
+     * orders are locked, through idx_ord_customer. A locking join locked every customer row it scanned — every customer
+     * of the store when MySQL chose a scan — so the orders on invoice of all other companies waited on one.
      */
     public static function companyOpenTotal(int $companyId, bool $locking = false): int {
-        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(o.total), 0)
-            FROM orders o
-            JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
-            WHERE o.store_id = :store AND c.company_id = :company
-              AND o.status <> 'cancelled'
-              AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')" . ($locking ? ' FOR UPDATE' : ''));
-        $stmt->execute([
-            ':store' => StoreContext::current()->id(),
-            ':company' => $companyId,
-        ]);
-        return (int)$stmt->fetchColumn();
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $members = $db->prepare('SELECT id FROM customers' . Db::forceIndex('customers', 'idx_customers_store_company', $db) . ' WHERE store_id = ? AND company_id = ?');
+        $members->execute([$store, $companyId]);
+        $total = 0;
+        foreach (array_chunk(array_map('intval', $members->fetchAll(PDO::FETCH_COLUMN)), 500) as $ids) {
+            $stmt = $db->prepare('SELECT COALESCE(SUM(o.total), 0) FROM orders o' . Db::forceIndex('orders', 'idx_ord_customer', $db)
+                . ' WHERE o.customer_id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ") AND o.store_id = ?
+                  AND o.status <> 'cancelled'
+                  AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')" . ($locking ? ' FOR UPDATE' : ''));
+            $stmt->execute([...$ids, $store]);
+            $total += (int)$stmt->fetchColumn();
+        }
+        return $total;
     }
 
     // ============================================================

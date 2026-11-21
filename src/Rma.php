@@ -143,7 +143,12 @@ class Rma {
     private static function acknowledge(array $order, string $rmaNumber, string $reason, array $selected): void {
         $seller = InvoiceService::sellerIdentity($order);
         $locale = (string)($order['locale'] ?? '');
+        // R51 (low): a return within the withdrawal period (or after a timely withdrawal statement) needs no approval —
+        // the e-mail no longer says "we will let you know whether the return is approved" there.
+        $withdrawal = Withdrawal::withinPeriod($order) || Withdrawal::forOrder((int)$order['id']) !== [];
         MailService::send('rma_received', (string)$order['customer_email'], $locale, [
+            'within_withdrawal' => $withdrawal,
+            'needs_approval' => !$withdrawal,
             'customer_name' => (string)$order['customer_name'],
             'order_number' => (string)$order['order_number'],
             'rma_number' => $rmaNumber,
@@ -531,6 +536,10 @@ class Rma {
      * id), plus a requested refund still in flight. "Refunded" on a return then would pay the same goods a second time.
      * A balance: less what returns of the order already counted — closed without payout (rma_requests.outside_refund_applied)
      * or credited less it (credit_snapshot outside_applied of a live item refund).
+     *
+     * R51 (R49 open): a refund still in flight is not money returned (it may fail): a return waits for it instead
+     * (refundInFlight()). The refund of a cancellation after a partial shipment paid for the goods that never shipped
+     * (Fulfillment::unshippedGross()), not for the shipped goods a return brings back: it no longer lowers that return.
      */
     public static function refundedOutsideReturns(int $orderId): int {
         $order = Orders::byId($orderId);
@@ -545,14 +554,33 @@ class Rma {
             WHERE r.order_id=:order AND r.store_id=:store AND r.rma_id IS NOT NULL AND " . self::LIVE_REFUND_SQL);
         $credits->execute([':order' => $orderId, ':store' => $store]);
         foreach ($credits->fetchAll(PDO::FETCH_COLUMN) as $snapshot) $counted += (int)((json_decode((string)$snapshot, true) ?: [])['outside_applied'] ?? 0);
+        $cancelledAfterShipping = self::cancellationRefunded($orderId) && Fulfillment::unshippedGross($orderId) !== null;
         $stmt = $db->prepare("SELECT COALESCE(SUM(t.amount),0) FROM payment_transactions t
             WHERE t.order_id=:order AND t.store_id=:store AND t.status IN ('partially_refunded','refunded','refund_succeeded') AND t.amount>0
+              AND t.idempotency_key <> :cancellation
               AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id=t.order_id AND r.store_id=t.store_id
                   AND (r.idempotency_key=t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference<>'' AND r.payment_reference=t.provider_ref)))");
-        $stmt->execute([':order' => $orderId, ':store' => $store]);
+        $stmt->execute([':order' => $orderId, ':store' => $store, ':cancellation' => $cancelledAfterShipping ? 'order_refund_' . $orderId : '']);
         $booked = (int)$stmt->fetchColumn();
         $stmt->closeCursor();
-        return max(0, $booked + PaymentService::requestedRefundInFlight($order) - $counted);
+        return max(0, $booked - $counted);
+    }
+
+    /** R51: a refund of the order requested and not booked yet; a return is settled once it is (refundedOutsideReturns()). */
+    public static function refundInFlight(int $orderId): bool {
+        $order = Orders::byId($orderId);
+        return $order !== null && PaymentService::requestedRefundInFlight($order) > 0;
+    }
+
+    /** Whether the order-level refund (order_refund_<id>) was requested by the order's cancellation, not by its return. */
+    private static function cancellationRefunded(int $orderId): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
+            AND raw_response LIKE :reason LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => 'order_refund_request_' . $orderId,
+            ':reason' => '%"reason":"order.cancelled"%']);
+        $found = (bool)$stmt->fetchColumn();
+        $stmt->closeCursor();
+        return $found;
     }
 
     /**
@@ -563,8 +591,7 @@ class Rma {
     public static function owedAfterOutside(int $rmaId, int $orderId): array {
         $outside = self::refundedOutsideReturns($orderId);
         $source = $outside > 0 ? InvoiceService::byOrderId($orderId) : null;
-        $value = $source ? InvoiceService::rmaCreditGross((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId)) : 0;
-        return [$outside, max(0, $value - $outside)];
+        return [$outside, $source ? InvoiceService::rmaCreditOwed((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $outside)[1] : 0];
     }
 
     /**
@@ -581,11 +608,14 @@ class Rma {
             if ($rma) Orders::lockWithin((int)$rma['order_id']);
             $rma = $rma ? self::lockedRma($rmaId) : null;
             $outside = $rma ? self::refundedOutsideReturns((int)$rma['order_id']) : 0;
-            $source = $rma && $rma['status'] === 'received' && $outside > 0 ? InvoiceService::byOrderId((int)$rma['order_id']) : null;
-            $value = $source ? InvoiceService::rmaCreditGross((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId)) : 0;
+            $source = $rma && $rma['status'] === 'received' && $outside > 0 && !self::refundInFlight((int)$rma['order_id'])
+                ? InvoiceService::byOrderId((int)$rma['order_id']) : null;
+            // R51: the outside money this return uses up is the goods' value it covers (at most all of that money).
+            [$full, $owed] = $source ? InvoiceService::rmaCreditOwed((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $outside) : [0, 1];
+            $value = min($full, $outside);
             $pending = $db->prepare("SELECT COUNT(*) FROM order_refunds WHERE rma_id = ? AND store_id = ? AND status = 'pending'");
             $pending->execute([$rmaId, StoreContext::current()->id()]);
-            $closable = $source && $value <= $outside && (int)$pending->fetchColumn() === 0;
+            $closable = $source && $owed === 0 && $value > 0 && (int)$pending->fetchColumn() === 0;
             $pending->closeCursor();
             if ($closable) {
                 $db->prepare('UPDATE rma_items SET refunded_quantity = received_quantity WHERE rma_id = ?')->execute([$rmaId]);

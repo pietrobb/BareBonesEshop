@@ -657,9 +657,9 @@ function handleRmaStatus(): void {
         } elseif ($status === 'refunded' && !Rma::settleAlreadyRefunded($id)) {
             $rma = Rma::byId($id);
             if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
-            // R49 (finding 3): money already returned outside this return is named first, then counted: the return closes
-            // without payout when that money covers it, else its credit note and refund are less it (was: the return paid
-            // out in full on top, or closed and the rest unpaid, and the same money counted again by the next return).
+            // R49 (finding 3): money returned outside this return is named, then counted: it closes the return without payout
+            // when it covers it, else the credit and refund are less it. R51: a refund still in flight waits until booked.
+            if (Rma::refundInFlight((int)$rma['order_id'])) throw new RuntimeException(I18n::t('admin.rma.refund_in_flight'));
             $outside = Rma::refundedOutsideReturns((int)$rma['order_id']);
             if ($outside > 0 && Security::clean($_POST['outside_refund'] ?? '') !== 'deduct') {
                 throw new RuntimeException(I18n::format('admin.rma.refunded_outside', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur'))]));
@@ -668,7 +668,7 @@ function handleRmaStatus(): void {
             if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
             $quantities = InvoiceService::creditableQuantities($id);
             if (!$quantities) throw new LogicException(I18n::t('admin.rma.nothing_to_credit'));
-            if ($outside > 0 && $outside >= InvoiceService::rmaCreditGross((int)$source['id'], $id, $quantities)) {
+            if ($outside > 0 && InvoiceService::rmaCreditOwed((int)$source['id'], $id, $quantities, $outside)[1] === 0) {
                 if (!Rma::closeWithoutPayout($id)) throw new LogicException(I18n::t('admin.rma.transition_refused'));
                 setFlash('ok', I18n::format('admin.rma.closed_without_payout', ['id' => $id]));
                 header('Location: admin.php?p=rma');

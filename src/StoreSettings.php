@@ -184,7 +184,8 @@ final class StoreSettings {
             $legal['bic'] = strtoupper((string)preg_replace('/\s+/', '', $legal['bic']));
             if ($legal['bic'] !== '' && !BankTransferInstructions::validBic($legal['bic'])) $errors[] = I18n::t('admin.stores.err.bic');
             if ($legal['payment_terms_days'] < 0 || $legal['payment_terms_days'] > 365) $errors[] = I18n::t('admin.stores.err.terms');
-            if ($legal['vat_registered'] && $legal['ic_dph'] === '') $errors[] = I18n::t('admin.stores.err.vat_id');
+            // R51 (low): an EU VAT ID only for a seller in the EU — the sample US store (sales tax, EIN) could not be saved.
+            if ($legal['vat_registered'] && $legal['ic_dph'] === '' && ($legal['country'] === '' || VatService::isEuCountry($legal['country']))) $errors[] = I18n::t('admin.stores.err.vat_id');
         }
         if ($storeName === '') $errors[] = I18n::format('admin.stores.err.required', ['fields' => I18n::t('admin.stores.field.store_name')]);
         // A form without the field (an older admin page) keeps the store's zone.

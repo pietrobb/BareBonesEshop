@@ -39,6 +39,7 @@ final class OssThreshold
     public static function reset(): void
     {
         self::$years = [];
+        self::$netsStored = false;
         EurRates::reset();
     }
 
@@ -233,7 +234,10 @@ final class OssThreshold
         $db->prepare("UPDATE orders SET oss_net = CASE WHEN status IN ('cancelled', 'refunded', 'failed') OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = orders.id AND i.type = 'invoice' AND i.status = 'issued') THEN 0 ELSE :net END WHERE id = :id")->execute([':net' => $net, ':id' => $orderId]);
         $year = self::orderYear((string)$order['store_id'], (string)$order['created_at']);
         $reason = self::snapshotReason($order);
-        self::rememberCrossing($db, (string)$order['store_id'], $year, $net > 0 && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order)
+        // R51 (high 2): decided only when an activation can still be recorded; evaluated eagerly it summed the year's open
+        // orders for every order, and migration 20261113190000 (every open order, table not created yet) went quadratic.
+        self::rememberCrossing($db, (string)$order['store_id'], $year, static fn(): bool => $net > 0
+            && !in_array((string)$order['status'], ['cancelled', 'refunded', 'failed'], true) && self::chargedAbroad($order)
             && ($reason === null ? self::crossesAtHome($db, $order, $year, $net) : $reason === self::REASON_CURRENT));
     }
 
@@ -289,7 +293,7 @@ final class OssThreshold
      * invoicing in its ERP, out of memory at 330 000). Stores the net of every order placed since $since (UTC) still
      * without one, 500 per batch (one commit each on MySQL). Uses no Db method a released Db lacks. Returns the orders.
      */
-    public static function backfillOrderNets(PDO $db, string $since): int
+    public static function backfillOrderNets(PDO $db, string $since, ?float $deadline = null): int
     {
         if (!self::hasColumn('orders', 'oss_net', $db)) return 0;
         $marks = implode(', ', array_fill(0, count(self::OPEN_ORDER_SCENARIOS), '?'));
@@ -318,7 +322,7 @@ final class OssThreshold
                 if ($opened) $db->rollBack();
                 throw $e;
             }
-        } while (count($rows) === 500);
+        } while (count($rows) === 500 && ($deadline === null || microtime(true) < $deadline));
         return $count;
     }
 
@@ -506,7 +510,10 @@ final class OssThreshold
         $net = 0;
         foreach ($items as $item) {
             if (!($item['digital'] ? $digital : $goods)) continue;
-            $rate = VatService::rate($sellerCountry, VatService::resolveClass((string)$item['vat_class']));
+            // R51 (low): the category itself (books 5 % in SK; a download its digital category, e-books 27 % in HU), as
+            // the snapshot prices it (VatService::buildSnapshot()); resolveClass() first gave the reduced 19 %.
+            $class = (string)$item['vat_class'];
+            $rate = VatService::rate($sellerCountry, $item['digital'] ? VatService::digitalCategory($class) : $class);
             $net += (int)round((int)$item['gross'] / (1 + $rate / 100));
         }
         return $net;
@@ -686,11 +693,12 @@ final class OssThreshold
     }
 
     // Persist only actual sales, in the writer's transaction. A speculative checkout must never activate OSS.
-    private static function rememberCrossing(PDO $db, string $storeId, int $year, bool $decided = false): void
+    private static function rememberCrossing(PDO $db, string $storeId, int $year, bool|\Closure $decided = false): void
     {
         if (!Db::tableExists('oss_threshold_activations', $db)) return;
         $store = self::storeConfig($storeId);
         if (self::activated($db, $storeId, $store, $year, false)) return;
+        if ($decided instanceof \Closure) $decided = $decided();
         $stores = self::sellerStores($storeId, $store, (array)(Bootstrap::stores()['stores'] ?? []));
         if (!$decided && self::yearSales($db, $stores, $year, $year === (int)ShopTime::date('Y'))['sum'] <= self::EUR_CENTS) return;
         $db->prepare(Db::insertIgnore() . ' INTO oss_threshold_activations (seller_key, year) VALUES (?, ?)')->execute([self::sellerKey($storeId, $store), $year]);
@@ -803,12 +811,39 @@ final class OssThreshold
     {
         $year = (int)ShopTime::date('Y');
         $sameSeller = self::sellerStores($storeId, $store, $stores);
+        self::storeMissingNets($db, $year);
         return self::consistently($db, static function () use ($db, $sameSeller, $year): array {
             $previous = self::yearSales($db, $sameSeller, $year - 1, false)['sum'];
             // Past the threshold last year: this year does not matter (art. 59c), nothing more to read.
             if ($previous > self::EUR_CENTS) return ['previous' => $previous, 'current' => 0];
             return ['previous' => $previous, 'current' => self::yearSales($db, $sameSeller, $year, true)['sum']];
         });
+    }
+
+    private const MISSING_NETS_SECONDS = 10.0;
+    private static bool $netsStored = false;
+
+    /**
+     * R51 (review round 21, medium): open orders still without orders.oss_net (backfillOrderNets() not run) get it before
+     * the count, 500 per committed batch, for at most MISSING_NETS_SECONDS of this request. Counted inside the snapshot and
+     * stored only at its end, 200 000 such orders outlasted max_execution_time = 30: each checkout died and the next one
+     * started over. With orders still missing after the budget the count is refused (the checkout asks to retry); the
+     * next request goes on where this one stopped.
+     */
+    private static function storeMissingNets(PDO $db, int $year): void
+    {
+        if (self::$netsStored || $db->inTransaction() || !self::hasColumn('orders', 'oss_net', $db)) return;
+        $since = sprintf('%04d-12-31', $year - 2); // a day before the previous year, in any store's time zone
+        $missing = $db->prepare('SELECT 1 FROM orders WHERE oss_net IS NULL AND created_at >= ? LIMIT 1');
+        for ($pass = 0; ; $pass++) {
+            $missing->execute([$since]);
+            $found = (bool)$missing->fetchColumn();
+            $missing->closeCursor();
+            if (!$found) break;
+            if ($pass > 0) throw new RuntimeException('Open orders without their stored OSS net are being stored; retry shortly');
+            self::backfillOrderNets($db, $since, microtime(true) + self::MISSING_NETS_SECONDS);
+        }
+        self::$netsStored = true;
     }
 
     /**

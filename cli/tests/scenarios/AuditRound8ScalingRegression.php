@@ -47,10 +47,10 @@ try {
     assert_true(str_contains($r8sOrders, 'SELECT * FROM orders{$index} WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset'), 'R8 scaling: the admin order list query has the shape measured below');
     $r8sCheck('R8 scaling: order list by status', $r8sPlan("SELECT * FROM orders WHERE store_id = ? AND status = ? ORDER BY created_at DESC LIMIT 25 OFFSET 0", [StoreContext::current()->id(), 'pending']), 'idx_orders_store_status_created');
     $r8sCheck('R8 scaling: order count by status', $r8sPlan("SELECT COUNT(*) FROM orders WHERE store_id = ? AND status = ?", [StoreContext::current()->id(), 'pending']), 'idx_orders_store_status_created');
-    $r8sCheck('R8 scaling: order list by payment status', $r8sPlan("SELECT * FROM orders WHERE store_id = ? AND payment_status = ? ORDER BY created_at DESC LIMIT 25 OFFSET 0", [StoreContext::current()->id(), 'authorized']), 'idx_orders_store_payment_created');
+    $r8sCheck('R8 scaling: order list by payment status', $r8sPlan("SELECT * FROM orders WHERE store_id = ? AND payment_status = ? ORDER BY created_at DESC LIMIT 25 OFFSET 0", [StoreContext::current()->id(), 'authorized']), 'idx_orders_store_payment_cover');
     // Sales dashboard open-payment counter, taken verbatim from the entrypoint.
     assert_true(str_contains($r8sOrders, "SELECT COUNT(*) FROM orders WHERE store_id = :store AND payment_status IN ('pending', 'authorized')"), 'R8 scaling: the dashboard open-payment counter has the shape measured below');
-    $r8sCheck('R8 scaling: dashboard open-payment count', $r8sPlan("SELECT COUNT(*) FROM orders WHERE store_id = :store AND payment_status IN ('pending', 'authorized')", [':store' => StoreContext::current()->id()]), 'idx_orders_store_payment_created');
+    $r8sCheck('R8 scaling: dashboard open-payment count', $r8sPlan("SELECT COUNT(*) FROM orders WHERE store_id = :store AND payment_status IN ('pending', 'authorized')", [':store' => StoreContext::current()->id()]), 'idx_orders_store_payment_cover');
 
     // Admin customer list: the statements Customers::adminList/adminCount really prepare.
     $r8sDb->prepared = [];

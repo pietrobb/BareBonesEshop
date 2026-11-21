@@ -8,6 +8,7 @@
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>
 {{#if reason}}<p>Dôvod: {{reason}}</p>{{/if}}
-<p>Dáme vám vedieť, či vrátenie schvaľujeme a ako nám tovar poslať. Tento e-mail si uschovajte ako záznam o vašej žiadosti.</p>
+{{#if within_withdrawal}}<p>V lehote na odstúpenie od zmluvy môžete tovar vrátiť bez udania dôvodu a bez nášho schválenia. Oznámime vám, ako nám ho poslať; platbu vrátime do 14 dní od doručenia odstúpenia (môžeme počkať, kým tovar dostaneme späť alebo kým preukážete, že ste ho odoslali). Tento e-mail si uschovajte ako záznam o vašej žiadosti.</p>{{/if}}
+{{#if needs_approval}}<p>Dáme vám vedieť, či vrátenie schvaľujeme a ako nám tovar poslať. Tento e-mail si uschovajte ako záznam o vašej žiadosti.</p>{{/if}}
 <p>Predávajúci: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

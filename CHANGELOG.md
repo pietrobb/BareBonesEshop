@@ -97,6 +97,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   indexes (review round 36): the threshold's year totals per store, filled for the current and the previous year, and
   what each order of those years adds until it is invoiced. On a large shop it reads two years of orders once: both
   migrations originally took 7.7 minutes for 200 000 invoices on MySQL 8.4. The new prerequisite `20261113175959_oss_physical_backfill` bulk-fills physical invoices before those unchanged migrations; digital invoices and credit notes still use their original batched calculation. It is a no-op on stores with existing OSS totals.
+  Review round 51: its open orders are stored in one pass (each order no longer sums every other open order of the year):
+  3 000 open orders take under a second on SQLite and about 11 s on MySQL (were 143 s and, for 1 000, 500 s); expect
+  roughly 1 minute per 20 000 open orders on MySQL.
 - **Migration** `20261114210000_oss_threshold_activations` records historical OSS crossings per seller and year from issued documents and still-open orders. A later credit reduces the accounting turnover, but no longer removes OSS for that year and the next; checkout previews do not activate it. The doctor distinguishes this obligation from the reduced turnover.
 - **Migration** `20261114200000_oss_open_orders` removes already-invoiced and closed orders from the OSS open-order
   index. Issuing an invoice now clears its order's contribution; cancelling it restores a still-live order. The
@@ -379,6 +382,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   held while a download or its free resume streams, so no free resume starts next to a transfer that is still running.
   A resume after a dropped connection works once the server has noticed the drop; a request the server killed keeps
   its lease, and further ranges of that download count as new downloads.
+- **Migration** `20261121090000_report_and_credit_indexes` (review round 51): adds `customers (store_id, company_id)`,
+  `orders (store_id, payment_status, created_at, is_synthetic, currency, total)` and `order_items (order_id, product_id,
+  variant_id, quantity, total)`, and drops `idx_orders_store_payment_created` and `idx_oi_order`, which the new indexes
+  start with. On MySQL/MariaDB the two order indexes are built over the whole tables (about 8 s each at 500 000 orders):
+  a large shop should run `apply` in its maintenance window (as above).
+- **Migration** `20261121090100_drop_unused_product_fulltext` (review round 51, MySQL/MariaDB only): drops
+  `idx_ft_products`; the search reads `idx_ft_products_names`.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -415,8 +425,76 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   payment method.
 - **Cancelling the rest of an order whose set ships from two warehouses refunds only what did not ship.** A set
   (bundle) counted as shipped only once all its parts had left, so cancelling after its first parcel refunded the
-  whole order and its shipping. A set with a part dispatched now counts as with the customer (returnable), and
-  shipping is refunded only when nothing was dispatched.
+  whole order and its shipping. A set with a part dispatched is returnable, the cancellation refunds the share of the
+  set that did not leave (review round 51: it refunded nothing of it) and its return credits and restocks the share
+  that came back; shipping is refunded only when nothing was dispatched.
+- **Cancellations and returns no longer deadlock against checkout, and a deadlock no longer fails checkout (review
+  round 51).** A cancellation released its lines in order-line order while a checkout locked the same SKUs in SKU
+  order, so on MySQL the two could deadlock and the buyer got a 500. A cancellation and a return now lock the stock of
+  all their SKUs in SKU order first, and a checkout MySQL picks as a deadlock victim runs its order again (up to three
+  times). A line reserved twice in one warehouse (a backorder allocated after a restock) with one unit shipped kept the
+  other unit reserved for good when the rest was cancelled; it is released.
+- **Open orders without a stored OSS net are filled in before the count (review round 51).** Checkout counted them
+  from their lines inside its snapshot and stored them only at the end, so 200 000 of them outlasted
+  `max_execution_time = 30`: each checkout died and the next started over. They are now stored in committed batches of
+  500 for at most 10 s per request before the count; until all are stored a distance-sale checkout asks to try again.
+- **Method names in every language of the stores sharing them (review round 51).** A store using another store's
+  shipping and payment methods (`provider_scope`) was offered only its own further languages for their names, so a
+  German store on a Slovak store's methods could not enter German (its page showed the Slovak name), and saving a
+  method from one store dropped the translations entered from the other. The form offers the languages of all stores
+  sharing the methods (less the language of the method's own name) and a save keeps any other saved translation.
+- **GDPR erasure: carrier labels, consent user-agent, no table-wide locks (review round 51, low).** The erasure kept
+  the carrier's printable label (`shipping_labels.label_data`: name, address, phone) and the link to a return label,
+  and the browser user-agent of the checkout consent, for the 10-year retention. They are erased; the parcel and
+  tracking numbers, carrier and the consent itself stay. On MySQL the API replay responses naming the customer were
+  deleted by a statement that locked every row of `api_idempotency` it scanned until the erasure committed (API
+  requests waited, up to a lock timeout); they are now found by a plain read and deleted by id.
+- **`cli/restore.php` creates a missing MySQL database only after the confirmation (review round 51, low).** On a new
+  server it created `db_name` before refusing a run without `--i-stopped-writers` or asking for `yes`, so a refused or
+  declined run left an empty database behind. The refusals and the question now come first.
+- **Backup runbook (review round 51, low).** It warned only about the GDPR salt; it now names `config.php` (database
+  password, `admin_identity_key`, gateway and API keys) and the executable `themes/` in the files archive, asks for
+  encrypted, write-protected storage and a SHA-256 list kept outside the backup storage to compare before a restore,
+  and explains how to raise the invoice counters after a restore onto a new server (the numbers issued after the
+  backup would be issued again). The GDPR design notes no longer mention a `cli/gdpr-gc.php --dry-run` flag (a run
+  without `--apply` is the dry run).
+- **MySQL: a B2B order on invoice locks only its company; sales reports read covering indexes (review round 51,
+  low).** The credit check of an order on invoice locked every customer row it scanned, through an index starting with
+  `customer_group_id`, so with MySQL choosing a scan the orders on invoice of all other companies waited on it; it now
+  reads the company's members first (`customers (store_id, company_id)`) and locks only their orders. A 365-day sales
+  report at 500 000 orders took 13 s (totals, trend and best sellers each joined every order and line of the period to
+  its refunds and credits): the orders and lines are summed from covering indexes and corrected only for the orders
+  with a refund or credit note, and the report page takes its totals from its trend (measured with a 128 MB buffer
+  pool: 3.8 s for 365 days, 1.5 s for the 90 days the page offers at most). Best sellers show the SKU and name of their
+  latest line (was: the alphabetically last). Filling `products.search_names` (migration
+  `20261120120300_product_search_names`) commits per 500 products, not per product: 100 000 products about 1 minute on
+  MySQL (was over 20), and the full-text index the search no longer reads is dropped.
+- **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
+  open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
+  after that credit was already capped at what the invoice had left (twice off), and a refund requested but not yet
+  booked counted as returned. The money comes off the goods' value before the cap; while a refund is in flight
+  "Refunded" waits for it (if it fails, the return pays in full).
+- **Smaller money and security fixes (review round 51, low).** An admin edit that raises an order on invoice checks
+  the company's credit limit, as checkout does (was: an edit could pass it). A payment refunded in full in the
+  GoPay/ThePay dashboard, with no refund of the shop in flight, books the remaining balance as a refund outside the
+  shop and closes the order (was: logged, the order stayed paid and shippable); a partial refund there names no amount
+  and stays a log entry. The checkout's estimate of the 10 000 EUR OSS threshold nets each cart line at the rate of its
+  category, as the order is priced (a book in SK at 5 %, was the reduced 19 %). `config/vat-rates.json`: HU medicines
+  5 % (were the reduced 18 %; prescription-only medicines are 0 % since 1 September 2026 — set `vat_class` `zero` on
+  them), HU e-books 27 % (were the printed books' 5 %), SK e-books 20 % before 2025. The limit of 3 placed orders per
+  buyer in 30 minutes takes the order's slot atomically before the order is created and gives it back when the order
+  fails (concurrent checkouts all passed it). A download whose request was killed without its shutdown (SIGKILL,
+  `request_terminate_timeout`) releases its transfer lease 5 minutes after its last heartbeat (a running transfer
+  renews it every minute); was: no free resume of that download ever again.
+- **Smaller UI and text fixes (review round 51, low).** The price list and promotion forms say "store time" instead of
+  "(UTC)" (they take and show the store's wall clock). The merchant's payment e-mail names a payment method the
+  merchant named in the merchant's language (was: the customer's, frozen at checkout). The card of `pricing.json` rules
+  under Promotions says what a rule gives ("10 % off, from 50,00 €", "Free shipping"), not `free_shipping` / `fixed`.
+  A VAT-registered seller outside the EU needs no EU VAT ID, so the sample US store saves. The web installer asks for
+  the shop's language and currency (EUR, CZK, PLN, HUF, USD; was: always a Slovak shop in EUR). The return
+  acknowledgement within the withdrawal period says the return needs no approval (was: "we will let you know whether
+  the return is approved"). Checkout removes Unicode bidi controls (U+202E and the other overrides, embeddings,
+  isolates, marks) and C1 controls from names, addresses and notes.
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as
@@ -432,8 +510,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   no counters to carry over, so the invoice storage counts as well: a number whose PDF is already there, in any month
   of its year, is skipped (and logged) when the next document is numbered.
 - **Backups also cover `config.php`, the jobs not done yet and `themes/`; a restore works on a new MySQL server.** A
-  restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run next to the
-  live ones (`*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
+  restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run into the
+  private directory `<backup_recovery_dir>/from-backup/` (never the web root; the web server rules also deny
+  `*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
   `db_name` before importing.
 - **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
   (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the

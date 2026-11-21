@@ -1,8 +1,8 @@
 {
     "_doc": "EU VAT rates per country and class. Primary record = currently valid rate. history[] holds prior rates with valid_from/valid_to. Resolver picks effective rate for a given date (typically invoice.issued_at).",
-    "_updated": "2026-10-23",
+    "_updated": "2026-11-21",
     "_categories": "categories{} overrides the class rate for a product category (products.vat_class = books, medicines, ...) in that country and period. Rates and categories must be confirmed by the merchant's accountant before going live.",
-    "_sources": "2026-10-23: rates checked against the European Commission (Your Europe VAT table, TEDB) and national authorities (Agencia Tributaria Tipos IVA 2026, Revenue.ie zero rate, service-public.fr). books = printed and e-books. medicines = non-prescription human medicines where a country splits them (FR reimbursed 2.1 %, IT/PL/FR otherwise the reduced class). LV books not set: sources disagree (5 % vs 12 %).",
+    "_sources": "2026-10-23: rates checked against the European Commission (Your Europe VAT table, TEDB) and national authorities (Agencia Tributaria Tipos IVA 2026, Revenue.ie zero rate, service-public.fr). books = printed and e-books. medicines = non-prescription human medicines where a country splits them (FR reimbursed 2.1 %, IT/PL/FR otherwise the reduced class). LV books not set: sources disagree (5 % vs 12 %). 2026-11-21: HU medicines 5 % and e-books 27 % (EIBF July 2025: online e-books excluded from the 5 %; prescription-only medicines 0 % from 2026-09-01, set vat_class zero on them); SK e-books 20 % before 2025 (EIBF).",
 
     "default_rate": 0,
     "fallback_class": "standard",
@@ -19,7 +19,7 @@
             "valid_from": "2025-01-01",
             "history": [
                 {"standard": 20, "reduced": 10, "reduced2": 5, "zero": 0,
-                 "categories": {"books": 10, "medicines": 10},
+                 "categories": {"books": 10, "ebooks": 20, "medicines": 10},
                  "valid_from": "2020-01-01", "valid_to": "2024-12-31"}
             ]
         },
@@ -41,7 +41,7 @@
         },
         "HU": {
             "standard": 27, "reduced": 18, "reduced2": 5, "zero": 0,
-            "categories": {"books": 5},
+            "categories": {"books": 5, "ebooks": 27, "medicines": 5},
             "valid_from": "2012-01-01",
             "history": []
         },

@@ -401,9 +401,9 @@ try {
             'ja, 14 Tage', 'ohne Limit', 'Limit / unbezahlt', 'Firma löschen?', 'A157 GmbH']);
     $a157Check('A15.7 de: promotions page is German', $a154Run(['p' => 'promotions']),
         ['Neue Aktion', 'Bereich', 'Katalog (Produktpreis)', 'Warenkorb (Bestellrabatt)', 'Kombinierbarkeit', 'Exklusiv (keine weiteren gelten)',
-            'Bedingungen', 'Rabatt in %', 'Kaufe X, erhalte Y gratis', 'Gültig ab (UTC)', 'Nur für Kundengruppen', 'Gutscheincode (nur Warenkorb)', 'Aktion löschen?', 'A157 Aktion', 'Katalog']);
+            'Bedingungen', 'Rabatt in %', 'Kaufe X, erhalte Y gratis', 'Gültig ab (Shopzeit)', 'Nur für Kundengruppen', 'Gutscheincode (nur Warenkorb)', 'Aktion löschen?', 'A157 Aktion', 'Katalog']);
     $a157Check('A15.7 de: price lists page is German', $a154Run(['p' => 'price_lists']),
-        ['Neue Preisliste', '— alle Kunden —', 'Priorität (höhere gewinnt)', 'Gültig bis (UTC)', 'Gültigkeit (UTC)', 'Preisliste samt Preisen löschen?', 'A157 Liste', 'alle']);
+        ['Neue Preisliste', '— alle Kunden —', 'Priorität (höhere gewinnt)', 'Gültig bis (Shopzeit)', 'Gültigkeit (Shopzeit)', 'Preisliste samt Preisen löschen?', 'A157 Liste', 'alle']);
     $a157Check('A15.7 de: price list edit is German', $a154Run(['p' => 'price_lists', 'id' => $a157List]),
         ['Bearbeiten: A157 Liste', 'Preise der Preisliste a157-liste', 'Eine Zeile pro Preis', 'Preise speichern']);
     $a157Check('A15.7 de: suppliers page is German', $a154Run(['p' => 'suppliers', 'id' => $a157Supplier]),
@@ -454,7 +454,7 @@ try {
     $a157Flash('A15.7 de: refused cart action flash is German', ['p' => 'promotions', 'action' => 'save'], ['scope' => 'cart', 'action_type' => 'fixed_price'] + $a157Promo,
         ['p' => 'promotions'], ['Die Aktion Festpreis ist für einen Gutschein nicht erlaubt (erlaubt: Rabatt in %, Rabatt um Betrag, Kostenloser Versand (Warenkorb oder Gutschein)).']);
     $a157Flash('A15.7 de: promotion date flash is German', ['p' => 'promotions', 'action' => 'save'], ['coupon_code' => '', 'valid_from' => 'gestern'] + $a157Promo,
-        ['p' => 'promotions'], ['Gültig ab: ungültiges Datum (JJJJ-MM-TT HH:MM, UTC).']);
+        ['p' => 'promotions'], ['Gültig ab: ungültiges Datum (JJJJ-MM-TT HH:MM, Shopzeit).']);
     $a157Lists = ['p' => 'price_lists', 'id' => $a157List];
     $a157Flash('A15.7 de: price line format flash is German', $a157Lists + ['action' => 'prices'], ['prices' => 'A155-P | 1'],
         $a157Lists, ['Zeile 1: geben Sie SKU | Mindestmenge | Preis [| ursprünglicher Preis] ein, Preise in der Währung der Preisliste.']);

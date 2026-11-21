@@ -433,6 +433,32 @@ class Fulfillment {
     }
 
     /**
+     * R51: the shipped part of an order line as [shipped, whole] in component units (each component unit of a set
+     * weighs the same; a simple line counts its units). A set split between warehouses whose first parcel left is half
+     * shipped: cancelling the rest refunds that half. R50 counted the whole set as shipped and refunded nothing of it.
+     * @return array{0: int, 1: int}
+     */
+    public static function shippedShare(array $orderItem): array {
+        $ordered = max(1, (int)$orderItem['quantity']);
+        $stmt = Db::get()->prepare("SELECT si.sku, COALESCE(SUM(si.quantity), 0) AS quantity FROM shipment_items si
+            WHERE si.order_item_id = :item AND si.status = 'shipped' GROUP BY si.sku");
+        $stmt->execute([':item' => (int)$orderItem['id']]);
+        $shipped = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $shipped[(string)$row['sku']] = (int)$row['quantity'];
+        if (!$shipped) return [0, $ordered];
+        $lines = Inventory::reservationLines($orderItem);
+        if ($lines === []) return [0, $ordered];
+        $part = 0;
+        $whole = 0;
+        foreach ($lines as $line) {
+            $units = $ordered * max(1, (int)($line['quantity_per_bundle'] ?? 1));
+            $whole += $units;
+            $part += min($units, $shipped[(string)$line['sku']] ?? 0);
+        }
+        return [$part, max(1, $whole)];
+    }
+
+    /**
      * Gross of the order's goods that never shipped, or null when nothing shipped. Each line's discounted gross (the
      * financial snapshot, as credit notes slice it) is split like InvoiceService::credit(): the shipped units are the
      * first slice, which a later RMA credit note refunds, so both refunds together never exceed the line.
@@ -445,11 +471,10 @@ class Fulfillment {
         $anyShipped = false;
         $gross = 0;
         foreach ($items as $item) {
-            $ordered = max(1, (int)$item['quantity']);
-            $shipped = min($ordered, self::shippedUnits($item));
+            [$shipped, $whole] = self::shippedShare($item);
             $anyShipped = $anyShipped || $shipped > 0;
             $line = $lines[(int)$item['id']];
-            $gross += $line - intdiv($line * $shipped, $ordered);
+            $gross += $line - intdiv($line * $shipped, $whole);
         }
         return $anyShipped ? $gross : null;
     }

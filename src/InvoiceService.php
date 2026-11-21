@@ -641,8 +641,20 @@ final class InvoiceService
             $ordered = (int)$orderItem['quantity'];
             if ($before + $quantity > $ordered) throw new LogicException('Order item is already fully credited');
             $component = $componentByItem[$orderItemId];
-            $gross = self::proportionalSegment((int)$component['gross'], $before, $quantity, $ordered);
-            $net = self::proportionalSegment((int)$component['net'], $before, $quantity, $ordered);
+            [$lineGross, $lineNet] = [(int)$component['gross'], (int)$component['net']];
+            // R51: a set whose rest was cancelled while part of it had shipped got its unshipped share back then
+            // (unshippedParts()); its return credits the shipped share only, so both never exceed the line.
+            if (in_array((string)($order['status'] ?? ''), ['cancelled', 'refunded'], true)) {
+                [$shippedPart, $whole] = Fulfillment::shippedShare($orderItem);
+                $shippedUnits = Fulfillment::shippedUnits($orderItem);
+                if ($shippedUnits > 0 && $shippedPart * $ordered < $whole * $shippedUnits) {
+                    [$lineGross, $lineNet] = [intdiv($lineGross * $shippedPart, $whole), intdiv($lineNet * $shippedPart, $whole)];
+                    if ($before + $quantity > $shippedUnits) throw new LogicException('Order item is already fully credited');
+                    $ordered = $shippedUnits;
+                }
+            }
+            $gross = self::proportionalSegment($lineGross, $before, $quantity, $ordered);
+            $net = self::proportionalSegment($lineNet, $before, $quantity, $ordered);
             $vat = $gross - $net;
             $rate = (int)$component['rate_basis_points'];
             // The line's country and scheme when it was supplied abroad (an e-book under OSS or reverse charge).
@@ -660,14 +672,18 @@ final class InvoiceService
     }
 
     /**
-     * R49 (capability review of finding 3): gross a credit note of these RMA quantities would credit now, before the
-     * money of the order refunded outside its returns is counted (credit() with $deductOutside).
+     * R51 (R49 open): [the returned goods' full value, what their credit pays after $outside money refunded outside the
+     * returns]. The outside money is taken off the goods' value, then the invoice's uncredited rest caps it: that money's
+     * own credit note already lowered the rest, and deducting it from the capped credit took it off twice.
+     * @return array{0: int, 1: int}
      */
-    public static function rmaCreditGross(int $sourceInvoiceId, int $rmaId, array $quantities): int {
-        if (!$quantities) return 0;
+    public static function rmaCreditOwed(int $sourceInvoiceId, int $rmaId, array $quantities, int $outside): array {
+        if (!$quantities) return [0, 0];
         $db = Db::get();
         [$source, , , $lines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
-        return (int)self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source)[1]['gross'];
+        $full = (int)self::creditTotals($lines)[1]['gross'];
+        $capped = (int)self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source)[1]['gross'];
+        return [$full, max(0, min($capped, $full - max(0, $outside)))];
     }
 
     /**
@@ -728,9 +744,9 @@ final class InvoiceService
         }
 
         [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
-        [$lines, $totals, $breakdown] = self::capToUncredited($fullLines, self::uncredited($db, $source)['rates'], $source);
-        if ($deductOutside) [$lines, $totals, $breakdown] = self::lessOutside($lines, $totals, (int)$order['id']);
-        [$lines, $totals, $breakdown] = self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source);
+        // R51 (R49 open): the outside money comes off the goods' full value, then the uncredited rest caps it (rmaCreditOwed()).
+        $draftLines = $deductOutside ? self::lessOutside($fullLines, self::creditTotals($fullLines)[1], (int)$order['id'])[0] : $fullLines;
+        [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
@@ -752,9 +768,10 @@ final class InvoiceService
             Orders::lockWithin((int)$order['id']);
             $lockedOrder = Orders::byId((int)$order['id']) ?: $order;
             // R15 high 3: under the lock again, each VAT rate capped at what the invoice still has uncredited at that rate.
-            [$lines, $totals, $breakdown] = self::capToUncredited($fullLines, self::uncredited($db, $source)['rates'], $source);
             $less = 0;
-            if ($deductOutside) [$lines, $totals, $breakdown, $less] = self::lessOutside($lines, $totals, (int)$order['id']);
+            $draftLines = $fullLines;
+            if ($deductOutside) [$draftLines, , , $less] = self::lessOutside($fullLines, self::creditTotals($fullLines)[1], (int)$order['id']);
+            [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             $creditData = [
@@ -961,8 +978,8 @@ final class InvoiceService
         $parts = [];
         foreach ($items as $position => $item) {
             $component = $components[$position];
-            $ordered = max(1, (int)$item['quantity']);
-            $shipped = min($ordered, Fulfillment::shippedUnits($item));
+            // R51: a set half shipped (split between warehouses) credits its unshipped half.
+            [$shipped, $ordered] = Fulfillment::shippedShare($item);
             if ($shipped >= $ordered) continue;
             $supply = isset($component['rate_country']) ? ['country' => strtoupper((string)$component['rate_country']), 'supply' => (string)($component['supply'] ?? 'oss')] : [];
             $key = VatService::breakdownKey((int)$component['rate_basis_points'], $supply['country'] ?? '', $supply['supply'] ?? '');

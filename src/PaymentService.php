@@ -1732,6 +1732,15 @@ class PaymentService {
                 return self::bookRefundWithin($order, $provider, '', $item['amount'], $eventType, $eventKey,
                     $payload + ['settles_refund_request' => $item['request_key']], $item['refund_id'], $eventKey);
             }
+            // R51 (review round 51, low): the whole payment refunded in the GoPay/ThePay dashboard, no refund of the shop
+            // in flight: the remaining balance is booked as a refund outside the shop (like a Stripe dashboard refund), so
+            // the order closes. Was: only logged, the order stayed paid. A partial refund there names no amount and stays a
+            // log entry.
+            $balance = self::refundableBalance($orderId);
+            if ($request === null && $item === null && strtolower((string)($data['state'] ?? '')) === 'refunded' && $currency === $orderCurrency
+                && in_array($from, ['paid', 'partially_refunded', 'disputed'], true) && $balance > 0) {
+                return self::bookRefundWithin($order, $provider, '', $balance, $eventType, $eventKey, $payload);
+            }
             self::recordEvent($orderId, $eventType, 'ignored', (int)($data['amount'] ?? 0), $currency ?: $orderCurrency, $eventKey,
                 $payload + ['payment_status' => $from], $provider, (string)($data['provider_ref'] ?? ''));
             return false;
@@ -2236,6 +2245,23 @@ class PaymentService {
         if ($label !== '') return MethodLabels::name('payment', (string)($snapshot['code'] ?? ''), $label);
         $generic = self::orderLabel($order, I18n::locale());
         return $generic !== '' ? $generic : (string)($order['payment_method'] ?? '');
+    }
+
+    /**
+     * R51 (low): the payment method in a merchant e-mail, in $locale. The snapshot label was written in the customer's
+     * language ("Kreditkarte" of a German order told a Slovak shop in German): the method's current name in $locale
+     * (the merchant's translation, the translated seeded name, else the name as entered) when the method still exists.
+     */
+    public static function merchantLabel(array $order, string $locale): string {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        $code = is_array($snapshot) ? trim((string)($snapshot['code'] ?? '')) : '';
+        if ($code !== '' && StoreContext::hasCurrent() && self::hasMethodTables()) {
+            $stmt = Db::get()->prepare('SELECT name FROM payment_methods WHERE store_id = ? AND code = ?');
+            $stmt->execute([StoreContext::current()->providerId(), $code]);
+            $name = trim((string)$stmt->fetchColumn());
+            if ($name !== '') return MethodLabels::name('payment', $code, $name, $locale);
+        }
+        return self::orderLabel($order, $locale);
     }
 
     private static function orderProvider(array $order): string {

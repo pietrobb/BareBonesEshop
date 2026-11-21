@@ -8,6 +8,7 @@
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>
 {{#if reason}}<p>Motivo: {{reason}}</p>{{/if}}
-<p>Le informaremos si aprobamos la devolución y cómo enviarnos los productos. Conserve este correo como constancia de su solicitud.</p>
+{{#if within_withdrawal}}<p>Dentro del plazo de desistimiento puede devolver los productos sin indicar el motivo y sin nuestra aprobación. Le indicaremos cómo enviarlos; le reembolsaremos el pago en un plazo de 14 días desde que recibamos su desistimiento (podemos esperar a recibir los productos o a que acredite su envío). Conserve este correo como constancia de su solicitud.</p>{{/if}}
+{{#if needs_approval}}<p>Le informaremos si aprobamos la devolución y cómo enviarnos los productos. Conserve este correo como constancia de su solicitud.</p>{{/if}}
 <p>Vendedor: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

@@ -169,11 +169,12 @@ try {
     $arrGoPayState = 'REFUNDED';
     PaymentService::handlePulledNotification(['id' => '3000000201'], $arrGoPay, 'gopay');
     assert_equals(['delivered', 'refunded', 1000], $arrState($r2), 'ARR 2: the GoPay REFUNDED notification completes the refund in flight (was stuck in refund_pending)');
-    // A REFUNDED report without a matching refund in flight moves no money.
+    // R51: a REFUNDED report without a refund of the shop in flight is the whole payment refunded in the GoPay dashboard:
+    // the balance is booked as a refund outside the shop and the order closes (was: a log entry, the order stayed paid).
     $r2b = $arrOrder('delivered', 'paid', 'gopay', '3000000202');
     $pdo->prepare("UPDATE orders SET order_number = 'ARR-GOPAY-3000000202' WHERE id = ?")->execute([$r2b]);
     PaymentService::handlePulledNotification(['id' => '3000000202'], $arrGoPay, 'gopay');
-    assert_equals(['delivered', 'paid', 0], $arrState($r2b), 'ARR 2: a refund report the shop did not request stays a log entry');
+    assert_equals(['delivered', 'refunded', 1000], $arrState($r2b), 'ARR 2: a dashboard refund the shop did not request closes the order (R51)');
     $r2c = $arrOrder('delivered', 'paid', 'gopay', '3000000203');
     $pdo->prepare("UPDATE orders SET order_number = 'ARR-GOPAY-3000000203' WHERE id = ?")->execute([$r2c]);
     PaymentService::requestRefund($r2c, 300, 'arr_2c_request');

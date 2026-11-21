@@ -8,6 +8,7 @@
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>
 {{#if reason}}<p>Indok: {{reason}}</p>{{/if}}
-<p>Értesítjük, hogy jóváhagyjuk-e a visszaküldést, és hogyan küldheti vissza a terméket. Őrizze meg ezt az e-mailt kérelme igazolásaként.</p>
+{{#if within_withdrawal}}<p>Az elállási határidőn belül indoklás és jóváhagyásunk nélkül visszaküldheti az árut. Tájékoztatjuk, hogyan küldje vissza; a fizetett összeget az elállás kézhezvételétől számított 14 napon belül visszatérítjük (megvárhatjuk, amíg az áru visszaérkezik, vagy igazolja annak feladását). Őrizze meg ezt az e-mailt kérelme igazolásaként.</p>{{/if}}
+{{#if needs_approval}}<p>Értesítjük, hogy jóváhagyjuk-e a visszaküldést, és hogyan küldheti vissza a terméket. Őrizze meg ezt az e-mailt kérelme igazolásaként.</p>{{/if}}
 <p>Eladó: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
 </body></html>

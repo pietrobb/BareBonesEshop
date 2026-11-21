@@ -85,12 +85,22 @@ class Search {
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             $stmt->closeCursor();
             if ($rows === []) break;
-            foreach ($rows as $row) {
-                $after = max($after, (int)$row['id']);
-                $names = self::translatedNames($row['translations'] ?? '');
-                if ($names === (string)($row['search_names'] ?? '')) continue;
-                $update->execute([$names, (int)$row['id']]);
-                $changed++;
+            // R51 (review round 51, low): one commit per batch, not per product (100 000 autocommitted updates took
+            // minutes on MySQL, each waiting for its log flush). Inside a caller's transaction its commit applies.
+            $own = !$db->inTransaction();
+            if ($own) $db->beginTransaction();
+            try {
+                foreach ($rows as $row) {
+                    $after = max($after, (int)$row['id']);
+                    $names = self::translatedNames($row['translations'] ?? '');
+                    if ($names === (string)($row['search_names'] ?? '')) continue;
+                    $update->execute([$names, (int)$row['id']]);
+                    $changed++;
+                }
+                if ($own) $db->commit();
+            } catch (Throwable $e) {
+                if ($own) $db->rollBack();
+                throw $e;
             }
         }
         return $changed;

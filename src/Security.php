@@ -366,6 +366,48 @@ class Security {
         }, $failClosed);
     }
 
+    /**
+     * R51 (low): takes one of $maxHits slots of $action atomically for an action that may still fail — the hit is
+     * inserted and counted under SQLite's write lock (as rateLimit()), so concurrent requests cannot both take the last
+     * slot, as rateLimitAllows() followed by rateLimitRecord() let them. Returns the hit to give back with
+     * rateLimitRelease() when the action failed, 0 when the limiter storage failed (allowed, nothing taken), or null
+     * when no slot is left.
+     * @phpstan-impure
+     */
+    public static function rateLimitReserve(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): ?int {
+        $windowSeconds = max(1, min(86400, $windowSeconds));
+        $hit = 0;
+        $allowed = self::withRateDb(static function (PDO $db) use ($action, $maxHits, $windowSeconds, $bindIp, &$hit): bool {
+            $key = self::rateKey($action, $bindIp);
+            $now = time();
+            $open = !$db->inTransaction() && $db->beginTransaction();
+            try {
+                $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")->execute([':key' => $key, ':ts' => $now]);
+                $id = (int)$db->lastInsertId();
+                $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+                $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
+                $allowed = (int)$stmt->fetchColumn() <= max(0, $maxHits);
+                if (!$allowed) $db->prepare("DELETE FROM hits WHERE rowid = :id")->execute([':id' => $id]);
+                if ($open) $db->commit();
+                $hit = $allowed ? $id : 0;
+                return $allowed;
+            } catch (Throwable $e) {
+                if ($open) $db->rollBack();
+                throw $e;
+            }
+        });
+        return $allowed ? $hit : null;
+    }
+
+    /** Gives back a hit rateLimitReserve() took (the guarded action failed). */
+    public static function rateLimitRelease(int $hit): void {
+        if ($hit <= 0) return;
+        self::withRateDb(static function (PDO $db) use ($hit): bool {
+            $db->prepare("DELETE FROM hits WHERE rowid = :id")->execute([':id' => $hit]);
+            return true;
+        });
+    }
+
     /** Records one hit for $action (see rateLimitAllows()). */
     public static function rateLimitRecord(string $action, bool $bindIp = true): void {
         self::withRateDb(static function (PDO $db) use ($action, $bindIp): bool {

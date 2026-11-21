@@ -110,6 +110,11 @@ class Db {
         return $e instanceof PDOException && ((int)$e->getCode() === 1049 || str_contains($e->getMessage(), '[1049]'));
     }
 
+    /** MySQL/MariaDB rolled the transaction back as a deadlock victim (1213, SQLSTATE 40001): it may simply run again. */
+    public static function deadlocked(\Throwable $e): bool {
+        return $e instanceof PDOException && self::isMysql() && ((string)$e->getCode() === '40001' || (int)($e->errorInfo[1] ?? 0) === 1213);
+    }
+
     /** Initialize with an existing PDO (for testing) */
     public static function init(PDO $pdo, string $driver = 'sqlite'): void {
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') $pdo->exec("SET SESSION time_zone='+00:00'");

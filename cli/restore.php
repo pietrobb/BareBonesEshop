@@ -27,7 +27,7 @@ require_once __DIR__ . '/cli-only.php';
  *         (retained, max 5 newest). Files are extracted into a private staging directory by a strict
  *         reader (regular files only, no absolute/../link entries); differing live files are only
  *         overwritten with --force, and files missing from the backup are kept. config.php, themes and
- *         the job queue are never overwritten: a differing file goes next to the live one as *.from-backup.
+ *         the job queue are never overwritten: a differing file goes to <backup_recovery_dir>/from-backup/.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -67,7 +67,21 @@ try {
         PrivateOwner::run(static fn() => BackupService::init(Db::get()));
     } catch (\Throwable $e) {
         // R50: a restore onto a new MySQL/MariaDB server: db_name is created empty and the backup imported into it.
-        if (!Db::isUnknownDatabase($e) || isset($flags['list']) || $filesOnly || !Db::createMissingMysqlDatabase()) throw $e;
+        if (!Db::isUnknownDatabase($e) || isset($flags['list']) || $filesOnly) throw $e;
+        // R51 (low): nothing is created before the refusals and the confirmation below (was: an empty db_name stayed on
+        // the server after "no" or a refused run). A missing database is a MySQL/MariaDB restore, so their rules apply.
+        if (!$writersStopped || $skipSnapshot) {
+            fwrite(STDERR, "REFUSED: db_name does not exist on this MySQL/MariaDB server. A restore into it needs --i-stopped-writers\n"
+                . "(stop web traffic, workers and cron first) and keeps the pre-restore-snapshot (no --skip-snapshot).\n");
+            exit(1);
+        }
+        if (!$yes && !$quiet) {
+            echo "db_name does not exist on this MySQL/MariaDB server. Create it empty and restore "
+                . ($positional[0] ?? 'the latest backup') . " into it? Type 'yes' to continue: ";
+            if (strtolower(trim((string)fgets(STDIN))) !== 'yes') { $emit('Aborted.'); exit(1); }
+            $yes = true;
+        }
+        if (!Db::createMissingMysqlDatabase()) throw $e;
         $emit('Created the empty database db_name on this MySQL/MariaDB server for the restore.');
         PrivateOwner::run(static fn() => BackupService::init(Db::get()));
     }
@@ -258,7 +272,7 @@ if ($withFiles) {
     $emit('  overwritten:  ' . count($files['overwritten']));
     if ($files['set_aside'] !== []) {
         fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) from config.php, themes or the job queue differ from the live ones (or the queue"
-            . " has already run) and were written next to them as *.from-backup, not over them. Compare and move them in by hand.\n");
+            . " has already run) and were written to the private directory " . BackupService::asideDirectory() . ", not over them. Compare and move them in by hand.\n");
     }
     foreach ($files['skipped_sources'] as $name) {
         fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");

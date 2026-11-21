@@ -73,9 +73,14 @@ final class MethodLabels {
     /**
      * R50 (low): the translations the merchant entered for a method ({"cs": {"name": "…", "description": "…"}}) as JSON
      * for the methods' translations column: only the given store languages, only non-empty texts; null when none.
+     * R51: the saved translations of languages the form did not offer ($existing) are kept, not dropped.
      */
-    public static function encodeTranslations(mixed $posted, array $languages): ?string {
+    public static function encodeTranslations(mixed $posted, array $languages, ?string $existing = null): ?string {
         $out = [];
+        $kept = json_decode((string)$existing, true);
+        foreach (is_array($kept) ? $kept : [] as $locale => $texts) {
+            if (is_string($locale) && !in_array($locale, $languages, true) && is_array($texts)) $out[$locale] = $texts;
+        }
         foreach (is_array($posted) ? $posted : [] as $locale => $texts) {
             if (!is_string($locale) || !in_array($locale, $languages, true) || !is_array($texts)) continue;
             foreach (['name', 'description'] as $field) {
@@ -113,10 +118,24 @@ final class MethodLabels {
         return self::$merchant[$store][$kind][$code] ?? [];
     }
 
-    /** The active store's further languages, in which a method may carry the merchant's own name and description. */
+    /**
+     * The languages in which a method may carry the merchant's own name and description: those of every store sharing
+     * the active store's methods (provider_scope), less the language of the methods' own name (the default language of
+     * the store owning them). R51: only the active store's were offered, so a German store sharing a Slovak store's
+     * methods could not enter German at all, and saving from one store dropped the other stores' translations.
+     */
     public static function translationLanguages(): array {
         $store = StoreContext::current();
-        return array_values(array_diff(array_unique(array_map('strval', (array)($store->config()['languages'] ?? []))), [$store->defaultLocale()]));
+        $provider = $store->providerId();
+        $stores = (array)(Bootstrap::stores()['stores'] ?? []);
+        $languages = [];
+        foreach ([$store->id() => $store->config()] + $stores as $id => $config) {
+            if (!is_array($config) || (string)($config['provider_scope'] ?? $id) !== $provider) continue;
+            foreach ([(string)($config['default_locale'] ?? 'en'), ...array_map('strval', (array)($config['languages'] ?? []))] as $locale) $languages[$locale] = true;
+        }
+        $owner = is_array($stores[$provider] ?? null) ? (string)($stores[$provider]['default_locale'] ?? 'en') : $store->defaultLocale();
+        unset($languages[$owner]);
+        return array_keys($languages);
     }
 
     private static function translated(string $kind, string $code, string $value, int $field, string $suffix, ?string $locale): string {

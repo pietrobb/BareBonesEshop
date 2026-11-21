@@ -98,6 +98,21 @@ try {
         $db->prepare("UPDATE orders SET status = 'cancelled' WHERE order_number LIKE 'R50P-B%'")->execute();
     });
 
+    // --- R51: open orders without a net get it in committed batches before the count ----------------------------------
+    $section('oss_net filled before the count', static function () use ($db, $place, $check): void {
+        $db->beginTransaction();
+        for ($i = 0; $i < 1200; $i++) $place('R51P-' . $i);
+        $db->exec("UPDATE orders SET oss_net = NULL WHERE order_number LIKE 'R51P-%'");
+        $db->commit();
+        $left = static fn(): int => (int)$db->query("SELECT COUNT(*) FROM orders WHERE oss_net IS NULL AND order_number LIKE 'R51P-%'")->fetchColumn();
+        OssThreshold::backfillOrderNets($db, '2000-01-01', microtime(true) - 1);
+        $check($left() === 700, 'past its time budget the fill keeps the batch of 500 it committed and stops (a web request limit loses no work; left ' . $left() . ')');
+        OssThreshold::reset();
+        (new ReflectionMethod(OssThreshold::class, 'storeMissingNets'))->invoke(null, $db, (int)ShopTime::date('Y'));
+        $check($left() === 0 && !$db->inTransaction(), 'the next count stores the rest before its read-only snapshot (was: counted inside it and stored only at its end)');
+        $db->prepare("UPDATE orders SET status = 'cancelled' WHERE order_number LIKE 'R51P-%'")->execute();
+    });
+
     // --- GDPR e-mail lookups ------------------------------------------------------------------------------------------
     $section('GDPR e-mail lookup', static function () use ($db, $driver, $place, $check): void {
         $order = $place('R50P-GDPR', 'cancelled', 'domestic', 'R50P-Mixed@Example.TEST');
@@ -121,7 +136,7 @@ try {
         if ($driver === 'mysql') {
             $check(Db::forceIndex('orders', 'idx_orders_store_created') === ' FORCE INDEX (idx_orders_store_created)' && Db::forceIndex('orders', 'idx_r50p_missing') === '',
                 'MySQL: the list hint names an index only when it exists');
-            $check(str_contains(OrderExport::listIndex('pending', ''), 'idx_orders_store_status_created') && str_contains(OrderExport::listIndex('', 'paid'), 'idx_orders_store_payment_created')
+            $check(str_contains(OrderExport::listIndex('pending', ''), 'idx_orders_store_status_created') && str_contains(OrderExport::listIndex('', 'paid'), 'idx_orders_store_payment_cover')
                 && str_contains(OrderExport::filters(['period' => 'all'])['index'], 'idx_orders_store_created'),
                 'MySQL: the order list reads the index whose columns are its filters, in created_at order');
         } else {
@@ -137,7 +152,7 @@ try {
         $rows = $plan->fetchAll(PDO::FETCH_ASSOC);
         $text = json_encode($rows);
         $ranged = $driver === 'mysql'
-            ? array_filter($rows, static fn(array $r): bool => ($r['table'] ?? '') === 'o' && ($r['key'] ?? '') === 'idx_orders_store_payment_created' && ($r['type'] ?? '') === 'range') !== []
+            ? array_filter($rows, static fn(array $r): bool => ($r['table'] ?? '') === 'o' && ($r['key'] ?? '') === 'idx_orders_store_payment_cover' && ($r['type'] ?? '') === 'range') !== []
             : preg_match('/SEARCH o USING (COVERING )?INDEX idx_orders_store_\w+ \(store_id=\?.*created_at>\?\)/', $text) === 1;
         $check($ranged, 'the report reads only the store\'s orders of the period through an index range, not every order of the store (' . substr($text, 0, 600) . ')');
         SalesReport::totals('default', $since);

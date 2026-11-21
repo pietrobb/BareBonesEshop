@@ -486,10 +486,29 @@ class Pricing {
             $effect = $type === 'automatic' ? (string)($rule['action'] ?? 'discount')
                 : (($rule['discount_type'] ?? '') === 'percent' ? (float)($rule['discount_value'] ?? 0) . ' %' : (string)($rule['discount_type'] ?? 'fixed'));
             $min = (int)($rule['conditions']['min_subtotal'] ?? $rule['min_subtotal'] ?? 0);
-            if ($min > 0) $effect .= ', min ' . Money::decimal($min, $currency = self::cartRulesCurrency()) . ' ' . strtoupper($currency);
-            $rules[] = ['name' => (string)($rule['name'] ?? ''), 'type' => $type, 'code' => strtoupper(trim((string)($rule['code'] ?? ''))), 'effect' => $effect];
+            $currency = strtolower((string)($rule['conditions']['currency'] ?? self::cartRulesCurrency()));
+            if ($min > 0) $effect .= ', min ' . Money::decimal($min, $currency) . ' ' . strtoupper($currency);
+            $kind = $type === 'automatic' ? (string)($rule['action'] ?? 'discount') : (string)($rule['discount_type'] ?? 'fixed');
+            $rules[] = ['name' => (string)($rule['name'] ?? ''), 'type' => $type, 'code' => strtoupper(trim((string)($rule['code'] ?? ''))), 'effect' => $effect,
+                'kind' => $kind, 'value' => $type === 'coupon' ? (float)($rule['discount_value'] ?? 0) : 0.0, 'min' => $min, 'currency' => $currency];
         }
         return $rules;
+    }
+
+    /**
+     * R51 (low): what an activeCartRules() rule gives, in the admin's language ("10 % off, from 50,00 €", "Free shipping"),
+     * not the pricing.json codes (free_shipping, fixed) the doctor's English 'effect' carries.
+     */
+    public static function cartRuleEffectLabel(array $rule): string {
+        $currency = (string)($rule['currency'] ?? 'eur');
+        $text = match ((string)($rule['kind'] ?? '')) {
+            'percent' => I18n::format('admin.promo.rule_effect.percent', ['value' => rtrim(rtrim(number_format((float)$rule['value'], 2, '.', ''), '0'), '.')]),
+            'fixed' => I18n::format('admin.promo.rule_effect.fixed', ['amount' => I18n::price((int)round((float)$rule['value']), $currency)]),
+            'free_shipping' => I18n::t('admin.promo.rule_effect.free_shipping'),
+            default => I18n::t('admin.promo.rule_effect.discount'),
+        };
+        if ((int)($rule['min'] ?? 0) > 0) $text .= I18n::format('admin.promo.rule_effect.min', ['amount' => I18n::price((int)$rule['min'], $currency)]);
+        return $text;
     }
 
     /** Upper-case coupon codes that pricing.json defines for the active store. */
