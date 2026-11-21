@@ -118,7 +118,6 @@ $page(['checkout_refresh' => '1', 'csrf_token' => 'r15l-good'] + $planted);
 $afterRefresh = $page([]);
 echo 'R15LRESULT' . json_encode(['rejected' => $rejected, 'after_rejected' => $afterRejected, 'after_refresh' => $afterRefresh]);
 PHP);
-    $pdo->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchAll();
     $r15lProcess = proc_open([PHP_BINARY, $r15lRoot . '/draft.php', dirname(TEST_CLI_DIR), $testDbPath, json_encode((new ReflectionProperty(Pricing::class, 'config'))->getValue())],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r15lPipes);
     fclose($r15lPipes[0]);

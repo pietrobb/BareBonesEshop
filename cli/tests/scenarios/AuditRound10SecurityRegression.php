@@ -45,10 +45,7 @@ register_shutdown_function(static function(): void {
 });
 require $root . '/src/Entrypoints/Admin.php';
 PHP);
-$r10sRun = static function(string $dbPath, array $session, string $page = 'dashboard', string $action = '', array $post = [], array $cfg = [], array $basic = []) use ($r10sRoot, $r10sKey, $pdo): array {
-    // Linux: an earlier child process can unlink the suite's -wal file, after which the parent's writes (accounts,
-    // sessions) stay invisible to a new child. Checkpoint them into the database file first (see AuditRound9HotfixRegression).
-    $pdo->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchAll();
+$r10sRun = static function(string $dbPath, array $session, string $page = 'dashboard', string $action = '', array $post = [], array $cfg = [], array $basic = []) use ($r10sRoot, $r10sKey): array {
     $process = proc_open([PHP_BINARY, $r10sRoot . '/admin.php', dirname(TEST_CLI_DIR), $dbPath, $r10sRoot, $r10sKey, json_encode((object)$session), $page, $action,
         json_encode((object)$post), json_encode((object)$cfg), json_encode($basic)], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     fclose($pipes[0]);

@@ -109,9 +109,6 @@ echo 'R9HRESULT' . json_encode([
     'coupon' => preg_match('~name="coupon_code"[^>]*value="([^"]*)"~', $html, $m) ? $m[1] : null,
 ]) . "\nR9HPAGE" . substr(preg_replace('~\s+~', ' ', strip_tags($html)), 0, 600);
 PHP);
-    // On Linux an earlier child process can have closed this database last and removed its -wal file, leaving this
-    // connection writing into the unlinked one: copy the rows into the database file so the child sees them.
-    $pdo->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchAll();
     $r9hProcess = proc_open([PHP_BINARY, $r9hRoot . '/reload.php', dirname(TEST_CLI_DIR), $testDbPath, json_encode((new ReflectionProperty(Pricing::class, 'config'))->getValue())],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r9hPipes);
     fclose($r9hPipes[0]);

@@ -39,8 +39,10 @@ $crfSuiteFile = '';
 foreach ($pdo->query('PRAGMA database_list')->fetchAll(PDO::FETCH_ASSOC) as $crfRow) {
     if (($crfRow['name'] ?? '') === 'main') $crfSuiteFile = (string)$crfRow['file'];
 }
-$crfSuiteCopied = $crfDriver === 'sqlite' && $crfSuiteFile !== '' && copy($crfSuiteFile, $crfImportDb)
-    && (!is_file($crfSuiteFile . '-wal') || copy($crfSuiteFile . '-wal', $crfImportDb . '-wal'));
+// R52 (idea 25): copied by SQLite (VACUUM INTO). Was: copy() of the file and its -wal, and closing that descriptor
+// dropped every POSIX lock this process held on the suite database, so on Linux the next child process to close it
+// took it for the last connection and deleted the -wal under the suite (TestHarness suite_sqlite_lock_lost()).
+$crfSuiteCopied = $crfDriver === 'sqlite' && $crfSuiteFile !== '' && $pdo->exec('VACUUM INTO ' . $pdo->quote($crfImportDb)) !== false;
 $crfBackend = new class implements QueueBackend {
     /** @var list<bool> inTransaction() of the import connection at each renewal */
     public array $renewals = [];
