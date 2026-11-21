@@ -190,12 +190,15 @@ try {
         Cart::add(9711, null, 2);
         $_SERVER['REQUEST_METHOD'] = 'POST';
         $_SESSION['csrf_token'] = 'r49-checkout';
+        // A fresh checkout throttle (10 per IP, 5 per session): the full suite's earlier checkouts count against it.
+        Security::setRateDbForTesting(new PDO('sqlite::memory:'));
         $_POST = ['csrf_token' => 'r49-checkout', 'name' => 'R49 Buyer', 'email' => $email, 'country' => 'SK',
             'street' => 'Return 49', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'packeta', 'payment_method' => 'bank_transfer'];
         $checkout = apiCheckout();
         $_POST = [];
         Cart::clear();
         $orderId = (int)($checkout['order_id'] ?? 0);
+        if ($orderId === 0) throw new RuntimeException('R49 RMA checkout for ' . $email . ' placed no order: ' . json_encode($checkout));
         $pdo->exec("UPDATE orders SET status='paid', payment_status='paid', payment_id='' WHERE id={$orderId}");
         InvoiceService::issue($orderId);
         $pdo->exec("UPDATE orders SET status='delivered' WHERE id={$orderId}");
