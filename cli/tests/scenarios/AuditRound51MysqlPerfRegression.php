@@ -160,8 +160,14 @@ if (getenv('TEST_MYSQL_DSN')) {
         'R51 mysql: the credit-check and covering report indexes exist and replace the narrower ones they start with');
     // The refunds are summed from the refunds (a separate statement), not joined as a derived table to each order.
     // MariaDB reads the orders from the index alone (":covering"), MySQL 8.4 also looks at the row: both use the index.
-    $r51pOrders = static fn(?array $plan): ?array => $plan === null ? null
-        : array_map(static fn(string $row): string => $row === 'o:idx_orders_store_payment_cover:covering' ? 'o:idx_orders_store_payment_cover' : $row, $plan);
+    // R54 (review round 19): the tables in name order: MariaDB 10.11 may read the order lines first on so few rows (the
+    // indexes, not the join order, are what the test is about).
+    $r51pOrders = static function (?array $plan): ?array {
+        if ($plan === null) return null;
+        $plan = array_map(static fn(string $row): string => $row === 'o:idx_orders_store_payment_cover:covering' ? 'o:idx_orders_store_payment_cover' : $row, $plan);
+        sort($plan);
+        return $plan;
+    };
     assert_equals(['o:idx_orders_store_payment_cover'], $r51pOrders($r51pResult['plans']['totals'] ?? null),
         'R51 mysql reports: the totals read the paid orders of the period through the covering index and join no refund table to every order');
     assert_equals(['o:idx_orders_store_payment_cover', 'oi:idx_oi_order_cover:covering'], $r51pOrders($r51pResult['plans']['top'] ?? null),

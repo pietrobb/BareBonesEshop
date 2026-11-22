@@ -81,13 +81,13 @@ final class SalesReport {
     /**
      * Revenue orders placed since $sinceUtc (and before $untilUtc) and their revenue (total less what was refunded of
      * them), per currency and, with $hourly, per UTC hour ('' otherwise). The orders are counted from the index; the
-     * refunds of those orders are summed from the refunds and taken off.
+     * refunds of those orders are summed from the refunds and taken off. $bucket: the leading characters of created_at that
      * @return list<array{currency:string, hour_utc:string, orders:int, revenue:int}>
      */
-    private static function revenueBy(string $storeId, string $sinceUtc, ?string $untilUtc, bool $hourly): array {
+    private static function revenueBy(string $storeId, string $sinceUtc, ?string $untilUtc, int $bucket): array {
         $db = Db::get();
-        $columns = 'LOWER(o.currency) AS currency, ' . ($hourly ? 'SUBSTR(o.created_at, 1, 13)' : "''") . ' AS hour_utc';
-        $group = 'LOWER(o.currency)' . ($hourly ? ', SUBSTR(o.created_at, 1, 13)' : '');
+        $columns = 'LOWER(o.currency) AS currency, ' . ($bucket > 0 ? "SUBSTR(o.created_at, 1, {$bucket})" : "''") . ' AS hour_utc';
+        $group = 'LOWER(o.currency)' . ($bucket > 0 ? ", SUBSTR(o.created_at, 1, {$bucket})" : '');
         [$where, $params] = self::revenueWhere($storeId, $sinceUtc, $untilUtc);
         $stmt = $db->prepare("SELECT {$columns}, COUNT(*) AS orders, COALESCE(SUM(o.total), 0) AS revenue
             FROM orders o" . Db::forceIndex('orders', 'idx_orders_store_payment_cover', $db) . " WHERE {$where} GROUP BY {$group}");
@@ -124,7 +124,7 @@ final class SalesReport {
      */
     public static function revenueRows(string $storeId, string $sinceUtc, string $untilUtc): array {
         $out = [];
-        foreach (self::revenueBy($storeId, $sinceUtc, $untilUtc, false) as $row) $out[$row['currency']] = ['orders' => $row['orders'], 'revenue' => $row['revenue']];
+        foreach (self::revenueBy($storeId, $sinceUtc, $untilUtc, 0) as $row) $out[$row['currency']] = ['orders' => $row['orders'], 'revenue' => $row['revenue']];
         return $out;
     }
 
@@ -161,7 +161,7 @@ final class SalesReport {
             }
         }
         foreach ($raw as [$since, $until]) {
-            foreach (self::revenueBy($storeId, $since, $until, false) as $row) {
+            foreach (self::revenueBy($storeId, $since, $until, 0) as $row) {
                 $sums[$row['currency']]['orders'] = ($sums[$row['currency']]['orders'] ?? 0) + $row['orders'];
                 $sums[$row['currency']]['revenue'] = ($sums[$row['currency']]['revenue'] ?? 0) + $row['revenue'];
             }
@@ -218,11 +218,15 @@ final class SalesReport {
                 }
             }
         }
+        // R54 (low): a zone off by a half or three quarters of an hour (Kathmandu, Newfoundland) starts its day inside a UTC
+        // hour: the orders of the day's first minutes counted the day before. Its orders are grouped by the minute.
+        $whole = static fn(DateTimeImmutable $at): bool => $zone->getOffset($at) % 3600 === 0;
+        $bucket = $whole(new DateTimeImmutable($since, $utc)) && $whole($now ?? new DateTimeImmutable('now')) ? 13 : 16;
         foreach ($raw as [$rawSince, $rawUntil]) {
-            foreach (self::revenueBy($storeId, $rawSince, $rawUntil, true) as $row) {
+            foreach (self::revenueBy($storeId, $rawSince, $rawUntil, $bucket) as $row) {
                 $currency = $row['currency'];
                 $out[$currency] ??= $emptyDays;
-                $localDay = (new DateTimeImmutable($row['hour_utc'] . ':00:00', $utc))->setTimezone($zone)->format('Y-m-d');
+                $localDay = (new DateTimeImmutable($row['hour_utc'] . ($bucket === 13 ? ':00:00' : ':00'), $utc))->setTimezone($zone)->format('Y-m-d');
                 // An order stamped after today (a clock ahead, an import) counts today, as totals() counts it.
                 // The first hour of a zone off by a half hour starts before the first local day: it is that day.
                 if (!isset($out[$currency][$localDay])) $localDay = (string)($localDay < array_key_first($emptyDays) ? array_key_first($emptyDays) : array_key_last($emptyDays));

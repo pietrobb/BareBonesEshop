@@ -188,11 +188,6 @@ final class WorkerJobs
     }
 
     /**
-     * $claim (the fulfilment claim, renewed in place) is renewed right before the mail, so its lease covers the delivery.
-     * R27: true when the links were only written to the log for a misconfigured mail provider: they reached nobody and are
-     * revoked (they stand in the log), and the caller tries again with new ones (was: marked delivered, never sent).
-     */
-    /**
      * R49 (review round 19, low): how long a download link is valid, in the order's language (was: "no expiry",
      * "max 3 downloads" in every e-mail).
      * @param array{expires_at: int|string|null, download_limit: int|string|null} $link
@@ -205,6 +200,13 @@ final class WorkerJobs
         return $validity;
     }
 
+    /**
+     * Grant the order's downloads and mail their links. $claim (the fulfilment claim, renewed in place) is renewed right
+     * before the mail, so its lease covers the delivery. A failed mail revokes the links and throws (the job retries; the
+     * next grant() keeps the downloads already counted, R54). R27: true when the links were only written to the log for a
+     * misconfigured mail provider: they reached nobody and are revoked (they stand in the log), and the caller tries again
+     * with new ones (was: marked delivered, never sent).
+     */
     public static function fulfilDigitalOrder(int $orderId, ?string &$claim = null): bool {
         $links = DigitalDelivery::grant($orderId);
         if (!$links) return false;
@@ -331,7 +333,10 @@ final class WorkerJobs
             return;
         }
         // A redelivered whole-order job after the provider confirmed the refund only finishes the bookkeeping.
-        $alreadyRefunded = $itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey);
+        // R54 (medium 3): so does the job of a credit note a refund event settled already (the payment refunded in the
+        // GoPay/ThePay dashboard while it waited): calling the provider again would refund it twice or be declined.
+        $alreadyRefunded = ($itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey))
+            || ($itemRefundId > 0 && (string)(Rma::refundById($itemRefundId)['status'] ?? '') === 'succeeded');
 
         $result = $alreadyRefunded ? ['status' => 'succeeded', 'replayed' => true] : ['status' => 'skipped'];
         if (!$alreadyRefunded && $paymentId !== '' && $orderId > 0 && $amount > 0) {
@@ -385,10 +390,9 @@ final class WorkerJobs
         $order = Orders::byId($orderId);
         if (!$order) return;
         $paymentStatus = PaymentService::settleRefundJob($orderId, $amount, $itemRefundId > 0, $refundId, $itemRefundId);
-        $orderStatus = (string)(Orders::byId($orderId)['status'] ?? $order['status']);
-        if ($itemRefundId === 0 && $paymentStatus === 'refunded' && OrderWorkflow::canTransition($orderStatus, 'refunded')) {
-            OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
-        }
+        // R54 (review round 19, medium 4): a job that returned all the money closes the order as the refund webhooks do; a
+        // paid or processing order (processing → refunded is no transition) stayed to be shipped.
+        if ($paymentStatus === 'refunded') PaymentService::closeRefundedOrder($orderId, "Payment refund completed: {$paymentId}");
     }
 
     /** Re-queues after the last attempt failed, at most this many times (5, 10, 20, 40 minutes, then hourly: about 9 hours). */

@@ -174,6 +174,27 @@ try {
         && StoreCurrencyCoverage::unpriced($a111SeedDb, 'hu', $a111Stores['stores']['hu'])['count'] === 0, 'R23 UX: a second seed run (--fresh) reuses the sample price lists and prices the new products too: '
         . json_encode([$a111SeedAgain['code'], substr($a111SeedAgain['out'] . $a111SeedAgain['err'], -400), $a111SeedDb->query("SELECT store_id, code FROM price_lists")->fetchAll(PDO::FETCH_NUM)]));
     $a111SeedDb = null;
+    // R54 (review round 19, UX): a shop whose default store sells in CZK gets its seeded catalog in CZK (was: 'eur', and
+    // every product read "Tento výběr není dostupný").
+    $a111StoresJson = (string)file_get_contents($a111Private . '/stores.json');
+    $a111CzkStores = $a111Stores;
+    $a111CzkStores['stores']['default']['currency'] = 'CZK';
+    file_put_contents($a111Private . '/stores.json', json_encode($a111CzkStores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    try {
+        $a111SeedCzk = $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+        $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+        $a111CzkRows = $a111SeedDb->query("SELECT DISTINCT LOWER(currency) FROM products WHERE store_id = 'default'")->fetchAll(PDO::FETCH_COLUMN);
+        $a111CzkPrices = $a111SeedDb->query("SELECT price FROM products WHERE store_id = 'default'")->fetchAll(PDO::FETCH_COLUMN);
+        $a111CzkGap = StoreCurrencyCoverage::unpriced($a111SeedDb, 'default', $a111CzkStores['stores']['default'])['count'];
+        $a111SeedDb = null;
+        assert_true($a111SeedCzk['code'] === 0 && $a111CzkRows === ['czk'] && $a111CzkGap === 0 && $a111CzkPrices !== []
+            && array_filter($a111CzkPrices, static fn($p): bool => (int)$p % 100 !== 0 || (int)$p < 7400) === [],
+            'R54 UX: cli/seed.php seeds a CZK default store in whole korunas at the sample rate (was: in euros, nothing sold): '
+            . json_encode([$a111SeedCzk['code'], $a111CzkRows, $a111CzkPrices, $a111CzkGap, substr($a111SeedCzk['out'] . $a111SeedCzk['err'], -300)]));
+    } finally {
+        file_put_contents($a111Private . '/stores.json', $a111StoresJson);
+        $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+    }
 
     // Documented subcommand CLIs: getopt() used to drop every option after the subcommand.
     $a111Client = $a111Php(['cli/api-client.php', 'create', '--name=ERP', '--store=default', '--scopes=products:read,orders:read']);

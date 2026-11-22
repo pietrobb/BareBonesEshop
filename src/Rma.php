@@ -72,7 +72,8 @@ class Rma {
         if ($customerId !== null && $customerId > 0 && !self::withinReturnWindow($order)) {
             return [false, null, 'return_window_closed'];
         }
-        $reason = trim($reason);
+        // R54 (review round 19, low): without bidi controls (Security::plainText()).
+        $reason = trim(Security::plainText($reason));
         if ($reason === '') {
             return [false, null, 'reason_required'];
         }
@@ -145,7 +146,7 @@ class Rma {
         $locale = (string)($order['locale'] ?? '');
         // R51 (low): a return within the withdrawal period (or after a timely withdrawal statement) needs no approval —
         // the e-mail no longer says "we will let you know whether the return is approved" there.
-        $withdrawal = Withdrawal::withinPeriod($order) || Withdrawal::forOrder((int)$order['id']) !== [];
+        $withdrawal = self::withinWithdrawal($order);
         MailService::send('rma_received', (string)$order['customer_email'], $locale, [
             'within_withdrawal' => $withdrawal,
             'needs_approval' => !$withdrawal,
@@ -159,6 +160,11 @@ class Rma {
             'seller_name' => (string)($seller['name'] ?? ''),
             'seller_email' => (string)($seller['email'] ?? ''),
         ], (int)$order['id']);
+    }
+
+    /** A return of $order within the withdrawal period (or after a timely withdrawal statement): it needs no approval. */
+    public static function withinWithdrawal(array $order): bool {
+        return Withdrawal::withinPeriod($order) || Withdrawal::forOrder((int)$order['id']) !== [];
     }
 
     /**

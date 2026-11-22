@@ -913,10 +913,16 @@ class VatService implements TaxProvider
         // R42 (low 6): a title before the name is followed by a space or a hyphen ("Dipl.-Ing."): "Dr.Max s.r.o." is the
         // company Dr.Max (was: "Max", the leading word of "Max Mustermann"). Two-word titles go whole ("Ing. arch.",
         // "Mgr. art."; "arch" and "art" stayed as words of the name and the holder did not match).
-        $name = (string)preg_replace(array_merge(['/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u'], $business ? [] : [
-            // R47: "Ing. arch.Ján" keeps its two-word title whole for the joined rule below (was: "arch" left as a name).
-            // R49 (low): the Austrian "Mag. pharm." likewise.
-            '/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|mag\.\s*pharm|(?:' . implode('|', self::TITLES_BEFORE) . ')(?!\.\s*(?:arch|art|pharm)\.))\.(?=[\s\-]|$)/u']), ' ', $name);
+        $name = (string)preg_replace('/(?<![\p{L}\p{N}])(?:ph\.\s?d|ll\.\s?m|art\.\s?d)\./u', ' ', $name);
+        // R47: "Ing. arch.Ján" keeps its two-word title whole for the joined rule below (was: "arch" left as a name).
+        // R49 (low): the Austrian "Mag. pharm." likewise.
+        $spaced = (string)preg_replace('/(?<![\p{L}\p{N}])(?:ing\.\s*arch|mgr\.\s*art|mag\.\s*pharm|(?:' . implode('|', self::TITLES_BEFORE)
+            . ')(?!\.\s*(?:arch|art|pharm)\.))\.(?=[\s\-]|$)/u', ' ', $name);
+        // R54 (review round 19, low): a business word keeps the title only when it names the company ("Dr. Max Holding"):
+        // after a first name and a surname it is a sole trader's trade ("Ing. Ján Novák - STAVBY" is Ján Novák; was:
+        // "ing" stayed a word of the name on that side only and the holder "Ján Novák" did not match).
+        $leading = array_search(true, array_map(static fn(string $w): bool => in_array($w, self::BUSINESS_WORDS, true), self::nameWords($spaced)), true);
+        if (!$business || ($leading !== false && $leading >= 2)) $name = $spaced;
         $name = (string)preg_replace('/,\s*(?:' . implode('|', self::TITLES_AFTER) . ')(?![\p{L}\p{N}])\.?/u', ' ', $name);
         $words = self::nameWords($name);
         // R44 (review round 16, low 4): R42 kept a title joined to the next word, so "Ing.Ján Novák" (a sole trader

@@ -25,6 +25,7 @@ class MerchantNotifier {
         // R50: 'return:<rma id>' names that return request, its lines and the customer's reason.
         $rma = $kind === 'return' ? Rma::byId((int)(explode(':', $event, 2)[1] ?? 0)) : null;
         if ($kind === 'return' && ($rma === null || (int)$rma['order_id'] !== $orderId)) throw new RuntimeException("Return for order #{$orderId} not found");
+        $rmaWithdrawal = $rma !== null && Rma::withinWithdrawal($order);
         // R29: written for the merchant: merchant_notifications.locale, else the store's language (the admin's default), not
         // the language the customer ordered in (a German order told a Slovak shop about it in German).
         $locale = trim((string)($notificationCfg['locale'] ?? ''));
@@ -44,6 +45,9 @@ class MerchantNotifier {
                 $result = MailService::send($template, $recipient, $locale, OrderAddress::mailVars($order, $locale) + ($rma === null ? [] : [
                     'rma_number' => (string)$rma['rma_number'],
                     'reason' => (string)$rma['reason'],
+                    // R54 (review round 19, UX): as the customer was told (was: always "approve or reject").
+                    'within_withdrawal' => $rmaWithdrawal,
+                    'needs_approval' => !$rmaWithdrawal,
                     'admin_url' => self::adminUrl($cfg, '/admin.php?p=rma&status=requested'),
                 ]) + [
                     'event' => $event,

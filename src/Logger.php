@@ -209,10 +209,17 @@ class Logger
      */
     public static function phpLog(string $line): void
     {
-        $masked = self::maskPersonal((string)preg_replace('/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '[email]', self::maskSecrets($line)));
+        $masked = self::maskText($line);
         error_log((string)preg_replace_callback('/[\x00-\x1F\x7F]/', static fn(array $m): string => match ($m[0]) {
             "\n" => '\n', "\r" => '\r', "\t" => '\t', default => sprintf('\x%02X', ord($m[0])),
         }, $masked));
+    }
+
+    /** Secrets, e-mail addresses and the personal data maskPersonal() recognises masked in free text. */
+    private static function maskText(string $text): string
+    {
+        // No brackets in the local part: "https://shop:[REDACTED]@host" keeps its user and host.
+        return self::maskPersonal((string)preg_replace('/[^\s@<>"\'(),;:\[\]]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '[email]', self::maskSecrets($text)));
     }
 
     /** Keys whose value is a customer's name, phone, bank account or address (first_name, "customerPhone", iban, street…). */
@@ -254,7 +261,9 @@ class Logger
             } elseif (is_array($item)) {
                 $item = self::redact($item);
             } elseif (is_string($item)) {
-                $item = self::maskSecrets($item);
+                // R54 (review round 19, low): a value under a key that names no personal data ("detail", "reason",
+                // "error") is free text too: e-mails, IBANs and phone numbers in it were written to the log (was: secrets only).
+                $item = self::maskText($item);
             } elseif (is_object($item)) {
                 $item = '[OBJECT]';
             }

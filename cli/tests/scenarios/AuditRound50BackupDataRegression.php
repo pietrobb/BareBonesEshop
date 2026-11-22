@@ -198,20 +198,23 @@ try {
     unlink($r50bShop . '/themes/mine/home.html');
     unlink($r50bData . '/jobs/pending/mail-1.json');
     $r50bFiles = BackupService::restoreFiles((string)$r50bMeta['remote_path']);
-    $r50bAside = BackupService::asideDirectory();
+    $r50bAside = (string)($r50bFiles['aside_dir'] ?? '');
     clearstatcache();
     assert_equals(["<?php return ['db_name' => 'new_server'];", "<?php return ['db_name' => 'old_server'];"],
         [file_get_contents($r50bShop . '/config.php'), @file_get_contents($r50bAside . '/config.php')],
         'R50 restore: a differing config.php is set aside in the private recovery directory, without --force');
     assert_true(!file_exists($r50bShop . '/config.php.from-backup') && !file_exists($r50bShop . '/themes.from-backup'),
         'R51 restore: nothing is set aside in the web root (config.php.from-backup was served with the database password)');
-    assert_equals($r50bRoot . '/restore-recovery/from-backup', $r50bAside, 'R51 restore: the copies go to <backup_recovery_dir>/from-backup');
-    assert_equals(['body{color:blue}', 'body{color:red}', '<h1>Mine</h1>'], [file_get_contents($r50bShop . '/themes/default/style.css'),
-        @file_get_contents($r50bAside . '/themes/default/style.css'), @file_get_contents($r50bShop . '/themes/mine/home.html')],
-        'R50 restore: a changed theme file is set aside, a missing one is restored in place');
+    assert_true(dirname($r50bAside) === $r50bRoot . '/restore-recovery/from-backup' && preg_match('/^\d{8}-\d{6}-[0-9a-f]{12}$/', basename($r50bAside)) === 1,
+        "R51/R54 restore: the copies go to this restore's own <backup_recovery_dir>/from-backup/<time>-<random> ({$r50bAside})");
+    // R54: a theme file the live themes lack is set aside too (a forged backup's template became the checkout page).
+    assert_equals(['body{color:blue}', 'body{color:red}', false, '<h1>Mine</h1>'], [file_get_contents($r50bShop . '/themes/default/style.css'),
+        @file_get_contents($r50bAside . '/themes/default/style.css'), @file_get_contents($r50bShop . '/themes/mine/home.html'),
+        @file_get_contents($r50bAside . '/themes/mine/home.html')],
+        'R50/R54 restore: a changed theme file and a missing one are set aside, never written into themes/');
     assert_true(!is_file($r50bData . '/jobs/pending/mail-1.json') && is_file($r50bAside . '/jobs/pending/mail-1.json'),
         'R50 restore: the jobs of a queue that has already run are set aside (they would be sent again)');
-    assert_true(count((array)($r50bFiles['set_aside'] ?? [])) === 3, 'R50 restore: the files set aside are reported (' . json_encode($r50bFiles['set_aside'] ?? null) . ')');
+    assert_true(count((array)($r50bFiles['set_aside'] ?? [])) === 4, 'R50 restore: the files set aside are reported (' . json_encode($r50bFiles['set_aside'] ?? null) . ')');
 
     // A new server: the queue directory is empty, so the pending jobs go back in place.
     $r50bRm($r50bData . '/jobs');

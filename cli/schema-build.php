@@ -91,7 +91,8 @@ foreach ($stores['stores'] ?? [] as $store) {
 $defaultLocale = $stores['default_locale'] ?? 'en';
 
 foreach ($catalog['product_types'] as $typeName => $typeDef) {
-    $headers = ['sku', 'name', 'slug', 'category', 'price', 'compare_price', 'stock', 'status', 'summary', 'description', 'image', 'weight_g', 'tags'];
+    // R54 (review round 19, UX): vat_class too (books, food, reduced, ...); an empty cell keeps the default.
+    $headers = ['sku', 'name', 'slug', 'category', 'price', 'compare_price', 'stock', 'status', 'summary', 'description', 'image', 'weight_g', 'tags', 'vat_class'];
 
     foreach ($typeDef['attributes'] ?? [] as $attrName => $attrDef) {
         $headers[] = "attr:{$attrName}";

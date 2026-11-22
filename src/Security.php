@@ -370,11 +370,11 @@ class Security {
      * R51 (low): takes one of $maxHits slots of $action atomically for an action that may still fail — the hit is
      * inserted and counted under SQLite's write lock (as rateLimit()), so concurrent requests cannot both take the last
      * slot, as rateLimitAllows() followed by rateLimitRecord() let them. Returns the hit to give back with
-     * rateLimitRelease() when the action failed, 0 when the limiter storage failed (allowed, nothing taken), or null
-     * when no slot is left.
+     * rateLimitRelease() when the action failed, 0 when the limiter storage failed (allowed, nothing taken; refused with
+     * $failClosed), or null when no slot is left.
      * @phpstan-impure
      */
-    public static function rateLimitReserve(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): ?int {
+    public static function rateLimitReserve(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true, bool $failClosed = false): ?int {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $hit = 0;
         $allowed = self::withRateDb(static function (PDO $db) use ($action, $maxHits, $windowSeconds, $bindIp, &$hit): bool {
@@ -395,7 +395,7 @@ class Security {
                 if ($open) $db->rollBack();
                 throw $e;
             }
-        });
+        }, $failClosed);
         return $allowed ? $hit : null;
     }
 
@@ -555,6 +555,17 @@ class Security {
     // ============================================================
     public static function clean(mixed $input): string {
         return trim(strip_tags(self::str($input)));
+    }
+
+    /**
+     * Text a person typed, shown elsewhere as plain text: without the Unicode bidi controls (U+202E RIGHT-TO-LEFT
+     * OVERRIDE and the other embeddings, overrides, isolates and marks) and the C1 controls. "Ján\u{202E}gnp.exe"
+     * reversed how a name or review read in the admin, e-mails and labels. Text that is not UTF-8 is returned as it is,
+     * for the caller to refuse.
+     */
+    public static function plainText(string $text): string {
+        if (!mb_check_encoding($text, 'UTF-8')) return $text;
+        return (string)preg_replace('/[\x{0080}-\x{009F}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]+/u', '', $text);
     }
 
     /**

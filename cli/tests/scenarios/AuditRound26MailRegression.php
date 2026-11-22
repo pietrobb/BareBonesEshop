@@ -138,8 +138,9 @@ try {
     $r26mRoot = dirname(TEST_CLI_DIR);
     $r26mSource = static fn(string $file): string => (string)file_get_contents($r26mRoot . '/' . $file);
     assert_true(substr_count($r26mSource('src/Customers.php'), "return MailService::logged(\$mail) ? 'logged' : 'sent';") === 2
-        && str_contains($r26mSource('src/BackInStock.php'), "=== 'sent' && !MailService::logged(\$mail) ? 'confirm_sent' : 'failed';")
-        && str_contains($r26mSource('src/GuestCheckoutAccount.php'), "=== 'sent' && !MailService::logged(\$mail) ? 'sent' : 'failed';")
+        // R54: logged mail is 'logged' there too (checked first), so it still never reads as sent.
+        && str_contains($r26mSource('src/BackInStock.php'), "if (MailService::logged(\$mail)) return 'logged';\n        return (\$mail['status'] ?? '') === 'sent' ? 'confirm_sent' : 'failed';")
+        && str_contains($r26mSource('src/GuestCheckoutAccount.php'), "if (MailService::logged(\$mail)) return 'logged';\n        return (\$mail['status'] ?? '') === 'sent' ? 'sent' : 'failed';")
         && str_contains($r26mSource('src/StockAlerts.php'), 'if (MailService::logged($mail)) $logged++;'),
         'R26 mail: the admin payment link, e-mail verification, password reset, back-in-stock confirmation, the account offer and stock alerts do not count logged mail as sent');
 

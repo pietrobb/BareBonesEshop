@@ -56,6 +56,11 @@ function pageStoreSettings(): void {
                     <?php foreach (DateTimeZone::listIdentifiers() as $identifier): ?><option<?= $identifier === $zone ? ' selected' : '' ?>><?= esc($identifier) ?></option><?php endforeach; ?>
                 </select>
                 <small class="muted" id="store-<?= esc($storeId) ?>-timezone-hint"><?= esc(I18n::t('admin.stores.timezone_hint')) ?></small></div>
+            <?php if (Security::adminRole() === 'owner'): // the host picks the store: only the owner moves a store to a domain ?>
+            <div class="form-row"><label for="store-<?= esc($storeId) ?>-domains"><?= esc(I18n::t('admin.stores.field.domains')) ?></label>
+                <textarea id="store-<?= esc($storeId) ?>-domains" name="domains" rows="2" maxlength="2600" data-store-domains aria-describedby="store-<?= esc($storeId) ?>-domains-hint"><?= esc((string)($draft['domains'] ?? implode("\n", array_map('strval', (array)($store['domains'] ?? []))))) ?></textarea>
+                <small class="muted" id="store-<?= esc($storeId) ?>-domains-hint"><?= esc(I18n::t('admin.stores.domains_hint')) ?></small></div>
+            <?php endif; ?>
             <?php if ($seller !== null): ?>
             <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p>
             <?php else: ?>
@@ -92,7 +97,9 @@ function handleStoreSettingsSave(): void {
         setFlash('err', I18n::t('admin.stores.err.unknown'));
         return;
     }
-    $result = StoreSettings::save($storeId, $_POST);
+    $input = $_POST;
+    if (Security::adminRole() !== 'owner') unset($input['domains']);
+    $result = StoreSettings::save($storeId, $input);
     if (!$result['ok']) {
         setFlash('err', implode(' ', $result['errors']));
         $GLOBALS['adminStoreDraft'][$storeId] = array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);

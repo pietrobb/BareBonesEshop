@@ -23,7 +23,15 @@ class AdminForm {
         foreach (['submit_label' => 'submit', 'submitting_label' => 'submitting'] as $attribute => $suffix) {
             if (isset($form[$attribute])) $form[$attribute] = $t($prefix . $suffix, $t('admin.form.' . $suffix, $form[$attribute]));
         }
-        if (isset($form['description'])) $form['description'] = $t($prefix . 'description', $form['description']);
+        if (isset($form['description'])) {
+            // R54 (review round 19, UX): the CSV import help names the currency the import prices a new product in and the
+            // VAT classes it accepts (was: always "in euros", vat_class not listed).
+            $form['description'] = $t($prefix . 'description', $form['description']);
+            if (str_contains($form['description'], '{')) $form['description'] = strtr($form['description'], [
+                '{currency}' => strtoupper(Warehouse::catalogCurrency(StoreContext::current()->catalogId())),
+                '{vat_classes}' => implode(', ', VatService::productClasses()),
+            ]);
+        }
         foreach ($form['fields'] as &$field) {
             $name = (string)($field['name'] ?? '');
             if (isset($field['label'])) $field['label'] = $t($prefix . $name, $field['label']);

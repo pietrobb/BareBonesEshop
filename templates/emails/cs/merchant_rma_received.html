@@ -1,7 +1,9 @@
 <!doctype html>
 <html lang="cs"><body style="font-family:Arial,sans-serif;color:#111">
 <h2>Žádost o vrácení zboží</h2>
-<p>{{customer_name}} ({{customer_email}}) žádá o vrácení zboží z objednávky <strong>{{order_number}}</strong> (vrácení {{rma_number}}). Žádost schvalte nebo zamítněte v administraci.</p>
+<p>{{customer_name}} ({{customer_email}}) žádá o vrácení zboží z objednávky <strong>{{order_number}}</strong> (vrácení {{rma_number}}).</p>
+{{#if needs_approval}}<p>Žádost schvalte nebo zamítněte v administraci.</p>{{/if}}
+{{#if within_withdrawal}}<p>Vrácení je ve lhůtě pro odstoupení od smlouvy a nepotřebuje vaše schválení: pošlete zákazníkovi pokyny k vrácení zboží.</p>{{/if}}
 <ul>
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>

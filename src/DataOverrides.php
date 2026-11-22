@@ -9,6 +9,8 @@ declare(strict_types=1);
 final class DataOverrides
 {
     public const STORES_EXAMPLE = 'stores.example.json';
+    /** Largest settings file (stores.json, mail settings) readRegularFile() reads: far above any real shop's. */
+    public const MAX_SETTINGS_BYTES = 8 * 1048576;
 
     private static ?string $testDir = null;
     private static ?string $suiteDir = null;
@@ -100,6 +102,14 @@ final class DataOverrides
         // The example's sample stores (cz, pl, hu, de, us with made-up sellers) come in hidden: no storefront until the
         // merchant enters the seller and publishes the store in Admin → Stores and seller.
         if ($source !== $legacy) $content = (string)preg_replace('/"sample"\s*:\s*true\b/', '"public": false', $content);
+        // R54 (review round 19, UX): the system language (the admin's) is the main store's, as the web installer sets it
+        // (was: the example's "en" over a Slovak shop after `setup.php install`).
+        $mainLocale = (string)($data['stores'][(string)($data['default_store'] ?? 'default')]['default_locale'] ?? '');
+        if ($source !== $legacy && preg_match('/^[a-z]{2}$/', $mainLocale) === 1 && ($data['default_locale'] ?? null) !== $mainLocale) {
+            $relocalized = (string)preg_replace('/"default_locale"\s*:\s*"[^"]*"/', '"default_locale": "' . $mainLocale . '"', $content, 1);
+            $check = json_decode($relocalized, true);
+            if (is_array($check) && ($check['default_locale'] ?? null) === $mainLocale) $content = $relocalized;
+        }
         if (!self::ensureDir($dir) || !self::atomicWrite($target, $content, 0640)) throw new RuntimeException("Cannot write {$target}");
         if ($source !== $legacy) return ['path' => $target, 'action' => 'created from ' . self::STORES_EXAMPLE];
         // A read-only code directory (Docker) keeps the old file; the data directory copy takes precedence anyway.
@@ -153,17 +163,18 @@ final class DataOverrides
     /**
      * R47 (review round 17, low): the contents of a regular file, else null. Opened non-blocking ('n' = O_NONBLOCK), so a
      * FIFO swapped in after storesPath()'s is_file() cannot stall the caller (root's update doctor/check); fstat() of
-     * the open handle then refuses anything but a regular file.
+     * the open handle then refuses anything but a regular file. R54 (review round 19, low): nor larger than $maxBytes —
+     * a 3 GB stores.json held root's update check for a minute.
      */
-    public static function readRegularFile(string $path): ?string
+    public static function readRegularFile(string $path, int $maxBytes = self::MAX_SETTINGS_BYTES): ?string
     {
         $handle = @fopen($path, 'rn');
         if ($handle === false) return null;
         try {
             $stat = fstat($handle);
-            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0100000) return null;
-            $contents = stream_get_contents($handle);
-            return $contents === false ? null : $contents;
+            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0100000 || (int)$stat['size'] > $maxBytes) return null;
+            $contents = stream_get_contents($handle, $maxBytes + 1);
+            return $contents === false || strlen($contents) > $maxBytes ? null : $contents;
         } finally {
             fclose($handle);
         }

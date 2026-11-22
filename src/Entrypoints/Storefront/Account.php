@@ -195,6 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'sent' => 'account.verify_email_sent',
             'verified' => 'account.verify_email_done',
             'throttled' => 'account.verify_email_throttled',
+            'logged' => 'mail.logged_only',
             default => 'account.verify_email_failed',
         });
         $flashType = in_array($outcome, ['sent', 'verified'], true) ? 'ok' : 'error';

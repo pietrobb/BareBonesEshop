@@ -168,7 +168,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   PDF. The order-done page says the confirmation will be e-mailed, not that it was sent (the worker sends it).
   `php cli/setup.php doctor` shows a fix only under a WARN or FAIL. The admin checklist names the worker cron check,
   the manual payment change names the status in the admin's language ("Zaplatené", not 'paid'), Slovak and Czech
-  translate "Low stock" and "Stock", and `catalog.json` and `cli/seed.php` have Czech and German attribute texts.
+  translate "Low stock" and "Stock", `catalog.json` has Czech and German attribute texts and `cli/seed.php` Czech and
+  German category names.
   `deploy/bbe-step.sh` prints its usage on missing or wrong arguments. README: the quick start says to run
   `setup.php install` as the checkout's owner (`chmod -R go-w .` for a tree root owns), the e-mail log is in
   `<private_runtime_dir>/logs/`, and "Root" lists the two accounts as numbered steps with the crontab of the web
@@ -564,6 +565,67 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   values MySQL quotes (`Duplicate entry '…'`) and the value after a name, phone, IBAN or address key of a gateway
   message. A GDPR erasure also deletes the `/api/v1` replay responses that name one of the person's order numbers
   (a response stored before the order's e-mail was corrected named the old address only).
+- **A restore sets its copies aside in a directory of its own (review round 54, medium 1).** Only
+  `backup_recovery_dir` was checked, not `from-backup` inside it: whoever can write the recovery directory (the web
+  user, through the setgid group of the split deployment) could replace `from-backup` with a symlink to the shop, and
+  `cli/restore.php --files-only --yes` then wrote the backup's `config.php` over the live one and its scripts and
+  `.htaccess` into the web root while reporting them set aside. Each restore now creates
+  `<backup_recovery_dir>/from-backup/<time>-<random>/` exclusively and 0700, refuses when `from-backup` is a symlink or
+  the directory does not resolve inside the recovery directory, checks that again before each file, and prints that
+  directory. A real `from-backup` that is not private (another owner, or group/other access) is refused too: its owner
+  could read the new directory's name and swap it for a symlink to the shop between the check and the write. A theme file the live `themes/` lack is set aside too, not installed (low: a forged backup could add a
+  child theme `checkout.html` with its own script). A SQLite restore over a damaged live database whose invoice
+  counters cannot be read completes with a warning to check the last numbers (low: since R50 it stopped there).
+  `stores.json` and the e-mail settings larger than 8 MiB are not read (low: a 3 GB file held root's update check for a
+  minute).
+- **An e-book's download limit holds while its delivery mail is retried (review round 54, medium 2).** Each retry of
+  the delivery mail revoked the download and granted a new one at zero downloads, and the account's downloads page
+  offered it before the mail went out: with a limit of 3, nine copies. A retry keeps the downloads already counted, and
+  the account page lists a download only once its delivery mail was sent. Low: a download whose request was killed
+  records how far it got every 1 MiB and at each lease heartbeat (was: every 8 MiB), and once its lease lapsed it
+  resumes for free from up to 1 MiB past that point (was: nearly always counted as a new download).
+- **GoPay/ThePay: a payment refunded in the dashboard while a credit note's refund is in flight (review round 54,
+  medium 3).** A credit note whose refund job had not reached GoPay yet: the whole balance was booked as refunded
+  outside the shop and the job then tried GoPay again, so money stood without its credit note. A credit note refund
+  GoPay had accepted, smaller than the balance: the REFUNDED notification was ignored for good and the payment stayed
+  unsettled. Every pending credit note is now booked with its credit note and only the rest as a refund outside the
+  shop; the credit note's job then only finishes the bookkeeping.
+- **A refund job that returned all the money closes the order (review round 54, medium 4).** A paid or processing order
+  whose whole payment the worker refunded stayed to be shipped; it is cancelled and closed as refunded, as the refund
+  notifications and a manual refund already did.
+- **The refund of a cancelled unshipped rest credits those goods (review round 54, medium 7).** Its credit note was
+  split over every VAT rate of the invoice, so the later return of the shipped goods was cut short (54.48 back of
+  60.00). It credits the goods that never shipped, at their own rates.
+- **Daily sales totals keep every change (review round 54, mediums 5 and 6).** On MySQL a change logged by a checkout
+  that committed while the totals were built was deleted unseen, and its day kept the old figures until `--rebuild`
+  (19 days under load). On SQLite the build failed with "database is locked" (a 500 on the reports) when a checkout
+  wrote meanwhile. Only the changes the build read are deleted, and every read is closed before it writes. Lows: the
+  changes of a day a worker built while a report request ran are no longer dropped; a zone off by a half or three
+  quarters of an hour (Kathmandu, Newfoundland) counts the orders of its day's first minutes on that day in the trend;
+  the rows inserted without a logged change are read 5 000 ids at a time, and the migration that adds the totals builds
+  for 3 seconds and leaves the rest to the worker job (was: every day at once, 10 s at 200 000 orders on MariaDB).
+- **Smaller security and privacy fixes (review round 54, lows).** Reviews, product names sent through API v1, returns,
+  complaints and the names and summaries of a CSV import are stored without Unicode bidi controls (U+202E and the
+  others the checkout already removed), so a name can no longer read reversed in the admin and in e-mails. An invoice
+  or credit note number whose PDF was set aside before (only `*.superseded-*.pdf` is left) or whose place holds a link
+  is skipped like one whose PDF is there (was: issued again). Wrong passwords at the admin re-authentication take their
+  attempt atomically, so concurrent requests of one session cannot try more than five. VIES accepts a sole trader whose
+  registered name is "Ing. Ján Novák - STAVBY" for the holder "Ján Novák" and the other way round (was: refused and VAT
+  charged). E-mail addresses, IBANs and phone numbers in free log text (a `detail` or `error` value) are masked like
+  those under a named key.
+- **Smaller usability and documentation fixes (review round 54, lows).** `cli/seed.php` prices the sample products in
+  the currency of the default catalog's store (was: always `eur`, so a CZK shop showed every one as unavailable). The
+  doctor accepts `operations.worker_cron` as the whole crontab line README asks for, not only its five schedule fields,
+  and a value that is neither says so (was: "configured"). The merchant's mail about a return within the withdrawal
+  period says it needs no approval, as the customer was told (was: always "approve or reject"). Admin → Stores and
+  seller edits the store's `domains` (one per line, used by no other store), and README describes them. The admin's
+  orders show the payment method in the admin's language (was: the customer's, "Kreditkarte" in a Slovak admin). The
+  CSV import help names the catalog's currency and the `vat_class` column, and the generated import templates have
+  it. With the log mail provider the withdrawal, complaint, account, back-in-stock and e-mail verification pages say
+  the mail was only recorded in the log (was: that it failed). The web installer in English starts without a seller
+  country and in a language other than Slovak without the Slovak store name; `setup.php install` sets the admin's
+  language to the main store's. The Czech, Polish and Hungarian terms print the seller's VAT ID, and README lists the
+  installer's fields.
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

@@ -884,6 +884,12 @@ final class InvoiceService
     public static function creditRefund(int $orderId, int $amount, string $refundKey, string $reason = '', array $itemRates = []): ?array
     {
         if ($amount <= 0 || $refundKey === '') throw new InvalidArgumentException('A refund credit note needs an amount and the refund key');
+        // R54 (review round 19, medium 7): the refund of a paid order whose unshipped rest was cancelled credits the goods
+        // that never shipped, at their own rates (as creditClosure() does for an unpaid one). Was: split over the whole
+        // invoice, so it ate into the shipped goods' rates and their later return was cut short (54.48 back of 60.00).
+        if ($itemRates === [] && ($order = Orders::byId($orderId)) && in_array((string)$order['status'], ['cancelled', 'refunded'], true)) {
+            $itemRates = self::unshippedParts($order) ?? [];
+        }
         return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($orderId, $amount, $itemRates): array {
             $own = [];
             foreach ($itemRates as $key => $part) {
@@ -1775,9 +1781,15 @@ final class InvoiceService
             return false;
         }
         if (!is_dir($yearDir)) return false;
-        $name = rawurlencode($number) . '.pdf';
+        $base = rawurlencode($number);
+        $name = $base . '.pdf';
         foreach (scandir($yearDir) ?: [] as $month) {
-            if ($month === '.' || $month === '..' || !is_file($yearDir . DIRECTORY_SEPARATOR . $month . DIRECTORY_SEPARATOR . $name)) continue;
+            if ($month === '.' || $month === '..') continue;
+            $monthDir = $yearDir . DIRECTORY_SEPARATOR . $month;
+            // R54 (review round 19): also a link in its place (writePdf() sets it aside too) and a PDF of the number set
+            // aside before (was: only a regular <number>.pdf counted, so the number was issued again and the file renamed).
+            $file = $monthDir . DIRECTORY_SEPARATOR . $name;
+            if (!is_file($file) && !is_link($file) && (glob($monthDir . DIRECTORY_SEPARATOR . $base . '.superseded-*.pdf') ?: []) === []) continue;
             Logger::warning('invoice_number_skipped', ['number' => $number, 'pdf' => "{$year}/{$month}/{$name}",
                 'reason' => 'its PDF is already in invoice_storage_dir (restored older database?)']);
             return true;

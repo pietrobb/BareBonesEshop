@@ -1,7 +1,9 @@
 <!doctype html>
 <html lang="en"><body style="font-family:Arial,sans-serif;color:#111">
 <h2>Return request</h2>
-<p>{{customer_name}} ({{customer_email}}) asked to return goods from order <strong>{{order_number}}</strong> (return {{rma_number}}). Approve or reject the request in the admin.</p>
+<p>{{customer_name}} ({{customer_email}}) asked to return goods from order <strong>{{order_number}}</strong> (return {{rma_number}}).</p>
+{{#if needs_approval}}<p>Approve or reject the request in the admin.</p>{{/if}}
+{{#if within_withdrawal}}<p>The return is within the withdrawal period and needs no approval: send the customer the return instructions.</p>{{/if}}
 <ul>
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>

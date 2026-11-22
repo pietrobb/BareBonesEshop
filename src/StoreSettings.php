@@ -195,6 +195,9 @@ final class StoreSettings {
         $isDefault = $storeId === (string)($data['default_store'] ?? '');
         $public = $isDefault || (isset($input['public']) ? $input['public'] === '1' : StoreContext::isPublicConfig($store));
         if ($public && !StoreContext::isPublicConfig($store) && !$sharesSeller && Setup::legalIdentityProblems($legal) !== []) $errors[] = I18n::t('admin.stores.err.publish_example');
+        // R54 (review round 19, UX): the store's own domains (StoreContext serves it there, its links use the first one);
+        // a form without the field keeps them (was: only by editing stores.json).
+        $domains = array_key_exists('domains', $input) ? self::parseDomains($input['domains'], $data['stores'], $storeId, $errors) : null;
         if ($errors) return ['ok' => false, 'errors' => $errors];
 
         $before = $store;
@@ -206,13 +209,35 @@ final class StoreSettings {
         // A form without the field keeps the store's choice (Cart::keepsNetAbroad(), default "net").
         if (in_array($input['cross_border_pricing'] ?? null, ['net', 'gross'], true)) $store['cross_border_pricing'] = $input['cross_border_pricing'];
         if ($timezone !== '') $store['timezone'] = $timezone;
+        if ($domains !== null) $store['domains'] = $domains;
         $store['legal'] = $legal;
         if ($public) unset($store['public']); else $store['public'] = false;
         $data['stores'][$storeId] = $store;
         if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
         AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'timezone' => $before['timezone'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'cross_border_pricing' => $before['cross_border_pricing'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
-            ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'cross_border_pricing' => $store['cross_border_pricing'] ?? null, 'public' => $public, 'legal' => $store['legal']]);
+            ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'cross_border_pricing' => $store['cross_border_pricing'] ?? null, 'public' => $public, 'legal' => $store['legal']]
+            + ($domains !== null ? ['domains' => $domains, 'domains_before' => $before['domains'] ?? []] : []));
         return ['ok' => true, 'errors' => []];
+    }
+
+    /**
+     * Host names, one per line or separated by commas or spaces: lower case, without scheme, port or path, each with a
+     * dot and used by no other store (the host picks the store). At most 10.
+     * @param list<string> $errors
+     * @return list<string>
+     */
+    private static function parseDomains(mixed $posted, array $stores, string $storeId, array &$errors): array {
+        $list = preg_split('/[\s,]+/', strtolower(trim(is_scalar($posted) ? (string)$posted : '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $domains = array_values(array_unique(array_map(static fn(string $d): string => rtrim($d, '.'), $list)));
+        $taken = [];
+        foreach ($stores as $id => $other) {
+            if ((string)$id === $storeId || !is_array($other)) continue;
+            foreach ((array)($other['domains'] ?? []) as $d) $taken[strtolower(rtrim(trim((string)$d), '.'))] = (string)$id;
+        }
+        $bad = array_filter($domains, static fn(string $d): bool => !str_contains($d, '.') || strlen($d) > 253
+            || filter_var($d, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false || isset($taken[$d]));
+        if ($bad !== [] || count($domains) > 10) $errors[] = I18n::format('admin.stores.err.domains', ['domains' => implode(', ', $bad ?: $domains)]);
+        return $domains;
     }
 
     /** Atomic replace: readers see the old or the new file, never a half-written one. */

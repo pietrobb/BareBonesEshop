@@ -39,6 +39,7 @@ function requestGuestAccount(array $order): array {
     return match (GuestCheckoutAccount::sendLink($order, I18n::locale())) {
         'sent' => ['sent' => true],
         'throttled' => ['error' => $t('account.rate_limited')],
+        'logged' => ['error' => $t('mail.logged_only')],
         default => ['error' => $t('order_done.account_failed')],
     };
 }
@@ -112,7 +113,7 @@ function renderStockNotify(): string {
     }
     $result = BackInStock::subscribe(Security::int($_POST['product_id'] ?? 0), Security::str($_POST['email'] ?? ''), I18n::locale());
     if ($result === 'invalid') http_response_code(422);
-    return Template::render('storefront/status-message', ['message' => $t('back_in_stock.' . $result)]);
+    return Template::render('storefront/status-message', ['message' => $t($result === 'logged' ? 'mail.logged_only' : 'back_in_stock.' . $result)]);
 }
 
 /** The e-mailed confirmation link. Opening it confirms nothing (mail scanners follow links); the posted button does. */

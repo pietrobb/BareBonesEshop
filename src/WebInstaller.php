@@ -221,6 +221,8 @@ final class WebInstaller
     public const LOCALE_DEFAULTS = [
         'sk' => ['SK', 'Europe/Bratislava', 'eur'], 'cs' => ['CZ', 'Europe/Prague', 'czk'], 'pl' => ['PL', 'Europe/Warsaw', 'pln'],
         'hu' => ['HU', 'Europe/Budapest', 'huf'], 'de' => ['DE', 'Europe/Berlin', 'eur'], 'es' => ['ES', 'Europe/Madrid', 'eur'],
+        // R54 (review round 19, UX): English names no country, so the merchant picks it (was: the Slovak example store).
+        'en' => ['', 'UTC', 'eur'],
     ];
 
     /**
@@ -241,6 +243,8 @@ final class WebInstaller
         $store = is_array($stores) ? (array)($stores['stores'][(string)($stores['default_store'] ?? 'default')] ?? []) : [];
         if ($starter === null && isset(self::LOCALE_DEFAULTS[(string)$locale])) {
             [$country, $timezone, $currency] = self::LOCALE_DEFAULTS[(string)$locale];
+            // R54: the example store's name is Slovak ("Slovenský obchod"): another language starts without a name.
+            if ((string)($store['default_locale'] ?? '') !== $locale) $store['name'] = '';
             $store['legal']['country'] = $country;
             $store['timezone'] = $timezone;
             $store['default_locale'] = $locale;
