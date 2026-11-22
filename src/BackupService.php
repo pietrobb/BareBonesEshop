@@ -956,7 +956,8 @@ class BackupService
 
         $lockHandle = self::acquireLock();
         try {
-            $liveSeries = self::numberSeries(self::$db);
+            $liveWarnings = [];
+            $liveSeries = self::liveNumberSeries(self::$db, $liveWarnings);
             // 3. close this process's connections to the live file; the gate proves no other process holds it
             self::$db = null;
             $sharedReleased = class_exists('Db', false) && Db::releaseSqliteFile($livePath);
@@ -1044,7 +1045,7 @@ class BackupService
                 $applied = null;
             }
             [$schemaWarnings, $appliedCount, $pendingCount] = self::migrationStatus($applied);
-            $numberingWarnings = self::continueNumberSeries($newDb, $liveSeries);
+            $numberingWarnings = [...$liveWarnings, ...self::continueNumberSeries($newDb, $liveSeries)];
 
             self::log("RESTORE OK src={$remotePath} snapshot=" . ($snapshotPath ?: '-') .
                 " integrity={$integrity} applied={$appliedCount} pending={$pendingCount}");
@@ -1168,6 +1169,21 @@ class BackupService
     }
 
     /**
+     * R54 (review round 19, low): the live database a restore replaces is often the damaged one. A counter table it cannot
+     * read no longer stops the restore (it did since R50): the operator is warned that the numbers were not carried over.
+     */
+    private static function liveNumberSeries(PDO $db, array &$warnings): array
+    {
+        try {
+            return self::numberSeries($db);
+        } catch (\Throwable $e) {
+            $warnings[] = 'The number series of the live database could not be read (' . $e->getMessage() . '), so the restored database '
+                . 'numbers its documents from its own counters. Check the last invoice and credit note numbers issued before issuing new ones.';
+            return [];
+        }
+    }
+
+    /**
      * R50: an older backup brings back lower number counters, so the next document took a number already issued (and
      * its PDF overwrote the other customer's). Every series of the replaced database continues after the higher of the
      * two last numbers. Returns the warnings for the operator: the numbers whose documents the backup does not have.
@@ -1282,7 +1298,8 @@ class BackupService
 
             $lockHandle = self::acquireLock();
             try {
-                $liveSeries = self::numberSeries(self::$db);
+                $liveWarnings = [];
+                $liveSeries = self::liveNumberSeries(self::$db, $liveWarnings);
                 $result = $mysql->restoreBackupDump($source, self::$mysqlScratchDatabase, $rollback, $schema, $ownSessions);
             } catch (\Throwable $e) {
                 if ($e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP) {
@@ -1305,7 +1322,7 @@ class BackupService
             }
 
             [$schemaWarnings, $appliedCount, $pendingCount] = self::migrationStatus($result['migrations']);
-            $numberingWarnings = self::continueNumberSeries(self::$db, $liveSeries);
+            $numberingWarnings = [...$liveWarnings, ...self::continueNumberSeries(self::$db, $liveSeries)];
             self::log("RESTORE OK driver=mysql src={$remotePath} snapshot=" . ($snapshotPath ?: '-')
                 . " tables={$result['tables']} rows={$result['rows']} applied={$appliedCount} pending={$pendingCount}");
             foreach ($numberingWarnings as $warning) self::log('RESTORE WARNING ' . $warning);
@@ -1362,7 +1379,8 @@ class BackupService
      * unless force => true (cli/restore.php --force). Files absent from the backup are kept. Scripts and dotfiles of
      * themes/ and uploads/ go to the private recovery directory, never into the web root.
      *
-     * Returns ['archive', 'written', 'unchanged', 'overwritten', 'set_aside', 'quarantined' => entries, 'skipped_sources' => names].
+     * Returns ['archive', 'written', 'unchanged', 'overwritten', 'set_aside', 'quarantined' => entries, 'skipped_sources' => names,
+     * 'aside_dir' => this restore's directory of the copies set aside or quarantined (null: none)].
      */
     public static function restoreFiles(string $remotePath, array $opts = []): array
     {
@@ -1406,6 +1424,7 @@ class BackupService
             $setAside = [];
             $quarantined = [];
             $jobsRan = null;
+            $asideRun = null;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
                 $root = (string)(self::$fileSources[$name] ?? '');
@@ -1427,19 +1446,20 @@ class BackupService
                 // server serves, not even a missing one: a forged backup's themes/default/assets/shell.php ran after --files-only.
                 if (in_array($name, self::WEB_SOURCES, true) && self::runnableInWebRoot($rest)
                     && !(is_file($target) && !is_link($target) && hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target)))) {
-                    $asideDir = self::asideDirectory();
-                    [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir . '/' . $name];
+                    $asideDir = $asideRun ??= self::createAsideRun();
+                    [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir];
                     $isAside = $isQuarantined = true;
                 } elseif (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
                     $differs = is_file($target) && !hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target));
                     if ($name === 'jobs' && !is_file($target)) $jobsRan ??= self::holdsAnyFile($root);
-                    if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan)) {
+                    // R54 (review round 19, low): a theme file the live themes lack is set aside too: a forged backup's child
+                    // theme checkout.html with its own script became the checkout page (a card skimmer).
+                    if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan) || ($name === 'themes' && !is_file($target))) {
                         // R51: in the private recovery directory, never next to the live source: config.php.from-backup
                         // and themes.from-backup/ in the web root were served (database password, gateway keys).
-                        $asideDir = self::asideDirectory();
-                        [$target, $base] = $kind === 'file'
-                            ? [$asideDir . '/' . basename($root), $asideDir]
-                            : [$asideDir . '/' . $name . '/' . $rest, $asideDir . '/' . $name];
+                        $asideDir = $asideRun ??= self::createAsideRun();
+                        $target = $kind === 'file' ? $asideDir . '/' . basename($root) : $asideDir . '/' . $name . '/' . $rest;
+                        $base = $asideDir;
                         $isAside = true;
                     }
                 }
@@ -1503,6 +1523,7 @@ class BackupService
             $written = [];
             foreach ($plan as [$entry, $source, $target, $base, $ownership, $overwrite]) {
                 try {
+                    if ($base === $asideRun) self::assertAsideRun($asideRun);
                     self::installRestoredFile($source, $target, $base, $ownership);
                 } catch (\Throwable $e) {
                     $message = 'Restore: files restore stopped at ' . $entry . ': ' . preg_replace('/^Restore: /', '', $e->getMessage()) . '. '
@@ -1525,8 +1546,11 @@ class BackupService
                 'set_aside'       => $setAside,
                 'quarantined'     => $quarantined,
                 'skipped_sources' => array_keys($skippedSources),
+                'aside_dir'       => $setAside !== [] || $quarantined !== [] ? $asideRun : null,
             ];
         } finally {
+            // A refused restore leaves no empty directory of its own behind.
+            if ($asideRun !== null) @rmdir($asideRun);
             if ($stagingDir !== null) self::removeTree($stagingDir);
             self::removeStagedFile($staged);
         }
@@ -1823,6 +1847,57 @@ class BackupService
         }
         self::assertPrivateAbsolutePath($dir, 'backup_recovery_dir');
         return rtrim(str_replace('\\', '/', $dir), '/') . '/from-backup';
+    }
+
+    /**
+     * R54 (review round 19, medium 1): every restore sets its copies aside in a directory of its own, from-backup/<time>-<random>,
+     * created exclusively (mkdir fails on an existing name or link) and 0700. Only backup_recovery_dir was checked: whoever
+     * can write it (the web user through the setgid group of a split deployment) replaced from-backup with a symlink to the
+     * application root, and --files-only --yes wrote config.php over the live one and shell.php and .htaccess into the web
+     * root while reporting them set aside. Neither from-backup nor the new directory may be a link, and the result must
+     * resolve below the recovery directory.
+     */
+    private static function createAsideRun(): string
+    {
+        $root = self::asideDirectory();
+        $recovery = dirname($root);
+        if (is_link($recovery) || (!is_dir($recovery) && !@mkdir($recovery, 0700, true) && !is_dir($recovery))) {
+            throw new RuntimeException("Restore: cannot use the private recovery directory {$recovery}");
+        }
+        clearstatcache(true, $root);
+        $stat = @lstat($root);
+        if ($stat === false) {
+            if (!self::withMode(0700, static fn(): bool => @mkdir($root, 0700))) {
+                throw new RuntimeException("Restore: cannot create {$root}");
+            }
+        } elseif (($stat['mode'] & 0170000) !== 0040000) {
+            throw new RuntimeException("Restore: {$root} is a symlink or not a directory; refusing to set copies aside through it");
+        }
+        $run = $root . '/' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(6));
+        if (!self::withMode(0700, static fn(): bool => @mkdir($run, 0700))) {
+            throw new RuntimeException("Restore: cannot create {$run}");
+        }
+        self::assertAsideRun($run);
+        return $run;
+    }
+
+    /** $run and from-backup are still real directories (no link swapped in since) resolving below the recovery directory. */
+    private static function assertAsideRun(string $run): void
+    {
+        $root = dirname($run);
+        foreach ([$root, $run] as $dir) {
+            clearstatcache(true, $dir);
+            $stat = @lstat($dir);
+            if ($stat === false || ($stat['mode'] & 0170000) !== 0040000) {
+                throw new RuntimeException("Restore: {$dir} is a symlink or not a directory; refusing to set copies aside through it");
+            }
+        }
+        $realRecovery = realpath(dirname($root));
+        $realRun = realpath($run);
+        if ($realRecovery === false || $realRun === false
+            || str_replace('\\', '/', $realRun) !== rtrim(str_replace('\\', '/', $realRecovery), '/') . '/' . basename($root) . '/' . basename($run)) {
+            throw new RuntimeException("Restore: {$run} does not resolve inside the private recovery directory; refusing");
+        }
     }
 
     /** Whether directory $dir holds any file (a job queue that has already run). */

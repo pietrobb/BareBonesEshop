@@ -49,14 +49,16 @@ try {
     $r53rMeta = BackupService::create(['label' => 'manual']);
     foreach (array_keys($r53rRunnable + $r53rPlain) as $r53rRel) unlink($r53rShop . '/' . $r53rRel);
     $r53rFiles = BackupService::restoreFiles((string)$r53rMeta['remote_path']);
-    $r53rAside = BackupService::asideDirectory();
+    $r53rAside = (string)($r53rFiles['aside_dir'] ?? '');
     clearstatcache();
     foreach ($r53rRunnable as $r53rRel => $r53rBody) {
         assert_true(!file_exists($r53rShop . '/' . $r53rRel), "R53 restore: {$r53rRel} is not restored into the web root");
         assert_equals($r53rBody, @file_get_contents($r53rAside . '/' . $r53rRel), "R53 restore: {$r53rRel} is kept in the private recovery directory");
     }
     foreach ($r53rPlain as $r53rRel => $r53rBody) {
-        assert_equals($r53rBody, @file_get_contents($r53rShop . '/' . $r53rRel), "R53 restore: {$r53rRel} is restored in place");
+        // R54: a theme file the live themes lack is set aside like a changed one; uploads are restored in place.
+        $r53rWhere = str_starts_with($r53rRel, 'themes/') ? $r53rAside : $r53rShop;
+        assert_equals($r53rBody, @file_get_contents($r53rWhere . '/' . $r53rRel), "R53 restore: {$r53rRel} is restored " . ($r53rWhere === $r53rShop ? 'in place' : 'aside'));
     }
     $r53rQuarantined = (array)($r53rFiles['quarantined'] ?? []);
     sort($r53rQuarantined);
@@ -65,7 +67,10 @@ try {
     assert_equals($r53rExpected, $r53rQuarantined, 'R53 restore: the files kept out of the web root are reported');
     assert_true(is_file($r53rShop . '/uploads/full/.gitkeep') && !file_exists($r53rAside . '/uploads/full/.gitkeep'),
         'R53 restore: a dotfile identical to the live one is just unchanged');
-    assert_equals([], (array)($r53rFiles['set_aside'] ?? null), 'R53 restore: nothing else is reported as set aside');
+    $r53rSetAside = (array)($r53rFiles['set_aside'] ?? null);
+    sort($r53rSetAside);
+    assert_equals(['themes/default/assets/shop.css', 'themes/default/assets/shop.js'], $r53rSetAside,
+        'R53/R54 restore: only the missing theme files are reported as set aside');
     assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/restore.php'), "\$files['quarantined']"),
         'R53 restore: cli/restore.php warns about the files kept out of the web root');
 } catch (Throwable $e) {

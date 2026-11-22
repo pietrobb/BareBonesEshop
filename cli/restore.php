@@ -27,7 +27,8 @@ require_once __DIR__ . '/cli-only.php';
  *         (retained, max 5 newest). Files are extracted into a private staging directory by a strict
  *         reader (regular files only, no absolute/../link entries); differing live files are only
  *         overwritten with --force, and files missing from the backup are kept. config.php, themes and
- *         the job queue are never overwritten: a differing file goes to <backup_recovery_dir>/from-backup/.
+ *         the job queue are never overwritten: a differing file (and a theme file the live themes lack)
+ *         goes to this restore's own <backup_recovery_dir>/from-backup/<time>-<random>/.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -281,11 +282,11 @@ if ($withFiles) {
     $emit('  overwritten:  ' . count($files['overwritten']));
     if ($files['set_aside'] !== []) {
         fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) from config.php, themes or the job queue differ from the live ones (or the queue"
-            . " has already run) and were written to the private directory " . BackupService::asideDirectory() . ", not over them. Compare and move them in by hand.\n");
+            . " has already run) and were written to the private directory " . $files['aside_dir'] . ", not over them. Compare and move them in by hand.\n");
     }
     if ($files['quarantined'] !== []) {
         fwrite(STDERR, 'WARNING: ' . count($files['quarantined']) . ' script(s) or server config file(s) in themes/ or uploads/ (' . implode(', ', array_slice($files['quarantined'], 0, 5))
-            . (count($files['quarantined']) > 5 ? ', ...' : '') . ') were not restored into the web root but into ' . BackupService::asideDirectory()
+            . (count($files['quarantined']) > 5 ? ', ...' : '') . ') were not restored into the web root but into ' . $files['aside_dir']
             . ". A shop's themes and uploads hold none: check where the backup came from.\n");
     }
     foreach ($files['skipped_sources'] as $name) {

@@ -9,6 +9,8 @@ declare(strict_types=1);
 final class DataOverrides
 {
     public const STORES_EXAMPLE = 'stores.example.json';
+    /** Largest settings file (stores.json, mail settings) readRegularFile() reads: far above any real shop's. */
+    public const MAX_SETTINGS_BYTES = 8 * 1048576;
 
     private static ?string $testDir = null;
     private static ?string $suiteDir = null;
@@ -153,17 +155,18 @@ final class DataOverrides
     /**
      * R47 (review round 17, low): the contents of a regular file, else null. Opened non-blocking ('n' = O_NONBLOCK), so a
      * FIFO swapped in after storesPath()'s is_file() cannot stall the caller (root's update doctor/check); fstat() of
-     * the open handle then refuses anything but a regular file.
+     * the open handle then refuses anything but a regular file. R54 (review round 19, low): nor larger than $maxBytes —
+     * a 3 GB stores.json held root's update check for a minute.
      */
-    public static function readRegularFile(string $path): ?string
+    public static function readRegularFile(string $path, int $maxBytes = self::MAX_SETTINGS_BYTES): ?string
     {
         $handle = @fopen($path, 'rn');
         if ($handle === false) return null;
         try {
             $stat = fstat($handle);
-            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0100000) return null;
-            $contents = stream_get_contents($handle);
-            return $contents === false ? null : $contents;
+            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0100000 || (int)$stat['size'] > $maxBytes) return null;
+            $contents = stream_get_contents($handle, $maxBytes + 1);
+            return $contents === false || strlen($contents) > $maxBytes ? null : $contents;
         } finally {
             fclose($handle);
         }

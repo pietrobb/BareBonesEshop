@@ -564,6 +564,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   values MySQL quotes (`Duplicate entry '…'`) and the value after a name, phone, IBAN or address key of a gateway
   message. A GDPR erasure also deletes the `/api/v1` replay responses that name one of the person's order numbers
   (a response stored before the order's e-mail was corrected named the old address only).
+- **A restore sets its copies aside in a directory of its own (review round 54, medium 1).** Only
+  `backup_recovery_dir` was checked, not `from-backup` inside it: whoever can write the recovery directory (the web
+  user, through the setgid group of the split deployment) could replace `from-backup` with a symlink to the shop, and
+  `cli/restore.php --files-only --yes` then wrote the backup's `config.php` over the live one and its scripts and
+  `.htaccess` into the web root while reporting them set aside. Each restore now creates
+  `<backup_recovery_dir>/from-backup/<time>-<random>/` exclusively and 0700, refuses when `from-backup` is a symlink or
+  the directory does not resolve inside the recovery directory, checks that again before each file, and prints that
+  directory. A theme file the live `themes/` lack is set aside too, not installed (low: a forged backup could add a
+  child theme `checkout.html` with its own script). A SQLite restore over a damaged live database whose invoice
+  counters cannot be read completes with a warning to check the last numbers (low: since R50 it stopped there).
+  `stores.json` and the e-mail settings larger than 8 MiB are not read (low: a 3 GB file held root's update check for a
+  minute).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

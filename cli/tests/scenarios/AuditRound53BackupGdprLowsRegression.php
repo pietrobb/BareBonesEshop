@@ -77,7 +77,7 @@ try {
         'R53 backup kinds: the GDPR salt is restored as the file this shop configures, whatever the metadata says (was: a directory at its path; '
         . (is_array($r53gRestored) ? 'restored' : (string)$r53gRestored) . ')');
     if (PHP_OS_FAMILY !== 'Windows') {
-        $r53gAside = BackupService::asideDirectory();
+        $r53gAside = is_array($r53gRestored) ? (string)($r53gRestored['aside_dir'] ?? '') : '';
         $r53gModes = [];
         foreach (['', '/config.php', '/themes', '/themes/default/assets', '/themes/default/assets/shell.php'] as $r53gRel) {
             $r53gModes[$r53gRel] = file_exists($r53gAside . $r53gRel) ? sprintf('%o', fileperms($r53gAside . $r53gRel) & 0777) : 'missing';
