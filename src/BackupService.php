@@ -1399,6 +1399,7 @@ class BackupService
         $force = (bool)($opts['force'] ?? false);
         $staged = null;
         $stagingDir = null;
+        $asideRun = null;
         try {
             $staged = self::stagingPath('.files.tar');
             $archiveMeta = self::downloadVerified($archivePath, $staged);
@@ -1424,7 +1425,6 @@ class BackupService
             $setAside = [];
             $quarantined = [];
             $jobsRan = null;
-            $asideRun = null;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
                 $root = (string)(self::$fileSources[$name] ?? '');

@@ -264,7 +264,7 @@ $architectureBudgets = [
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
     // +9 lines, +1 function R48: adminStoreIdentityIssue words the seller-identity badge in the admin's language.
-    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 104, 'functions' => 4, 'max_function_lines' => 67, 'coupling' => 7],
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 111, 'functions' => 4, 'max_function_lines' => 72, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.
@@ -303,7 +303,7 @@ $architectureBudgets = [
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
     // +8 lines, +1 coupling R10 UX3: the order detail's "Pay" button starts a payment for the unpaid order (PaymentLink).
-    /* R14 #1: the verification link verifies only with the account's sign-in (+6); R17: registering a taken address reads like a new account (+7); R18: no sign-in before the e-mail is verified, even timing (+10, +1 coupling) */ 'src/Entrypoints/Storefront/Account.php' => ['lines' => 481, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 18],
+    /* R14 #1: the verification link verifies only with the account's sign-in (+6); R17: registering a taken address reads like a new account (+7); R18: no sign-in before the e-mail is verified, even timing (+10, +1 coupling); R54: a verification mail only logged says so (+1) */ 'src/Entrypoints/Storefront/Account.php' => ['lines' => 482, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 18],
     // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing; +1 coupling R8: legal pages render through ConsumerNotice, shared with the confirmation attachment */ 'coupling' => 9],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
