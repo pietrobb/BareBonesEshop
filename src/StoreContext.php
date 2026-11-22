@@ -249,6 +249,7 @@ class StoreContext {
             $end = strpos($host, ']');
             return $end === false ? $host : substr($host, 0, $end + 1);
         }
-        return explode(':', $host, 2)[0];
+        // R55 (review round 20, low): "shop.example." is the same host (a fully qualified name); it fell to the default store.
+        return rtrim(explode(':', $host, 2)[0], '.');
     }
 }

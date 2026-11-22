@@ -82,6 +82,7 @@ function handlePost(string $page, string $action): void {
         'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         'mail:save' => handleMailDeliverySave(), 'mail:test' => handleMailDeliveryTest(),
         'stores:save' => handleStoreSettingsSave(),
+        'stores:domains' => handleStoreDomainsSave(),
         'stores:add' => handleStoreAdd(),
         'stores:remove' => handleStoreRemove(),
         'stores:legal_save' => handleStoreLegalSave(),
