@@ -174,9 +174,10 @@ final class ManualOrder {
         $statuses = $buyer['vat_id'] === '' ? [$placedStatus] : array_values(array_unique([$placedStatus, 'valid', 'unverified']));
         $detail = '';
         $locale = self::locale((string)($order['locale'] ?? ''));
-        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, $statuses, $stored, $storedScenario, $locale, &$detail): array {
+        $error = Orders::replaceItems($orderId, static function () use ($orderId, $lines, $buyer, $customerId, $order, $statuses, $stored, $storedScenario, $locale, &$detail): array {
             foreach ($statuses as $vatIdStatus) {
-                $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus, $locale);
+                // The order's old total is replaced, not added to: the credit check of the edit itself is in replaceItems().
+                $priced = Customers::excludingOrder($orderId, static fn(): array => self::priced($lines, $buyer, $customerId, $vatIdStatus, $locale));
                 if (isset($priced['error'])) {
                     // R39: a VAT ID status the order was not placed under that needs a residence cannot reproduce it.
                     if ($priced['error'] === 'checkout.error.residence_required' && $vatIdStatus !== $statuses[0]) continue;

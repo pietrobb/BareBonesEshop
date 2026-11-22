@@ -894,11 +894,32 @@ class Customers {
             $stmt = $db->prepare('SELECT COALESCE(SUM(o.total), 0) FROM orders o' . Db::forceIndex('orders', 'idx_ord_customer', $db)
                 . ' WHERE o.customer_id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ") AND o.store_id = ?
                   AND o.status <> 'cancelled'
-                  AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')" . ($locking ? ' FOR UPDATE' : ''));
-            $stmt->execute([...$ids, $store]);
+                  AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')"
+                . (self::$excludedOrder !== null ? ' AND o.id <> ?' : '') . ($locking ? ' FOR UPDATE' : ''));
+            $stmt->execute([...$ids, $store, ...(self::$excludedOrder !== null ? [self::$excludedOrder] : [])]);
             $total += (int)$stmt->fetchColumn();
         }
         return $total;
+    }
+
+    private static ?int $excludedOrder = null;
+
+    /**
+     * $fn() with order $orderId left out of companyOpenTotal(). R53 (low): pricing an admin edit of an order on invoice
+     * offered "invoice" only if the company's open total, which still held the order's old total, plus its new total
+     * fitted the limit: a 600 € order raised to 700 € on a 1000 € limit was refused (1300 €).
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    public static function excludingOrder(int $orderId, callable $fn): mixed {
+        $previous = self::$excludedOrder;
+        self::$excludedOrder = $orderId;
+        try {
+            return $fn();
+        } finally {
+            self::$excludedOrder = $previous;
+        }
     }
 
     // ============================================================

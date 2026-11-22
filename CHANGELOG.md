@@ -533,6 +533,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   "e-books" has a label in every admin language (was the key `vat_class.ebooks`). A method's own name and description
   fields name their language when the method has translations. The Czech privacy policy template is complete (was a
   short stub), and the CZ, SK and PL imprints name the dispute resolution body after a colon (the name is nominative).
+- **Refunds, credit and stock edits (review round 53, low).** A set whose part shipped and whose rest is cancelled
+  refunds the rest by the catalog prices of its parts frozen at checkout: a 29 € lamp shipped and its ten 0,10 € bulbs
+  cancelled refund 1 € (was 10/11 of the set); sets ordered before keep equal weights per unit. An admin edit of an
+  order on invoice checks the credit limit with the order's new total only (the old one was counted next to it, so
+  raising a 600 € order to 900 € on a 1000 € limit was refused). A payment refunded in full in the GoPay or ThePay
+  dashboard while a smaller refund of the shop is in flight settles that refund and books the rest as refunded outside
+  the shop (was: only logged, the payment stayed `refund_pending`). A stock edit in the admin, a CSV or API adjustment
+  and a goods receipt that MySQL picks as a deadlock victim run again, up to three times (was: "stock not changed").
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

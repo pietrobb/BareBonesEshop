@@ -433,9 +433,12 @@ class Fulfillment {
     }
 
     /**
-     * R51: the shipped part of an order line as [shipped, whole] in component units (each component unit of a set
-     * weighs the same; a simple line counts its units). A set split between warehouses whose first parcel left is half
-     * shipped: cancelling the rest refunds that half. R50 counted the whole set as shipped and refunded nothing of it.
+     * R51: the shipped part of an order line as [shipped, whole] in component units (a simple line counts its units). A
+     * set split between warehouses whose first parcel left is half shipped: cancelling the rest refunds that half. R50
+     * counted the whole set as shipped and refunded nothing of it. R53 (low): each component unit weighs its catalog
+     * price frozen at checkout (a 29 € lamp shipped with ten 0,10 € bulbs cancelled refunds about 1 €, not 10/11 of the
+     * set); a set ordered before that, or whose parts are all free, weighs each unit the same. Reduced by the common
+     * divisor, so two equal parts are [1, 2].
      * @return array{0: int, 1: int}
      */
     public static function shippedShare(array $orderItem): array {
@@ -448,14 +451,26 @@ class Fulfillment {
         if (!$shipped) return [0, $ordered];
         $lines = Inventory::reservationLines($orderItem);
         if ($lines === []) return [0, $ordered];
+        $priced = array_filter($lines, static fn(array $line): bool => isset($line['unit_price']));
+        $weighted = count($priced) === count($lines) && array_sum(array_map(static fn(array $line): int => (int)$line['unit_price'], $lines)) > 0;
         $part = 0;
         $whole = 0;
         foreach ($lines as $line) {
             $units = $ordered * max(1, (int)($line['quantity_per_bundle'] ?? 1));
-            $whole += $units;
-            $part += min($units, $shipped[(string)$line['sku']] ?? 0);
+            $weight = $weighted ? max(0, (int)$line['unit_price']) : 1;
+            $whole += $units * $weight;
+            $part += min($units, $shipped[(string)$line['sku']] ?? 0) * $weight;
         }
-        return [$part, max(1, $whole)];
+        if ($whole <= 0) return [0, 1];
+        $divisor = self::gcd($part, $whole);
+        [$part, $whole] = [intdiv($part, $divisor), intdiv($whole, $divisor)];
+        // Callers multiply a line's gross by the part: keep it a share per million when prices made it large.
+        return $whole > 1000000 ? [(int)round($part / $whole * 1000000), 1000000] : [$part, $whole];
+    }
+
+    private static function gcd(int $a, int $b): int {
+        while ($b !== 0) [$a, $b] = [$b, $a % $b];
+        return max(1, $a);
     }
 
     /**
