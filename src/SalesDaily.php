@@ -118,7 +118,11 @@ final class SalesDaily {
             self::reset($db, $storeId);
             $state = self::state($db);
         }
-        self::logInserted($db, $state);
+        if (!self::logInserted($db, $state, $deadline)) {
+            // Rows not logged yet may change any built day: this request sums every day from the orders.
+            self::$staleFrom[$storeId] = '';
+            return false;
+        }
         $builtUntil = (string)($state['built_until:' . $storeId] ?? '');
         // The changed days first: the reports read the built days, a stale one would be wrong rather than slow.
         if (!self::buildChanged($db, $storeId, $builtUntil, $deadline)) return false;
@@ -308,8 +312,12 @@ final class SalesDaily {
         });
     }
 
-    /** Log the orders of the rows inserted since the last refresh (without touchOrders()). */
-    private static function logInserted(PDO $db, array $state): void {
+    /**
+     * Log the orders of the rows inserted since the last refresh (without touchOrders()); whether all of them were
+     * logged before $deadline.
+     * @param array<string, string> $state
+     */
+    private static function logInserted(PDO $db, array $state, ?float $deadline): bool {
         foreach (self::WATCHED as $table => $sql) {
             if (!Db::tableExists($table, $db)) continue;
             $max = (int)($db->query("SELECT MAX(id) FROM {$table}")->fetchAll(PDO::FETCH_COLUMN)[0] ?? 0);
@@ -326,9 +334,18 @@ final class SalesDaily {
                 continue;
             }
             $stmt = $db->prepare($sql);
+            $next = $db->prepare("SELECT MIN(id) FROM {$table} WHERE id > ? AND id <= ?");
             // R54 (low): a batch of ids at a time, each committed with how far it got. Was: every row since the last
-            // refresh in one read and one transaction (an import of 200 000 orders).
+            // refresh in one read and one transaction (an import of 200 000 orders). R55 (review round 20, low): a batch
+            // starts at the next id there is (a gap of 100 million ids read 20 000 empty windows, 3-16 s) and stops at
+            // the deadline (the days are then summed from the orders until a later refresh logged the rest).
             for ($from = $seen; $from < $max; $from = $to) {
+                if ($deadline !== null && $from > $seen && microtime(true) >= $deadline) return false;
+                $next->execute([$from, $max]);
+                $first = $next->fetchColumn();
+                $next->closeCursor();
+                if ($first === false || $first === null) $first = $max;
+                $from = max($from, (int)$first - 1);
                 $to = min($max, $from + self::CHANGES_PAGE);
                 $stmt->execute([':from' => $from, ':to' => $to]);
                 $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -339,6 +356,7 @@ final class SalesDaily {
                 });
             }
         }
+        return true;
     }
 
     /**
@@ -396,12 +414,14 @@ final class SalesDaily {
             if ($current !== '') { $where[] = 'created_at >= ?'; $kept[] = self::dayStartUtc($current); }
             $only = $current === '' ? '' : ' AND (' . implode(' OR ', $where) . ')';
             // By id (integers, inlined), not by range: a range scan on MySQL locks the row after its end, and waited on the
-            // uncommitted change it must leave.
-            foreach ($ranges as [$from, $to]) {
-                for ($first = $from; $first <= $to; $first += 500) {
-                    $db->prepare('DELETE FROM sales_daily_changes WHERE store_id = ? AND id IN (' . implode(',', range($first, min($to, $first + 499))) . "){$only}")
-                        ->execute(array_merge([$storeId], $current === '' ? [] : $kept));
-                }
+            // uncommitted change it must leave. R55 (review round 20, medium 3): through the primary key, which MySQL
+            // skipped for a small table: a full scan locked that uncommitted change too, waited 50 s and failed (1205)
+            // while it held up the checkouts' touchOrders(). Medium 5: 500 ids per statement across the runs (ids
+            // that are not consecutive, other stores' changes in between, ran one DELETE each: 400 000 changes 49 s).
+            $delete = Db::isSqlite() ? 'DELETE FROM sales_daily_changes WHERE' : 'DELETE c FROM sales_daily_changes c FORCE INDEX (PRIMARY) WHERE';
+            $params = array_merge([$storeId], $current === '' ? [] : $kept);
+            foreach (self::idChunks($ranges, 500) as $ids) {
+                $db->prepare("{$delete} store_id = ? AND id IN (" . implode(',', $ids) . "){$only}")->execute($params);
             }
         });
         return $built === count($days);
@@ -436,6 +456,22 @@ final class SalesDaily {
             }
         } while (count($rows) === self::CHANGES_PAGE);
         return [array_map('strval', array_keys($hours)), $ranges];
+    }
+
+    /**
+     * The ids of runs [first, last] in lists of at most $size.
+     * @param list<array{0: int, 1: int}> $ranges
+     * @return Generator<int, list<int>>
+     */
+    private static function idChunks(array $ranges, int $size): Generator {
+        $ids = [];
+        foreach ($ranges as [$from, $to]) {
+            for ($id = $from; $id <= $to; $id++) {
+                $ids[] = $id;
+                if (count($ids) === $size) { yield $ids; $ids = []; }
+            }
+        }
+        if ($ids !== []) yield $ids;
     }
 
     /**

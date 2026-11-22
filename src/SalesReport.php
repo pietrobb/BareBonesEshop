@@ -21,6 +21,10 @@ final class SalesReport {
     private const NOT_REVENUE = "('cancelled', 'refunded')";
     public const PAID = "('paid', 'refund_pending', 'partially_refunded', 'disputed')";
     private const REFUNDED = "('partially_refunded', 'refunded', 'refund_succeeded')";
+    /** @var array<string, true> R55: stores whose SalesDaily::refresh() failed in this request */
+    public static array $refreshFailed = [];
+    /** revenueBy() bucket: UTC hour and its quarter ('Y-m-d H:i'). */
+    private const QUARTER = -1;
 
     /**
      * FROM clause of revenue orders `o` with `r.refunded` = what was refunded of each, and its parameters (merge them
@@ -86,15 +90,21 @@ final class SalesReport {
      */
     private static function revenueBy(string $storeId, string $sinceUtc, ?string $untilUtc, int $bucket): array {
         $db = Db::get();
-        $columns = 'LOWER(o.currency) AS currency, ' . ($bucket > 0 ? "SUBSTR(o.created_at, 1, {$bucket})" : "''") . ' AS hour_utc';
-        $group = 'LOWER(o.currency)' . ($bucket > 0 ? ", SUBSTR(o.created_at, 1, {$bucket})" : '');
+        // R55 (review round 20, low): QUARTER groups an hour by its quarters (a zone off by a half or three quarters of
+        // an hour starts its day on one); was by the minute, which ran out of memory at 300 000 orders.
+        $quarter = "CASE WHEN SUBSTR(o.created_at, 15, 2) < '15' THEN '00' WHEN SUBSTR(o.created_at, 15, 2) < '30' THEN '15' WHEN SUBSTR(o.created_at, 15, 2) < '45' THEN '30' ELSE '45' END";
+        $length = $bucket === self::QUARTER ? 13 : $bucket;
+        $columns = 'LOWER(o.currency) AS currency, ' . ($length > 0 ? "SUBSTR(o.created_at, 1, {$length})" : "''") . ' AS hour_utc'
+            . ($bucket === self::QUARTER ? ", {$quarter} AS quarter" : '');
+        $group = 'LOWER(o.currency)' . ($length > 0 ? ", SUBSTR(o.created_at, 1, {$length})" : '') . ($bucket === self::QUARTER ? ", {$quarter}" : '');
         [$where, $params] = self::revenueWhere($storeId, $sinceUtc, $untilUtc);
         $stmt = $db->prepare("SELECT {$columns}, COUNT(*) AS orders, COALESCE(SUM(o.total), 0) AS revenue
             FROM orders o" . Db::forceIndex('orders', 'idx_orders_store_payment_cover', $db) . " WHERE {$where} GROUP BY {$group}");
         $stmt->execute($params);
         $rows = [];
+        $at = static fn(array $row): string => (string)$row['hour_utc'] . (isset($row['quarter']) ? ':' . $row['quarter'] : '');
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $rows[$row['currency'] . '|' . $row['hour_utc']] = ['currency' => (string)$row['currency'], 'hour_utc' => (string)$row['hour_utc'],
+            $rows[$row['currency'] . '|' . $at($row)] = ['currency' => (string)$row['currency'], 'hour_utc' => $at($row),
                 'orders' => (int)$row['orders'], 'revenue' => (int)$row['revenue']];
         }
         if ($rows !== [] && Db::tableExists('payment_transactions')) {
@@ -110,7 +120,7 @@ final class SalesReport {
                 GROUP BY {$group}");
             $stmt->execute([':rstore' => $storeId, ':store' => $storeId, ':since' => $sinceUtc] + ($untilUtc !== null ? [':until' => $untilUtc] : []));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $key = $row['currency'] . '|' . $row['hour_utc'];
+                $key = $row['currency'] . '|' . $at($row);
                 if (isset($rows[$key])) $rows[$key]['revenue'] -= (int)$row['refunded'];
             }
         }
@@ -135,7 +145,21 @@ final class SalesReport {
      * @return array{0: ?array{0: string, 1: string}, 1: list<array{0: string, 1: ?string}>}
      */
     private static function parts(string $storeId, string $sinceUtc, ?DateTimeImmutable $now = null): array {
-        if (!SalesDaily::refresh($storeId, SalesDaily::$requestSeconds)) return [null, [[$sinceUtc, null]]];
+        // R55 (review round 20, medium 3): a refresh that fails (SQLite "database is locked" behind a writer holding it
+        // for longer than the busy timeout, a MySQL lock wait timeout) answered the reports and the dashboard with a 500.
+        // The report then sums the orders; the next request or the worker builds the days. The other reports of the same
+        // request (the dashboard reads three) do not wait for the lock again.
+        $refreshed = false;
+        if (!isset(self::$refreshFailed[$storeId])) {
+            try {
+                $refreshed = SalesDaily::refresh($storeId, SalesDaily::$requestSeconds);
+            } catch (PDOException $e) {
+                if (Db::transactionOpen()) throw $e;
+                Logger::warning('sales_daily.refresh_failed', ['store' => $storeId, 'error' => $e->getMessage()]);
+                self::$refreshFailed[$storeId] = true;
+            }
+        }
+        if (!$refreshed) return [null, [[$sinceUtc, null]]];
         $from = SalesDaily::dayOf($sinceUtc);
         $raw = [];
         if (SalesDaily::dayStartUtc($from) !== $sinceUtc) {
@@ -220,8 +244,15 @@ final class SalesReport {
         }
         // R54 (low): a zone off by a half or three quarters of an hour (Kathmandu, Newfoundland) starts its day inside a UTC
         // hour: the orders of the day's first minutes counted the day before. Its orders are grouped by the minute.
-        $whole = static fn(DateTimeImmutable $at): bool => $zone->getOffset($at) % 3600 === 0;
-        $bucket = $whole(new DateTimeImmutable($since, $utc)) && $whole($now ?? new DateTimeImmutable('now')) ? 13 : 16;
+        // R55 (review round 20, low): every offset the zone has in the period, not only those at its ends (Lord Howe is
+        // +10:30 in winter, +11 in summer: a year from summer to summer was grouped by the hour), and by the quarter hour.
+        $startAt = new DateTimeImmutable($since, $utc);
+        $endAt = $now ?? new DateTimeImmutable('now');
+        $offsets = [$zone->getOffset($startAt), $zone->getOffset($endAt)];
+        foreach ($zone->getTransitions($startAt->getTimestamp(), max($startAt->getTimestamp(), $endAt->getTimestamp())) ?: [] as $transition) {
+            $offsets[] = (int)$transition['offset'];
+        }
+        $bucket = array_filter($offsets, static fn(int $offset): bool => $offset % 3600 !== 0) === [] ? 13 : self::QUARTER;
         foreach ($raw as [$rawSince, $rawUntil]) {
             foreach (self::revenueBy($storeId, $rawSince, $rawUntil, $bucket) as $row) {
                 $currency = $row['currency'];
