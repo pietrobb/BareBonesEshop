@@ -135,7 +135,7 @@ final class SalesReport {
      * @return array{0: ?array{0: string, 1: string}, 1: list<array{0: string, 1: ?string}>}
      */
     private static function parts(string $storeId, string $sinceUtc, ?DateTimeImmutable $now = null): array {
-        if (!SalesDaily::refresh($storeId)) return [null, [[$sinceUtc, null]]];
+        if (!SalesDaily::refresh($storeId, SalesDaily::$requestSeconds)) return [null, [[$sinceUtc, null]]];
         $from = SalesDaily::dayOf($sinceUtc);
         $raw = [];
         if (SalesDaily::dayStartUtc($from) !== $sinceUtc) {

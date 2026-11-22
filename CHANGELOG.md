@@ -479,10 +479,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   day; only today is summed from the orders. At 500 000 orders (128 MB buffer pool) the Reports page takes 0.1 s for 365
   days and 0.05 s for 90 (the same 365 days summed from the orders: 2.7 s); after ten older orders changed, 0.6 s
   once. A day's refunds and credit notes are read from that day's orders, not from every refunded order of the store.
-  The days are built when a report is opened (and by the
-  migration and `php cli/sales-daily.php`); a later payment, cancellation, edit, refund or credit note of an older order
-  builds its day again, also one written by an import or by SQL (new rows are found by id). Orders deleted or changed by
-  hand need `php cli/sales-daily.php --rebuild`. A store whose timezone changes is built again for its new calendar.
+  The days are built by the migration, `php cli/sales-daily.php` and the worker; a report request builds for at most
+  2 s, commits every batch with how far it got and queues the worker job `sales_daily_build` for the rest, and until
+  then sums the days not built from the orders (review round 53, medium 2: the first build of a large shop ran in one
+  admin request, 42 s at 500 000 orders on MySQL, and started over after a timeout; a signed update from 2.1.2 leaves
+  the build to the worker). A later payment, cancellation, edit, refund or credit note of an older order builds its day
+  again, also an order line, payment, refund or credit note row inserted by an import or by SQL (found by id), unless
+  that row's transaction commits after a row with a higher id was already seen (on MySQL, a long transaction): then, as
+  for orders deleted or changed by hand, run `php cli/sales-daily.php --rebuild`. 400 000 logged changes are read per
+  hour, not per row (they exhausted the memory), and a report with one of the tables missing sums the orders instead of
+  failing. A store whose timezone changes is built again for its new calendar.
   The Reports page offers 365 days.
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
