@@ -10,19 +10,19 @@ try {
     $r55vCategory = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
     $r55vWarehouse = (int)$pdo->query("SELECT id FROM warehouses WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
     $pdo->exec("INSERT INTO products (id, store_id, category_id, sku, slug, product_type, name, price, currency, stock, status, inventory_policy, vat_class) VALUES
-        (98551, 'default', {$r55vCategory}, 'R55V-STD', 'r55v-std', 'simple', 'R55V standard', 1000, 'eur', 5, 'active', 'deny', 'standard'),
-        (98552, 'default', {$r55vCategory}, 'R55V-BOOK1', 'r55v-book1', 'simple', 'R55V book shipped', 1000, 'eur', 5, 'active', 'deny', 'books'),
-        (98553, 'default', {$r55vCategory}, 'R55V-BOOK2', 'r55v-book2', 'simple', 'R55V book unshipped', 1000, 'eur', 5, 'active', 'deny', 'books')");
+        (95581, 'default', {$r55vCategory}, 'R55V-STD', 'r55v-std', 'simple', 'R55V standard', 1000, 'eur', 5, 'active', 'deny', 'standard'),
+        (95582, 'default', {$r55vCategory}, 'R55V-BOOK1', 'r55v-book1', 'simple', 'R55V book shipped', 1000, 'eur', 5, 'active', 'deny', 'books'),
+        (95583, 'default', {$r55vCategory}, 'R55V-BOOK2', 'r55v-book2', 'simple', 'R55V book unshipped', 1000, 'eur', 5, 'active', 'deny', 'books')");
     foreach (['R55V-STD', 'R55V-BOOK1', 'R55V-BOOK2'] as $r55vSku) Warehouse::setStock($r55vWarehouse, $r55vSku, 5, 'count', 'test', 'r55v-opening-' . $r55vSku);
     $r55vLine = static fn(int $productId, string $sku): array => ['product_id' => $productId, 'variant_id' => null, 'sku' => $sku,
         'name' => $sku, 'qty' => 1, 'price' => 1000, 'attrs' => []];
-    $r55vOrder = Orders::create([$r55vLine(98551, 'R55V-STD'), $r55vLine(98552, 'R55V-BOOK1'), $r55vLine(98553, 'R55V-BOOK2')],
+    $r55vOrder = Orders::create([$r55vLine(95581, 'R55V-STD'), $r55vLine(95582, 'R55V-BOOK1'), $r55vLine(95583, 'R55V-BOOK2')],
         ['name' => 'R55V Buyer', 'email' => 'r55v@example.test', 'phone' => '', 'address' => ['country' => 'SK'], 'shipping_cost' => 0, 'tax_amount' => 0,
             'coupon_discount' => 0, 'currency' => 'eur'], 'bank_transfer');
     $r55vSnapshot = VatService::buildSnapshot([
-        ['product_id' => 98551, 'sku' => 'R55V-STD', 'qty' => 1, 'price' => 1000, 'product_type' => 'simple', 'vat_class' => 'standard'],
-        ['product_id' => 98552, 'sku' => 'R55V-BOOK1', 'qty' => 1, 'price' => 1000, 'product_type' => 'simple', 'vat_class' => 'books'],
-        ['product_id' => 98553, 'sku' => 'R55V-BOOK2', 'qty' => 1, 'price' => 1000, 'product_type' => 'simple', 'vat_class' => 'books'],
+        ['product_id' => 95581, 'sku' => 'R55V-STD', 'qty' => 1, 'price' => 1000, 'product_type' => 'simple', 'vat_class' => 'standard'],
+        ['product_id' => 95582, 'sku' => 'R55V-BOOK1', 'qty' => 1, 'price' => 1000, 'product_type' => 'simple', 'vat_class' => 'books'],
+        ['product_id' => 95583, 'sku' => 'R55V-BOOK2', 'qty' => 1, 'price' => 1000, 'product_type' => 'simple', 'vat_class' => 'books'],
     ], ['seller_country' => 'SK', 'customer_country' => 'SK'], ['currency' => 'eur']);
     $pdo->prepare("UPDATE orders SET status = 'paid', payment_status = 'paid', vat_scenario = 'domestic', shipping_addr = '{\"country\":\"SK\"}', financial_snapshot = ? WHERE id = ?")
         ->execute([json_encode($r55vSnapshot), $r55vOrder]);

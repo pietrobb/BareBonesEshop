@@ -66,8 +66,8 @@ try {
         'R55 domains: the store\'s links keep app_url\'s port (was: dropped)');
 
     $r55dPage = (string)file_get_contents($r55dRoot . '/src/Entrypoints/Admin/StoreSettings.php');
-    assert_true(str_contains($r55dPage, 'action=domains') && str_contains((string)file_get_contents($r55dRoot . '/src/Entrypoints/Admin/Request.php'), "'stores:domains' => handleStoreDomainsSave()")
-        && str_contains($r55dPage, "if (Security::adminRole() !== 'owner' || !adminStoreSettingsAllowed(\$storeId))"),
+    assert_true(str_contains($r55dPage, 'action=domains') && str_contains((string)file_get_contents($r55dRoot . '/src/Entrypoints/Admin/Request.php'), "'stores:domains' => handleStoreSettingsSave(true)")
+        && str_contains($r55dPage, "if (!adminStoreSettingsAllowed(\$storeId) || (\$domains && Security::adminRole() !== 'owner')) {"),
         'R55 domains: the admin page has a domains form of its own, saved by the owner only');
     foreach (['en', 'sk', 'cs', 'de', 'pl', 'hu', 'es'] as $r55dLang) {
         foreach (['admin.stores.err.domains_app_url', 'admin.stores.err.domains_idn', 'admin.stores.domains_unreachable'] as $r55dKey) {

@@ -22,7 +22,7 @@ try {
         'R55 import: attributes, then the name/summary/slug of every language but the default one');
     $r55uAdmin = (string)file_get_contents($r55uRoot . '/src/Entrypoints/Admin.php');
     $r55uOps = (string)file_get_contents($r55uRoot . '/src/Entrypoints/Admin/Operations.php');
-    assert_true(str_contains($r55uAdmin, "if (\$page === 'import' && \$action === 'template') {") && str_contains($r55uOps, 'p=import&amp;action=template&amp;type=')
+    assert_true(str_contains($r55uAdmin, "(\$page === 'import' && \$action === 'template')") && str_contains($r55uOps, 'p=import&amp;action=template&amp;type=')
         && str_contains($r55uOps, "header('Content-Type: text/csv; charset=UTF-8');") && str_contains($r55uOps, "http_response_code(404);"),
         'R55 import: the import page links each template, served as CSV behind the import permission; an unknown type is 404');
     foreach (['en', 'sk', 'cs', 'de', 'pl', 'hu', 'es'] as $r55uLang) {

@@ -276,7 +276,7 @@ try {
         }
         if ($opsImmutable !== null) {
             $opsMidway = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
-            assert_true(str_contains($opsMidway, 'stopped at uploads/products/') && str_contains($opsMidway, 'already written: invoices/2026/10/F1.pdf'),
+            assert_true(str_contains($opsMidway, 'stopped at uploads/products/') && str_contains($opsMidway, 'already written in place: invoices/2026/10/F1.pdf'),
                 'Ops files restore: a write failing mid-way reports which files were already written' . ($opsMidway === '' ? '' : " ({$opsMidway})"));
         } else {
             echo "  [SKIP] Ops files restore mid-way failure report (chattr unavailable)\n";
