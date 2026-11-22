@@ -35,6 +35,19 @@ return new class {
         if (method_exists('Db', 'forgetSchema')) Db::forgetSchema($db);
         if (!method_exists('SalesDaily', 'refreshAll') || !method_exists('SalesReport', 'revenueRows') || Db::get() !== $db) return;
         foreach (['tableExists', 'forceIndex', 'rollBackOpen', 'transactionOpen'] as $method) if (!method_exists('Db', $method)) return;
-        SalesDaily::refreshAll();
+        // R54 (low): for a few seconds; the worker job builds the rest and the reports sum the days not built from the
+        // orders. Was: every day at once (10 s on MariaDB at 200 000 orders, inside the update's maintenance window).
+        if (!defined('SalesDaily::JOB') || !class_exists('JobQueue')) {
+            SalesDaily::refreshAll();
+            return;
+        }
+        SalesDaily::refreshAll(false, 3.0, $finished);
+        if (!$finished) {
+            try {
+                JobQueue::push(SalesDaily::JOB, []);
+            } catch (Throwable $e) {
+                // The first report builds further and queues the job itself.
+            }
+        }
     }
 };

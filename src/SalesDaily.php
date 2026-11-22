@@ -20,6 +20,8 @@
  */
 final class SalesDaily {
     private const SETTLE_SECONDS = 900;
+    /** Logged changes read per query (buildChanged()), ids per batch of logInserted(). */
+    private const CHANGES_PAGE = 5000;
     /** Tables whose new rows change the day of their order: SQL of (store_id, created_at) of the orders of rows id in (:from, :to]. */
     private const WATCHED = [
         'orders' => 'SELECT o.store_id, o.created_at FROM orders o WHERE o.id > :from AND o.id <= :to',
@@ -310,7 +312,7 @@ final class SalesDaily {
     private static function logInserted(PDO $db, array $state): void {
         foreach (self::WATCHED as $table => $sql) {
             if (!Db::tableExists($table, $db)) continue;
-            $max = (int)$db->query("SELECT MAX(id) FROM {$table}")->fetchColumn();
+            $max = (int)($db->query("SELECT MAX(id) FROM {$table}")->fetchAll(PDO::FETCH_COLUMN)[0] ?? 0);
             if (!isset($state['max_' . $table])) {
                 // First run: every row so far is in the days the first build reads.
                 self::transaction($db, static fn() => self::setState($db, 'max_' . $table, (string)$max));
@@ -318,13 +320,24 @@ final class SalesDaily {
             }
             $seen = (int)$state['max_' . $table];
             if ($max === $seen) continue;
+            if ($max < $seen) {
+                // The table was emptied (rows deleted by hand): nothing new to log.
+                self::transaction($db, static fn() => self::setState($db, 'max_' . $table, (string)$max));
+                continue;
+            }
             $stmt = $db->prepare($sql);
-            $stmt->execute([':from' => min($seen, $max), ':to' => $max]);
-            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            self::transaction($db, static function () use ($db, $orders, $max, $table): void {
-                self::log($db, $orders);
-                self::setState($db, 'max_' . $table, (string)$max);
-            });
+            // R54 (low): a batch of ids at a time, each committed with how far it got. Was: every row since the last
+            // refresh in one read and one transaction (an import of 200 000 orders).
+            for ($from = $seen; $from < $max; $from = $to) {
+                $to = min($max, $from + self::CHANGES_PAGE);
+                $stmt->execute([':from' => $from, ':to' => $to]);
+                $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $stmt->closeCursor();
+                self::transaction($db, static function () use ($db, $orders, $to, $table): void {
+                    self::log($db, $orders);
+                    self::setState($db, 'max_' . $table, (string)$to);
+                });
+            }
         }
     }
 
@@ -365,23 +378,64 @@ final class SalesDaily {
      * built from its orders when its turn comes.
      */
     private static function buildChanged(PDO $db, string $storeId, string $builtUntil, ?float $deadline): bool {
-        $max = $db->prepare('SELECT MAX(id) FROM sales_daily_changes WHERE store_id = ?');
-        $max->execute([$storeId]);
-        $maxId = (int)$max->fetchColumn();
-        if ($maxId === 0) return true;
-        $hours = $db->prepare('SELECT DISTINCT SUBSTR(created_at, 1, 13) FROM sales_daily_changes WHERE store_id = ? AND id <= ?');
-        $hours->execute([$storeId, $maxId]);
-        $days = array_values(array_filter(self::daysOfHours($hours->fetchAll(PDO::FETCH_COLUMN)), static fn(string $day): bool => $day < $builtUntil));
+        [$hours, $ranges] = self::visibleChanges($db, $storeId);
+        if ($ranges === []) return true;
+        $days = array_values(array_filter(self::daysOfHours($hours), static fn(string $day): bool => $day < $builtUntil));
         $built = self::buildDays($db, $storeId, $days, $deadline, null);
-        $delete = 'DELETE FROM sales_daily_changes WHERE store_id = ? AND id <= ?';
-        if ($built === count($days)) {
-            $db->prepare($delete)->execute([$storeId, $maxId]);
-            return true;
-        }
-        // Built: the days before $days[$built]; not built yet at all: the days from $builtUntil.
-        self::$staleFrom[$storeId] = $days[$built];
-        $db->prepare($delete . ' AND (created_at < ? OR created_at >= ?)')->execute([$storeId, $maxId, self::dayStartUtc($days[$built]), self::dayStartUtc($builtUntil)]);
-        return false;
+        // Built: the days before $days[$built] (all of them: before $builtUntil).
+        $firstUnbuilt = $built === count($days) ? $builtUntil : $days[$built];
+        if ($built < count($days)) self::$staleFrom[$storeId] = $firstUnbuilt;
+        self::transaction($db, static function () use ($db, $storeId, $ranges, $firstUnbuilt): void {
+            // R54 (low): a change of a day not built at all is dropped (that day is built from its orders), but only of a
+            // day not built by now: re-read under the writers' lock. A worker that built it meanwhile may have read its
+            // order before the change committed; the change was deleted all the same and the day stayed wrong.
+            $current = (string)(self::state($db)['built_until:' . $storeId] ?? '');
+            $kept = [];
+            $where = [];
+            if ($firstUnbuilt !== '') { $where[] = 'created_at < ?'; $kept[] = self::dayStartUtc($firstUnbuilt); }
+            if ($current !== '') { $where[] = 'created_at >= ?'; $kept[] = self::dayStartUtc($current); }
+            $only = $current === '' ? '' : ' AND (' . implode(' OR ', $where) . ')';
+            // By id (integers, inlined), not by range: a range scan on MySQL locks the row after its end, and waited on the
+            // uncommitted change it must leave.
+            foreach ($ranges as [$from, $to]) {
+                for ($first = $from; $first <= $to; $first += 500) {
+                    $db->prepare('DELETE FROM sales_daily_changes WHERE store_id = ? AND id IN (' . implode(',', range($first, min($to, $first + 499))) . "){$only}")
+                        ->execute(array_merge([$storeId], $current === '' ? [] : $kept));
+                }
+            }
+        });
+        return $built === count($days);
+    }
+
+    /**
+     * The hours ('Y-m-d H', UTC) of $storeId's logged changes and the runs of ids read, [first, last] each.
+     * R54 (review round 19, medium 5): on MySQL a change whose transaction had not committed was below the MAX(id)
+     * read, unseen by the build and then deleted with the others: its day kept the old figures (19 days under load)
+     * until --rebuild. Only the ids read are deleted; one not visible yet is a gap between two runs and stays for the
+     * next refresh. Medium 6: the cursor of that MAX(id) stayed open on SQLite and the build's write transaction failed
+     * at once with "database is locked" when a checkout wrote meanwhile (the report answered 500): every read here is
+     * fetched whole and closed.
+     * @return array{0: list<string>, 1: list<array{0: int, 1: int}>}
+     */
+    private static function visibleChanges(PDO $db, string $storeId): array {
+        $stmt = $db->prepare('SELECT id, SUBSTR(created_at, 1, 13) FROM sales_daily_changes WHERE store_id = ? AND id > ? ORDER BY id LIMIT ' . self::CHANGES_PAGE);
+        $hours = [];
+        $ranges = [];
+        $after = 0;
+        do {
+            $stmt->execute([$storeId, $after]);
+            $rows = $stmt->fetchAll(PDO::FETCH_NUM);
+            $stmt->closeCursor();
+            foreach ($rows as [$id, $hour]) {
+                $id = (int)$id;
+                $hours[(string)$hour] = true;
+                $last = array_key_last($ranges);
+                if ($last !== null && $ranges[$last][1] === $id - 1) $ranges[$last][1] = $id;
+                else $ranges[] = [$id, $id];
+                $after = $id;
+            }
+        } while (count($rows) === self::CHANGES_PAGE);
+        return [array_map('strval', array_keys($hours)), $ranges];
     }
 
     /**
