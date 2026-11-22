@@ -576,6 +576,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   counters cannot be read completes with a warning to check the last numbers (low: since R50 it stopped there).
   `stores.json` and the e-mail settings larger than 8 MiB are not read (low: a 3 GB file held root's update check for a
   minute).
+- **An e-book's download limit holds while its delivery mail is retried (review round 54, medium 2).** Each retry of
+  the delivery mail revoked the download and granted a new one at zero downloads, and the account's downloads page
+  offered it before the mail went out: with a limit of 3, nine copies. A retry keeps the downloads already counted, and
+  the account page lists a download only once its delivery mail was sent. Low: a download whose request was killed
+  records how far it got every 1 MiB and at each lease heartbeat (was: every 8 MiB), and once its lease lapsed it
+  resumes for free from up to 1 MiB past that point (was: nearly always counted as a new download).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

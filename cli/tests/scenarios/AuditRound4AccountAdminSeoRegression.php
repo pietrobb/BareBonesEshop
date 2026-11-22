@@ -39,7 +39,9 @@ $r4Asset = (int)$r4Db->lastInsertId();
 $r4Entitlements = [];
 foreach ([$r4OwnOrder, $r4ForeignOrder] as $r4OrderId) {
     $r4Db->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, (SELECT id FROM products WHERE sku = 'R4-EBOOK'), 'R4-EBOOK', 'R4 Ebook', 1, 1000, 1000)")->execute([$r4OrderId]);
-    $r4Db->prepare("INSERT INTO digital_entitlements (order_id, order_item_id, asset_id, token_hash, status, download_count, download_limit, expires_at) VALUES (?, ?, ?, ?, 'active', 1, 3, ?)")
+    // Delivered (its mail sent): R54 offers no entitlement on the account page before its delivery mail went out.
+    $r4Db->prepare("INSERT INTO digital_entitlements (order_id, order_item_id, asset_id, token_hash, status, download_count, download_limit, expires_at, delivered_at)
+        VALUES (?, ?, ?, ?, 'active', 1, 3, ?, '2026-01-02 00:00:00')")
         ->execute([$r4OrderId, (int)$r4Db->lastInsertId(), $r4Asset, hash('sha256', 'r4-mail-' . $r4OrderId), time() + 86400]);
     $r4Entitlements[$r4OrderId] = (int)$r4Db->lastInsertId();
 }

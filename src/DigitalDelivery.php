@@ -81,13 +81,14 @@ class DigitalDelivery {
             $limit = $asset['download_limit'] !== null ? max(1, (int)$asset['download_limit']) : null;
 
             $insert = Db::get()->prepare("INSERT INTO digital_entitlements
-                (order_id, order_item_id, asset_id, token_hash, status, download_limit, expires_at)
-                VALUES (:order_id, :order_item_id, :asset_id, :token_hash, 'active', :download_limit, :expires_at)");
+                (order_id, order_item_id, asset_id, token_hash, status, download_count, download_limit, expires_at)
+                VALUES (:order_id, :order_item_id, :asset_id, :token_hash, 'active', :download_count, :download_limit, :expires_at)");
             $insert->execute([
                 ':order_id' => $orderId,
                 ':order_item_id' => (int)$asset['order_item_id'],
                 ':asset_id' => (int)$asset['id'],
                 ':token_hash' => $tokenHash,
+                ':download_count' => self::retriedDownloads((int)$asset['order_item_id'], (int)$asset['id']),
                 ':download_limit' => $limit,
                 ':expires_at' => $expiresAt,
             ]);
@@ -102,6 +103,23 @@ class DigitalDelivery {
         }
 
         return $links;
+    }
+
+    /** Why a delivery attempt revoked its entitlements: grant() rotating them, or the delivery mail failing (WorkerJobs). */
+    public const DELIVERY_RETRY_REASONS = ['delivery_retry', 'delivery_email_failed', 'delivery_email_logged'];
+
+    /**
+     * R54 (review round 19, medium 2): the downloads already counted on the entitlement an earlier delivery attempt of the
+     * same line and asset revoked. Each retry of the delivery mail started again at download_count 0, so with a limit of 3
+     * nine full copies were downloaded while the mail kept failing.
+     */
+    private static function retriedDownloads(int $orderItemId, int $assetId): int {
+        $placeholders = implode(',', array_fill(0, count(self::DELIVERY_RETRY_REASONS), '?'));
+        $stmt = Db::get()->prepare("SELECT download_count FROM digital_entitlements
+            WHERE order_item_id = ? AND asset_id = ? AND status = 'revoked' AND revoked_reason IN ({$placeholders})
+            ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$orderItemId, $assetId, ...self::DELIVERY_RETRY_REASONS]);
+        return (int)$stmt->fetchColumn();
     }
 
     /**
@@ -208,7 +226,11 @@ class DigitalDelivery {
             $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** Active entitlements of a customer's orders in the current store, newest first (account downloads page). */
+    /**
+     * Active, delivered entitlements of a customer's orders in the current store, newest first (account downloads page).
+     * R54: not one whose delivery mail is still being sent or retried (delivered_at NULL): the page reissued its link and
+     * counted downloads on an entitlement the next attempt replaced.
+     */
     public static function forCustomer(int $customerId): array {
         $stmt = Db::get()->prepare("SELECT de.id, de.order_item_id, de.download_count, de.download_limit, de.expires_at,
                 da.label, da.download_name, da.asset_key, da.active AS asset_active,
@@ -216,7 +238,7 @@ class DigitalDelivery {
             FROM digital_entitlements de
             JOIN digital_assets da ON da.id = de.asset_id
             JOIN orders o ON o.id = de.order_id
-            WHERE o.customer_id = :customer AND o.store_id = :store AND de.status = 'active'
+            WHERE o.customer_id = :customer AND o.store_id = :store AND de.status = 'active' AND de.delivered_at IS NOT NULL
             ORDER BY de.id DESC LIMIT 200");
         $stmt->execute([':customer' => $customerId, ':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -305,6 +327,14 @@ class DigitalDelivery {
     public const LEASE_SECONDS = 300;
     public const LEASE_RENEW_SECONDS = 60;
 
+    /**
+     * R54 (review round 19, low): download.php records a streaming transfer's offset after every this many bytes (and on
+     * each lease heartbeat). A killed request leaves at most this much unrecorded, so a resume after its lease lapsed may
+     * start up to this far past the recorded offset (the client holds those bytes). It was recorded every 8 MiB and a
+     * resume had to start at or below it: after a killed request the resume nearly always counted as a new download.
+     */
+    public const PROGRESS_BYTES = 1048576;
+
     /** Seconds after a counted download in which Range requests resume it without counting again. */
     public static function resumeWindowSeconds(): int {
         return max(0, (int)(self::config()['digital_download_resume_minutes'] ?? 30)) * 60;
@@ -387,20 +417,23 @@ class DigitalDelivery {
     private static function claimResume(array $entitlement, int $rangeStart, int $size, int $now, string $lease): bool {
         $served = (int)($entitlement['last_download_offset'] ?? 0);
         $slack = self::resumeSlack($size);
-        if (!self::canResume($entitlement, $now) || $served >= $size || $rangeStart > $served || $rangeStart < $served - $slack) return false;
         // R50: one free resume per recorded offset — concurrent resumes before any of them recorded progress are not
         // each a free copy (they count as new downloads instead). Before migration 20261120120500 only the cap holds.
         $claim = Db::hasColumn('digital_entitlements', 'resume_claimed_offset');
         // R50 (run 620): and only once the transfer before it stopped (its lease released, see openTransfer()) or, R51,
         // its lease lapsed (LEASE_SECONDS without a heartbeat: the request was killed).
         $leased = Db::hasColumn('digital_entitlements', 'transfer_lease');
+        // R54: a killed transfer (lease still set, lapsed) served up to PROGRESS_BYTES past its last recorded offset.
+        $ahead = $leased && ($entitlement['transfer_lease'] ?? null) !== null ? self::PROGRESS_BYTES : 0;
+        if (!self::canResume($entitlement, $now) || $served >= $size || $rangeStart > $served + $ahead || $rangeStart < $served - $slack) return false;
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET resume_count = resume_count + 1, " . ($claim ? 'resume_claimed_offset = last_download_offset, ' : '')
               . ($leased ? 'transfer_lease = :lease, ' : '') . "updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since"
               . ($claim ? ' AND (resume_claimed_offset IS NULL OR last_download_offset > resume_claimed_offset)' : '')
               . ($leased ? ' AND (transfer_lease IS NULL OR transfer_lease < :lapsed)' : '') . "
-              AND resume_count < :max_resumes AND last_download_offset >= :start AND last_download_offset <= :start_plus_slack
+              AND resume_count < :max_resumes AND last_download_offset <= :start_plus_slack
+              AND (last_download_offset >= :start" . ($leased ? ' OR (transfer_lease IS NOT NULL AND last_download_offset >= :start_less_ahead)' : '') . ")
               AND last_download_offset < :size AND (expires_at IS NULL OR expires_at >= :now)
               AND EXISTS (
                   SELECT 1 FROM orders o
@@ -412,7 +445,7 @@ class DigitalDelivery {
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
             ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + $slack, ':size' => $size, ':now' => $now,
         ];
-        if ($leased) $params += [':lease' => $lease, ':lapsed' => sprintf('%010d', $now - self::LEASE_SECONDS)];
+        if ($leased) $params += [':lease' => $lease, ':lapsed' => sprintf('%010d', $now - self::LEASE_SECONDS), ':start_less_ahead' => $rangeStart - self::PROGRESS_BYTES];
         $stmt->execute($params);
         return $stmt->rowCount() === 1;
     }

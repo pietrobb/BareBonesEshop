@@ -110,13 +110,15 @@ try {
         // Counted as served even when the client dropped mid-chunk: it may resume from any byte it received.
         $remaining -= strlen($chunk);
         $served += strlen($chunk);
-        // A running offset (every 8 MiB) survives a killed request; the final one is written below.
-        if ($served - $recorded >= 8388608) {
+        // A running offset (every PROGRESS_BYTES, R54: was 8 MiB, and on each heartbeat) survives a killed request; the final
+        // one is written below. A resume after the killed request's lease lapsed may start up to PROGRESS_BYTES past it.
+        $beat = time() - $heartbeat >= DigitalDelivery::LEASE_RENEW_SECONDS;
+        if ($served - $recorded >= DigitalDelivery::PROGRESS_BYTES || ($beat && $served > $recorded)) {
             DigitalDelivery::recordProgress((int)$entitlement['id'], (int)$transfer['counted_at'], $start + $served);
             $recorded = $served;
         }
         // R51 (low): the lease is renewed while the transfer streams; a killed request's lease lapses (DigitalDelivery::LEASE_SECONDS).
-        if (time() - $heartbeat >= DigitalDelivery::LEASE_RENEW_SECONDS) {
+        if ($beat) {
             DigitalDelivery::holdTransfer((int)$entitlement['id'], $transfer);
             $heartbeat = time();
         }

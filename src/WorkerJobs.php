@@ -188,11 +188,6 @@ final class WorkerJobs
     }
 
     /**
-     * $claim (the fulfilment claim, renewed in place) is renewed right before the mail, so its lease covers the delivery.
-     * R27: true when the links were only written to the log for a misconfigured mail provider: they reached nobody and are
-     * revoked (they stand in the log), and the caller tries again with new ones (was: marked delivered, never sent).
-     */
-    /**
      * R49 (review round 19, low): how long a download link is valid, in the order's language (was: "no expiry",
      * "max 3 downloads" in every e-mail).
      * @param array{expires_at: int|string|null, download_limit: int|string|null} $link
@@ -205,6 +200,13 @@ final class WorkerJobs
         return $validity;
     }
 
+    /**
+     * Grant the order's downloads and mail their links. $claim (the fulfilment claim, renewed in place) is renewed right
+     * before the mail, so its lease covers the delivery. A failed mail revokes the links and throws (the job retries; the
+     * next grant() keeps the downloads already counted, R54). R27: true when the links were only written to the log for a
+     * misconfigured mail provider: they reached nobody and are revoked (they stand in the log), and the caller tries again
+     * with new ones (was: marked delivered, never sent).
+     */
     public static function fulfilDigitalOrder(int $orderId, ?string &$claim = null): bool {
         $links = DigitalDelivery::grant($orderId);
         if (!$links) return false;
