@@ -84,31 +84,9 @@ echo "\nGenerating import templates...\n";
 $importDir = __DIR__ . '/../import';
 if (!is_dir($importDir)) mkdir($importDir, 0750, true);
 
-$allLangs = [];
-foreach ($stores['stores'] ?? [] as $store) {
-    foreach ($store['languages'] ?? [] as $l) $allLangs[$l] = true;
-}
-$defaultLocale = $stores['default_locale'] ?? 'en';
-
 foreach ($catalog['product_types'] as $typeName => $typeDef) {
-    // R54 (review round 19, UX): vat_class too (books, food, reduced, ...); an empty cell keeps the default.
-    $headers = ['sku', 'name', 'slug', 'category', 'price', 'compare_price', 'stock', 'status', 'summary', 'description', 'image', 'weight_g', 'tags', 'vat_class'];
-
-    foreach ($typeDef['attributes'] ?? [] as $attrName => $attrDef) {
-        $headers[] = "attr:{$attrName}";
-    }
-
-    foreach (array_keys($allLangs) as $l) {
-        if ($l !== $defaultLocale) {
-            $headers[] = "name_{$l}";
-            $headers[] = "summary_{$l}";
-            $headers[] = "slug_{$l}";
-        }
-    }
-
-    $fp = fopen("{$importDir}/template-{$typeName}.csv", 'w');
-    fputcsv($fp, $headers, ',', '"', '');
-    fclose($fp);
+    // R55: the same header row as the admin's template download (ImportTemplates).
+    file_put_contents("{$importDir}/template-{$typeName}.csv", ImportTemplates::csv(ImportTemplates::headers((array)$typeDef, $stores)));
     echo "  [OK] import/template-{$typeName}.csv\n";
 }
 

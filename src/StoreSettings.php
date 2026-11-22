@@ -257,18 +257,31 @@ final class StoreSettings {
      * the domains whose /healthz did not answer as this shop (DNS or the web server not set up yet).
      * @return array{ok: bool, errors: list<string>, warning?: string}
      */
-    public static function saveDomains(string $storeId, mixed $posted): array {
-        $result = self::locked(static function () use ($storeId, $posted): array {
+    public static function saveDomains(string $storeId, mixed $posted, mixed $prefixPosted = null): array {
+        $result = self::locked(static function () use ($storeId, $posted, $prefixPosted): array {
             $data = self::load();
             $store = $data['stores'][$storeId] ?? null;
             if (!is_array($store)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.unknown')]];
             $errors = [];
-            $domains = self::parseDomains($posted, $data['stores'], $storeId, $storeId === (string)($data['default_store'] ?? ''), $errors);
+            $isDefault = $storeId === (string)($data['default_store'] ?? '');
+            $domains = self::parseDomains($posted, $data['stores'], $storeId, $isDefault, $errors);
+            // R55 (review round 20, UX): the URL prefix is set here too (was: only in stores.json). Without one a store is
+            // told apart by its own domain only; the form without the field keeps the prefix.
+            $prefix = $prefixPosted === null ? rtrim((string)($store['url_prefix'] ?? ''), '/')
+                : rtrim('/' . trim(strtolower(trim(is_scalar($prefixPosted) ? (string)$prefixPosted : '')), '/'), '/');
+            if ($prefix === '' && !$isDefault && $domains === []) {
+                $errors[] = I18n::t('admin.stores.err.prefix_needs_domain');
+            } elseif ($prefix !== '' && $prefixPosted !== null && $prefix !== rtrim((string)($store['url_prefix'] ?? ''), '/')
+                && (!preg_match('#^/[a-z0-9-]{2,20}$#', $prefix) || StoreContext::isReservedPrefix($prefix)
+                    || in_array($prefix, array_map(static fn($s): string => is_array($s) ? rtrim((string)($s['url_prefix'] ?? ''), '/') : '', array_diff_key($data['stores'], [$storeId => true])), true))) {
+                $errors[] = I18n::t('admin.stores.err.prefix');
+            }
             if ($errors) return ['ok' => false, 'errors' => $errors];
-            $before = $store['domains'] ?? [];
+            $before = ['domains' => $store['domains'] ?? [], 'url_prefix' => (string)($store['url_prefix'] ?? '')];
             $data['stores'][$storeId]['domains'] = $domains;
+            $data['stores'][$storeId]['url_prefix'] = $prefix;
             if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
-            AuditLog::log('store_settings', 0, ['store' => $storeId, 'domains' => $before], ['store' => $storeId, 'domains' => $domains]);
+            AuditLog::log('store_settings', 0, ['store' => $storeId] + $before, ['store' => $storeId, 'domains' => $domains, 'url_prefix' => $prefix]);
             return ['ok' => true, 'errors' => [], 'domains' => $domains];
         });
         if (!$result['ok']) return $result;

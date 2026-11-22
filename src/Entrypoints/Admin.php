@@ -76,6 +76,10 @@ if ($page === 'invoice_pdf' || $page === 'delivery_note') {
     $page === 'invoice_pdf' ? pageInvoicePdf() : pageDeliveryNotes();
     exit;
 }
+if ($page === 'import' && $action === 'template') {
+    handleImportTemplate();
+    exit;
+}
 
 // Render page — buffered: a fatal error mid-render (e.g. memory limit) becomes a 500, never HTTP 200 with half a page.
 ob_start();
@@ -172,7 +176,7 @@ tr:hover{background:#fafbfc}td a:not(.btn){color:var(--accent-d);font-weight:500
 .btn-primary:hover,.bbf-submit:hover{background:var(--accent-dd);border-color:var(--accent-dd)}.btn-danger{background:#dc2626;color:#fff;border-color:#dc2626}.btn-danger:hover{background:#b91c1c}
 .btn-sm{padding:.18rem .55rem;font-size:.75rem}
 .flash{padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;overflow-wrap:anywhere;border:1px solid transparent}code{overflow-wrap:anywhere;font-family:var(--mono);font-size:.85em}
-.flash-ok{background:#ecfdf3;color:#065f46;border-color:#a7f3d0}.flash-err{background:#fef2f2;color:#991b1b;border-color:#fecaca}.flash-warn{background:#fffbeb;color:#92400e;border-color:#fde68a}
+.flash-ok{background:#ecfdf3;color:#065f46;border-color:#a7f3d0}.flash-err{background:#fef2f2;color:#991b1b;border-color:#fecaca}.flash-warn{background:#fffbeb;color:#92400e;border-color:#fde68a}.flash-info{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}
 input,select,textarea{padding:.45rem .65rem;border:1px solid #d6dae0;border-radius:6px;font:inherit;font-size:.9rem;max-width:100%;background:#fff;color:var(--text)}
 input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(234,88,12,.15)}:focus-visible{outline:2px solid var(--accent-d);outline-offset:2px}nav :focus-visible{outline-color:#fff}#main:focus{outline:0}
 input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5rem;height:1.5rem;margin:0 .25rem 0 0;vertical-align:middle;accent-color:var(--accent-d)}textarea{resize:vertical}

@@ -39,42 +39,74 @@ $start = microtime(true);
 // ============================================================
 echo "Creating categories...\n";
 
+// R55 (review round 20, UX): names in the language of the store the default catalog belongs to, translated into the
+// shop's other languages (was: always Slovak, with "… DE" German names). sk, cs, en and de; another language gets English.
+$seedStores = StoreSettings::load();
+$seedLocale = 'en';
+foreach ((array)($seedStores['stores'] ?? []) as $seedStoreId => $seedStore) {
+    if (is_array($seedStore) && (string)($seedStore['catalog_scope'] ?? $seedStoreId) === 'default' && (string)$seedStoreId === (string)($seedStores['default_store'] ?? $seedStoreId)) {
+        $seedLocale = strtolower((string)($seedStore['default_locale'] ?? $seedStores['default_locale'] ?? 'en'));
+    }
+}
+// Each word list in the order sk, cs, en, de.
+$seedWords = static fn(string ...$words): array => array_combine(['sk', 'cs', 'en', 'de'], $words);
+$seedPacks = ['sk', 'cs', 'en', 'de'];
+$seedBase = in_array($seedLocale, $seedPacks, true) ? $seedLocale : 'en';
+$seedOther = [];
+foreach ((array)($seedStores['stores'] ?? []) as $seedStore) {
+    foreach ((array)(is_array($seedStore) ? ($seedStore['languages'] ?? []) : []) as $seedLanguage) {
+        $seedLanguage = strtolower((string)$seedLanguage);
+        if ($seedLanguage !== $seedBase && in_array($seedLanguage, $seedPacks, true)) $seedOther[$seedLanguage] = true;
+    }
+}
+$seedOther = array_keys($seedOther);
+
 $categoryTree = [
-    'oblecenie' => ['Oblečenie', ['tricka' => 'Tričká', 'nohavice' => 'Nohavice', 'mikiny' => 'Mikiny', 'bundy' => 'Bundy', 'saty' => 'Šaty']],
-    'elektronika' => ['Elektronika', ['telefony' => 'Telefóny', 'tablety' => 'Tablety', 'notebooky' => 'Notebooky', 'prislusenstvo' => 'Príslušenstvo']],
-    'dom-zahrada' => ['Dom a záhrada', ['nabytok' => 'Nábytok', 'dekoracie' => 'Dekorácie', 'naradie' => 'Náradie', 'osvetlenie' => 'Osvetlenie']],
-    'sport' => ['Šport', ['fitness' => 'Fitness', 'outdoor' => 'Outdoor', 'cyklistika' => 'Cyklistika', 'bezecke' => 'Bežecké']],
-    'knihy' => ['Knihy', ['beletria' => 'Beletria', 'odborna' => 'Odborná', 'detske' => 'Detské', 'ucebnice' => 'Učebnice']],
+    'oblecenie' => [$seedWords('Oblečenie', 'Oblečení', 'Clothing', 'Kleidung'), [
+        'tricka' => $seedWords('Tričká', 'Trička', 'T-shirts', 'T-Shirts'), 'nohavice' => $seedWords('Nohavice', 'Kalhoty', 'Trousers', 'Hosen'),
+        'mikiny' => $seedWords('Mikiny', 'Mikiny', 'Hoodies', 'Kapuzenpullover'), 'bundy' => $seedWords('Bundy', 'Bundy', 'Jackets', 'Jacken'),
+        'saty' => $seedWords('Šaty', 'Šaty', 'Dresses', 'Kleider')]],
+    'elektronika' => [$seedWords('Elektronika', 'Elektronika', 'Electronics', 'Elektronik'), [
+        'telefony' => $seedWords('Telefóny', 'Telefony', 'Phones', 'Telefone'), 'tablety' => $seedWords('Tablety', 'Tablety', 'Tablets', 'Tablets'),
+        'notebooky' => $seedWords('Notebooky', 'Notebooky', 'Laptops', 'Notebooks'), 'prislusenstvo' => $seedWords('Príslušenstvo', 'Příslušenství', 'Accessories', 'Zubehör')]],
+    'dom-zahrada' => [$seedWords('Dom a záhrada', 'Dům a zahrada', 'Home & Garden', 'Haus & Garten'), [
+        'nabytok' => $seedWords('Nábytok', 'Nábytek', 'Furniture', 'Möbel'), 'dekoracie' => $seedWords('Dekorácie', 'Dekorace', 'Decorations', 'Dekoration'),
+        'naradie' => $seedWords('Náradie', 'Nářadí', 'Tools', 'Werkzeug'), 'osvetlenie' => $seedWords('Osvetlenie', 'Osvětlení', 'Lighting', 'Beleuchtung')]],
+    'sport' => [$seedWords('Šport', 'Sport', 'Sports', 'Sport'), [
+        'fitness' => $seedWords('Fitness', 'Fitness', 'Fitness', 'Fitness'), 'outdoor' => $seedWords('Outdoor', 'Outdoor', 'Outdoor', 'Outdoor'),
+        'cyklistika' => $seedWords('Cyklistika', 'Cyklistika', 'Cycling', 'Radsport'), 'bezecke' => $seedWords('Bežecké', 'Běžecké', 'Running', 'Laufen')]],
+    'knihy' => [$seedWords('Knihy', 'Knihy', 'Books', 'Bücher'), [
+        'beletria' => $seedWords('Beletria', 'Beletrie', 'Fiction', 'Belletristik'), 'odborna' => $seedWords('Odborná', 'Odborná', 'Non-fiction', 'Sachbücher'),
+        'detske' => $seedWords('Detské', 'Dětské', "Children's", 'Kinderbücher'), 'ucebnice' => $seedWords('Učebnice', 'Učebnice', 'Textbooks', 'Lehrbücher')]],
 ];
 
-$catIds = []; // slug => id
+$catIds = []; // key => id
 $catStmt = $db->prepare(Db::insertIgnore() . " INTO categories (slug, name, parent_id, path, depth, sort_order, translations) VALUES (:slug, :name, :pid, :path, :depth, :sort, :trans)");
-
-$translations = [
-    'oblecenie' => ['en' => ['name' => 'Clothing'], 'de' => ['name' => 'Kleidung'], 'cs' => ['name' => 'Oblečení']],
-    'elektronika' => ['en' => ['name' => 'Electronics'], 'de' => ['name' => 'Elektronik'], 'cs' => ['name' => 'Elektronika']],
-    'dom-zahrada' => ['en' => ['name' => 'Home & Garden'], 'de' => ['name' => 'Haus & Garten'], 'cs' => ['name' => 'Dům a zahrada']],
-    'sport' => ['en' => ['name' => 'Sports'], 'de' => ['name' => 'Sport'], 'cs' => ['name' => 'Sport']],
-    'knihy' => ['en' => ['name' => 'Books'], 'de' => ['name' => 'Bücher'], 'cs' => ['name' => 'Knihy']],
-];
+$catTranslations = static function (array $names) use ($seedOther): string {
+    $translations = [];
+    foreach ($seedOther as $locale) $translations[$locale] = ['name' => $names[$locale]];
+    return $translations === [] ? '{}' : json_encode($translations, JSON_UNESCAPED_UNICODE);
+};
 
 $sort = 0;
-foreach ($categoryTree as $rootSlug => [$rootName, $children]) {
+foreach ($categoryTree as $rootKey => [$rootNames, $children]) {
+    $rootSlug = Import::slugify($rootNames[$seedBase]);
     $catStmt->execute([
-        ':slug' => $rootSlug, ':name' => $rootName, ':pid' => null,
+        ':slug' => $rootSlug, ':name' => $rootNames[$seedBase], ':pid' => null,
         ':path' => $rootSlug, ':depth' => 0, ':sort' => $sort++,
-        ':trans' => json_encode($translations[$rootSlug]),
+        ':trans' => $catTranslations($rootNames),
     ]);
     $rootId = (int)$db->lastInsertId();
-    $catIds[$rootSlug] = $rootId;
+    $catIds[$rootKey] = $rootId;
 
-    foreach ($children as $childSlug => $childName) {
+    foreach ($children as $childKey => $childNames) {
+        $childSlug = Import::slugify($childNames[$seedBase]);
         $catStmt->execute([
-            ':slug' => $childSlug, ':name' => $childName, ':pid' => $rootId,
+            ':slug' => $childSlug, ':name' => $childNames[$seedBase], ':pid' => $rootId,
             ':path' => $rootSlug . '/' . $childSlug, ':depth' => 1, ':sort' => $sort++,
-            ':trans' => '{}',
+            ':trans' => $catTranslations($childNames),
         ]);
-        $catIds[$childSlug] = (int)$db->lastInsertId();
+        $catIds[$childKey] = (int)$db->lastInsertId();
     }
 }
 echo "  Created " . count($catIds) . " categories.\n\n";
@@ -90,13 +122,33 @@ $sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 $materials = ['bavlna', 'polyester', 'vlna', 'silk', 'nylon', 'denim'];
 $brands = ['Nike', 'Adidas', 'Samsung', 'Apple', 'Sony', 'LG', 'Bosch', 'Ikea', 'Generic'];
 $adjectives = ['Premium', 'Classic', 'Modern', 'Vintage', 'Ultra', 'Pro', 'Eco', 'Slim', 'Max', 'Super'];
+// Per category: [sk, cs, en, de] words of one product kind.
 $nouns = [
-    'oblecenie' => ['Tričko', 'Košeľa', 'Mikina', 'Bunda', 'Nohavice', 'Šortky', 'Sveter', 'Vesta'],
-    'elektronika' => ['Telefón', 'Tablet', 'Notebook', 'Slúchadlá', 'Nabíjačka', 'Puzdro', 'Kábel', 'Adaptér'],
-    'dom-zahrada' => ['Stolička', 'Stôl', 'Lampa', 'Vankúš', 'Záves', 'Váza', 'Polica', 'Koberec'],
-    'sport' => ['Lopta', 'Činky', 'Podložka', 'Fľaša', 'Rukavice', 'Batoh', 'Helma', 'Topánky'],
-    'knihy' => ['Román', 'Učebnica', 'Príručka', 'Zbierka', 'Atlas', 'Slovník', 'Encyklopédia', 'Komiks'],
+    'oblecenie' => [['Tričko', 'Tričko', 'T-shirt', 'T-Shirt'], ['Košeľa', 'Košile', 'Shirt', 'Hemd'], ['Mikina', 'Mikina', 'Hoodie', 'Kapuzenpullover'],
+        ['Bunda', 'Bunda', 'Jacket', 'Jacke'], ['Nohavice', 'Kalhoty', 'Trousers', 'Hose'], ['Šortky', 'Kraťasy', 'Shorts', 'Shorts'],
+        ['Sveter', 'Svetr', 'Sweater', 'Pullover'], ['Vesta', 'Vesta', 'Vest', 'Weste']],
+    'elektronika' => [['Telefón', 'Telefon', 'Phone', 'Telefon'], ['Tablet', 'Tablet', 'Tablet', 'Tablet'], ['Notebook', 'Notebook', 'Laptop', 'Notebook'],
+        ['Slúchadlá', 'Sluchátka', 'Headphones', 'Kopfhörer'], ['Nabíjačka', 'Nabíječka', 'Charger', 'Ladegerät'], ['Puzdro', 'Pouzdro', 'Case', 'Hülle'],
+        ['Kábel', 'Kabel', 'Cable', 'Kabel'], ['Adaptér', 'Adaptér', 'Adapter', 'Adapter']],
+    'dom-zahrada' => [['Stolička', 'Židle', 'Chair', 'Stuhl'], ['Stôl', 'Stůl', 'Table', 'Tisch'], ['Lampa', 'Lampa', 'Lamp', 'Lampe'],
+        ['Vankúš', 'Polštář', 'Pillow', 'Kissen'], ['Záves', 'Závěs', 'Curtain', 'Vorhang'], ['Váza', 'Váza', 'Vase', 'Vase'],
+        ['Polica', 'Police', 'Shelf', 'Regal'], ['Koberec', 'Koberec', 'Rug', 'Teppich']],
+    'sport' => [['Lopta', 'Míč', 'Ball', 'Ball'], ['Činky', 'Činky', 'Dumbbells', 'Hanteln'], ['Podložka', 'Podložka', 'Mat', 'Matte'],
+        ['Fľaša', 'Láhev', 'Bottle', 'Flasche'], ['Rukavice', 'Rukavice', 'Gloves', 'Handschuhe'], ['Batoh', 'Batoh', 'Backpack', 'Rucksack'],
+        ['Helma', 'Helma', 'Helmet', 'Helm'], ['Topánky', 'Boty', 'Shoes', 'Schuhe']],
+    'knihy' => [['Román', 'Román', 'Novel', 'Roman'], ['Učebnica', 'Učebnice', 'Textbook', 'Lehrbuch'], ['Príručka', 'Příručka', 'Handbook', 'Handbuch'],
+        ['Zbierka', 'Sbírka', 'Collection', 'Sammlung'], ['Atlas', 'Atlas', 'Atlas', 'Atlas'], ['Slovník', 'Slovník', 'Dictionary', 'Wörterbuch'],
+        ['Encyklopédia', 'Encyklopedie', 'Encyclopedia', 'Enzyklopädie'], ['Komiks', 'Komiks', 'Comic', 'Comic']],
 ];
+$colorNames = [
+    'cierna' => $seedWords('čierna', 'černá', 'black', 'schwarz'), 'biela' => $seedWords('biela', 'bílá', 'white', 'weiß'),
+    'cervena' => $seedWords('červená', 'červená', 'red', 'rot'), 'modra' => $seedWords('modrá', 'modrá', 'blue', 'blau'),
+    'zelena' => $seedWords('zelená', 'zelená', 'green', 'grün'), 'seda' => $seedWords('sivá', 'šedá', 'grey', 'grau'),
+    'hneda' => $seedWords('hnedá', 'hnědá', 'brown', 'braun'), 'zlta' => $seedWords('žltá', 'žlutá', 'yellow', 'gelb'),
+    'oranzova' => $seedWords('oranžová', 'oranžová', 'orange', 'orange'), 'ruzova' => $seedWords('ružová', 'růžová', 'pink', 'rosa'),
+];
+$summaryText = $seedWords('{adj} {noun} od {brand}. Farba: {color}, veľkosť: {size}.', '{adj} {noun} od {brand}. Barva: {color}, velikost: {size}.',
+    '{adj} {noun} by {brand}. Colour: {color}, size: {size}.', '{adj} {noun} von {brand}. Farbe: {color}, Größe: {size}.');
 
 $leafCats = []; // category slugs that are children (leaves)
 foreach ($categoryTree as $rootSlug => [$_, $children]) {
@@ -133,11 +185,16 @@ for ($i = 1; $i <= $count; $i++) {
 
     $adj = $adjectives[array_rand($adjectives)];
     $nounList = $nouns[$rootSlug] ?? $nouns['dom-zahrada'];
-    $noun = $nounList[array_rand($nounList)];
+    $nounWords = $seedWords(...$nounList[array_rand($nounList)]);
     $brand = $brands[array_rand($brands)];
     $color = $colors[array_rand($colors)];
+    $size = $sizes[array_rand($sizes)];
+    $localized = static fn(string $locale): array => [
+        'name' => "{$adj} {$nounWords[$locale]} {$brand} #{$i}",
+        'summary' => strtr($summaryText[$locale], ['{adj}' => $adj, '{noun}' => $nounWords[$locale], '{brand}' => $brand, '{color}' => $colorNames[$color][$locale], '{size}' => $size]),
+    ];
 
-    $name = "{$adj} {$noun} {$brand} #{$i}";
+    $name = $localized($seedBase)['name'];
     $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad($i, 6, '0', STR_PAD_LEFT);
     $slug = Import::slugify($name); // lower-cases before stripping, so "Premium" stays "premium"
 
@@ -152,7 +209,6 @@ for ($i = 1; $i <= $count; $i++) {
         default => 'simple',
     };
 
-    $size = $sizes[array_rand($sizes)];
     $material = $materials[array_rand($materials)];
 
     $attrsJson = json_encode(['color' => $color, 'size' => $size, 'material' => $material, 'brand' => $brand]);
@@ -160,13 +216,14 @@ for ($i = 1; $i <= $count; $i++) {
 
     $filterTags = "attr_color_{$color} attr_size_" . strtolower($size) . " attr_material_{$material} attr_brand_" . strtolower($brand);
 
-    $translated = [
-        'en' => ['name' => str_replace(['Tričko','Košeľa','Mikina','Bunda','Nohavice'], ['T-shirt','Shirt','Hoodie','Jacket','Pants'], $name), 'slug' => $slug . '-en'],
-        'de' => ['name' => $name . ' DE', 'slug' => $slug . '-de'],
-    ];
-    $trans = json_encode($translated);
+    $translated = [];
+    foreach ($seedOther as $locale) {
+        $text = $localized($locale);
+        $translated[$locale] = ['name' => $text['name'], 'summary' => $text['summary'], 'slug' => Import::slugify($text['name']) . '-' . $locale];
+    }
+    $trans = $translated === [] ? '{}' : json_encode($translated, JSON_UNESCAPED_UNICODE);
 
-    $summary = "{$adj} {$noun} od {$brand}. Farba: {$color}, Veľkosť: {$size}.";
+    $summary = $localized($seedBase)['summary'];
 
     $prodStmt->execute([
         ':sku'     => $sku,
@@ -186,8 +243,8 @@ for ($i = 1; $i <= $count; $i++) {
         ':trans'   => $trans,
     ]);
     $productId = (int)$db->lastInsertId();
-    // Storefront /en/ and /de/ product URLs resolve through slug_registry, as for imported products.
-    Import::registerSlug($slug, 'sk', 'product', $productId, $db);
+    // Storefront product URLs of every language resolve through slug_registry, as for imported products.
+    Import::registerSlug($slug, $seedBase, 'product', $productId, $db);
     foreach ($translated as $locale => $tr) Import::registerSlug($tr['slug'], $locale, 'product', $productId, $db);
     $stockStmt->execute([':store' => $warehouse['store_id'], ':wh' => (int)$warehouse['id'], ':sku' => $sku, ':qty' => $stock]);
 

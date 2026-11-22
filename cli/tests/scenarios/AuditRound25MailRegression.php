@@ -58,7 +58,7 @@ try {
     assert_true(str_contains($r25mSource('src/Withdrawal.php'), '$status = MailService::shownStatus($result);')
         && str_contains($r25mSource('src/Complaints.php'), 'return MailService::shownStatus($result);')
         && str_contains($r25mSource('src/MerchantNotifier.php'), 'self::finish($orderId, $event, $recipient, MailService::shownStatus($result), \'\');')
-        && preg_match_all("~if \(MailService::logged\(\\\$res\)\) \{\s+setFlash\('err', I18n::format\('admin\.order\.msg\.email_logged'~", $r25mSource('src/Entrypoints/Admin/Orders.php')) === 2
+        && preg_match_all("~if \(MailService::logged\(\\\$res\)\) \{\s+(?:\/\/[^\n]*\n\s+)?setFlash\('(?:err|info)', I18n::format\('admin\.order\.msg\.email_logged'~", $r25mSource('src/Entrypoints/Admin/Orders.php')) === 2
         && str_contains($r25mSource('src/GdprService.php'), "CASE WHEN status = 'sent' AND adapter = 'log' THEN 'logged' ELSE status END AS status, sent_at"),
         'R25 mail: the withdrawal and complaint receipts (page and admin), merchant notifications, the admin resend messages and the GDPR export say "logged", not "sent"');
     foreach (glob($r25mRoot . '/lang/*.php') ?: [] as $r25mLang) {

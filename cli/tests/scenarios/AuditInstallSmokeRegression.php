@@ -179,10 +179,23 @@ try {
     $a111StoresJson = (string)file_get_contents($a111Private . '/stores.json');
     $a111CzkStores = $a111Stores;
     $a111CzkStores['stores']['default']['currency'] = 'CZK';
+    $a111CzkStores['stores']['default']['default_locale'] = 'cs'; // R55: and Czech
     file_put_contents($a111Private . '/stores.json', json_encode($a111CzkStores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     try {
         $a111SeedCzk = $a111Php(['cli/seed.php', '--count=2', '--fresh']);
         $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+        // R55 (review round 20, UX): the catalog is seeded in the default store's language, with real translations.
+        $a111CsRoot = (string)$a111SeedDb->query("SELECT name FROM categories WHERE parent_id IS NULL AND path = 'obleceni'")->fetchColumn();
+        $a111CsProducts = $a111SeedDb->query("SELECT summary, translations FROM products WHERE store_id = 'default'")->fetchAll(PDO::FETCH_ASSOC);
+        $a111CsLocales = $a111SeedDb->query("SELECT DISTINCT locale FROM slug_registry WHERE entity = 'product' ORDER BY locale")->fetchAll(PDO::FETCH_COLUMN);
+        assert_true($a111CsRoot === 'Oblečení' && $a111CsProducts !== [] && in_array('cs', $a111CsLocales, true)
+            && array_filter($a111CsProducts, static function (array $p): bool {
+                $tr = json_decode((string)$p['translations'], true) ?: [];
+                return !str_contains((string)$p['summary'], 'Barva:') || !str_contains((string)($tr['en']['summary'] ?? ''), 'Colour:')
+                    || str_ends_with((string)($tr['de']['name'] ?? ''), ' DE') || isset($tr['cs']);
+            }) === [],
+            'R55 UX: cli/seed.php names the catalog in the default store\'s language (cs) and translates it (was: Slovak, "… DE"): '
+            . json_encode([$a111CsRoot, $a111CsLocales, array_slice($a111CsProducts, 0, 1)], JSON_UNESCAPED_UNICODE));
         $a111CzkRows = $a111SeedDb->query("SELECT DISTINCT LOWER(currency) FROM products WHERE store_id = 'default'")->fetchAll(PDO::FETCH_COLUMN);
         $a111CzkPrices = $a111SeedDb->query("SELECT price FROM products WHERE store_id = 'default'")->fetchAll(PDO::FETCH_COLUMN);
         $a111CzkGap = StoreCurrencyCoverage::unpriced($a111SeedDb, 'default', $a111CzkStores['stores']['default'])['count'];
@@ -235,12 +248,15 @@ try {
         }
         $a111Home = $a111Get('/');
         assert_true($a111Home['status'] === 200 && str_contains($a111Home['body'], '<html'), 'A11.1 php -S router.php serves the storefront');
-        $a111Slug = (string)(new PDO('sqlite:' . $a111Private . '/db/shop.sqlite'))->query("SELECT slug FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetchColumn();
+        $a111First = (new PDO('sqlite:' . $a111Private . '/db/shop.sqlite'))->query("SELECT slug, translations FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+        $a111Slug = (string)($a111First['slug'] ?? '');
+        $a111TrSlugs = array_map(static fn($t): string => (string)($t['slug'] ?? ''), json_decode((string)($a111First['translations'] ?? ''), true) ?: []);
         assert_equals(200, $a111Get('/product/' . $a111Slug)['status'], 'A11.1 php -S router.php applies the product rewrite');
         // R10 UX4: the seeder keeps the first letter of every word ("premium-…", not "remium-…") and its /en/ and /de/ slugs resolve.
         assert_true(preg_match('/^(premium|classic|modern|vintage|ultra|pro|eco|slim|max|super)-/', $a111Slug) === 1, "R10 seed: product slug keeps capitalised words ({$a111Slug})");
         foreach (['en', 'de'] as $a111Locale) {
-            $a111Url = "/{$a111Locale}/product/{$a111Slug}-{$a111Locale}";
+            // R55: the translated slug comes from the translated name (was: the Slovak slug plus "-en").
+            $a111Url = "/{$a111Locale}/product/" . ($a111TrSlugs[$a111Locale] ?? "{$a111Slug}-{$a111Locale}");
             assert_equals(200, $a111Get($a111Url)['status'], "R10 seed: the {$a111Locale} product link of a seeded product opens ({$a111Url})");
         }
         $a111Sitemap = $a111Get('/sitemap.xml');
