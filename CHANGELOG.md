@@ -521,6 +521,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   acknowledgement within the withdrawal period says the return needs no approval (was: "we will let you know whether
   the return is approved"). Checkout removes Unicode bidi controls (U+202E and the other overrides, embeddings,
   isolates, marks) and C1 controls from names, addresses and notes.
+- **A shop installed in CZK, HUF or PLN charges shipping and payment in that currency (review round 53, medium 3).**
+  The installer kept the default store's EUR prices as the new currency's amounts (GLS 2,99 Kč, free shipping from
+  50 Kč, cash on delivery 3 Kč). It now gives the default store the shipping methods, rates, zones and payment fees
+  the migrations price in that currency (the CZ, HU and PL price lists); USD keeps the EUR amounts. `setup.php doctor`
+  warns (`stores.provider_prices.<store>`) when a store's median shipping rate is under 0,50 € or over 100 € at the
+  EUR rate of its currency: such prices were entered for another currency.
+- **Installer and admin texts (review round 53, low).** After a Czech (or other non-English) install the admin opens
+  in that language (was English: the system language stayed `en`). The installer in Czech, Polish, Hungarian, German or
+  Spanish prefills that country, time zone, shop language and currency (was the Slovak example store). The VAT class
+  "e-books" has a label in every admin language (was the key `vat_class.ebooks`). A method's own name and description
+  fields name their language when the method has translations. The Czech privacy policy template is complete (was a
+  short stub), and the CZ, SK and PL imprints name the dispute resolution body after a colon (the name is nominative).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

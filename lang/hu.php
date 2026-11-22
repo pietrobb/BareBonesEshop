@@ -1098,6 +1098,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.vat_class.reduced2' => 'második kedvezményes',
     'admin.product.vat_class.zero' => 'nulla / mentes',
     'admin.product.vat_class.books' => 'könyvek',
+    'admin.product.vat_class.ebooks' => 'e-könyvek',
     'admin.product.vat_class.food' => 'élelmiszer',
     'admin.product.vat_class.medicines' => 'gyógyszerek',
     'admin.product.vat_class.baby' => 'babatermékek',

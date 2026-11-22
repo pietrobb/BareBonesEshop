@@ -54,3 +54,48 @@ assert_equals([399, 'pass', 'pass'], [$r53iEur['gls'] ?? null, $r53iEur['doctor_
     'R53 install: a EUR shop keeps its EUR prices and the doctor passes (' . json_encode($r53iEur) . ')');
 assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/WebInstaller.php'), 'self::priceInStoreCurrency(Db::get(), $stores);'),
     'R53 install: the installer prices the default store in its currency before it switches the payment methods');
+
+// UI lows.
+$r53iRepo = dirname(TEST_CLI_DIR);
+$r53iExample = json_decode((string)file_get_contents($r53iRepo . '/stores.example.json'), true);
+$r53iInstalled = WebInstaller::withIdentity($r53iExample, ['shop_name' => 'Obchod', 'timezone' => 'Europe/Prague', 'shop_locale' => 'cs', 'currency' => 'czk',
+    'company' => 'Firma s.r.o.', 'street' => 'Hlavní 1', 'city' => 'Praha', 'zip' => '11000', 'country' => 'CZ', 'vat_id' => '', 'iban' => '', 'email' => 'a@example.cz']);
+assert_equals('cs', $r53iInstalled['default_locale'] ?? null, 'R53 install: a Czech install makes Czech the system language the admin opens in (was "en")');
+$r53iPlain = $r53iRoot . '/plain';
+mkdir($r53iPlain);
+copy($r53iRepo . '/stores.example.json', $r53iPlain . '/stores.example.json');
+$r53iDefaults = WebInstaller::defaults($r53iPlain, ['HTTP_HOST' => 'shop.example.cz', 'SCRIPT_NAME' => '/install.php'], 'cs');
+assert_equals(['CZ', 'Europe/Prague', 'cs', 'czk'], [$r53iDefaults['country'], $r53iDefaults['timezone'], $r53iDefaults['shop_locale'], $r53iDefaults['currency']],
+    'R53 install: the Czech installer prefills a Czech shop, not the Slovak example store');
+$r53iEnglish = WebInstaller::defaults($r53iPlain, ['HTTP_HOST' => 'shop.example.com', 'SCRIPT_NAME' => '/install.php'], 'en');
+assert_equals([(string)($r53iExample['stores']['default']['legal']['country'] ?? ''), (string)$r53iExample['stores']['default']['default_locale']],
+    [$r53iEnglish['country'], $r53iEnglish['shop_locale']], 'R53 install: in English the installer keeps the example store');
+
+$r53iMissing = [];
+foreach (array_keys(WebInstaller::LOCALES) as $r53iLang) {
+    foreach (VatService::productClasses() as $r53iClass) {
+        $r53iKey = 'admin.product.vat_class.' . $r53iClass;
+        if (I18n::tIn($r53iKey, $r53iLang) === $r53iKey) $r53iMissing[] = "{$r53iLang}:{$r53iClass}";
+    }
+}
+assert_equals([], $r53iMissing, 'R53 product: every VAT class (ebooks too) has a label in every admin language');
+
+$r53iOps = (string)file_get_contents($r53iRepo . '/src/Entrypoints/Admin/Operations.php');
+$r53iMark = 'lang="<?= esc(MethodLabels::baseLanguage()) ?>" name=';
+assert_true(substr_count($r53iOps, 'action=method_save') === 4 && substr_count($r53iOps, $r53iMark . '"name"') === 4
+    && substr_count($r53iOps, $r53iMark . '"description"') === 4 && method_exists('MethodLabels', 'baseLanguage'),
+    'R53 methods: the own name and description of every shipping and payment method row carry their language');
+assert_equals((string)(Bootstrap::stores()['stores'][StoreContext::current()->providerId()]['default_locale'] ?? StoreContext::current()->defaultLocale()),
+    method_exists('MethodLabels', 'baseLanguage') ? MethodLabels::baseLanguage() : null, 'R53 methods: the own name is in the default language of the store owning the methods');
+
+$r53iLegal = static fn(string $lang, string $page): string => (string)file_get_contents("{$r53iRepo}/templates/legal/{$lang}/{$page}.html");
+assert_equals(substr_count($r53iLegal('sk', 'privacy'), '<h2>'), substr_count($r53iLegal('cs', 'privacy'), '<h2>'),
+    'R53 legal: the Czech privacy policy has every section of the Slovak one (was a five-line stub)');
+assert_true(str_contains($r53iLegal('cs', 'privacy'), 'Úřad pro ochranu osobních údajů') && str_contains($r53iLegal('cs', 'privacy'), 'zpracovatel'),
+    'R53 legal: the Czech privacy policy names the supervisory authority and the processors');
+$r53iDeclined = [];
+foreach (['cs', 'sk', 'pl'] as $r53iLang) {
+    // The ADR body's name ("Česká obchodní inspekce", or the merchant's own) is in the nominative: it follows a colon.
+    if (!str_contains($r53iLegal($r53iLang, 'imprint'), ': <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a>')) $r53iDeclined[] = $r53iLang;
+}
+assert_equals([], $r53iDeclined, 'R53 legal: the imprint does not put the ADR body\'s name after a preposition needing another case');

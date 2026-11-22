@@ -1072,6 +1072,7 @@ return [
     'admin.product.vat_class.reduced2' => 'second reduced',
     'admin.product.vat_class.zero' => 'zero / exempt',
     'admin.product.vat_class.books' => 'books',
+    'admin.product.vat_class.ebooks' => 'e-books',
     'admin.product.vat_class.food' => 'food',
     'admin.product.vat_class.medicines' => 'medicines',
     'admin.product.vat_class.baby' => 'baby goods',

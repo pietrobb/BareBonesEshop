@@ -1077,6 +1077,7 @@ return [
     'admin.product.vat_class.reduced2' => 'druhá znížená',
     'admin.product.vat_class.zero' => 'nulová / oslobodené',
     'admin.product.vat_class.books' => 'knihy',
+    'admin.product.vat_class.ebooks' => 'e-knihy',
     'admin.product.vat_class.food' => 'potraviny',
     'admin.product.vat_class.medicines' => 'lieky',
     'admin.product.vat_class.baby' => 'detský tovar',
