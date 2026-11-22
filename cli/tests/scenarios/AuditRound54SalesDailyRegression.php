@@ -17,6 +17,7 @@ file_put_contents($r54sRoot . '/child.php', <<<'PHP'
 [, $driver, $target, $root] = $argv;
 require $root . '/src/autoload.php';
 set_error_handler(static function(int $severity, string $message, string $file, int $line): bool {
+    if (!(error_reporting() & $severity)) return false;
     throw new ErrorException($message, 0, $severity, $file, $line);
 });
 $connect = static function() use ($driver, $target): PDO {
@@ -67,7 +68,8 @@ try {
     if ($driver === 'sqlite') {
         // Medium 6: a checkout commits on another connection while the build reads the logged changes.
         $fired = false;
-        $db->sqliteCreateFunction('SUBSTR', static function($value, $start, $length = null) use (&$fired, $other, $at) {
+        // ShopPDO is a plain PDO, so Pdo\Sqlite::createFunction() is not available; PHP 8.5 only deprecates this one.
+        @$db->sqliteCreateFunction('SUBSTR', static function($value, $start, $length = null) use (&$fired, $other, $at) {
             if (!$fired) {
                 $fired = true;
                 $other->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, shipping_addr, payment_method, subtotal, total, currency, store_id, locale, created_at)
