@@ -546,6 +546,7 @@ class Rma {
      * R51 (R49 open): a refund still in flight is not money returned (it may fail): a return waits for it instead
      * (refundInFlight()). The refund of a cancellation after a partial shipment paid for the goods that never shipped
      * (Fulfillment::unshippedGross()), not for the shipped goods a return brings back: it no longer lowers that return.
+     * R55 (low): an item refund a GoPay/ThePay REFUNDED settled (no refund id) is referenced by the key of its booking.
      */
     public static function refundedOutsideReturns(int $orderId): int {
         $order = Orders::byId($orderId);
@@ -565,7 +566,8 @@ class Rma {
             WHERE t.order_id=:order AND t.store_id=:store AND t.status IN ('partially_refunded','refunded','refund_succeeded') AND t.amount>0
               AND t.idempotency_key <> :cancellation
               AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id=t.order_id AND r.store_id=t.store_id
-                  AND (r.idempotency_key=t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference<>'' AND r.payment_reference=t.provider_ref)))");
+                  AND (r.idempotency_key=t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference<>''
+                      AND (r.payment_reference=t.provider_ref OR r.payment_reference=t.idempotency_key))))");
         $stmt->execute([':order' => $orderId, ':store' => $store, ':cancellation' => $cancelledAfterShipping ? 'order_refund_' . $orderId : '']);
         $booked = (int)$stmt->fetchColumn();
         $stmt->closeCursor();
@@ -773,11 +775,13 @@ class Rma {
                 PaymentService::releaseFailedItemRefund((int)$refund['order_id'], $refundId);
             }
             if ($own) $db->commit();
-            return $released;
         } catch (Throwable $e) {
             if ($own && $db->inTransaction()) $db->rollBack();
             throw $e;
         }
+        // R55: a payment the release left refunded (the rest went back another way) closes its order.
+        if ($released && $own) PaymentService::closeRefundedOrder((int)$refund['order_id'], 'Item refund failed, the money was refunded already');
+        return $released;
     }
 
     /** The provider accepted an item refund asynchronously: its refund id lets the refund webhook complete it. */

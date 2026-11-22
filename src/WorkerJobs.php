@@ -335,7 +335,9 @@ final class WorkerJobs
         // A redelivered whole-order job after the provider confirmed the refund only finishes the bookkeeping.
         // R54 (medium 3): so does the job of a credit note a refund event settled already (the payment refunded in the
         // GoPay/ThePay dashboard while it waited): calling the provider again would refund it twice or be declined.
-        $alreadyRefunded = ($itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey))
+        // R55 (review round 20, medium 2): and the job of a request a REFUNDED notification settled while it waited.
+        $alreadyRefunded = ($itemRefundId === 0 && $idempotencyKey !== '' && (PaymentService::refundSucceeded($idempotencyKey)
+                || PaymentService::refundSettledByEvent($orderId, $idempotencyKey)))
             || ($itemRefundId > 0 && (string)(Rma::refundById($itemRefundId)['status'] ?? '') === 'succeeded');
 
         $result = $alreadyRefunded ? ['status' => 'succeeded', 'replayed' => true] : ['status' => 'skipped'];
@@ -377,6 +379,8 @@ final class WorkerJobs
         // R14 T18: a declined item refund was released with its credit note (PaymentService::refund()); retrying it
         // would only be declined again. The merchant is told and can refund the items anew.
         if ($itemRefundId > 0 && in_array($status, ['failed', 'canceled', 'cancelled'], true)) {
+            // R55 (low): settled by the payment's REFUNDED status meanwhile (PaymentService::refund()): the customer has the money.
+            if ((string)(Rma::refundById($itemRefundId)['status'] ?? '') === 'succeeded') return;
             IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'released' => true]);
             return;
         }
