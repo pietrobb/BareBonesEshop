@@ -55,7 +55,7 @@ function handleOrderPaymentLink(): void {
     $result = $order !== null && Security::rateLimit('admin_payment_link_' . $orderId, 5, 3600, false) ? PaymentLink::send($order) : ['status' => 'refused'];
     $sent = ($result['status'] ?? '') === 'sent'; // R26: a link only written to the log comes back 'logged'
     if ($sent) AuditLog::log('payment_link_sent', $orderId, '', AuditLogLabels::maskEmail((string)$order['customer_email']), 'Payment link e-mailed by ' . Security::adminUser());
-    setFlash($sent ? 'ok' : 'err', ($result['status'] ?? '') === 'logged' ? I18n::format('admin.order.msg.email_logged', ['adapter' => 'log']) : I18n::t($sent ? 'admin.order.msg.payment_link_sent' : 'admin.order.msg.payment_link_failed'));
+    setFlash($sent ? 'ok' : (($result['status'] ?? '') === 'logged' ? 'info' : 'err'), ($result['status'] ?? '') === 'logged' ? I18n::format('admin.order.msg.email_logged', ['adapter' => 'log']) : I18n::t($sent ? 'admin.order.msg.payment_link_sent' : 'admin.order.msg.payment_link_failed'));
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }

@@ -673,7 +673,8 @@ class Customers {
         $errors = [];
         foreach ($fields as $field) {
             $value = Security::str($values[$field] ?? '');
-            if (!mb_check_encoding($value, 'UTF-8') || preg_match('/[\p{Cc}\p{Zl}\p{Zp}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', $value)) $errors[$field] = 'account.err_invalid_text';
+            // R55 (review round 20, low): and the directional marks U+200E, U+200F and U+061C the checkout strips (Security::plainText()).
+            if (!mb_check_encoding($value, 'UTF-8') || preg_match('/[\p{Cc}\p{Zl}\p{Zp}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', $value)) $errors[$field] = 'account.err_invalid_text';
         }
         return $errors;
     }

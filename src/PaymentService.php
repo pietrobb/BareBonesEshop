@@ -429,6 +429,16 @@ class PaymentService {
         $outcome = $status;
         $refundId = (string)($result['refund_id'] ?? '');
         $db = Db::get();
+        // R55 (low): GoPay/ThePay refuse the refund of a payment refunded in their dashboard meanwhile; the customer has the
+        // money. The payment's REFUNDED status settles the refunds in flight first (applyRefundEvent()), the credit note
+        // with its money. Was: the credit note released with a critical "refund failed", its money then booked outside it.
+        if ($status === 'failed' && $gateway instanceof PullVerifiedNotificationAdapter && !$db->inTransaction()) {
+            try {
+                self::handlePulledNotification(['id' => $paymentId], $gateway, self::providerName($gateway));
+            } catch (\Throwable $e) {
+                Logger::warning('refund.status_check_failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+            }
+        }
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
@@ -471,6 +481,7 @@ class PaymentService {
             self::rollBackOwn($ownTransaction);
             throw $e;
         }
+        if (isset($failedBy)) self::closeReleasedOrder($orderId, 'Refund failed, the money was refunded already');
 
         return $result;
     }
@@ -871,7 +882,7 @@ class PaymentService {
      */
     public static function releaseUnknownRefund(int $orderId, string $actor, string $note, string $requestKey, int $amount): bool {
         if (trim($note) === '') throw new \InvalidArgumentException('A refund release needs a note');
-        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note, $requestKey, $amount): bool {
+        $released = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note, $requestKey, $amount): bool {
             $pending = self::unconfirmedProviderRefund($order);
             // R40 (medium 1): only the refund the admin saw (confirmProviderRefund()).
             if ($pending === null || empty($pending['unknown']) || !self::isOfferedRefund($pending, $requestKey, $amount)) return false;
@@ -886,6 +897,8 @@ class PaymentService {
                 . " not executed at the provider, released by {$actor}: {$note}");
             return true;
         });
+        if ($released) self::closeReleasedOrder($orderId, 'Refund not executed, the money was refunded already');
+        return $released;
     }
 
     /**
@@ -1217,8 +1230,9 @@ class PaymentService {
         // refunded: was "paid", although part of the money was returned. No money moves (amount 0). R39 (low): so on a
         // disputed payment (the dispute won): "paid" dropped the refunds booked during the dispute from its status.
         if ($newStatus === 'paid' && in_array($from, ['refund_pending', 'disputed'], true) && self::statusAfterRelease($order) !== 'paid') {
-            self::withLockedOrder($orderId, static fn(array $current): bool => (string)($current['payment_status'] ?? '') === $from
+            $released = self::withLockedOrder($orderId, static fn(array $current): bool => (string)($current['payment_status'] ?? '') === $from
                 && self::applyTransition($current, self::statusAfterRelease($current), 'admin.paid', 0, $key, ['actor' => $actor, 'note' => $note], '', $from === 'disputed'));
+            if ($released) self::closeReleasedOrder($orderId, 'Admin payment: the money was refunded already');
             return false;
         }
         self::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
@@ -1746,13 +1760,29 @@ class PaymentService {
             // only logged, the order stayed refund_pending with the rest counted as paid. The rest is booked as a refund
             // outside the shop. The request is settled first (named, so an equal amount is not mistaken for it), then the rest
             // is booked against the payment that request left partially refunded, which refunds it.
+            // R55 (review round 20, medium 2): credit notes pending beside that request are refunds in flight too: each is
+            // booked with its credit note (as below), only the rest outside the shop. Was: their money was booked outside
+            // the shop and their item refunds stayed pending for good, with nothing for the admin to confirm or release.
             $balance = self::refundableBalance($orderId);
+            $pendingBeside = $inFlight > 0 ? self::pendingItemRefunds($orderId) : [];
+            $besideItems = array_sum(array_map(static fn(array $row): int => (int)$row['amount'], $pendingBeside));
             if (strtolower((string)($data['state'] ?? '')) === 'refunded' && $from === 'refund_pending' && $currency === $orderCurrency
-                && $inFlight > 0 && $inFlight < $balance) {
+                && $inFlight > 0 && $inFlight < $balance && $inFlight + $besideItems <= $balance && ($pendingBeside === [] || !self::refundsByHand($order))) {
                 $settled = self::bookRefundWithin($order, $provider, '', $inFlight, $eventType, $eventKey,
                     $payload + ['settles_refund_request' => (string)($request['idempotency_key'] ?? '')]);
-                $after = $settled ? Orders::byId($orderId) : null;
-                return $after !== null && self::bookRefundWithin($after, $provider, '', $balance - $inFlight, $eventType, $eventKey . ':outside', $payload);
+                $current = $settled ? Orders::byId($orderId) : null;
+                if ($current === null) return false;
+                foreach ($pendingBeside as $row) {
+                    $reference = (string)($row['payment_reference'] ?? '');
+                    $refundId = $reference === (string)($order['payment_id'] ?? '') ? '' : $reference;
+                    $key = $eventKey . ':credit:' . (int)$row['id'];
+                    self::bookRefundWithin($current, $provider, $refundId, (int)$row['amount'], $eventType, $key,
+                        $payload + ['settles_refund_request' => (string)$row['idempotency_key']], (int)$row['id'], $reference !== '' ? $reference : $key);
+                    $current = Orders::byId((int)$current['id']) ?? $current; // re-read: the booking changed its payment state
+                }
+                $rest = $balance - $inFlight - $besideItems;
+                if ($rest > 0) self::bookRefundWithin($current, $provider, '', $rest, $eventType, $eventKey . ':outside', $payload);
+                return true;
             }
             // R39 (low): item refunds (credit notes) still pending when the payment is reported refunded are settled by it.
             // R51 (low): the whole payment refunded in the GoPay/ThePay dashboard, no refund of the shop in flight: the
@@ -1957,7 +1987,7 @@ class PaymentService {
      * Whether a provider-reported refund without its refund id (refund.reported; a Stripe charge.refunded up to 2.1.2) was booked as the
      * refund this payment_refund job executes ($executeKey: the item refund's key, or the request's execute key).
      */
-    private static function refundSettledByEvent(int $orderId, string $executeKey): bool {
+    public static function refundSettledByEvent(int $orderId, string $executeKey): bool {
         if ($executeKey === '') return false;
         $keys = array_filter([$executeKey, self::refundRequestKey($executeKey)]);
         $stmt = Db::get()->prepare("SELECT idempotency_key, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
@@ -2101,6 +2131,7 @@ class PaymentService {
             return false;
         });
         IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'refund_id' => $refundId, 'released' => $released]);
+        if ($released) self::closeReleasedOrder($orderId, 'Refund failed, the money was refunded already');
         return $released;
     }
 
@@ -2109,7 +2140,7 @@ class PaymentService {
      * the admin's next refund was refused. With no other refund in flight it returns to paid / partially_refunded.
      */
     public static function releaseFailedItemRefund(int $orderId, int $itemRefundId): bool {
-        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $itemRefundId): bool {
+        $released = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $itemRefundId): bool {
             if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::requestedRefundInFlight($order) > 0) return false;
             $pending = Db::get()->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' LIMIT 1");
             $pending->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
@@ -2119,6 +2150,8 @@ class PaymentService {
             // No money moves: amount 0, so the status row is never read as a capture or a refund.
             return self::applyTransition($order, $to, 'refund.failed', 0, 'item-refund-failed:' . $itemRefundId, ['item_refund_id' => $itemRefundId]);
         });
+        if ($released) self::closeReleasedOrder($orderId, 'Item refund failed, the money was refunded already');
+        return $released;
     }
 
     /**
@@ -2141,6 +2174,7 @@ class PaymentService {
             return true;
         });
         IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'declined' => true, 'released' => $released]);
+        if ($released) self::closeReleasedOrder($orderId, 'Refund declined, the money was refunded already');
         return $released;
     }
 
@@ -2202,6 +2236,16 @@ class PaymentService {
      * whose money all went back (a full manual refund, a refund in the PayU/GoPay dashboard) is cancelled first; it
      * stayed paid and could still be shipped.
      */
+    /**
+     * R55 (review round 20, medium 4): a refund released (declined, failed, not executed, dropped by "paid") after the
+     * rest of the money went back another way leaves the payment refunded; the order is closed as by any full refund.
+     * Was: it stayed processing and could still be shipped. Inside a caller's transaction the caller closes it after
+     * its commit (OrderWorkflow::transition() opens its own).
+     */
+    private static function closeReleasedOrder(int $orderId, string $note): void {
+        if (!Db::get()->inTransaction()) self::closeRefundedOrder($orderId, $note);
+    }
+
     public static function closeRefundedOrder(int $orderId, string $note): void {
         $order = Orders::byId($orderId);
         if ($order && (string)($order['payment_status'] ?? '') === 'refunded' && in_array((string)$order['status'], ['paid', 'processing'], true)) {

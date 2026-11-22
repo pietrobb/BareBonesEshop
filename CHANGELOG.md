@@ -626,6 +626,45 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   country and in a language other than Slovak without the Slovak store name; `setup.php install` sets the admin's
   language to the main store's. The Czech, Polish and Hungarian terms print the seller's VAT ID, and README lists the
   installer's fields.
+- **A later refund of a partly cancelled order is split over what the invoice has left (review round 55, medium 1).**
+  Since round 54 every refund of a paid order whose unshipped rest was cancelled credited the unshipped goods' rates,
+  also a later dashboard refund of the shipped goods, so those rates were credited twice. Only the refund of the
+  cancelled rest credits the unshipped goods; a later one is split over what the earlier credit notes left per rate.
+- **GoPay/ThePay REFUNDED with an admin refund and a credit note in flight (review round 55, medium 2).** The admin's
+  refund request and the credit notes waiting for the provider are booked with the notification together, and only the
+  rest counts as refunded outside the shop (was: the item refund stayed pending for ever). A credit note refund GoPay
+  refuses because the dashboard returned the money already is settled by that refund, not reported as failed, and a
+  queued request the notification settled does not call GoPay again.
+- **Reports answer when the daily totals cannot be refreshed (review round 55, mediums 3 and 5).** A locked SQLite
+  database or a MySQL lock wait while refreshing `sales_daily` answered the reports page with a 500; it now reads the
+  figures from the orders and refreshes later. The changes read are deleted in batches by primary key (was: a full scan
+  that held locks on MySQL) within the refresh's time limit. Lows: the build of inserted rows skips a gap in the ids
+  (was: 20 000 empty windows, up to 16 s); a zone off by a half or three quarters of an hour groups its orders by the
+  quarter hour (was: by the minute, out of memory at 300 000 orders), using every offset it has in the period (Lord Howe).
+- **Every refund that returns all the money closes the order (review round 55, medium 4).** A declined or failed
+  provider refund, a released item refund, an unknown refund released by hand and a payment set to paid from
+  `refund_pending` left a fully refunded order to be shipped; they close it as refunded, as round 54 did for the worker.
+- **Another store cannot take the main storefront's host (review round 55, medium M1).** A store given the host of
+  `app_url` (also with a trailing dot or a port) took the main storefront over (404 or the wrong store). The domains
+  have a form of their own (a sample IBAN in the seller form no longer blocks them), a domain that does not answer as
+  this shop on `/healthz` is named after saving, a Unicode domain is refused with its punycode, a host with a trailing
+  dot finds its store and the store's links keep `app_url`'s port.
+- **Smaller restore fixes (review round 55, lows).** Legal texts the live shop lacks and uploads a browser runs (HTML,
+  SVG, scripts) are set aside like theme files, not written in place. The live invoice number series are read table by
+  table, a transient lock is retried and a persistent one stops the restore (was: all series dropped on any error). A
+  failed restore lists the copies set aside apart from the files written, and old runs in `from-backup/` are pruned.
+- **Smaller security fixes (review round 55, lows).** VIES matches a sole trader's name ("Ing. Ján Novák - STAVBY")
+  by first name and surname, not the first name alone. API v1 `PATCH` checks a product name as stored (only bidi
+  controls: 422). Reviews, returns and complaints refuse text that is not UTF-8. The product editor strips bidi controls
+  and directional marks from names and summaries; B2B company fields and the customer profile refuse them, and
+  U+200E, U+200F and U+061C too. The log masks a number starting with 00 as a phone only when written in groups (an
+  EAN, variable symbol or tracking number stays). The doctor accepts `operations.worker_cron` only as a valid schedule,
+  alone or running `cli/worker.php`.
+- **Smaller usability fixes (review round 55).** Admin → Import CSV downloads the import template of each product
+  type, also after a web installation that has no `import/template-*.csv`. Admin → Stores sets a store's URL prefix
+  next to its domains; a store on its own domain may have none. "The e-mail was only written to the log" is an
+  information, not an error. `cli/seed.php` names the sample catalog in the main store's language (Slovak, Czech,
+  English or German; English otherwise) and translates it into the shop's other languages (was: Slovak, "… DE").
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

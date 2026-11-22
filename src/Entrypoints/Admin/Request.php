@@ -81,7 +81,7 @@ function handlePost(string $page, string $action): void {
         'my_account:password' => handleMyAccountPassword(), 'my_account:mfa' => handleMyAccountMfa(),
         'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         'mail:save' => handleMailDeliverySave(), 'mail:test' => handleMailDeliveryTest(),
-        'stores:save' => handleStoreSettingsSave(),
+        'stores:save' => handleStoreSettingsSave(), 'stores:domains' => handleStoreSettingsSave(true),
         'stores:add' => handleStoreAdd(),
         'stores:remove' => handleStoreRemove(),
         'stores:legal_save' => handleStoreLegalSave(),

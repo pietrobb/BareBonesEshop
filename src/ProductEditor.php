@@ -41,6 +41,8 @@ final class ProductEditor {
      * Returns ['columns' => products columns, 'categories' => [primary, ...extra], 'slugs' => locale => slug] or an error message.
      */
     public static function validate(array $form, array $post, int $id, ?array $old): array|string {
+        // R55 (review round 20, low): a name of bidi controls only (or not UTF-8) is no name (was: stored, shown empty).
+        if (Security::typedText((string)$form['name']) === '') return I18n::format('admin.msg.field_required', ['label' => 'name', 'max' => self::MAX_LENGTH['name']]);
         $slug = Security::slug($form['slug'] !== '' ? $form['slug'] : $form['name']);
         if ($slug === '') return I18n::t('admin.msg.product.slug_from_name');
         $db = Db::get();
@@ -288,7 +290,7 @@ final class ProductEditor {
             foreach (self::TRANSLATION_FIELDS as $field) {
                 $value = $fields[$field] ?? '';
                 if (!is_scalar($value)) return I18n::t('admin.msg.product.tr_invalid');
-                $value = trim((string)$value);
+                $value = in_array($field, ['name', 'summary'], true) ? Security::typedText((string)$value) : trim((string)$value);
                 if ($field === 'description' && $value !== '') $value = Security::sanitizeRichHtml($value);
                 if ($field === 'slug') {
                     $name = is_scalar($fields['name'] ?? null) ? trim((string)$fields['name']) : '';

@@ -887,10 +887,18 @@ final class InvoiceService
         // R54 (review round 19, medium 7): the refund of a paid order whose unshipped rest was cancelled credits the goods
         // that never shipped, at their own rates (as creditClosure() does for an unpaid one). Was: split over the whole
         // invoice, so it ate into the shipped goods' rates and their later return was cut short (54.48 back of 60.00).
+        // R55 (review round 20, medium 1): only for what of those goods no earlier refund credited. Was: every later refund
+        // of the order (a dashboard or admin refund, the shipped goods' return) credited the unshipped goods' rate again,
+        // and the return then failed ("Credit total is invalid") or left the shipped goods' rate uncredited.
+        $unshipped = null;
         if ($itemRates === [] && ($order = Orders::byId($orderId)) && in_array((string)$order['status'], ['cancelled', 'refunded'], true)) {
-            $itemRates = self::unshippedParts($order) ?? [];
+            $unshipped = self::unshippedParts($order);
         }
-        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited) use ($orderId, $amount, $itemRates): array {
+        /** @var ArrayObject<string, bool> $split whether the split below credited the unshipped goods (read by the snapshot callback) */
+        $split = new ArrayObject(['unshipped' => false]);
+        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited, array $source) use ($orderId, $amount, $itemRates, $unshipped, $split): array {
+            $ofUnshipped = $unshipped !== null;
+            if ($unshipped !== null) $itemRates = self::unshippedUncredited($source, $unshipped);
             $own = [];
             foreach ($itemRates as $key => $part) {
                 $key = (string)$key;
@@ -898,7 +906,10 @@ final class InvoiceService
                 $gross = min($part['gross'], $rates[$key]['gross']);
                 $own[$key] = ['gross' => $gross, 'net' => (int)round($part['net'] * $gross / $part['gross'])];
             }
-            if ($own !== [] && $amount <= array_sum(array_column($own, 'gross'))) $rates = $own;
+            if ($own !== [] && $amount <= array_sum(array_column($own, 'gross'))) {
+                $rates = $own;
+                $split['unshipped'] = $ofUnshipped;
+            }
             if ($amount > $uncredited) {
                 // R16: money that came in after a cancellation credit note (a cancelled purchase on invoice paid all the same) goes
                 // back with that part of the invoice already credited: only the rest is credited. Was: refused, and the
@@ -931,7 +942,29 @@ final class InvoiceService
                 $parts[$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
             }
             return $parts;
-        });
+        }, static function () use ($split): array { return $split['unshipped'] ? ['split' => 'unshipped'] : []; });
+    }
+
+    /**
+     * R55: $unshipped (unshippedParts()) less what the refund credit notes of those goods (credit_snapshot split
+     * 'unshipped') issued on $source so far credited, per breakdown key. Read under the order lock (rateCredit()).
+     * @param array<string, array{gross: int, net: int}> $unshipped
+     * @return array<string, array{gross: int, net: int}>
+     */
+    private static function unshippedUncredited(array $source, array $unshipped): array
+    {
+        $stmt = Db::get()->prepare("SELECT vat_breakdown, credit_snapshot FROM invoices WHERE refers_to_invoice_id = :source AND type = 'credit_note' AND store_id = :store AND status <> :cancelled");
+        $stmt->execute([':source' => (int)$source['id'], ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $credit) {
+            $snapshot = json_decode((string)($credit['credit_snapshot'] ?? ''), true);
+            if (!is_array($snapshot) || ($snapshot['split'] ?? '') !== 'unshipped') continue;
+            foreach (json_decode((string)$credit['vat_breakdown'], true) ?: [] as $key => $info) {
+                if (!is_array($info) || !isset($unshipped[(string)$key])) continue;
+                $unshipped[(string)$key]['gross'] += (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
+                $unshipped[(string)$key]['net'] += (int)($info['net'] ?? 0);
+            }
+        }
+        return array_filter($unshipped, static fn(array $part): bool => $part['gross'] > 0);
     }
 
     /**
@@ -1001,9 +1034,11 @@ final class InvoiceService
      * A credit note of whole VAT rates (no item lines) on the order's issued invoice, under $refundKey: $split gets the
      * invoice's uncredited rates and gross under the order lock and returns gross and net per breakdown key. Kind
      * 'refund' (money returned) or 'cancellation' (an unpaid order closed) names its rows.
-     * @param callable(array<string, array{gross: int, net: int, supply: array}>, int): array<string, array{gross: int, net: int}> $split
+     * $snapshot (called after $split) returns what else its credit_snapshot records.
+     * @param callable(array<string, array{gross: int, net: int, supply: array}>, int, array): array<string, array{gross: int, net: int}> $split
+     * @param (callable(): array<string, string>)|null $snapshot
      */
-    private static function rateCredit(int $orderId, string $refundKey, string $kind, string $reason, callable $split): ?array
+    private static function rateCredit(int $orderId, string $refundKey, string $kind, string $reason, callable $split, ?callable $snapshot = null): ?array
     {
         $db = Db::get();
         if ($row = self::refundCreditByKey($db, $orderId, $refundKey)) return $row;
@@ -1027,7 +1062,7 @@ final class InvoiceService
             $lines = [];
             $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
             $breakdown = [];
-            foreach ($split($rates, $uncredited) as $key => $part) {
+            foreach ($split($rates, $uncredited, $source) as $key => $part) {
                 $key = (string)$key;
                 $gross = (int)$part['gross'];
                 if ($gross <= 0 || !isset($rates[$key])) continue;
@@ -1042,7 +1077,8 @@ final class InvoiceService
                 return null;
             }
             $creditData = ['version' => 1, 'kind' => $kind, 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
-                'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals];
+                'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals]
+                + ($snapshot !== null ? $snapshot() : []);
             $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, self::numberPrefix($store['legal'] ?? [], 'credit_note'));
             $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
             $db->prepare("INSERT INTO invoices

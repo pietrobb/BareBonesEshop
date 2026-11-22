@@ -214,7 +214,8 @@ $architectureBudgets = [
     // +4 lines R21: the feed page lists the items its last sync refused.
     // +7 lines R23 UX: checklist checks titled in the admin's language, the doctor's text in a details element.
     // +1 line, +1 coupling R30: CSV import row errors in the admin's language (ImportErrorLabels).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 74, 'coupling' => 23],
+    // +1 function R55 UX: the CSV import templates are downloaded from the import page (handleImportTemplate).
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 37, 'max_function_lines' => 74, 'coupling' => 23],
     // Admin UI refresh: the dashboard moved out of Operations.php (tiles, 14-day revenue, health, checklist, incidents, monitoring).
     'src/Entrypoints/Admin/Dashboard.php' => ['lines' => 240, 'functions' => 11, 'max_function_lines' => 50, 'coupling' => 14],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
@@ -264,7 +265,7 @@ $architectureBudgets = [
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
     // +9 lines, +1 function R48: adminStoreIdentityIssue words the seller-identity badge in the admin's language.
-    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 111, 'functions' => 4, 'max_function_lines' => 72, 'coupling' => 7],
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 118, 'functions' => 4, 'max_function_lines' => 78, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.

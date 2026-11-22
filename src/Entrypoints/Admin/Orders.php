@@ -933,7 +933,7 @@ function handleOrderEmailResend(): void {
     try {
         $res = MailService::resend($logId, $orderId);
         if (MailService::logged($res)) {
-            setFlash('err', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']])); // R25: not "sent again"
+            setFlash('info', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']])); // R25: not "sent again"; R55 UX: info, not an error
         } elseif (($res['status'] ?? '') === 'sent') {
             setFlash('ok', I18n::format('admin.order.msg.email_resent', ['adapter' => $res['adapter'] ?? '']));
         } else {
@@ -1003,7 +1003,7 @@ function handleOrderInvoiceResend(): void {
         $res = MailService::send('invoice_issued', $order['customer_email'] ?? '', (string)($inv['locale'] ?? ''), $vars, (int)$inv['order_id'],
             [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
         if (MailService::logged($res)) {
-            setFlash('err', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']]));
+            setFlash('info', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']]));
         } elseif (($res['status'] ?? '') === 'sent') {
             setFlash('ok', I18n::t('admin.order.msg.invoice_resent'));
         } else {

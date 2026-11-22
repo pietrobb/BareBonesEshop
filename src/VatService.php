@@ -882,8 +882,20 @@ class VatService implements TaxProvider
             // and surname both, a middle name aside ("Ján" alone was "Ing. Ján Novák").
             return count($short) >= 2 && array_diff($short, $long) === [] ? null : 'name';
         }
+        // R55 (review round 20, low): a sole trader's name (a first name and a surname before the trade, "Ing. Ján Novák -
+        // STAVBY") is a person's: matched by both, not by the first name alone (was: "Ján" or "Ing. Ján" matched it).
+        if (count($short) < 2 && (self::traderName($long) || self::traderName($short))) return 'name';
         // A company: the other's leading words, in order. R49 (low): "Novák Peter" is not "Peter Novák s.r.o.".
         return array_slice($long, 0, count($short)) === $short ? null : 'name';
+    }
+
+    /** R55: holderTokens() of a person trading under their name: the first business word comes after two words or more. */
+    private static function traderName(array $words): bool
+    {
+        foreach ($words as $i => $word) {
+            if (in_array($word, self::BUSINESS_WORDS, true)) return $i >= 2;
+        }
+        return false;
     }
 
     /** R49: a legal form or a business word names a company, not a person. */

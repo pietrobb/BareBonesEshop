@@ -94,7 +94,8 @@ try {
             && str_contains($r54uHelp, implode(', ', VatService::productClasses())) && !str_contains($r54uHelp, '{'),
             "R54 import {$r54uLang}: the help names the catalog currency and the vat_class column with its classes (was: euros, no vat_class): {$r54uHelp}");
     }
-    assert_true(str_contains((string)file_get_contents($r54uRoot . '/cli/schema-build.php'), "'weight_g', 'tags', 'vat_class'];"),
+    // R55: the header row comes from ImportTemplates (cli/schema-build.php and the admin's download).
+    assert_true(in_array('vat_class', ImportTemplates::headers([], []), true) && str_contains((string)file_get_contents($r54uRoot . '/cli/schema-build.php'), 'ImportTemplates::headers('),
         'R54 import: the generated CSV templates have a vat_class column');
 } catch (Throwable $e) { $r54uFail('import help', $e); } finally { I18n::setLocale($r54uLocale); }
 

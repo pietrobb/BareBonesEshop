@@ -197,7 +197,7 @@ final class StoreSettings {
         if ($public && !StoreContext::isPublicConfig($store) && !$sharesSeller && Setup::legalIdentityProblems($legal) !== []) $errors[] = I18n::t('admin.stores.err.publish_example');
         // R54 (review round 19, UX): the store's own domains (StoreContext serves it there, its links use the first one);
         // a form without the field keeps them (was: only by editing stores.json).
-        $domains = array_key_exists('domains', $input) ? self::parseDomains($input['domains'], $data['stores'], $storeId, $errors) : null;
+        $domains = array_key_exists('domains', $input) ? self::parseDomains($input['domains'], $data['stores'], $storeId, $isDefault, $errors) : null;
         if ($errors) return ['ok' => false, 'errors' => $errors];
 
         $before = $store;
@@ -226,7 +226,7 @@ final class StoreSettings {
      * @param list<string> $errors
      * @return list<string>
      */
-    private static function parseDomains(mixed $posted, array $stores, string $storeId, array &$errors): array {
+    private static function parseDomains(mixed $posted, array $stores, string $storeId, bool $isDefault, array &$errors): array {
         $list = preg_split('/[\s,]+/', strtolower(trim(is_scalar($posted) ? (string)$posted : '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $domains = array_values(array_unique(array_map(static fn(string $d): string => rtrim($d, '.'), $list)));
         $taken = [];
@@ -234,10 +234,81 @@ final class StoreSettings {
             if ((string)$id === $storeId || !is_array($other)) continue;
             foreach ((array)($other['domains'] ?? []) as $d) $taken[strtolower(rtrim(trim((string)$d), '.'))] = (string)$id;
         }
-        $bad = array_filter($domains, static fn(string $d): bool => !str_contains($d, '.') || strlen($d) > 253
-            || filter_var($d, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false || isset($taken[$d]));
+        // R55 (review round 20, medium M1): the host of app_url serves the default store. Another store given it took that
+        // host over: one save left the main storefront 404, or showed that store in its place.
+        $appHost = strtolower(rtrim((string)parse_url((string)Security::configuredAppUrl(), PHP_URL_HOST), '.'));
+        $mainHost = array_values(array_filter($domains, static fn(string $d): bool => !$isDefault && $appHost !== '' && $d === $appHost));
+        if ($mainHost !== []) $errors[] = I18n::format('admin.stores.err.domains_app_url', ['domain' => $mainHost[0]]);
+        // A Unicode name is entered as punycode (the Host header carries that); the message gives it.
+        $unicode = array_values(array_filter($domains, static fn(string $d): bool => preg_match('/[^\x00-\x7F]/', $d) === 1));
+        if ($unicode !== []) {
+            $ascii = array_map(static fn(string $d): string => function_exists('idn_to_ascii') ? (string)(idn_to_ascii($d, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46) ?: '') : '', $unicode);
+            $errors[] = I18n::format('admin.stores.err.domains_idn', ['domains' => implode(', ', $unicode), 'punycode' => implode(', ', array_filter($ascii)) ?: 'xn--…']);
+        }
+        $bad = array_filter($domains, static fn(string $d): bool => !in_array($d, $mainHost, true) && !in_array($d, $unicode, true) && (!str_contains($d, '.') || strlen($d) > 253
+            || filter_var($d, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false || isset($taken[$d])));
         if ($bad !== [] || count($domains) > 10) $errors[] = I18n::format('admin.stores.err.domains', ['domains' => implode(', ', $bad ?: $domains)]);
         return $domains;
+    }
+
+    /**
+     * R55 (review round 20, UX): the store's domains alone, from their own form (owner only). They were saved with the
+     * seller form, so a sample IBAN or a missing seller field kept a store from moving to its domain. The warning names
+     * the domains whose /healthz did not answer as this shop (DNS or the web server not set up yet).
+     * @return array{ok: bool, errors: list<string>, warning?: string}
+     */
+    public static function saveDomains(string $storeId, mixed $posted, mixed $prefixPosted = null): array {
+        $result = self::locked(static function () use ($storeId, $posted, $prefixPosted): array {
+            $data = self::load();
+            $store = $data['stores'][$storeId] ?? null;
+            if (!is_array($store)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.unknown')]];
+            $errors = [];
+            $isDefault = $storeId === (string)($data['default_store'] ?? '');
+            $domains = self::parseDomains($posted, $data['stores'], $storeId, $isDefault, $errors);
+            // R55 (review round 20, UX): the URL prefix is set here too (was: only in stores.json). Without one a store is
+            // told apart by its own domain only; the form without the field keeps the prefix.
+            $prefix = $prefixPosted === null ? rtrim((string)($store['url_prefix'] ?? ''), '/')
+                : rtrim('/' . trim(strtolower(trim(is_scalar($prefixPosted) ? (string)$prefixPosted : '')), '/'), '/');
+            if ($prefix === '' && !$isDefault && $domains === []) {
+                $errors[] = I18n::t('admin.stores.err.prefix_needs_domain');
+            } elseif ($prefix !== '' && $prefixPosted !== null && $prefix !== rtrim((string)($store['url_prefix'] ?? ''), '/')
+                && (!preg_match('#^/[a-z0-9-]{2,20}$#', $prefix) || StoreContext::isReservedPrefix($prefix)
+                    || in_array($prefix, array_map(static fn($s): string => is_array($s) ? rtrim((string)($s['url_prefix'] ?? ''), '/') : '', array_diff_key($data['stores'], [$storeId => true])), true))) {
+                $errors[] = I18n::t('admin.stores.err.prefix');
+            }
+            if ($errors) return ['ok' => false, 'errors' => $errors];
+            $before = ['domains' => $store['domains'] ?? [], 'url_prefix' => (string)($store['url_prefix'] ?? '')];
+            $data['stores'][$storeId]['domains'] = $domains;
+            $data['stores'][$storeId]['url_prefix'] = $prefix;
+            if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
+            AuditLog::log('store_settings', 0, ['store' => $storeId] + $before, ['store' => $storeId, 'domains' => $domains, 'url_prefix' => $prefix]);
+            return ['ok' => true, 'errors' => [], 'domains' => $domains];
+        });
+        if (!$result['ok']) return $result;
+        $unreachable = self::unreachableDomains($result['domains']);
+        return ['ok' => true, 'errors' => [], 'warning' => $unreachable === [] ? '' : I18n::format('admin.stores.domains_unreachable', ['domains' => implode(', ', $unreachable)])];
+    }
+
+    /**
+     * The $domains whose /healthz (under app_url's scheme, port and path) does not answer as this shop. Only probed for
+     * an HTTPS app_url (JsonHttpClient: no redirects, no proxies, 4 s).
+     * @param list<string> $domains
+     * @return list<string>
+     */
+    private static function unreachableDomains(array $domains): array {
+        $appUrl = Security::configuredAppUrl();
+        if ($appUrl === null || strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)) !== 'https') return [];
+        $unreachable = [];
+        foreach ($domains as $domain) {
+            try {
+                $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], 4);
+                if (($health['service'] ?? '') !== 'bareboneseshop') $unreachable[] = $domain;
+            } catch (Throwable $e) {
+                Logger::exception('store_settings.domain_probe_failed', $e, ['domain' => $domain]);
+                $unreachable[] = $domain;
+            }
+        }
+        return $unreachable;
     }
 
     /** Atomic replace: readers see the old or the new file, never a half-written one. */

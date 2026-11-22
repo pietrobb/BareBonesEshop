@@ -43,7 +43,6 @@ function pageStoreSettings(): void {
             <?php endif; ?></h3>
         <p class="muted"><?= esc(I18n::format('admin.stores.fixed', [
             'currency' => strtoupper((string)($store['currency'] ?? '')),
-            'prefix' => (string)($store['url_prefix'] ?? '') !== '' ? (string)$store['url_prefix'] : '/',
             'invoice_prefix' => (string)($legal['invoice_prefix'] ?? '') !== '' ? (string)$legal['invoice_prefix'] : '—',
         ])) ?></p>
         <form method="post" action="admin.php?p=stores&amp;action=save&amp;store=<?= esc(rawurlencode($storeId)) ?>">
@@ -56,11 +55,6 @@ function pageStoreSettings(): void {
                     <?php foreach (DateTimeZone::listIdentifiers() as $identifier): ?><option<?= $identifier === $zone ? ' selected' : '' ?>><?= esc($identifier) ?></option><?php endforeach; ?>
                 </select>
                 <small class="muted" id="store-<?= esc($storeId) ?>-timezone-hint"><?= esc(I18n::t('admin.stores.timezone_hint')) ?></small></div>
-            <?php if (Security::adminRole() === 'owner'): // the host picks the store: only the owner moves a store to a domain ?>
-            <div class="form-row"><label for="store-<?= esc($storeId) ?>-domains"><?= esc(I18n::t('admin.stores.field.domains')) ?></label>
-                <textarea id="store-<?= esc($storeId) ?>-domains" name="domains" rows="2" maxlength="2600" data-store-domains aria-describedby="store-<?= esc($storeId) ?>-domains-hint"><?= esc((string)($draft['domains'] ?? implode("\n", array_map('strval', (array)($store['domains'] ?? []))))) ?></textarea>
-                <small class="muted" id="store-<?= esc($storeId) ?>-domains-hint"><?= esc(I18n::t('admin.stores.domains_hint')) ?></small></div>
-            <?php endif; ?>
             <?php if ($seller !== null): ?>
             <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p>
             <?php else: ?>
@@ -86,23 +80,36 @@ function pageStoreSettings(): void {
             <?php endif; ?>
             <p style="margin-top:.5rem"><button class="btn btn-primary" type="submit"<?= $writable ? '' : ' disabled' ?>><?= esc(I18n::t('admin.btn.save')) ?></button></p>
         </form>
+        <?php if (Security::adminRole() === 'owner'): // the host picks the store: only the owner moves it; R55 UX: own form (a sample IBAN blocked the seller form) ?>
+        <form method="post" action="admin.php?p=stores&amp;action=domains&amp;store=<?= esc(rawurlencode($storeId)) ?>" data-store-domains-form>
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <div class="form-row"><label for="store-<?= esc($storeId) ?>-domains"><?= esc(I18n::t('admin.stores.field.domains')) ?></label>
+                <textarea id="store-<?= esc($storeId) ?>-domains" name="domains" rows="2" maxlength="2600" data-store-domains aria-describedby="store-<?= esc($storeId) ?>-domains-hint"><?= esc((string)($GLOBALS['adminStoreDomainsDraft'][$storeId]['domains'] ?? implode("\n", array_map('strval', (array)($store['domains'] ?? []))))) ?></textarea>
+                <small class="muted" id="store-<?= esc($storeId) ?>-domains-hint"><?= esc(I18n::t('admin.stores.domains_hint')) ?></small></div>
+            <div class="form-row"><label for="store-<?= esc($storeId) ?>-url_prefix"><?= esc(I18n::t('admin.stores.field.url_prefix')) ?></label>
+                <input id="store-<?= esc($storeId) ?>-url_prefix" name="url_prefix" maxlength="21" pattern="/?[a-z0-9\-]{0,20}" placeholder="/cz" data-store-url-prefix aria-describedby="store-<?= esc($storeId) ?>-url_prefix-hint" value="<?= esc((string)($GLOBALS['adminStoreDomainsDraft'][$storeId]['url_prefix'] ?? ($store['url_prefix'] ?? ''))) ?>">
+                <small class="muted" id="store-<?= esc($storeId) ?>-url_prefix-hint"><?= esc(I18n::t('admin.stores.url_prefix_hint')) ?></small></div>
+            <p><button class="btn" type="submit"<?= $writable ? '' : ' disabled' ?>><?= esc(I18n::t('admin.btn.save')) ?></button></p>
+        </form>
+        <?php endif; ?>
     </div>
     <?php endforeach;
     adminStoreManagementCards(is_array($stores) ? $stores : [], $writable);
 }
 
-function handleStoreSettingsSave(): void {
+/** $domains (R55): the store's domains and URL prefix from their own form; the owner only (the host picks the store). */
+function handleStoreSettingsSave(bool $domains = false): void {
     $storeId = Security::str($_GET['store'] ?? '');
-    if (!adminStoreSettingsAllowed($storeId)) {
+    if (!adminStoreSettingsAllowed($storeId) || ($domains && Security::adminRole() !== 'owner')) {
         setFlash('err', I18n::t('admin.stores.err.unknown'));
         return;
     }
     $input = $_POST;
     if (Security::adminRole() !== 'owner') unset($input['domains']);
-    $result = StoreSettings::save($storeId, $input);
+    $result = $domains ? StoreSettings::saveDomains($storeId, $_POST['domains'] ?? '', $_POST['url_prefix'] ?? null) : StoreSettings::save($storeId, $input);
     if (!$result['ok']) {
         setFlash('err', implode(' ', $result['errors']));
-        $GLOBALS['adminStoreDraft'][$storeId] = array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);
+        $GLOBALS[$domains ? 'adminStoreDomainsDraft' : 'adminStoreDraft'][$storeId] = array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);
         return;
     }
     setFlash(empty($result['warning']) ? 'ok' : 'warn', trim(I18n::format('admin.stores.saved', ['store' => $storeId]) . ' ' . ($result['warning'] ?? '')));

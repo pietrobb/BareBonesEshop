@@ -254,10 +254,11 @@ class Security {
         $appUrl = rtrim($appUrl, '/');
         $domains = $store['domains'] ?? [];
         if (is_string($domains)) $domains = [$domains];
-        $domain = is_array($domains) ? strtolower(trim((string)($domains[0] ?? ''))) : '';
+        $domain = is_array($domains) ? rtrim(strtolower(trim((string)($domains[0] ?? ''))), '.') : '';
         if ($domain === '' || filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) return $appUrl;
         $parts = parse_url($appUrl);
-        return (string)($parts['scheme'] ?? 'https') . '://' . $domain . rtrim((string)($parts['path'] ?? ''), '/');
+        // R55 (review round 20, low): and its port (a shop behind :8443 linked its store domains without it).
+        return (string)($parts['scheme'] ?? 'https') . '://' . $domain . (isset($parts['port']) ? ':' . (int)$parts['port'] : '') . rtrim((string)($parts['path'] ?? ''), '/');
     }
 
     /** Validated public base URL, or null when app_url is not configured. Never derived from the Host header. */
@@ -566,6 +567,15 @@ class Security {
     public static function plainText(string $text): string {
         if (!mb_check_encoding($text, 'UTF-8')) return $text;
         return (string)preg_replace('/[\x{0080}-\x{009F}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]+/u', '', $text);
+    }
+
+    /**
+     * R55 (review round 20, low): plainText() of a field whose caller refuses an empty value, trimmed: text that is not
+     * UTF-8 is empty (refused as missing). Was: reviews, returns and complaints stored it with its bidi controls, and
+     * esc() then showed it empty.
+     */
+    public static function typedText(string $text): string {
+        return mb_check_encoding($text, 'UTF-8') ? trim(self::plainText($text)) : '';
     }
 
     /**

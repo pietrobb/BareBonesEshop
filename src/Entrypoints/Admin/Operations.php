@@ -10,6 +10,10 @@ function pageImport(): void {
     </div>
     <div class="card">
         <h3><?= esc(I18n::t('admin.import.templates')) ?></h3>
+        <?php // R55 (review round 20, UX): the templates are downloaded here (was: only files on the server, none after a web install). ?>
+        <p><?= esc(I18n::t('admin.import.templates_download')) ?>
+            <?php foreach (array_keys(ImportTemplates::all()) as $i => $type): ?><?= $i > 0 ? ' · ' : '' ?><a href="admin.php?p=import&amp;action=template&amp;type=<?= esc(rawurlencode($type)) ?>" download><?= esc(ucfirst($type)) ?></a><?php endforeach; ?>
+        </p>
         <p class="muted"><?= esc(I18n::t('admin.import.sample_hint')) ?> <code>import/test-products.csv</code></p>
     </div>
     <?php
@@ -97,6 +101,19 @@ function pageAudit(): void {
         <?php pagination($page, $pages, "admin.php?p=audit"); ?>
     </div>
     <?php
+}
+/** GET admin.php?p=import&action=template&type=<product type> — the type's CSV import template (a header row, no data). */
+function handleImportTemplate(): void {
+    $templates = ImportTemplates::all();
+    $type = Security::str($_GET['type'] ?? 'simple');
+    if (!isset($templates[$type])) {
+        http_response_code(404);
+        exit('Unknown product type');
+    }
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="template-' . preg_replace('/[^A-Za-z0-9_-]/', '_', $type) . '.csv"');
+    header('X-Content-Type-Options: nosniff');
+    echo ImportTemplates::csv($templates[$type]);
 }
 function handleImportUpload(): void {
     // BBF checks that a file came, its .csv extension, size and content type.

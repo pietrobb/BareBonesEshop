@@ -139,11 +139,13 @@ if ($r13oHasSources) {
         unlink($r13oData . '/stores.json');
         unlink($r13oData . '/legal/default/terms.sk.html');
         unlink($r13oData . '/downloads/ebooks/novel.epub');
-        BackupService::restoreFiles((string)$r13oMeta['remote_path']);
+        $r13oFiles = BackupService::restoreFiles((string)$r13oMeta['remote_path']);
         clearstatcache();
-        assert_equals(['{"stores":{"default":{"name":"R13 Books"}}}', '<p>Obchodné podmienky R13</p>', 'EPUBDATA'], [
-            @file_get_contents($r13oData . '/stores.json'), @file_get_contents($r13oData . '/legal/default/terms.sk.html'),
-            @file_get_contents($r13oData . '/downloads/ebooks/novel.epub')], 'R13 T8: a files restore brings back the stores, legal texts and e-book files');
+        // R55: a legal text the live shop lacks is rendered unescaped, so it is set aside for the operator, not written in place.
+        assert_equals(['{"stores":{"default":{"name":"R13 Books"}}}', '<p>Obchodné podmienky R13</p>', 'EPUBDATA', false], [
+            @file_get_contents($r13oData . '/stores.json'), @file_get_contents((string)($r13oFiles['aside_dir'] ?? '') . '/legal/default/terms.sk.html'),
+            @file_get_contents($r13oData . '/downloads/ebooks/novel.epub'), file_exists($r13oData . '/legal/default/terms.sk.html')],
+            'R13 T8: a files restore brings back the stores and e-book files, and keeps the legal texts in the recovery directory');
     } catch (Throwable $e) {
         assert_true(false, 'R13 T8: backup and restore of the merchant files (' . get_class($e) . ': ' . $e->getMessage() . ')');
     } finally {

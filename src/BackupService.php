@@ -1149,10 +1149,10 @@ class BackupService
     ];
 
     /** R50: last issued number per document series of $db, by counter table (null: the table is missing). */
-    private static function numberSeries(PDO $db): array
+    private static function numberSeries(PDO $db, ?array $tables = null): array
     {
         $series = [];
-        foreach (self::NUMBER_SERIES as $table => $columns) {
+        foreach ($tables ?? self::NUMBER_SERIES as $table => $columns) {
             Db::forgetSchema($db);
             if (!Db::tableExists($table, $db)) {
                 $series[$table] = null;
@@ -1174,14 +1174,34 @@ class BackupService
      */
     private static function liveNumberSeries(PDO $db, array &$warnings): array
     {
-        try {
-            return self::numberSeries($db);
-        } catch (\Throwable $e) {
-            $warnings[] = 'The number series of the live database could not be read (' . $e->getMessage() . '), so the restored database '
-                . 'numbers its documents from its own counters. Check the last invoice and credit note numbers issued before issuing new ones.';
-            return [];
+        // R55 (review round 20, low): table by table, so one unreadable counter table no longer drops the series the others
+        // hold; a lock (SQLITE_BUSY, a MySQL lock wait) is waited out and, if it stays, stops the restore before anything is
+        // replaced. Was: any error dropped every series with a warning, and invoice numbers without their PDF were reused.
+        $series = [];
+        foreach (self::NUMBER_SERIES as $table => $columns) {
+            for ($attempt = 1; ; $attempt++) {
+                try {
+                    $series += self::numberSeries($db, [$table => $columns]);
+                    break;
+                } catch (\Throwable $e) {
+                    if (preg_match('/database is (?:locked|busy)|SQLITE_BUSY|Lock wait timeout|Deadlock found/i', $e->getMessage()) === 1) {
+                        if ($attempt < self::SERIES_READ_ATTEMPTS) {
+                            usleep(250000 * $attempt);
+                            continue;
+                        }
+                        throw new RuntimeException('Restore: the live database stays locked (' . $e->getMessage() . ') while its document number series '
+                            . 'are read; nothing was restored. Stop the worker, cron jobs and web traffic, then run the restore again.', 0, $e);
+                    }
+                    $warnings[] = "The number series of {$table} in the live database could not be read (" . $e->getMessage() . '), so the restored database '
+                        . 'numbers those documents from its own counters. Check the last numbers issued before issuing new ones.';
+                    break;
+                }
+            }
         }
+        return $series;
     }
+
+    private const SERIES_READ_ATTEMPTS = 4;
 
     /**
      * R50: an older backup brings back lower number counters, so the next document took a number already issued (and
@@ -1444,7 +1464,9 @@ class BackupService
                 $isAside = $isQuarantined = false;
                 // R53: a script or a per-directory server config (.htaccess, .user.ini) never goes into a directory the web
                 // server serves, not even a missing one: a forged backup's themes/default/assets/shell.php ran after --files-only.
-                if (in_array($name, self::WEB_SOURCES, true) && self::runnableInWebRoot($rest)
+                // R55 (review round 20, low): uploads hold images and documents; a script, page or SVG of a forged backup (a
+                // script a forged legal text loads, allowed by CSP 'self') is quarantined like a server script.
+                if (in_array($name, self::WEB_SOURCES, true) && (self::runnableInWebRoot($rest) || ($name === 'uploads' && self::activeInBrowser($rest)))
                     && !(is_file($target) && !is_link($target) && hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target)))) {
                     $asideDir = $asideRun ??= self::createAsideRun();
                     [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir];
@@ -1462,6 +1484,12 @@ class BackupService
                         $base = $asideDir;
                         $isAside = true;
                     }
+                } elseif ($name === 'legal' && !is_link($target) && !file_exists($target)) {
+                    // R55 (review round 20, low): a legal text the live shop lacks is set aside too: it is rendered unescaped
+                    // ({{{content_html}}}), and a forged backup's terms.html loaded a script. Was: written in place, unreported.
+                    $asideDir = $asideRun ??= self::createAsideRun();
+                    [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir];
+                    $isAside = true;
                 }
                 if (isset($targets[$target])) {
                     $refused[] = "{$entry} (same target as {$targets[$target]})";
@@ -1521,19 +1549,24 @@ class BackupService
 
             $overwritten = [];
             $written = [];
+            $writtenAside = [];
             foreach ($plan as [$entry, $source, $target, $base, $ownership, $overwrite]) {
                 try {
                     if ($base === $asideRun) self::assertAsideRun($asideRun);
                     self::installRestoredFile($source, $target, $base, $ownership);
                 } catch (\Throwable $e) {
+                    // R55 (review round 20, low): the copies set aside are named as such. Was: listed as written in place.
                     $message = 'Restore: files restore stopped at ' . $entry . ': ' . preg_replace('/^Restore: /', '', $e->getMessage()) . '. '
-                        . ($written === [] ? 'No file was written.' : count($written) . ' file(s) were already written: ' . implode(', ', $written));
+                        . ($written === [] ? 'No file was written in place.' : count($written) . ' file(s) were already written in place: ' . implode(', ', $written) . '.')
+                        . ($writtenAside === [] ? '' : ' ' . count($writtenAside) . ' copy(ies) were set aside in ' . $asideRun . ': ' . implode(', ', $writtenAside) . '.');
                     self::log('RESTORE FILES FAIL src=' . $archivePath . ' ' . $message);
                     throw new RuntimeException($message, 0, $e);
                 }
-                $written[] = $entry;
+                if ($base === $asideRun) $writtenAside[] = $entry;
+                else $written[] = $entry;
                 if ($overwrite) $overwritten[] = $entry;
             }
+            if ($asideRun !== null) self::pruneAsideRuns($asideRun);
             self::log("RESTORE FILES OK src={$archivePath} written=" . count($plan) . " unchanged={$unchanged} overwritten=" . count($overwritten)
                 . ($skippedSources !== [] ? ' skipped_sources=' . implode(',', array_keys($skippedSources)) : '')
                 . ($setAside !== [] ? ' set_aside=' . count($setAside) : '')
@@ -1838,6 +1871,12 @@ class BackupService
         return preg_match('/\.(?:php[0-9]*|phps|phtml?|phar|inc|cgi|fcgi|pl|py|rb|sh|shtml|asp|aspx|jsp)(?:\.|$)/i', basename($relative)) === 1;
     }
 
+    /** R55: a file of uploads/ a browser runs or renders as active content from the shop's origin (scripts, pages, SVG, styles). */
+    private static function activeInBrowser(string $relative): bool
+    {
+        return preg_match('/\.(?:m?js|cjs|wasm|x?html?|xht|svgz?|xml|xsl|css|swf)(?:\.|$)/i', basename($relative)) === 1;
+    }
+
     /** R51: where restored copies are set aside — <backup_recovery_dir>/from-backup, private (0700), outside the web root. */
     public static function asideDirectory(): string
     {
@@ -1882,6 +1921,30 @@ class BackupService
         }
         self::assertAsideRun($run);
         return $run;
+    }
+
+    /** R55: copies set aside by the newest restores are kept; older runs (each with a config.php) are removed. */
+    private const ASIDE_RUNS_KEPT = 5;
+
+    /**
+     * R55 (review round 20, low): every restore left another copy of config.php (database password, gateway keys) in
+     * from-backup and nothing removed them. The newest ASIDE_RUNS_KEPT runs stay (always $current); older run directories
+     * (by their time-stamped name; only real directories, never through a link) are removed.
+     */
+    private static function pruneAsideRuns(string $current): void
+    {
+        $root = dirname($current);
+        $runs = [];
+        foreach (@scandir($root) ?: [] as $entry) {
+            if (!preg_match('/^\d{8}-\d{6}-[0-9a-f]{12}$/D', $entry)) continue;
+            $stat = @lstat($root . '/' . $entry);
+            if ($stat !== false && ($stat['mode'] & 0170000) === 0040000) $runs[] = $entry;
+        }
+        rsort($runs, SORT_STRING);
+        foreach (array_slice(array_values(array_diff($runs, [basename($current)])), self::ASIDE_RUNS_KEPT - 1) as $old) {
+            self::removeTree($root . '/' . $old);
+            self::log("Restore: removed the copies set aside by an older restore, {$root}/{$old}");
+        }
     }
 
     /** $run and from-backup are still real directories (no link swapped in since) resolving below the recovery directory. */
