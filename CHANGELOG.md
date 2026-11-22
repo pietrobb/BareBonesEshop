@@ -392,6 +392,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261121120000_sales_daily` (round 52): adds the daily sales totals of the reports (`sales_daily`,
   `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`) and builds them from the existing orders:
   about 30 s at 500 000 orders over two years on MySQL (a large shop runs `apply` in its maintenance window, as above).
+- **Migration** `20261122090000_sales_monthly_products` (review round 53): adds `sales_monthly_products`, the monthly
+  product sums of the built days, and fills it from `sales_daily_products` (seconds).
+- **Migration** `20261113175958_analyze_order_tables` (review round 53): MySQL only, `ANALYZE TABLE` of `orders`,
+  `order_items` and `invoices` before the OSS backfills (seconds). Dated before them, it also runs once on a shop that
+  has them already, where it only refreshes the statistics.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -479,10 +484,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   day; only today is summed from the orders. At 500 000 orders (128 MB buffer pool) the Reports page takes 0.1 s for 365
   days and 0.05 s for 90 (the same 365 days summed from the orders: 2.7 s); after ten older orders changed, 0.6 s
   once. A day's refunds and credit notes are read from that day's orders, not from every refunded order of the store.
-  The days are built when a report is opened (and by the
-  migration and `php cli/sales-daily.php`); a later payment, cancellation, edit, refund or credit note of an older order
-  builds its day again, also one written by an import or by SQL (new rows are found by id). Orders deleted or changed by
-  hand need `php cli/sales-daily.php --rebuild`. A store whose timezone changes is built again for its new calendar.
+  The days are built by the migration, `php cli/sales-daily.php` and the worker; a report request builds for at most
+  2 s, commits every batch with how far it got and queues the worker job `sales_daily_build` for the rest, and until
+  then sums the days not built from the orders (review round 53, medium 2: the first build of a large shop ran in one
+  admin request, 42 s at 500 000 orders on MySQL, and started over after a timeout; a signed update from 2.1.2 leaves
+  the build to the worker). A later payment, cancellation, edit, refund or credit note of an older order builds its day
+  again, also an order line, payment, refund or credit note row inserted by an import or by SQL (found by id), unless
+  that row's transaction commits after a row with a higher id was already seen (on MySQL, a long transaction): then, as
+  for orders deleted or changed by hand, run `php cli/sales-daily.php --rebuild`. 400 000 logged changes are read per
+  hour, not per row (they exhausted the memory), and a report with one of the tables missing sums the orders instead of
+  failing. A store whose timezone changes is built again for its new calendar. The best sellers read whole months
+  from monthly sums and are ranked in the database, with the products sold today: at 500 000 orders on MySQL (128 MB
+  buffer pool) 365 days take 0.06 s with 3 000 products and 0.2 s with 20 000 (before 0.23 s and 0.43 s), 0.9 s with
+  50 000 products all selling evenly (before 1.2 s; review round 53 measured 3.1 s).
   The Reports page offers 365 days.
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit
@@ -510,6 +524,46 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   acknowledgement within the withdrawal period says the return needs no approval (was: "we will let you know whether
   the return is approved"). Checkout removes Unicode bidi controls (U+202E and the other overrides, embeddings,
   isolates, marks) and C1 controls from names, addresses and notes.
+- **A shop installed in CZK, HUF or PLN charges shipping and payment in that currency (review round 53, medium 3).**
+  The installer kept the default store's EUR prices as the new currency's amounts (GLS 2,99 Kč, free shipping from
+  50 Kč, cash on delivery 3 Kč). It now gives the default store the shipping methods, rates, zones and payment fees
+  the migrations price in that currency (the CZ, HU and PL price lists); USD keeps the EUR amounts. `setup.php doctor`
+  warns (`stores.provider_prices.<store>`) when a store's median shipping rate is under 0,50 € or over 100 € at the
+  EUR rate of its currency: such prices were entered for another currency.
+- **Installer and admin texts (review round 53, low).** After a Czech (or other non-English) install the admin opens
+  in that language (was English: the system language stayed `en`). The installer in Czech, Polish, Hungarian, German or
+  Spanish prefills that country, time zone, shop language and currency (was the Slovak example store). The VAT class
+  "e-books" has a label in every admin language (was the key `vat_class.ebooks`). A method's own name and description
+  fields name their language when the method has translations. The Czech privacy policy template is complete (was a
+  short stub), and the CZ, SK and PL imprints name the dispute resolution body after a colon (the name is nominative).
+- **Refunds, credit and stock edits (review round 53, low).** A set whose part shipped and whose rest is cancelled
+  refunds the rest by the catalog prices of its parts frozen at checkout: a 29 € lamp shipped and its ten 0,10 € bulbs
+  cancelled refund 1 € (was 10/11 of the set); sets ordered before keep equal weights per unit. An admin edit of an
+  order on invoice checks the credit limit with the order's new total only (the old one was counted next to it, so
+  raising a 600 € order to 900 € on a 1000 € limit was refused). A payment refunded in full in the GoPay or ThePay
+  dashboard while a smaller refund of the shop is in flight settles that refund and books the rest as refunded outside
+  the shop (was: only logged, the payment stayed `refund_pending`). A stock edit in the admin, a CSV or API adjustment
+  and a goods receipt that MySQL picks as a deadlock victim run again, up to three times (was: "stock not changed").
+- **MySQL locking and update speed (review round 53, low).** A B2B order on invoice takes its company's row lock as
+  the first statement of its transaction and reads the members' open orders without a locking read, so it no longer
+  locks the gaps of the orders' customer index: a guest order or one of the newest customer is placed at once instead
+  of waiting for the B2B order to commit (two orders of one company still see each other). The checkout's lookup of
+  open orders without a stored OSS net reads only the configured stores, on `idx_orders_store_oss_net` (was: every
+  order, 0,1-0,8 s per checkout at 500 000 orders). The update from 2.1.2 refreshes the MySQL statistics of orders,
+  their lines and invoices before the OSS backfills: after a bulk import or a restore they counted the order lines as
+  none, and the backfills scanned them once per invoice and open order (100 000 orders: 107 s, was 6-16 min).
+- **Backups, logs and GDPR (review round 53, low).** `cli/restore.php --quiet` only shortens the output: without
+  `--yes` it still asks before it creates a missing MySQL `db_name` or restores (was: created and restored unasked).
+  `--list` prints the full SHA-256 of each backup and, on a `files=` line, its files archive's path, size and SHA-256
+  (was: 12 characters and `files=yes`), the values `sha256sum` prints, as the runbook's own SHA-256 list needs them.
+  Whether a restored source is one file or a directory comes from this shop's configuration, not from the backup's
+  metadata (a forged "directory" turned a missing GDPR salt file into a directory). Copies set aside in
+  `<backup_recovery_dir>/from-backup/` are created 0600 in 0700 directories (was: the mode of the directory above).
+  `cli/gdpr-gc.php --dry-run`, the command `cli/staging-preflight.php` recommends, works (was: "Unknown arg"); with
+  `--apply` it is refused. The PHP error log (e.g. "Checkout failed") masks IBANs, international phone numbers, the
+  values MySQL quotes (`Duplicate entry '…'`) and the value after a name, phone, IBAN or address key of a gateway
+  message. A GDPR erasure also deletes the `/api/v1` replay responses that name one of the person's order numbers
+  (a response stored before the order's e-mail was corrected named the old address only).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as
@@ -528,7 +582,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run into the
   private directory `<backup_recovery_dir>/from-backup/` (never the web root; the web server rules also deny
   `*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
-  `db_name` before importing.
+  `db_name` before importing. A restore never writes a script (`.php`, `.phtml`, `.phar`, `.cgi`… also as an inner
+  extension, `photo.php.jpg`) or a dotfile (`.htaccess`, `.user.ini`) into `themes/` or `uploads/`, not even a missing
+  one: it goes to the same private directory and `cli/restore.php` warns (review round 53: a forged backup's
+  `themes/default/assets/shell.php` ran after `--files-only`). `.htaccess` and `deploy/nginx.conf` deny PHP under
+  `themes/` as they do under `uploads/`.
 - **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
   (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the
   per-customer coupon counters keyed by an unsalted hash of the e-mail.

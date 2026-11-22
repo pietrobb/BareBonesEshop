@@ -1229,6 +1229,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.vat_class.reduced2' => 'segundo reducido',
     'admin.product.vat_class.zero' => 'cero / exento',
     'admin.product.vat_class.books' => 'libros',
+    'admin.product.vat_class.ebooks' => 'libros electrónicos',
     'admin.product.vat_class.food' => 'alimentos',
     'admin.product.vat_class.medicines' => 'medicamentos',
     'admin.product.vat_class.baby' => 'artículos para bebés',

@@ -133,9 +133,24 @@ final class MethodLabels {
             if (!is_array($config) || (string)($config['provider_scope'] ?? $id) !== $provider) continue;
             foreach ([(string)($config['default_locale'] ?? 'en'), ...array_map('strval', (array)($config['languages'] ?? []))] as $locale) $languages[$locale] = true;
         }
-        $owner = is_array($stores[$provider] ?? null) ? (string)($stores[$provider]['default_locale'] ?? 'en') : $store->defaultLocale();
-        unset($languages[$owner]);
+        unset($languages[self::baseLanguage()]);
         return array_keys($languages);
+    }
+
+    /**
+     * The language of a method's own name and description: the default language of the store owning the active store's
+     * methods. R53 (low): the admin marked the translations' languages but not this one.
+     */
+    public static function baseLanguage(): string {
+        $store = StoreContext::current();
+        $provider = $store->providerId();
+        $stores = (array)(Bootstrap::stores()['stores'] ?? []);
+        return is_array($stores[$provider] ?? null) ? (string)($stores[$provider]['default_locale'] ?? 'en') : $store->defaultLocale();
+    }
+
+    /** The admin label of a method's own name/description field ($key), with its language when translations are offered too. */
+    public static function fieldLabel(string $key): string {
+        return I18n::t($key) . (self::translationLanguages() !== [] ? ' (' . self::baseLanguage() . ')' : '');
     }
 
     private static function translated(string $kind, string $code, string $value, int $field, string $suffix, ?string $locale): string {

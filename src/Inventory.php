@@ -132,6 +132,8 @@ class Inventory {
                     $required
                 );
                 $snapshot['quantity_per_bundle'] = (int)$component['quantity'];
+                // R53: a component's own catalog price weighs its share of the set's price (Fulfillment::shippedShare()).
+                $snapshot['unit_price'] = max(0, (int)$component['unit_price']);
                 $snapshots[] = $snapshot;
                 if ($snapshot['backordered_qty'] > 0) {
                     $backordered = max($backordered, (int)ceil($snapshot['backordered_qty'] / max(1, (int)$component['quantity'])));
@@ -541,7 +543,7 @@ class Inventory {
 
     private static function bundleComponents(int $productId): array {
         $stmt = Db::get()->prepare("SELECT bc.component_product_id, bc.component_variant_id, bc.quantity,
-                COALESCE(v.sku, p.sku) AS sku
+                COALESCE(v.sku, p.sku) AS sku, COALESCE(v.price_absolute, p.price + COALESCE(v.price_delta, 0)) AS unit_price
             FROM bundle_components bc
             JOIN products p ON p.id = bc.component_product_id AND p.store_id = :store
             LEFT JOIN variants v ON v.id = bc.component_variant_id AND v.product_id = p.id

@@ -1359,9 +1359,10 @@ class BackupService
      * extracted into a private staging directory by a strict tar reader that accepts only regular
      * files and directories with relative paths (no absolute paths, '..', links or devices). A live
      * file whose content differs from the backup is never overwritten silently: nothing is written
-     * unless force => true (cli/restore.php --force). Files absent from the backup are kept.
+     * unless force => true (cli/restore.php --force). Files absent from the backup are kept. Scripts and dotfiles of
+     * themes/ and uploads/ go to the private recovery directory, never into the web root.
      *
-     * Returns ['archive', 'written', 'unchanged', 'overwritten' => entries, 'skipped_sources' => names].
+     * Returns ['archive', 'written', 'unchanged', 'overwritten', 'set_aside', 'quarantined' => entries, 'skipped_sources' => names].
      */
     public static function restoreFiles(string $remotePath, array $opts = []): array
     {
@@ -1403,6 +1404,7 @@ class BackupService
             $targets = [];
             $unchanged = 0;
             $setAside = [];
+            $quarantined = [];
             $jobsRan = null;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
@@ -1411,7 +1413,7 @@ class BackupService
                     $skippedSources[$name] = true;
                     continue;
                 }
-                $kind = (string)($kinds[$name] ?? '');
+                $kind = self::sourceKind($name, $root, (string)($kinds[$name] ?? ''));
                 if ($kind === 'file' && $rest !== '' && !str_contains($rest, '/')) {
                     [$target, $base] = [$root, dirname($root)];
                 } elseif ($kind === 'directory' && $rest !== '') {
@@ -1420,8 +1422,15 @@ class BackupService
                     throw new RuntimeException("Restore: files archive entry {$entry} does not fit source {$name} ({$kind})");
                 }
                 $source = $stagingDir . '/' . $entry;
-                $isAside = false;
-                if (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
+                $isAside = $isQuarantined = false;
+                // R53: a script or a per-directory server config (.htaccess, .user.ini) never goes into a directory the web
+                // server serves, not even a missing one: a forged backup's themes/default/assets/shell.php ran after --files-only.
+                if (in_array($name, self::WEB_SOURCES, true) && self::runnableInWebRoot($rest)
+                    && !(is_file($target) && !is_link($target) && hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target)))) {
+                    $asideDir = self::asideDirectory();
+                    [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir . '/' . $name];
+                    $isAside = $isQuarantined = true;
+                } elseif (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
                     $differs = is_file($target) && !hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target));
                     if ($name === 'jobs' && !is_file($target)) $jobsRan ??= self::holdsAnyFile($root);
                     if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan)) {
@@ -1465,6 +1474,9 @@ class BackupService
                 $ownership = self::restoredFileOwnership($target, $directory['existing'], match ($name) {
                     'gdpr_salt', 'stores', 'config' => 0640, 'mail', 'jobs' => 0600, default => 0666,
                 });
+                // R53 (review round 53, low): a copy set aside holds secrets (config.php) or quarantined scripts; it and the
+                // directories created for it are the operator's only (0600/0700), not modelled on the directory above.
+                if ($isAside) [$ownership['mode'], $ownership['dir_mode']] = [0600, 0700];
                 // R27 (run 397): a file or directory this user cannot give the owner and group it must have is refused.
                 $keep = $ownership['uid'] !== null && $ownership['gid'] !== null ? FileOwnership::cannotKeep($target, $ownership['uid'], $ownership['gid']) : null;
                 if ($keep === null && $directory['create'] !== [] && $ownership['dir_uid'] !== null && $ownership['dir_gid'] !== null) {
@@ -1475,7 +1487,8 @@ class BackupService
                     continue;
                 }
                 $plan[] = [$entry, $source, $target, $base, $ownership, $overwrite];
-                if ($isAside) $setAside[] = $entry;
+                if ($isQuarantined) $quarantined[] = $entry;
+                elseif ($isAside) $setAside[] = $entry;
             }
             if ($refused !== []) {
                 throw new RuntimeException('Restore: ' . count($refused) . ' target(s) cannot be restored safely, nothing was written: '
@@ -1502,13 +1515,15 @@ class BackupService
             }
             self::log("RESTORE FILES OK src={$archivePath} written=" . count($plan) . " unchanged={$unchanged} overwritten=" . count($overwritten)
                 . ($skippedSources !== [] ? ' skipped_sources=' . implode(',', array_keys($skippedSources)) : '')
-                . ($setAside !== [] ? ' set_aside=' . count($setAside) : ''));
+                . ($setAside !== [] ? ' set_aside=' . count($setAside) : '')
+                . ($quarantined !== [] ? ' quarantined=' . count($quarantined) : ''));
             return [
                 'archive'         => $archivePath,
                 'written'         => count($plan),
                 'unchanged'       => $unchanged,
                 'overwritten'     => $overwritten,
                 'set_aside'       => $setAside,
+                'quarantined'     => $quarantined,
                 'skipped_sources' => array_keys($skippedSources),
             ];
         } finally {
@@ -1765,6 +1780,40 @@ class BackupService
      */
     private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
 
+    /** The default sources that are one file (defaultFileSources()); the others are directories. */
+    private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'config'];
+    private const DIRECTORY_SOURCES = ['invoices', 'uploads', 'legal', 'downloads', 'jobs', 'themes'];
+
+    /**
+     * R53 (review round 53, low): whether a restored source is one file or a directory is this shop's, not the backup
+     * metadata's (which whoever can write the backup storage writes too): a default source by its name, another by its
+     * configured path here; only a source that exists in neither form goes by the metadata.
+     */
+    private static function sourceKind(string $name, string $root, string $recorded): string
+    {
+        if (in_array($name, self::FILE_SOURCES, true)) return 'file';
+        if (in_array($name, self::DIRECTORY_SOURCES, true)) return 'directory';
+        if (is_dir($root)) return 'directory';
+        if (is_file($root)) return 'file';
+        return $recorded;
+    }
+
+    /** R53: sources the web server serves directly. */
+    private const WEB_SOURCES = ['themes', 'uploads'];
+
+    /**
+     * Whether a file at $relative inside a web-served source could be run or could reconfigure the server: a dotfile
+     * or a file in a dot-directory (.htaccess, .user.ini), or a script name, also as an inner extension (shell.php.jpg
+     * runs where Apache maps handlers by any extension). Neither the shop's themes nor its uploads hold such a file.
+     */
+    private static function runnableInWebRoot(string $relative): bool
+    {
+        foreach (explode('/', $relative) as $segment) {
+            if (str_starts_with($segment, '.')) return true;
+        }
+        return preg_match('/\.(?:php[0-9]*|phps|phtml?|phar|inc|cgi|fcgi|pl|py|rb|sh|shtml|asp|aspx|jsp)(?:\.|$)/i', basename($relative)) === 1;
+    }
+
     /** R51: where restored copies are set aside — <backup_recovery_dir>/from-backup, private (0700), outside the web root. */
     public static function asideDirectory(): string
     {
@@ -1946,11 +1995,21 @@ class BackupService
 
     public static function list(): array
     {
-        // Files archives are companions of a database backup, not restore points of their own.
-        $rows = array_values(array_filter(
-            self::$storage->list(),
-            static fn(array $row): bool => !str_ends_with((string)($row['path'] ?? ''), '.files.tar')
-        ));
+        // Files archives are companions of a database backup, not restore points of their own. R53 (review round 53,
+        // low): their SHA-256 and size go with the backup row (files_sha256, files_size): the runbook's own SHA-256 list
+        // must cover the files archive too (config.php, themes), which the restore verifies the same way.
+        $archives = [];
+        $rows = [];
+        foreach (self::$storage->list() as $row) {
+            if (str_ends_with((string)($row['path'] ?? ''), '.files.tar')) $archives[(string)$row['path']] = $row;
+            else $rows[] = $row;
+        }
+        foreach ($rows as $i => $row) {
+            $archive = $archives[(string)($row['meta']['files_archive'] ?? '')] ?? null;
+            if ($archive === null) continue;
+            $rows[$i]['files_sha256'] = (string)($archive['meta']['sha256'] ?? '');
+            $rows[$i]['files_size'] = (int)($archive['size'] ?? 0);
+        }
         // Newest first without relying on 1 s file mtimes or directory order: microsecond creation
         // stamp, else the metadata/mtime second, then the -N suffix reserveUniquePath() appends.
         usort($rows, static fn(array $a, array $b): int => self::orderKey($b) <=> self::orderKey($a));

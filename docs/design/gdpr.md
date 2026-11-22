@@ -153,7 +153,7 @@ Single source of truth in `config/data-retention.json`:
 }
 ```
 
-CLI: `cli/gdpr-gc.php` — daily cron. Without arguments it is a dry run (counts only; there is no `--dry-run` flag), `--apply` writes. Each pass logs to `logs/gdpr-gc.log` and `gdpr_events`.
+CLI: `cli/gdpr-gc.php` — daily cron. Without arguments (or with `--dry-run`, which `cli/staging-preflight.php` recommends) it is a dry run (counts only), `--apply` writes; both together are refused. Each pass logs to `logs/gdpr-gc.log` and `gdpr_events`.
 
 ---
 

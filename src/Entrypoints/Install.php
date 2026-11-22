@@ -38,7 +38,7 @@ session_name('bbe_install');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'secure' => $installHttps]);
 session_start();
 $_SESSION['install_token'] ??= bin2hex(random_bytes(32));
-$values = WebInstaller::defaults($installRoot, $_SERVER);
+$values = WebInstaller::defaults($installRoot, $_SERVER, I18n::locale());
 $errors = [];
 $result = null;
 $exposed = [];

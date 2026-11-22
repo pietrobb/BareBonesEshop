@@ -522,7 +522,7 @@ class GdprService {
      *   - email_log: scrub PII (recipient→deleted-{id}@anonymized.local, subject→[erased], payload→[erased])
      *   - audit_log: scrub payload_json with placeholder
      *   - coupon_uses: hash email; coupon_usage_counters of the e-mail: DELETE
-     *   - api_idempotency responses naming the e-mail: DELETE
+     *   - api_idempotency responses naming the e-mail or one of the person's order numbers: DELETE
      *   - everything else in PII_REGISTRY: see eraseCustomerContent()
      *   - orders.customer_*, invoices.customer_snapshot: KEPT (10y legal retention), except the phone, IP and note
      *     of the orders and the phone in their invoices' snapshot (the issued PDFs stay as sent)
@@ -776,9 +776,24 @@ class GdprService {
         if (self::tableColumns($db, 'api_idempotency') !== []) {
             // R51 (low): found by a plain (non-locking) read and deleted by id; a DELETE with this WHERE locked every row
             // of the table it scanned on MySQL until the erasure committed, and API requests waited on them.
-            $stmt = self::prepare($db, 'SELECT id FROM api_idempotency WHERE store_id = :store AND INSTR(LOWER(response_body), :email) > 0');
-            $stmt->execute([':store' => StoreContext::current()->id(), ':email' => strtolower($origEmail)]);
-            foreach (array_chunk(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), 500) as $ids) {
+            // R53 (review round 53, low): also the responses naming one of the person's orders by its number: a response
+            // stored before the order's e-mail was corrected (or the account's changed) names the old address only.
+            $needles = [strtolower($origEmail)];
+            foreach (array_chunk(self::customerOrderIds($db, $ownership), 500) as $orderIds) {
+                $numbers = self::prepare($db, 'SELECT order_number FROM orders WHERE 1 = 1' . self::inList(' AND id', $orderIds));
+                $numbers->execute(array_map('intval', $orderIds));
+                foreach ($numbers->fetchAll(PDO::FETCH_COLUMN) as $number) {
+                    if ((string)$number !== '') $needles[] = strtolower('"number":' . json_encode((string)$number, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                }
+            }
+            $found = [];
+            foreach (array_chunk($needles, 100) as $chunk) {
+                $stmt = self::prepare($db, 'SELECT id FROM api_idempotency WHERE store_id = ? AND ('
+                    . implode(' OR ', array_fill(0, count($chunk), 'INSTR(LOWER(response_body), ?) > 0')) . ')');
+                $stmt->execute(array_merge([StoreContext::current()->id()], $chunk));
+                foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) $found[(int)$id] = (int)$id;
+            }
+            foreach (array_chunk(array_values($found), 500) as $ids) {
                 $delete = self::prepare($db, 'DELETE FROM api_idempotency WHERE 1 = 1' . self::inList(' AND id', $ids));
                 $delete->execute($ids);
                 $rowsIdempotency += $delete->rowCount();

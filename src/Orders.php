@@ -65,7 +65,9 @@ class Orders {
 
     /** The order transaction of create(), run again when MySQL picked it as a deadlock victim. */
     private static function createWithin(PDO $db, StoreContext $storeContext, array $cartItems, array $customer, string $paymentMethod, ?array $coupon): int {
+        $creditCompany = !empty($customer['customer_id']) && self::paysOnInvoice($paymentMethod, $customer) ? Customers::invoiceCreditCompany((int)$customer['customer_id']) : 0;
         $db->beginTransaction();
+        Customers::lockInvoiceCredit($creditCompany);
         // 1. Atomically reserve stock for each item and freeze its exact allocation.
         ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($cartItems);
 
@@ -133,7 +135,7 @@ class Orders {
         $sysDefaultLocale = $stores['default_locale'] ?? 'en';
         $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
         $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
-        if ($customerId !== null && self::paysOnInvoice($paymentMethod, $customer)) Customers::assertInvoiceCredit($customerId, (int)$total);
+        if ($customerId !== null && self::paysOnInvoice($paymentMethod, $customer)) Customers::assertInvoiceCredit($customerId, (int)$total, $creditCompany);
         $orderParams = [
             ':store'    => $storeContext->id(),
             ':channel'  => $storeContext->channel(),
@@ -283,8 +285,10 @@ class Orders {
         try {
             // R38 (low): the edit decides the OSS threshold as exactly as a new order (Orders::create(), guardOrder()).
             $ossLock = OssThreshold::lockSeller($db);
+            $creditCompany = Customers::invoiceCreditCompany((int)(self::byId($orderId)['customer_id'] ?? 0));
             $db->beginTransaction();
             self::lockWithin($orderId);
+            Customers::lockInvoiceCredit($creditCompany);
             $order = self::byId($orderId);
             $refusal = $order === null ? 'admin.order.edit.not_found' : self::editRefusal($order);
             if ($refusal !== null) {
@@ -347,7 +351,7 @@ class Orders {
             if ($customerId > 0 && (int)$totals['gross'] > (int)$order['total']
                 && self::paysOnInvoice((string)$order['payment_method'], ['payment_method_snapshot' => (string)($pricing['payment_method_snapshot'] ?? $order['payment_method_snapshot'] ?? '')])) {
                 $counted = in_array((string)($order['payment_status'] ?? 'pending'), ['pending', 'authorized'], true);
-                Customers::assertInvoiceCredit($customerId, $counted ? 0 : (int)$totals['gross']);
+                Customers::assertInvoiceCredit($customerId, $counted ? 0 : (int)$totals['gross'], $creditCompany);
             }
             self::insertItems($orderId, $orderItems);
             OssThreshold::recordOrder($db, $orderId);

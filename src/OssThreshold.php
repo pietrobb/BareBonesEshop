@@ -835,9 +835,12 @@ final class OssThreshold
     {
         if (self::$netsStored || $db->inTransaction() || !self::hasColumn('orders', 'oss_net', $db)) return;
         $since = sprintf('%04d-12-31', $year - 2); // a day before the previous year, in any store's time zone
-        $missing = $db->prepare('SELECT 1 FROM orders WHERE oss_net IS NULL AND created_at >= ? LIMIT 1');
+        // R53 (review round 53, low): per configured store (the stores a count reads), so the lookup runs on
+        // idx_orders_store_oss_net. Without the store it read every order: 0,1-0,8 s on each checkout at 500 000 orders.
+        $storeIds = array_map('strval', array_keys((array)(Bootstrap::stores()['stores'] ?? []))) ?: ['default'];
+        $missing = $db->prepare('SELECT 1 FROM orders WHERE store_id IN (' . implode(',', array_fill(0, count($storeIds), '?')) . ') AND oss_net IS NULL AND created_at >= ? LIMIT 1');
         for ($pass = 0; ; $pass++) {
-            $missing->execute([$since]);
+            $missing->execute([...$storeIds, $since]);
             $found = (bool)$missing->fetchColumn();
             $missing->closeCursor();
             if (!$found) break;

@@ -458,8 +458,38 @@ class Setup
     /** A store sells only what has a price in its currency: list what the shared catalog leaves unpriced there. */
     private static function storeCurrencyChecks(PDO $db, array $stores, callable $add): void {
         foreach ($stores as $storeId => $store) {
-            if (is_array($store)) $add(...array_values(self::storeCurrencyCheck($db, (string)$storeId, $store)));
+            if (!is_array($store)) continue;
+            $add(...array_values(self::storeCurrencyCheck($db, (string)$storeId, $store)));
+            if (($prices = self::providerPricesCheck($db, (string)$storeId, $store)) !== null) $add(...array_values($prices));
         }
+    }
+
+    /**
+     * R53 (review round 53, medium 3): a shop installed in CZK kept shipping rates in euro cents (GLS 2.99 Kč) and nothing
+     * said so. Warns when the median paid shipping rate of the store's provider scope is below 0.50 € or above 100 € at
+     * the EUR rate of the store's currency: entered for another currency. Null without paid rates or a rate.
+     * @return ?array{status: string, name: string, message: string, action: string}
+     */
+    public static function providerPricesCheck(PDO $db, string $storeId, array $store): ?array {
+        if (!Db::tableExists('shipping_rates', $db)) return null;
+        $currency = strtolower((string)($store['currency'] ?? 'eur'));
+        $rate = $currency === 'eur' ? 1.0 : (EurRates::current()['rates'][$currency] ?? null);
+        if ($rate === null) return null;
+        $scope = (string)($store['provider_scope'] ?? $storeId);
+        $stmt = $db->prepare('SELECT r.price FROM shipping_rates r JOIN shipping_methods m ON m.store_id = r.store_id AND m.code = r.method_code
+            WHERE r.store_id = ? AND r.price > 0 AND m.active = 1 ORDER BY r.price');
+        $stmt->execute([$scope]);
+        $prices = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($prices === []) return null;
+        $median = $prices[intdiv(count($prices), 2)];
+        $euro = $median / 100 * $rate;
+        $code = strtoupper($currency);
+        $shown = rtrim(rtrim(number_format($median / 100, 2, '.', ''), '0'), '.') . " {$code}";
+        $fits = $euro >= 0.5 && $euro <= 100;
+        return ['status' => $fits ? 'pass' : 'warn', 'name' => 'stores.provider_prices.' . $storeId, 'message' => $fits
+            ? "Store {$storeId}'s shipping rates fit {$code} (median {$shown})."
+            : "Store {$storeId} sells in {$code}, but its median shipping rate is {$shown} (" . number_format($euro, 2, '.', '') . ' €): the shipping and payment prices look entered for another currency.',
+            'action' => $fits ? '' : "Re-enter the shipping rates, free-shipping thresholds, cash-on-delivery and payment fees in {$code} (Admin → Shipping, Admin → Payments) for provider scope {$scope}."];
     }
 
     /** @return array{status: string, name: string, message: string, action: string} */

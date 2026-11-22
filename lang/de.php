@@ -1098,6 +1098,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.product.vat_class.reduced2' => 'zweiter ermäßigter Satz',
     'admin.product.vat_class.zero' => 'null / befreit',
     'admin.product.vat_class.books' => 'Bücher',
+    'admin.product.vat_class.ebooks' => 'E-Books',
     'admin.product.vat_class.food' => 'Lebensmittel',
     'admin.product.vat_class.medicines' => 'Arzneimittel',
     'admin.product.vat_class.baby' => 'Babyartikel',

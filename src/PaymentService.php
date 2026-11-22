@@ -1730,6 +1730,18 @@ class PaymentService {
                 return self::bookRefundWithin($order, $provider, '', $inFlight, $eventType, $eventKey,
                     $payload + ['settles_refund_request' => (string)($request['idempotency_key'] ?? '')]);
             }
+            // R53 (low): the whole payment refunded in the dashboard while a smaller refund of the shop is in flight. Was:
+            // only logged, the order stayed refund_pending with the rest counted as paid. The rest is booked as a refund
+            // outside the shop. The request is settled first (named, so an equal amount is not mistaken for it), then the rest
+            // is booked against the payment that request left partially refunded, which refunds it.
+            $balance = self::refundableBalance($orderId);
+            if (strtolower((string)($data['state'] ?? '')) === 'refunded' && $from === 'refund_pending' && $currency === $orderCurrency
+                && $inFlight > 0 && $inFlight < $balance) {
+                $settled = self::bookRefundWithin($order, $provider, '', $inFlight, $eventType, $eventKey,
+                    $payload + ['settles_refund_request' => (string)($request['idempotency_key'] ?? '')]);
+                $after = $settled ? Orders::byId($orderId) : null;
+                return $after !== null && self::bookRefundWithin($after, $provider, '', $balance - $inFlight, $eventType, $eventKey . ':outside', $payload);
+            }
             // R39 (low): an item refund (credit note) GoPay/ThePay accepted without a refund id that refunds the whole
             // remaining balance: the payment reported refunded settles it. Was: it stayed pending for good.
             $item = $request === null ? self::unconfirmedItemRefund($order) : null;

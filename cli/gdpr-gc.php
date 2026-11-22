@@ -7,7 +7,7 @@ require_once __DIR__ . '/cli-only.php';
  * Reads config/data-retention.json and applies each policy via GdprService::applyRetention.
  *
  * Usage:
- *   php cli/gdpr-gc.php                  Dry-run all policies (default — safe)
+ *   php cli/gdpr-gc.php                  Dry-run all policies (default — safe; --dry-run says so explicitly)
  *   php cli/gdpr-gc.php --apply          Actually delete/scrub. Triggers BackupService snapshot first
  *                                        (SQLite only; refuses when backups are disabled or on MySQL).
  *   php cli/gdpr-gc.php --apply --skip-backup   Apply after the operator took an external backup.
@@ -23,13 +23,20 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $argvLocal = $argv ?? [];
-$opts = ['apply' => false, 'policy' => null, 'quiet' => false, 'skip_backup' => false];
+$opts = ['apply' => false, 'dry_run' => false, 'policy' => null, 'quiet' => false, 'skip_backup' => false];
 foreach (array_slice($argvLocal, 1) as $a) {
     if ($a === '--apply') { $opts['apply'] = true; continue; }
+    // R53 (review round 53, low): the explicit form of the default, as cli/staging-preflight.php recommends it (the
+    // recommended command failed with "Unknown arg").
+    if ($a === '--dry-run') { $opts['dry_run'] = true; continue; }
     if ($a === '--skip-backup') { $opts['skip_backup'] = true; continue; }
     if ($a === '--quiet') { $opts['quiet'] = true; continue; }
     if (str_starts_with($a, '--policy=')) { $opts['policy'] = substr($a, 9); continue; }
     fwrite(STDERR, "Unknown arg: {$a}\n");
+    exit(1);
+}
+if ($opts['apply'] && $opts['dry_run']) {
+    fwrite(STDERR, "--apply and --dry-run exclude each other\n");
     exit(1);
 }
 

@@ -144,16 +144,7 @@ class Warehouse {
     ): void {
         if ($qty < 0) throw new InvalidArgumentException('Stock count cannot be negative');
         if (!self::byId($warehouseId)) throw new RuntimeException('Warehouse not found in active store');
-        $db = Db::get();
-        $ownsTransaction = !$db->inTransaction();
-        if ($ownsTransaction) $db->beginTransaction();
-        try {
-            self::writeStock($db, $warehouseId, $sku, $qty, $movementType, $referenceType, $referenceId, $idempotencyKey);
-            if ($ownsTransaction) $db->commit();
-        } catch (Throwable $e) {
-            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
-            throw $e;
-        }
+        self::transactional(static fn() => self::writeStock(Db::get(), $warehouseId, $sku, $qty, $movementType, $referenceType, $referenceId, $idempotencyKey));
     }
 
     private static function writeStock(PDO $db, int $warehouseId, string $sku, int $qty, string $movementType, ?string $referenceType,
@@ -434,19 +425,37 @@ class Warehouse {
         ?string $idempotencyKey = null
     ): void {
         if ($delta === 0) return;
-        $db = Db::get();
         // stock.adjusted is recorded with the change: a lone call runs in its own transaction.
-        $ownsTransaction = !$db->inTransaction();
-        if ($ownsTransaction) $db->beginTransaction();
-        try {
+        self::transactional(static function () use ($warehouseId, $sku, $delta, $movementType, $referenceType, $referenceId, $idempotencyKey): void {
             $available = self::totalAvailable($sku);
             self::applyAdjustment($warehouseId, $sku, $delta, $movementType, $referenceType, $referenceId, $idempotencyKey);
             self::recordAdjusted($sku, $available, $movementType, $referenceType);
             if ($delta > 0) BackorderAllocation::allocate([$sku]);
-            if ($ownsTransaction) $db->commit();
-        } catch (Throwable $e) {
-            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
-            throw $e;
+        });
+    }
+
+    /**
+     * $fn() in its own transaction. R53 (low): one MySQL picked as the victim of a deadlock (it rolled the transaction
+     * back) runs again, up to three times, like the checkout (R51). Was: the admin's stock edit failed with "stock not
+     * changed" and an API adjustment with a 500. Inside a caller's transaction it just runs: the caller owns the retry.
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private static function transactional(callable $fn): mixed {
+        $db = Db::get();
+        if (Db::transactionOpen($db)) return $fn();
+        for ($attempt = 1; ; $attempt++) {
+            $db->beginTransaction();
+            try {
+                $result = $fn();
+                $db->commit();
+                return $result;
+            } catch (Throwable $e) {
+                if ($db->inTransaction()) $db->rollBack();
+                if ($attempt >= 3 || !Db::deadlocked($e)) throw $e;
+                usleep(random_int(5_000, 40_000) * $attempt);
+            }
         }
     }
 
@@ -526,10 +535,7 @@ class Warehouse {
         $warehouse = self::defaultWarehouse();
         if (!$warehouse) return false;
         $defaultId = (int)$warehouse['id'];
-        $db = Db::get();
-        $ownsTransaction = !$db->inTransaction();
-        if ($ownsTransaction) $db->beginTransaction();
-        try {
+        self::transactional(static function () use ($sku, $available, $movementType, $referenceType, $basis, $defaultId): void {
             // Locked: an import or API change committed meanwhile is part of $before, not overwritten by it.
             $before = self::totalAvailable($sku, true);
             if ($basis !== null && self::ledgered($sku)) $available = max(0, $before + $available - $basis);
@@ -551,11 +557,7 @@ class Warehouse {
                 if ($remaining > 0) throw new RuntimeException("Adjustment would violate reservations for SKU: {$sku}");
                 self::recordAdjusted($sku, $before, $movementType, $referenceType);
             }
-            if ($ownsTransaction) $db->commit();
-        } catch (Throwable $e) {
-            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
-            throw $e;
-        }
+        });
         return true;
     }
 
