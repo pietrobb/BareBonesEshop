@@ -132,7 +132,7 @@ try {
     $o = $r11mOrder('paid', 'gopay', '32' . random_int(10000000, 99999999));
     PaymentService::requestRefund($o, 600, 'r11m_partial_' . $o);
     $r11mReported($o, 'EUR', 'payment_gopay_r11m_part_' . $o);
-    assert_equals(['refund_pending', 0], $r11mState($o), 'R11 refund.reported: "refunded" does not settle a request smaller than the remaining balance');
+    assert_equals(['refunded', 1000], $r11mState($o), 'R11 refund.reported: "refunded" with a smaller request in flight settles it and books the rest as refunded outside the shop (R53)');
 } catch (Throwable $e) { $r11mFail('refunds', $e); }
 
 // Snapshot fingerprint: canonical (key order is irrelevant at every level), covers every value.

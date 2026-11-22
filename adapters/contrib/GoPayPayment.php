@@ -12,8 +12,8 @@
  * Refunds started from the shop go through the refund worker. GoPay's refund call has no
  * idempotency key, so this adapter does not offer IdempotentRefundAdapter (credit-note refunds
  * that require one fail closed). The refund history carries no refund id to
- * deduplicate against, so a REFUNDED notification only completes the shop's own refund in
- * flight when that refund is the whole remaining balance; PARTIALLY_REFUNDED (no refunded
+ * deduplicate against. REFUNDED means the whole payment is refunded: it completes the shop's own
+ * refund in flight and books the rest (if any) as refunded outside the shop; PARTIALLY_REFUNDED (no refunded
  * amount) and any other refund report are logged and move no money in the shop.
  *
  * Config (env var wins over config.php):

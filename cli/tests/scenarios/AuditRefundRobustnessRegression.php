@@ -179,7 +179,9 @@ try {
     $pdo->prepare("UPDATE orders SET order_number = 'ARR-GOPAY-3000000203' WHERE id = ?")->execute([$r2c]);
     PaymentService::requestRefund($r2c, 300, 'arr_2c_request');
     PaymentService::handlePulledNotification(['id' => '3000000203'], $arrGoPay, 'gopay');
-    assert_equals(['delivered', 'refund_pending', 0], $arrState($r2c), 'ARR 2: REFUNDED does not complete a refund smaller than the remaining balance');
+    // R53 (low): REFUNDED is the whole payment refunded (in the dashboard): the smaller refund in flight is settled and the
+    // rest booked as refunded outside the shop (was: it stayed refund_pending with the rest counted as paid).
+    assert_equals(['delivered', 'refunded', 1000], $arrState($r2c), 'ARR 2: REFUNDED with a smaller refund in flight settles it and books the rest (R53)');
 
     // Manual refund completed: offline money (no provider refund API), audited, partial then full.
     $r2m = $arrOrder('cancelled', 'paid', 'manual', '');
