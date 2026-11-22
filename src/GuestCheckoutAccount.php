@@ -65,7 +65,9 @@ class GuestCheckoutAccount {
             'claim_url' => $baseUrl . '/?page=account-claim&token=' . $token, 'valid_hours' => (string)intdiv(self::LINK_TTL, 3600),
         ]);
         // R26: a link only written to the log reached nobody: the page does not say it was sent.
-        return ($mail['status'] ?? '') === 'sent' && !MailService::logged($mail) ? 'sent' : 'failed';
+        // R54 (review round 19, UX): 'logged' when the log provider only wrote it down, so the page does not say sending failed.
+        if (MailService::logged($mail)) return 'logged';
+        return ($mail['status'] ?? '') === 'sent' ? 'sent' : 'failed';
     }
 
     /** The order an unused link of this store was sent for, while the link is fresh and the e-mail still has no account. */

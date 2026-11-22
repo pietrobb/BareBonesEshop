@@ -88,7 +88,9 @@ class BackInStock {
             'shop_name' => (string)Template::branding()['name'],
         ]);
         // R26: a confirmation only written to the log reached nobody: the page does not say it was sent.
-        return ($mail['status'] ?? '') === 'sent' && !MailService::logged($mail) ? 'confirm_sent' : 'failed';
+        // R54 (review round 19, UX): 'logged' when the log provider only wrote it down, so the page does not say sending failed.
+        if (MailService::logged($mail)) return 'logged';
+        return ($mail['status'] ?? '') === 'sent' ? 'confirm_sent' : 'failed';
     }
 
     /** The unconfirmed request of the current store behind an e-mailed link that is still valid, with the product name; else null. */

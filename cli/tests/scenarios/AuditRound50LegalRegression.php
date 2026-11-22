@@ -100,6 +100,9 @@ try {
         $check($sent === 1 && str_contains($html($merchant), (string)($rma['rma_number'] ?? '-')) && str_contains($html($merchant), 'R50L Wooden chair')
             && !str_contains($html($merchant), 'R50L E-book') && str_contains($html($merchant), 'R50L stolička nesedí'),
             'the merchant e-mail names the return, only its line and the reason (sent ' . $sent . ')');
+        // R54 (review round 19, UX): delivered two days ago, so within the withdrawal period — as the customer was told.
+        $check(!str_contains($html($merchant), 'schváľte alebo zamietnite') && str_contains($html($merchant), 'nepotrebuje vaše schválenie'),
+            'R54: the merchant is not asked to approve a return within the withdrawal period (was: "Žiadosť schváľte alebo zamietnite")');
     });
 
     // --- Order confirmation -------------------------------------------------------------------------------------------

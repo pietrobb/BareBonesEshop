@@ -168,7 +168,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   PDF. The order-done page says the confirmation will be e-mailed, not that it was sent (the worker sends it).
   `php cli/setup.php doctor` shows a fix only under a WARN or FAIL. The admin checklist names the worker cron check,
   the manual payment change names the status in the admin's language ("Zaplatené", not 'paid'), Slovak and Czech
-  translate "Low stock" and "Stock", and `catalog.json` and `cli/seed.php` have Czech and German attribute texts.
+  translate "Low stock" and "Stock", `catalog.json` has Czech and German attribute texts and `cli/seed.php` Czech and
+  German category names.
   `deploy/bbe-step.sh` prints its usage on missing or wrong arguments. README: the quick start says to run
   `setup.php install` as the checkout's owner (`chmod -R go-w .` for a tree root owns), the e-mail log is in
   `<private_runtime_dir>/logs/`, and "Root" lists the two accounts as numbered steps with the crontab of the web
@@ -612,6 +613,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   registered name is "Ing. Ján Novák - STAVBY" for the holder "Ján Novák" and the other way round (was: refused and VAT
   charged). E-mail addresses, IBANs and phone numbers in free log text (a `detail` or `error` value) are masked like
   those under a named key.
+- **Smaller usability and documentation fixes (review round 54, lows).** `cli/seed.php` prices the sample products in
+  the currency of the default catalog's store (was: always `eur`, so a CZK shop showed every one as unavailable). The
+  doctor accepts `operations.worker_cron` as the whole crontab line README asks for, not only its five schedule fields,
+  and a value that is neither says so (was: "configured"). The merchant's mail about a return within the withdrawal
+  period says it needs no approval, as the customer was told (was: always "approve or reject"). Admin → Stores and
+  seller edits the store's `domains` (one per line, used by no other store), and README describes them. The admin's
+  orders show the payment method in the admin's language (was: the customer's, "Kreditkarte" in a Slovak admin). The
+  CSV import help names the catalog's currency and the `vat_class` column, and the generated import templates have
+  it. With the log mail provider the withdrawal, complaint, account, back-in-stock and e-mail verification pages say
+  the mail was only recorded in the log (was: that it failed). The web installer in English starts without a seller
+  country and in a language other than Slovak without the Slovak store name; `setup.php install` sets the admin's
+  language to the main store's. The Czech, Polish and Hungarian terms print the seller's VAT ID, and README lists the
+  installer's fields.
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

@@ -102,6 +102,14 @@ final class DataOverrides
         // The example's sample stores (cz, pl, hu, de, us with made-up sellers) come in hidden: no storefront until the
         // merchant enters the seller and publishes the store in Admin → Stores and seller.
         if ($source !== $legacy) $content = (string)preg_replace('/"sample"\s*:\s*true\b/', '"public": false', $content);
+        // R54 (review round 19, UX): the system language (the admin's) is the main store's, as the web installer sets it
+        // (was: the example's "en" over a Slovak shop after `setup.php install`).
+        $mainLocale = (string)($data['stores'][(string)($data['default_store'] ?? 'default')]['default_locale'] ?? '');
+        if ($source !== $legacy && preg_match('/^[a-z]{2}$/', $mainLocale) === 1 && ($data['default_locale'] ?? null) !== $mainLocale) {
+            $relocalized = (string)preg_replace('/"default_locale"\s*:\s*"[^"]*"/', '"default_locale": "' . $mainLocale . '"', $content, 1);
+            $check = json_decode($relocalized, true);
+            if (is_array($check) && ($check['default_locale'] ?? null) === $mainLocale) $content = $relocalized;
+        }
         if (!self::ensureDir($dir) || !self::atomicWrite($target, $content, 0640)) throw new RuntimeException("Cannot write {$target}");
         if ($source !== $legacy) return ['path' => $target, 'action' => 'created from ' . self::STORES_EXAMPLE];
         // A read-only code directory (Docker) keeps the old file; the data directory copy takes precedence anyway.

@@ -68,8 +68,12 @@ $r53iDefaults = WebInstaller::defaults($r53iPlain, ['HTTP_HOST' => 'shop.example
 assert_equals(['CZ', 'Europe/Prague', 'cs', 'czk'], [$r53iDefaults['country'], $r53iDefaults['timezone'], $r53iDefaults['shop_locale'], $r53iDefaults['currency']],
     'R53 install: the Czech installer prefills a Czech shop, not the Slovak example store');
 $r53iEnglish = WebInstaller::defaults($r53iPlain, ['HTTP_HOST' => 'shop.example.com', 'SCRIPT_NAME' => '/install.php'], 'en');
-assert_equals([(string)($r53iExample['stores']['default']['legal']['country'] ?? ''), (string)$r53iExample['stores']['default']['default_locale']],
-    [$r53iEnglish['country'], $r53iEnglish['shop_locale']], 'R53 install: in English the installer keeps the example store');
+// R54 (review round 19): English no longer keeps the Slovak example store (SK, EUR, Slovak); no country is prefilled.
+assert_equals(['', 'UTC', 'en', 'eur', ''], [$r53iEnglish['country'], $r53iEnglish['timezone'], $r53iEnglish['shop_locale'], $r53iEnglish['currency'], $r53iEnglish['shop_name']],
+    'R54 install: in English the installer prefills an English shop without a country or the Slovak example name');
+assert_equals('', $r53iDefaults['shop_name'], 'R54 install: the Czech installer does not prefill the Slovak example name "Slovenský obchod"');
+$r53iSlovak = WebInstaller::defaults($r53iPlain, ['HTTP_HOST' => 'shop.example.sk', 'SCRIPT_NAME' => '/install.php'], 'sk');
+assert_equals((string)$r53iExample['stores']['default']['name'], $r53iSlovak['shop_name'], 'R54 install: the Slovak installer keeps the example store name');
 
 $r53iMissing = [];
 foreach (array_keys(WebInstaller::LOCALES) as $r53iLang) {

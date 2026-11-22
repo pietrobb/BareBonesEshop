@@ -105,7 +105,15 @@ foreach ($categoryTree as $rootSlug => [$_, $children]) {
     }
 }
 
-$prodStmt = $db->prepare("INSERT INTO products (sku, slug, product_type, name, category_id, price, compare_price, currency, stock, status, images, summary, attrs, tags, filter_tags, weight_g, translations) VALUES (:sku, :slug, :type, :name, :cat, :price, :cp, 'eur', :stock, 'active', :images, :summary, :attrs, :tags, :ftags, :weight, :trans)");
+// R54 (review round 19, UX): in the currency of the store the default catalog belongs to (was: always 'eur', so a CZK
+// shop listed every seeded product as unavailable).
+$seedCurrency = Warehouse::catalogCurrency('default');
+$sampleRates = ['eur' => 1.0, 'czk' => 25.0, 'pln' => 4.3, 'huf' => 395.0, 'usd' => 1.08];
+// Prices are drawn in euro cents and shown in the catalog's currency at the sample rate (whole units where it has none).
+$seedRate = $sampleRates[$seedCurrency] ?? 1.0;
+$seedWhole = (int)((StoreSettings::load()['currencies'][$seedCurrency]['decimals'] ?? 2)) === 0;
+$seedPrice = static fn(int $eurCents): int => $seedWhole ? (int)round($eurCents * $seedRate / 100) * 100 : (int)round($eurCents * $seedRate);
+$prodStmt = $db->prepare("INSERT INTO products (sku, slug, product_type, name, category_id, price, compare_price, currency, stock, status, images, summary, attrs, tags, filter_tags, weight_g, translations) VALUES (:sku, :slug, :type, :name, :cat, :price, :cp, " . $db->quote($seedCurrency) . ", :stock, 'active', :images, :summary, :attrs, :tags, :ftags, :weight, :trans)");
 $attrStmt = $db->prepare("INSERT INTO product_attrs (product_id, attr_name, attr_value, numeric_val) VALUES (:pid, :name, :val, :num)");
 // Checkout reserves from the warehouse ledger, not products.stock: book every product's stock on the default warehouse.
 $warehouse = Warehouse::defaultWarehouse();
@@ -133,7 +141,7 @@ for ($i = 1; $i <= $count; $i++) {
     $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad($i, 6, '0', STR_PAD_LEFT);
     $slug = Import::slugify($name); // lower-cases before stripping, so "Premium" stays "premium"
 
-    $price = rand(299, 99900);
+    $price = $seedPrice(rand(299, 99900));
     $comparePrice = (rand(0, 4) === 0) ? (int)($price * rand(110, 150) / 100) : null;
     $stock = rand(0, 500);
     $weight = rand(50, 15000);
@@ -207,7 +215,6 @@ Import::recountCategories($db);
 // R23: a sample store in another currency than its catalog (cz CZK, pl PLN, hu HUF, us USD on the EUR catalog) sells
 // only what one of its price lists prices in its currency (Pricing::soldInStore): without these lists they sold nothing.
 echo "\nPricing the sample stores in their currencies...\n";
-$sampleRates = ['eur' => 1.0, 'czk' => 25.0, 'pln' => 4.3, 'huf' => 395.0, 'usd' => 1.08];
 $storesCfg = StoreSettings::load();
 foreach ((array)($storesCfg['stores'] ?? []) as $storeId => $store) {
     if (!is_array($store)) continue;

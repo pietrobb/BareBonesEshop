@@ -25,7 +25,7 @@ function renderWithdrawal(): string {
                 $result = Withdrawal::submit($order, $values['name'], $itemIds, $values['reason']);
                 $refusal = $result['error'];
                 if ($result['ok']) {
-                    $view['done'] = $t($result['confirmation'] === 'sent' ? 'withdrawal.done' : 'withdrawal.done_no_mail',
+                    $view['done'] = $t(match ($result['confirmation']) { 'sent' => 'withdrawal.done', 'logged' => 'withdrawal.done_logged', default => 'withdrawal.done_no_mail' },
                         ['at' => ShopTime::stamp($result['received_at']), 'email' => (string)$order['customer_email'], 'order' => (string)$order['order_number']]);
                     $view['show_form'] = false;
                 }

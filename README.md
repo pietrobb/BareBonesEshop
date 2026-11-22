@@ -45,7 +45,8 @@ git clone --recurse-submodules <repository-url> shop && cd shop
 #    (cz, pl, hu, de, us) come in hidden and the card method stays off until
 #    Stripe keys are set. Doctor then reports one FAIL, stores.legal.default:
 #    the seller is still the example company. Enter yours in Admin → Stores
-#    and seller (company, address, e-mail, IBAN) before taking orders.
+#    and seller (company, address, e-mail, IBAN) before taking orders. The admin
+#    opens in the main store's language (Slovak in the example stores.json).
 #    Run it as the account that owns the checkout, not as root. As root (a
 #    container, a fresh server) every step runs as the checkout's owner, and a
 #    checkout root owns is refused while group or others can write a file in
@@ -101,9 +102,12 @@ database and the eBook files.
 3. Open the shop's address. The first visit goes to `install.php` and writes `install-key.php` into the
    shop folder: open that file with your FTP client or the hosting file manager and copy the key into
    the form, so nobody else who finds the address can install the shop (over the web the file shows
-   nothing). The form asks for the shop name, the seller (name, address, e-mail, VAT ID), payments
-   (cash on delivery, bank transfer with your IBAN, optionally Stripe test keys), the private data
-   folder and the administrator. The installer first requests `src/` and the starter data from its own
+   nothing). The form asks for the shop (name, address, time zone, shop language, currency), the seller
+   (name, address, country, e-mail, VAT ID, company number and tax number), payments (cash on delivery,
+   bank transfer with your IBAN and BIC, optionally Stripe test keys), sending e-mail (SMTP, optional), the
+   private data folder and the administrator. Opened in Czech, Polish, Hungarian, German or Spanish it
+   prefills that country's time zone and currency; the shop language also becomes the admin's language.
+   The installer first requests `src/` and the starter data from its own
    server: if they are served (no `mod_rewrite` or `AllowOverride`), it refuses until the host is fixed.
 4. The installer writes `config.php` with fresh secrets, creates `bareboneseshop-private/` in the
    private data folder (default: `bareboneseshop-data/<shop folder>` next to a recognised web root
@@ -274,6 +278,13 @@ from a Slovak address, and the SEPA EPC code (GiroCode) for EUR from any other c
 without an address follows the store's `legal.country`). Other currencies get the text only. The
 pages show it as an inline SVG, the order confirmation and the payment reminder attach it as a PNG,
 and an invoice still to pay by transfer prints it beside the IBAN.
+
+**Store addresses.** A store is reached by its host first, then by its URL prefix: a request for one of the
+store's `domains` (Admin → Stores and seller → *Store domains*, owner only; `domains` in `stores.json`) is served
+by that store, any other request by the store whose `url_prefix` (e.g. `/cz`) starts the path, and the rest by
+the default store. Its absolute links (e-mails, feeds, payment returns) use its first domain on the scheme of
+`app_url`. Point the domain's DNS and the web server's virtual host at the same shop folder and give it a TLS
+certificate; a domain may belong to one store only.
 
 ---
 

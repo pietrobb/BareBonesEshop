@@ -1,7 +1,9 @@
 <!doctype html>
 <html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
 <h2>Solicitud de devolución</h2>
-<p>{{customer_name}} ({{customer_email}}) solicita devolver productos del pedido <strong>{{order_number}}</strong> (devolución {{rma_number}}). Apruebe o rechace la solicitud en la administración.</p>
+<p>{{customer_name}} ({{customer_email}}) solicita devolver productos del pedido <strong>{{order_number}}</strong> (devolución {{rma_number}}).</p>
+{{#if needs_approval}}<p>Apruebe o rechace la solicitud en la administración.</p>{{/if}}
+{{#if within_withdrawal}}<p>La devolución está dentro del plazo de desistimiento y no requiere aprobación: envíe al cliente las instrucciones de devolución.</p>{{/if}}
 <ul>
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>

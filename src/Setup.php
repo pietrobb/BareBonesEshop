@@ -845,7 +845,15 @@ class Setup
         $add(is_file($root . '/cli/worker.php') ? 'pass' : 'fail', 'operations.worker', 'Worker entry point ' . (is_file($root . '/cli/worker.php') ? 'present' : 'missing'), 'Restore cli/worker.php.');
         $cron = trim((string)($config['operations']['worker_cron'] ?? ''));
         $webWorker = WebWorker::enabled($config);
-        $add(preg_match('/^(?:\S+\s+){4}\S+$/', $cron) || $webWorker ? 'pass' : 'warn', 'operations.cron', $cron !== '' ? 'Worker cron declaration configured.' : ($webWorker ? 'No cron: page requests run the worker (operations.web_worker).' : 'Worker cron declaration not recorded.'), 'Set operations.worker_cron and install the equivalent scheduler entry.');
+        // R54 (review round 19, UX): the schedule alone or the whole crontab line README asks to record (was: only the
+        // five fields passed, and a line that failed was still reported as "configured").
+        $cronValid = preg_match('/^(?:@(?:yearly|annually|monthly|weekly|daily|hourly|reboot)|(?:[\d*\/,\-A-Za-z?]+\s+){4}[\d*\/,\-A-Za-z?]+)(?:\s+\S.*)?$/', $cron) === 1;
+        $add($cronValid || $webWorker ? 'pass' : 'warn', 'operations.cron', match (true) {
+            $cronValid => 'Worker cron declaration recorded.',
+            $webWorker => 'No cron: page requests run the worker (operations.web_worker).',
+            $cron !== '' => 'operations.worker_cron is neither a cron schedule nor a crontab line.',
+            default => 'Worker cron declaration not recorded.',
+        }, 'Set operations.worker_cron to the worker\'s crontab line (or its schedule) and install that entry in the scheduler.');
         $backupPath = $root . '/config/backup.json';
         $backup = is_file($backupPath) ? json_decode((string)file_get_contents($backupPath), true) : null;
         $add(is_array($backup) && !empty($backup['enabled']) ? 'pass' : 'fail', 'operations.backup', 'Backup configuration ' . (is_array($backup) && !empty($backup['enabled']) ? 'enabled' : 'missing or disabled'), 'Enable config/backup.json and run a restore probe.');

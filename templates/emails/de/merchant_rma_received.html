@@ -1,7 +1,9 @@
 <!doctype html>
 <html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
 <h2>Rücksendeanfrage</h2>
-<p>{{customer_name}} ({{customer_email}}) möchte Ware aus der Bestellung <strong>{{order_number}}</strong> zurücksenden (Rücksendung {{rma_number}}). Genehmigen oder lehnen Sie die Anfrage im Admin ab.</p>
+<p>{{customer_name}} ({{customer_email}}) möchte Ware aus der Bestellung <strong>{{order_number}}</strong> zurücksenden (Rücksendung {{rma_number}}).</p>
+{{#if needs_approval}}<p>Genehmigen oder lehnen Sie die Anfrage im Admin ab.</p>{{/if}}
+{{#if within_withdrawal}}<p>Die Rücksendung liegt in der Widerrufsfrist und braucht keine Genehmigung: Senden Sie dem Kunden die Rücksendeanweisungen.</p>{{/if}}
 <ul>
 {{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
 </ul>
