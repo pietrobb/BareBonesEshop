@@ -392,6 +392,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261121120000_sales_daily` (round 52): adds the daily sales totals of the reports (`sales_daily`,
   `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`) and builds them from the existing orders:
   about 30 s at 500 000 orders over two years on MySQL (a large shop runs `apply` in its maintenance window, as above).
+- **Migration** `20261122090000_sales_monthly_products` (review round 53): adds `sales_monthly_products`, the monthly
+  product sums of the built days, and fills it from `sales_daily_products` (seconds).
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -488,7 +490,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   that row's transaction commits after a row with a higher id was already seen (on MySQL, a long transaction): then, as
   for orders deleted or changed by hand, run `php cli/sales-daily.php --rebuild`. 400 000 logged changes are read per
   hour, not per row (they exhausted the memory), and a report with one of the tables missing sums the orders instead of
-  failing. A store whose timezone changes is built again for its new calendar.
+  failing. A store whose timezone changes is built again for its new calendar. The best sellers read whole months
+  from monthly sums and are ranked in the database, with the products sold today: at 500 000 orders on MySQL (128 MB
+  buffer pool) 365 days take 0.06 s with 3 000 products and 0.2 s with 20 000 (before 0.23 s and 0.43 s), 0.9 s with
+  50 000 products all selling evenly (before 1.2 s; review round 53 measured 3.1 s).
   The Reports page offers 365 days.
 - **A return's "Refunded" counts money refunded outside it once, and not a refund still in flight (review round 51,
   open from round 49).** Money refunded outside the return with its own credit note was taken off the return's credit

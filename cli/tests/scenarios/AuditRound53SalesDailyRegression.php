@@ -61,6 +61,10 @@ $r53sCheck = static function (string $label) use ($r53sStore): void {
 };
 try {
     if ($r53sCreated) (require TEST_CLI_DIR . '/../migrations/20261121120000_sales_daily.php')->up($r53sDb, Db::isSqlite());
+    $r53sMonthlyCreated = !Db::tableExists('sales_monthly_products', $r53sDb);
+    if ($r53sMonthlyCreated && is_file(TEST_CLI_DIR . '/../migrations/20261122090000_sales_monthly_products.php')) {
+        (require TEST_CLI_DIR . '/../migrations/20261122090000_sales_monthly_products.php')->up($r53sDb, Db::isSqlite());
+    }
     $r53sCategory = (int)$r53sDb->query('SELECT MIN(id) FROM categories')->fetchColumn();
     $r53sProduct = $r53sDb->prepare("INSERT INTO products (id, category_id, name, slug, sku, price, store_id) VALUES (?, ?, ?, ?, ?, 1000, ?)");
     foreach ([953101 => 'R53S-A', 953102 => 'R53S-B'] as $r53sId => $r53sSku) $r53sProduct->execute([$r53sId, $r53sCategory, $r53sSku, strtolower($r53sSku), $r53sSku, $r53sStore]);
@@ -98,6 +102,34 @@ try {
     assert_equals([SalesDaily::openDay(), [SalesDaily::JOB]], [$r53sState('built_until:' . $r53sStore), $r53sBackend->pushed],
         'R53 daily sales: the worker job builds the rest and does not queue itself again once done');
     $r53sCheck('after the worker job');
+    }
+
+    // 1b. The whole months of a 365-day report are read from the monthly sums; the best sellers are ranked in SQL, and a
+    // product sold today (summed from the orders) still climbs above the built leader.
+    $r53sMonthly = Db::tableExists('sales_monthly_products', $r53sDb);
+    assert_true($r53sMonthly, 'R53 daily sales: the monthly product sums exist');
+    if ($r53sMonthly) {
+        $r53sMonths = $r53sDb->prepare("SELECT COUNT(DISTINCT month) FROM sales_monthly_products WHERE store_id = ? AND currency = 'xts'");
+        $r53sMonths->execute([$r53sStore]);
+        assert_true((int)$r53sMonths->fetchColumn() >= 6, 'R53 daily sales: the built months are summed per product');
+        $r53sLeader = SalesReport::topProducts($r53sStore, SalesReport::sinceUtc(365), 1)['xts'][0]['product_id'] ?? null;
+        $r53sOther = $r53sLeader === 953101 ? 953102 : 953101;
+        $r53sOrder->execute(['R53S-' . bin2hex(random_bytes(5)), 900000, 900000, $r53sStore, gmdate('Y-m-d H:i:s')]);
+        $r53sOrders[] = $r53sToday = (int)$r53sDb->lastInsertId();
+        $r53sLine->execute([$r53sToday, $r53sOther, 'R53S', 'R53S', 1, 900000, 900000]);
+        // The ranked read returns the built leader and, because today's order can lift it above the leader, the other
+        // product's built figures too.
+        $r53sBuilt = SalesDaily::productGroups($r53sStore, SalesDaily::dayOf(SalesReport::sinceUtc(365)), SalesDaily::builtUntil($r53sStore), 1);
+        assert_equals([$r53sLeader], array_column(array_filter($r53sBuilt, static fn(array $g): bool => $g['currency'] === 'xts'), 'product_id'),
+            'R53 daily sales: the ranked read returns only the leader of the built days');
+        $r53sTop = SalesReport::topProducts($r53sStore, SalesReport::sinceUtc(365), 1)['xts'] ?? [];
+        $r53sRaw = SalesReport::productGroups($r53sStore, SalesReport::sinceUtc(365));
+        $r53sOtherRevenue = (int)round($r53sRaw['xts|' . $r53sOther . '|0']['revenue'] ?? 0);
+        assert_equals([$r53sOther, $r53sOtherRevenue], [$r53sTop[0]['product_id'] ?? null, $r53sTop[0]['revenue'] ?? null],
+            "R53 daily sales: a product sold today overtakes the built leader {$r53sLeader} in the top 1, with all of its revenue");
+        $r53sCheck('with a large order today');
+    }
+    if ($r53sBounded) {
 
     // 2. Old orders changed on three days: one batch per request, the days not built yet read from the orders.
     foreach ([30, 90, 150] as $r53sDay) {
@@ -186,9 +218,13 @@ PHP);
         foreach ($GLOBALS as $r53sValue) {
             if ($r53sValue instanceof PDOStatement) $r53sValue->closeCursor();
         }
-        foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes', 'sales_daily_state'] as $r53sTable) $r53sDb->exec("DROP TABLE IF EXISTS {$r53sTable}");
+        foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes', 'sales_daily_state', 'sales_monthly_products'] as $r53sTable) $r53sDb->exec("DROP TABLE IF EXISTS {$r53sTable}");
         Db::forgetSchema($r53sDb);
     } elseif (Db::tableExists('sales_daily_state', $r53sDb)) {
+        if (!empty($r53sMonthlyCreated)) {
+            $r53sDb->exec('DROP TABLE IF EXISTS sales_monthly_products');
+            Db::forgetSchema($r53sDb);
+        }
         SalesDaily::refreshAll(true);
     }
 }

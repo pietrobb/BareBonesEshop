@@ -245,9 +245,14 @@ final class SalesReport {
     public static function topProducts(string $storeId, string $sinceUtc, int $limit = 10): array {
         $db = Db::get();
         [$built, $raw] = self::parts($storeId, $sinceUtc);
-        $groups = $built !== null ? SalesDaily::productGroups($storeId, $built[0], $built[1]) : [];
-        foreach ($raw as [$rawSince, $rawUntil]) {
-            foreach (self::productGroups($storeId, $rawSince, $rawUntil) as $key => $group) {
+        $rawGroups = array_map(static fn(array $part): array => self::productGroups($storeId, $part[0], $part[1]), $raw);
+        // R53: ranked in SQL (a year of a large catalogue took 3.1 s here): the $limit best sellers of the built days and
+        // every built group of a product sold in the days summed from the orders, which may climb above them. Any other
+        // group's revenue is what was built, below those $limit (what the orders add is never negative).
+        $alsoProducts = array_values(array_unique(array_merge([], ...array_map(static fn(array $part): array => array_column($part, 'product_id'), $rawGroups))));
+        $groups = $built !== null ? SalesDaily::productGroups($storeId, $built[0], $built[1], max(0, $limit), $alsoProducts) : [];
+        foreach ($rawGroups as $part) {
+            foreach ($part as $key => $group) {
                 $groups[$key] = isset($groups[$key]) ? [
                     'variant_id' => $groups[$key]['variant_id'] ?? $group['variant_id'],
                     'line_id' => max($groups[$key]['line_id'], $group['line_id']),

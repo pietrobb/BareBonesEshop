@@ -45,6 +45,11 @@ final class SalesDaily {
         return true;
     }
 
+    /** R53: the monthly product sums (the 20261121120000 migration builds the days before their table exists). */
+    private static function monthly(PDO $db): bool {
+        return Db::tableExists('sales_monthly_products', $db);
+    }
+
     /** Local calendar day (PHP's default timezone) of a UTC timestamp. */
     public static function dayOf(string $utc): string {
         return (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->setTimezone(self::zone())->format('Y-m-d');
@@ -154,7 +159,7 @@ final class SalesDaily {
         $default = $configs[$stores['default_store'] ?? ''] ?? (reset($configs) ?: []);
         if ($rebuild) {
             self::transaction($db, static function () use ($db): void {
-                foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes'] as $table) $db->exec("DELETE FROM {$table}");
+                foreach (self::builtTables($db) as $table) $db->exec("DELETE FROM {$table}");
                 $db->exec("DELETE FROM sales_daily_state WHERE state_key LIKE 'timezone:%' OR state_key LIKE 'built_until:%'");
             });
         }
@@ -189,15 +194,54 @@ final class SalesDaily {
     }
 
     /**
-     * SalesReport::productGroups() of [$fromDay, $toDay), from the built days.
+     * SalesReport::productGroups() of [$fromDay, $toDay), from the built days: whole months from sales_monthly_products,
+     * the days at both ends from sales_daily_products. With $limit, per currency, every group of the $alsoProducts and
+     * the $limit best sellers of the others (by revenue, quantity, product, variant, as topProducts() ranks them),
+     * ranked in SQL: a large catalogue has tens of thousands of groups a year.
+     * @param list<int> $alsoProducts
      * @return array<string, array{currency:string, product_id:int, variant_id:?int, line_id:int, quantity:int, revenue:float}>
      */
-    public static function productGroups(string $storeId, string $fromDay, string $toDay): array {
-        $stmt = Db::get()->prepare('SELECT currency, product_id, variant_key, MAX(variant_id) AS variant_id, MAX(line_id) AS line_id, SUM(quantity) AS quantity, SUM(revenue) AS revenue
-            FROM sales_daily_products WHERE store_id = ? AND day >= ? AND day < ? GROUP BY currency, product_id, variant_key');
-        $stmt->execute([$storeId, $fromDay, $toDay]);
+    public static function productGroups(string $storeId, string $fromDay, string $toDay, ?int $limit = null, array $alsoProducts = []): array {
+        $db = Db::get();
+        // Whole months [$firstMonth, $endMonth): every one of their days is before $toDay, so built.
+        $firstMonth = substr($fromDay, 8, 2) === '01' ? substr($fromDay, 0, 7) : self::nextMonth(substr($fromDay, 0, 7));
+        $endMonth = substr($toDay, 0, 7);
+        if (!self::monthly($db) || $firstMonth >= $endMonth) {
+            $firstMonth = $endMonth = '';
+            $days = [$fromDay, $toDay, '', ''];
+        } else {
+            $days = [$fromDay, $firstMonth . '-01', $endMonth . '-01', $toDay];
+        }
+        // Grouped per part: the union then holds groups, not every product row of the year.
+        $sum = 'SELECT currency, product_id, variant_key, MAX(variant_id) AS variant_id, MAX(line_id) AS line_id, SUM(quantity) AS quantity, SUM(revenue) AS revenue';
+        $sql = "{$sum} FROM sales_daily_products WHERE store_id = :ds AND ((day >= :d1 AND day < :d2) OR (day >= :d3 AND day < :d4)) GROUP BY currency, product_id, variant_key";
+        $params = [':ds' => $storeId, ':d1' => $days[0], ':d2' => $days[1], ':d3' => $days[2], ':d4' => $days[3]];
+        if ($firstMonth !== '') {
+            // Named placeholders: MySQL's native prepares bind each one once, so the month part gets its own.
+            $sql .= " UNION ALL {$sum} FROM sales_monthly_products WHERE store_id = :ms AND month >= :m1 AND month < :m2 GROUP BY currency, product_id, variant_key";
+            $params += [':ms' => $storeId, ':m1' => $firstMonth, ':m2' => $endMonth];
+        }
+        $sql = "{$sum} FROM ({$sql}) x GROUP BY currency, product_id, variant_key";
+        $also = array_fill_keys(array_map('intval', $alsoProducts), true);
+        if ($limit !== null) {
+            // The $alsoProducts first (integers, inlined), then the best sellers; read until $limit others per currency.
+            $sql .= ' ORDER BY currency, ' . ($also !== [] ? 'CASE WHEN product_id IN (' . implode(',', array_keys($also)) . ') THEN 0 ELSE 1 END, ' : '')
+                . 'SUM(revenue) DESC, SUM(quantity) DESC, product_id, variant_key';
+        }
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $rows = [];
+        $others = [];
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            if ($limit !== null && !isset($also[(int)$row['product_id']])) {
+                $currency = (string)$row['currency'];
+                if (($others[$currency] ?? 0) >= $limit) continue;
+                $others[$currency] = ($others[$currency] ?? 0) + 1;
+            }
+            $rows[] = $row;
+        }
         $groups = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             $groups[$row['currency'] . '|' . $row['product_id'] . '|' . $row['variant_key']] = [
                 'currency' => (string)$row['currency'],
                 'product_id' => (int)$row['product_id'],
@@ -228,10 +272,35 @@ final class SalesDaily {
         $db->prepare('INSERT INTO sales_daily_state (state_key, value) VALUES (?, ?) ' . Db::upsertClause('state_key', 'value = excluded.value', 'value = VALUES(value)'))->execute([$name, $value]);
     }
 
+    /** @return list<string> the tables of built figures and logged changes */
+    private static function builtTables(PDO $db): array {
+        return array_merge(['sales_daily', 'sales_daily_products', 'sales_daily_changes'], self::monthly($db) ? ['sales_monthly_products'] : []);
+    }
+
+    /**
+     * Sum the built days of $storeId's $months ('Y-m') into sales_monthly_products (in the caller's transaction).
+     * @param list<string> $months
+     */
+    private static function rollup(PDO $db, string $storeId, array $months): void {
+        if (!self::monthly($db)) return;
+        $delete = $db->prepare('DELETE FROM sales_monthly_products WHERE store_id = ? AND month = ?');
+        $insert = $db->prepare('INSERT INTO sales_monthly_products (store_id, month, currency, product_id, variant_key, variant_id, line_id, quantity, revenue)
+            SELECT store_id, ?, currency, product_id, variant_key, MAX(variant_id), MAX(line_id), SUM(quantity), SUM(revenue)
+            FROM sales_daily_products WHERE store_id = ? AND day >= ? AND day < ? GROUP BY store_id, currency, product_id, variant_key');
+        foreach (array_unique($months) as $month) {
+            $delete->execute([$storeId, $month]);
+            $insert->execute([$month, $storeId, $month . '-01', self::nextMonth($month) . '-01']);
+        }
+    }
+
+    private static function nextMonth(string $month): string {
+        return (new DateTimeImmutable($month . '-01'))->modify('+1 month')->format('Y-m');
+    }
+
     /** Forget $storeId's built days (for PHP's current timezone): the next refresh() builds them all again. */
     private static function reset(PDO $db, string $storeId): void {
         self::transaction($db, static function () use ($db, $storeId): void {
-            foreach (['sales_daily', 'sales_daily_products', 'sales_daily_changes'] as $table) $db->prepare("DELETE FROM {$table} WHERE store_id = ?")->execute([$storeId]);
+            foreach (self::builtTables($db) as $table) $db->prepare("DELETE FROM {$table} WHERE store_id = ?")->execute([$storeId]);
             self::setState($db, 'timezone:' . $storeId, date_default_timezone_get());
             self::setState($db, 'built_until:' . $storeId, '');
         });
@@ -343,11 +412,14 @@ final class SalesDaily {
         $count = count($days);
         while ($built < $count && ($built === 0 || $deadline === null || microtime(true) < $deadline)) {
             self::transaction($db, static function () use ($db, $storeId, $days, $count, $deadline, $until, &$built): void {
+                $months = [];
                 $start = $built;
                 do {
                     self::build($db, $storeId, $days[$built]);
+                    $months[] = substr($days[$built], 0, 7);
                     $built++;
                 } while ($built < $count && $built - $start < 31 && ($deadline === null || microtime(true) < $deadline));
+                self::rollup($db, $storeId, $months);
                 // A day without orders between two built ones has no rows: every day before the next one is built.
                 if ($until !== null) self::setState($db, 'built_until:' . $storeId, $built < $count ? $days[$built] : $until);
             });
