@@ -204,6 +204,10 @@ class Import {
     }
 
     private static function importRow(array $data, PDO $db, bool $createOnly = false): void {
+        // R54 (review round 19, low): names and summaries without bidi controls (Security::plainText()).
+        foreach ($data as $key => $value) {
+            if (is_string($value) && preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) $data[$key] = Security::plainText($value);
+        }
         // Required fields
         $sku  = trim($data['sku'] ?? '');
         $name = trim($data['name'] ?? '');

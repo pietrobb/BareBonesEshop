@@ -252,7 +252,7 @@ class ApiV1 {
             foreach ($allowed as $field) {
                 if (!array_key_exists($field, $body)) continue;
                 $set[] = "{$field}=:_{$field}";
-                $params[":_{$field}"] = $field === 'name' ? trim((string)$body[$field]) : $body[$field];
+                $params[":_{$field}"] = $field === 'name' ? trim(Security::plainText((string)$body[$field])) : $body[$field];
             }
             $set[] = 'updated_at=' . Db::now();
             Db::get()->prepare('UPDATE products SET ' . implode(', ', $set) . ' WHERE id=:id AND store_id=:store')->execute($params);
@@ -328,7 +328,7 @@ class ApiV1 {
                 return self::error(422, 'unknown_category', 'category_id is not a category of this catalog') + ['store' => false];
             }
             $db = Db::get();
-            $row = ['sku' => $sku, 'name' => trim($body['name']), 'price' => $body['price'], 'status' => $status,
+            $row = ['sku' => $sku, 'name' => trim(Security::plainText($body['name'])), 'price' => $body['price'], 'status' => $status,
                 'weight_g' => $body['weight_g'] ?? 0, 'stock' => (string)($body['stock'] ?? 0)];
             if ($comparePrice !== null) $row['compare_price'] = $comparePrice;
             if ($slug !== null) $row['slug'] = $slug;

@@ -36,6 +36,7 @@ while (microtime(true) < $end && !is_file($dir . "/stop")) {
         foreach ($processes as $process) proc_close($process);
     };
 };
+$r27Trees = [];
 try {
     if (PHP_OS_FAMILY !== 'Windows') {
         // 1. atomicWrite: a link to the victim swapped in for each temporary file leaves the victim's mode alone (R26: 0666
@@ -114,10 +115,14 @@ try {
     if ($r27AsRoot && PHP_OS_FAMILY !== 'Windows') {
         // A copy of a step (cli/update.php with cli/cli-only.php) whose src/ the web user replaced: the planted autoload
         // reports who runs it.
-        $r27App = static function (string $name, int $uid, int $gid, int $mode): string {
-            $app = sys_get_temp_dir() . '/r27-app-' . $name . '-' . getmypid();
+        // R54 (review round 19): a random name, made exclusively, each removed in the finally below (was: named after the
+        // PID and never removed, so a run whose PID matched a stale tree failed with "mkdir(): File exists").
+        $r27App = static function (string $name, int $uid, int $gid, int $mode) use (&$r27Trees): string {
+            $app = sys_get_temp_dir() . '/r27-app-' . $name . '-' . getmypid() . '-' . bin2hex(random_bytes(4));
+            if (!mkdir($app, 0755)) throw new RuntimeException("Cannot create {$app}");
+            $r27Trees[] = $app;
             foreach (['', '/cli', '/src'] as $dir) {
-                @mkdir($app . $dir, 0755, true);
+                if ($dir !== '') mkdir($app . $dir, 0755);
                 chown($app . $dir, $uid);
                 chgrp($app . $dir, $gid);
                 chmod($app . $dir, $dir === '' ? $mode : 0755);
@@ -165,10 +170,8 @@ exit(0);');
         //     installer writes it), a file of adapters/, a symbolic link out of the tree — is refused before root
         //     loads it (was: only the app root, src/ and cli/ were checked, and root ran the web user's config.php).
         $r27CfgReport = sys_get_temp_dir() . '/r27cfg-' . getmypid() . '.json';
-        $r27Planted = [];
         foreach (['config', 'adapter', 'link'] as $r27Kind) {
             $r27Tree = $r27App('planted-' . $r27Kind, 0, 0, 0755);
-            $r27Planted[] = $r27Tree;
             $r27Php = '<?php file_put_contents(' . var_export($r27CfgReport, true) . ', json_encode(["euid" => posix_geteuid()])); return [];';
             if ($r27Kind === 'config') {
                 file_put_contents($r27Tree . '/config.php', $r27Php);
@@ -180,8 +183,8 @@ exit(0);');
                 chown($r27Tree . '/adapters/PaymentAdapter.php', 65534);
             } else {
                 $r27Outside = $r27Tree . '-outside';
-                $r27Planted[] = $r27Outside;
                 mkdir($r27Outside, 0755);
+                $r27Trees[] = $r27Outside;
                 chown($r27Outside, 65534);
                 symlink($r27Outside, $r27Tree . '/vendor');
             }
@@ -214,13 +217,18 @@ exit(0);');
             filegroup($r27GroupedLock . MaintenanceMode::HELD_SUFFIX), fileperms($r27GroupedLock . MaintenanceMode::HELD_SUFFIX) & 0777],
             'R27 step lock (root): the claim file without flock belongs to the app root\'s group, 0660');
         MaintenanceMode::unclaim($r27Grouped);
-        foreach ([$r27Foreign, $r27Shared, $r27Own, $r27Grouped, ...$r27Planted] as $r27Tree) {
-            if (function_exists('updateTestRemoveTree')) updateTestRemoveTree($r27Tree);
-        }
     }
 } catch (Throwable $e) {
     assert_true(false, 'R27 root (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
     MaintenanceMode::unclaim($r27Dir . '/shop');
-    if (function_exists('updateTestRemoveTree')) updateTestRemoveTree($r27Dir);
+    // Links are removed, not followed (the planted vendor link points at a tree of its own).
+    $r27Remove = static function (string $path) use (&$r27Remove): void {
+        if (is_link($path) || is_file($path)) { @unlink($path); return; }
+        if (!is_dir($path)) return;
+        foreach (scandir($path) ?: [] as $entry) if ($entry !== '.' && $entry !== '..') $r27Remove($path . '/' . $entry);
+        @rmdir($path);
+    };
+    foreach ([...$r27Trees, $r27Dir] as $r27Tree) $r27Remove($r27Tree);
+    assert_true(array_filter([...$r27Trees, $r27Dir], 'file_exists') === [], 'R27: the trees of the test are removed (was: left in the temp directory)');
 }

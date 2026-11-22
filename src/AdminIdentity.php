@@ -248,10 +248,15 @@ class AdminIdentity {
      */
     public static function reauthenticate(int $accountId, string $password, string $sessionId): string {
         $limit = 'admin_reauth_' . $accountId . ($sessionId === '' ? '' : '_' . substr(hash('sha256', $sessionId), 0, 32));
-        if (!Security::rateLimitAllows($limit, 5, 900, false, true)) return 'locked';
+        // R54 (review round 19, low): the attempt takes its slot atomically before the check; check-then-record let
+        // concurrent requests of one session all pass a count of four (it held only through the file-session lock).
+        $hit = Security::rateLimitReserve($limit, 5, 900, false, true);
+        if ($hit === null) return 'locked';
         $account = self::accountById($accountId);
-        if ($account && password_verify($password, (string)($account['password_hash'] ?? ''))) return 'ok';
-        Security::rateLimitRecord($limit, false);
+        if ($account && password_verify($password, (string)($account['password_hash'] ?? ''))) {
+            Security::rateLimitRelease($hit);
+            return 'ok';
+        }
         Logger::warning('admin.reauth_failed', ['account_id' => $accountId]);
         if (Security::rateLimitAllows($limit, 5, 900, false, true)) return 'invalid';
         AuditLog::log('admin_account', $accountId, null, null, 'Re-authentication locked after repeated wrong passwords; session ended');

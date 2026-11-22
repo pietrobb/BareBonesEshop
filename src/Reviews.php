@@ -33,10 +33,10 @@ class Reviews {
         if ($productId <= 0) return 'invalid_product';
         $rating = (int)($data['rating'] ?? 0);
         if ($rating < self::MIN_RATING || $rating > self::MAX_RATING) return 'invalid_rating';
-        $body = trim((string)($data['body'] ?? ''));
+        $body = trim(Security::plainText((string)($data['body'] ?? '')));
         if (mb_strlen($body) < self::MIN_BODY) return 'body_too_short';
         if (mb_strlen($body) > self::MAX_BODY) return 'body_too_long';
-        $authorName = trim((string)($data['author_name'] ?? ''));
+        $authorName = trim(Security::plainText((string)($data['author_name'] ?? '')));
         if ($authorName === '') return 'author_required';
         if (mb_strlen($authorName) > self::MAX_AUTHOR) return 'author_too_long';
         return null;
@@ -51,11 +51,12 @@ class Reviews {
         $error = self::validationError($productId, $data);
         if ($error !== null) return [false, null, $error];
         $rating = (int)$data['rating'];
-        $body = trim((string)$data['body']);
-        $title = mb_substr(trim((string)($data['title'] ?? '')), 0, self::MAX_TITLE);
+        // R54 (review round 19, low): without bidi controls, as the checkout fields (Security::plainText()).
+        $body = trim(Security::plainText((string)$data['body']));
+        $title = mb_substr(trim(Security::plainText((string)($data['title'] ?? ''))), 0, self::MAX_TITLE);
         $customerId = isset($data['customer_id']) ? (int)$data['customer_id'] : 0;
         $customerId = $customerId > 0 ? $customerId : null;
-        $authorName = trim((string)$data['author_name']);
+        $authorName = trim(Security::plainText((string)$data['author_name']));
 
         $db = Db::get();
         $ins = $db->prepare(

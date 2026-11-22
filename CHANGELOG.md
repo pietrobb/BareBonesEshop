@@ -603,6 +603,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   quarters of an hour (Kathmandu, Newfoundland) counts the orders of its day's first minutes on that day in the trend;
   the rows inserted without a logged change are read 5 000 ids at a time, and the migration that adds the totals builds
   for 3 seconds and leaves the rest to the worker job (was: every day at once, 10 s at 200 000 orders on MariaDB).
+- **Smaller security and privacy fixes (review round 54, lows).** Reviews, product names sent through API v1, returns,
+  complaints and the names and summaries of a CSV import are stored without Unicode bidi controls (U+202E and the
+  others the checkout already removed), so a name can no longer read reversed in the admin and in e-mails. An invoice
+  or credit note number whose PDF was set aside before (only `*.superseded-*.pdf` is left) or whose place holds a link
+  is skipped like one whose PDF is there (was: issued again). Wrong passwords at the admin re-authentication take their
+  attempt atomically, so concurrent requests of one session cannot try more than five. VIES accepts a sole trader whose
+  registered name is "Ing. Ján Novák - STAVBY" for the holder "Ján Novák" and the other way round (was: refused and VAT
+  charged). E-mail addresses, IBANs and phone numbers in free log text (a `detail` or `error` value) are masked like
+  those under a named key.
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

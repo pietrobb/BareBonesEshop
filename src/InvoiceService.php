@@ -1781,9 +1781,15 @@ final class InvoiceService
             return false;
         }
         if (!is_dir($yearDir)) return false;
-        $name = rawurlencode($number) . '.pdf';
+        $base = rawurlencode($number);
+        $name = $base . '.pdf';
         foreach (scandir($yearDir) ?: [] as $month) {
-            if ($month === '.' || $month === '..' || !is_file($yearDir . DIRECTORY_SEPARATOR . $month . DIRECTORY_SEPARATOR . $name)) continue;
+            if ($month === '.' || $month === '..') continue;
+            $monthDir = $yearDir . DIRECTORY_SEPARATOR . $month;
+            // R54 (review round 19): also a link in its place (writePdf() sets it aside too) and a PDF of the number set
+            // aside before (was: only a regular <number>.pdf counted, so the number was issued again and the file renamed).
+            $file = $monthDir . DIRECTORY_SEPARATOR . $name;
+            if (!is_file($file) && !is_link($file) && (glob($monthDir . DIRECTORY_SEPARATOR . $base . '.superseded-*.pdf') ?: []) === []) continue;
             Logger::warning('invoice_number_skipped', ['number' => $number, 'pdf' => "{$year}/{$month}/{$name}",
                 'reason' => 'its PDF is already in invoice_storage_dir (restored older database?)']);
             return true;

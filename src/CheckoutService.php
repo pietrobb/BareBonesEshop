@@ -15,9 +15,7 @@ class CheckoutService {
      */
     public static function withoutBidiControls(array $input): array {
         foreach ([...array_keys(self::FIELD_MAX_LENGTH), 'note', 'vat_id', 'ico', 'dic'] as $field) {
-            if (is_string($input[$field] ?? null) && mb_check_encoding($input[$field], 'UTF-8')) {
-                $input[$field] = (string)preg_replace('/[\x{0080}-\x{009F}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]+/u', '', $input[$field]);
-            }
+            if (is_string($input[$field] ?? null)) $input[$field] = Security::plainText($input[$field]);
         }
         return $input;
     }

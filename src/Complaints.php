@@ -51,7 +51,9 @@ class Complaints {
         $fail = static fn(string $error): array => ['ok' => false, 'error' => $error, 'id' => 0, 'number' => '', 'received_at' => '', 'confirmation' => ''];
         $refusal = self::refusal($order);
         if ($refusal !== null) return $fail($refusal);
-        $defect = mb_substr(trim($defect), 0, 4000);
+        // R54 (review round 19, low): without bidi controls (Security::plainText()).
+        $defect = mb_substr(trim(Security::plainText($defect)), 0, 4000);
+        $name = Security::plainText($name);
         if ($defect === '') return $fail('defect_required');
         if (!in_array($remedy, self::REMEDIES, true)) return $fail('remedy_required');
         $line = null;
