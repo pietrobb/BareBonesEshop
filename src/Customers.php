@@ -862,7 +862,7 @@ class Customers {
      * invoice of one company cannot together pass the limit (the payment offer checked each against the old total).
      * SQLite orders are already serialised by the checkout lock file.
      */
-    public static function assertInvoiceCredit(int $customerId, int $amount): void {
+    public static function assertInvoiceCredit(int $customerId, int $amount, int $lockedCompany = 0): void {
         $profile = self::commerceProfile($customerId);
         $companyId = (int)($profile['company_id'] ?? 0);
         if ($companyId <= 0) return;
@@ -871,9 +871,32 @@ class Customers {
         $stmt = $db->prepare('SELECT credit_limit FROM companies WHERE id = :id AND store_id = :store' . ($locking ? ' FOR UPDATE' : ''));
         $stmt->execute([':id' => $companyId, ':store' => StoreContext::current()->id()]);
         $creditLimit = max(0, (int)$stmt->fetchColumn());
-        if ($creditLimit > 0 && self::companyOpenTotal($companyId, $locking) + $amount > $creditLimit) {
+        // Locked before the transaction's first plain read (lockInvoiceCredit()), its snapshot holds every order committed
+        // under the company's lock: a plain read suffices. Otherwise the orders are read with a locking read.
+        if ($creditLimit > 0 && self::companyOpenTotal($companyId, $locking && $lockedCompany !== $companyId) + $amount > $creditLimit) {
             throw new CreditLimitExceededException("Order exceeds the credit limit of company {$companyId}");
         }
+    }
+
+    /** The company whose credit an order on invoice of this customer uses (0: none). A plain read, before the order transaction. */
+    public static function invoiceCreditCompany(int $customerId): int {
+        if (Db::isSqlite()) return 0;
+        $stmt = Db::get()->prepare('SELECT company_id FROM customers WHERE id = :id AND store_id = :store');
+        $stmt->execute([':id' => $customerId, ':store' => StoreContext::current()->id()]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * R53 (review round 53, low): the company's row lock taken as the first statement of an order transaction on MySQL,
+     * before any plain read. All the company's orders on invoice are placed under that lock, and InnoDB
+     * takes a transaction's snapshot at its first plain read, so assertInvoiceCredit(..., $companyId) reads the open total
+     * without a locking read. That locking read (idx_ord_customer, REPEATABLE READ) also locked the index gaps next to the
+     * members' orders: a guest order or one of the newest customer waited for the B2B order to commit.
+     */
+    public static function lockInvoiceCredit(int $companyId): void {
+        if ($companyId <= 0 || Db::isSqlite()) return;
+        Db::get()->prepare('SELECT id FROM companies WHERE id = :id AND store_id = :store FOR UPDATE')
+            ->execute([':id' => $companyId, ':store' => StoreContext::current()->id()]);
     }
 
     /**

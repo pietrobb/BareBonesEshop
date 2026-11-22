@@ -394,6 +394,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   about 30 s at 500 000 orders over two years on MySQL (a large shop runs `apply` in its maintenance window, as above).
 - **Migration** `20261122090000_sales_monthly_products` (review round 53): adds `sales_monthly_products`, the monthly
   product sums of the built days, and fills it from `sales_daily_products` (seconds).
+- **Migration** `20261113175958_analyze_order_tables` (review round 53): MySQL only, `ANALYZE TABLE` of `orders`,
+  `order_items` and `invoices` before the OSS backfills (seconds). Dated before them, it also runs once on a shop that
+  has them already, where it only refreshes the statistics.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -541,6 +544,14 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   dashboard while a smaller refund of the shop is in flight settles that refund and books the rest as refunded outside
   the shop (was: only logged, the payment stayed `refund_pending`). A stock edit in the admin, a CSV or API adjustment
   and a goods receipt that MySQL picks as a deadlock victim run again, up to three times (was: "stock not changed").
+- **MySQL locking and update speed (review round 53, low).** A B2B order on invoice takes its company's row lock as
+  the first statement of its transaction and reads the members' open orders without a locking read, so it no longer
+  locks the gaps of the orders' customer index: a guest order or one of the newest customer is placed at once instead
+  of waiting for the B2B order to commit (two orders of one company still see each other). The checkout's lookup of
+  open orders without a stored OSS net reads only the configured stores, on `idx_orders_store_oss_net` (was: every
+  order, 0,1-0,8 s per checkout at 500 000 orders). The update from 2.1.2 refreshes the MySQL statistics of orders,
+  their lines and invoices before the OSS backfills: after a bulk import or a restore they counted the order lines as
+  none, and the backfills scanned them once per invoice and open order (100 000 orders: 107 s, was 6-16 min).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as
