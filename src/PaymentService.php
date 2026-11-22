@@ -1778,7 +1778,7 @@ class PaymentService {
                     $key = $eventKey . ':credit:' . (int)$row['id'];
                     self::bookRefundWithin($current, $provider, $refundId, (int)$row['amount'], $eventType, $key,
                         $payload + ['settles_refund_request' => (string)$row['idempotency_key']], (int)$row['id'], $reference !== '' ? $reference : $key);
-                    $current = Orders::byId($orderId) ?? $current;
+                    $current = Orders::byId((int)$current['id']) ?? $current; // re-read: the booking changed its payment state
                 }
                 $rest = $balance - $inFlight - $besideItems;
                 if ($rest > 0) self::bookRefundWithin($current, $provider, '', $rest, $eventType, $eventKey . ':outside', $payload);

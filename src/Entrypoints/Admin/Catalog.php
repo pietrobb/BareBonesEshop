@@ -885,8 +885,7 @@ function handleProductSave(): void {
 
     $data = [
         ':sku'           => $form['sku'],
-        // R55 (review round 20, low): name and summary without bidi controls and directional marks, as the import and API.
-        ':name'          => Security::typedText($form['name']),
+        ':name'          => Security::typedText($form['name']), // R55 (low): no bidi controls/directional marks, as import and API
         ':product_type'  => $form['product_type'] !== '' ? $form['product_type'] : 'simple',
         // R50 (high 3): the VAT rate class (books, food, ... are taxed at a reduced rate); BBF checked it against the list.
         ':vat_class'     => $form['vat_class'] !== '' ? strtolower($form['vat_class']) : (string)($old['vat_class'] ?? 'standard'),

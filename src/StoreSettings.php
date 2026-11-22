@@ -303,7 +303,8 @@ final class StoreSettings {
             try {
                 $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], 4);
                 if (($health['service'] ?? '') !== 'bareboneseshop') $unreachable[] = $domain;
-            } catch (Throwable) {
+            } catch (Throwable $e) {
+                Logger::exception('store_settings.domain_probe_failed', $e, ['domain' => $domain]);
                 $unreachable[] = $domain;
             }
         }

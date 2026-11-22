@@ -894,8 +894,10 @@ final class InvoiceService
         if ($itemRates === [] && ($order = Orders::byId($orderId)) && in_array((string)$order['status'], ['cancelled', 'refunded'], true)) {
             $unshipped = self::unshippedParts($order);
         }
-        $ofUnshipped = false;
-        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited, array $source) use ($orderId, $amount, $itemRates, $unshipped, &$ofUnshipped): array {
+        /** @var ArrayObject<string, bool> $split whether the split below credited the unshipped goods (read by the snapshot callback) */
+        $split = new ArrayObject(['unshipped' => false]);
+        return self::rateCredit($orderId, $refundKey, 'refund', $reason, static function (array $rates, int $uncredited, array $source) use ($orderId, $amount, $itemRates, $unshipped, $split): array {
+            $ofUnshipped = $unshipped !== null;
             if ($unshipped !== null) $itemRates = self::unshippedUncredited($source, $unshipped);
             $own = [];
             foreach ($itemRates as $key => $part) {
@@ -906,7 +908,7 @@ final class InvoiceService
             }
             if ($own !== [] && $amount <= array_sum(array_column($own, 'gross'))) {
                 $rates = $own;
-                $ofUnshipped = $unshipped !== null;
+                $split['unshipped'] = $ofUnshipped;
             }
             if ($amount > $uncredited) {
                 // R16: money that came in after a cancellation credit note (a cancelled purchase on invoice paid all the same) goes
@@ -940,7 +942,7 @@ final class InvoiceService
                 $parts[$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
             }
             return $parts;
-        }, static function () use (&$ofUnshipped): array { return $ofUnshipped ? ['split' => 'unshipped'] : []; });
+        }, static function () use ($split): array { return $split['unshipped'] ? ['split' => 'unshipped'] : []; });
     }
 
     /**

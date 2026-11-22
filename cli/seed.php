@@ -184,7 +184,7 @@ for ($i = 1; $i <= $count; $i++) {
     $catId = $cat['id'];
 
     $adj = $adjectives[array_rand($adjectives)];
-    $nounList = $nouns[$rootSlug] ?? $nouns['dom-zahrada'];
+    $nounList = $nouns[$rootSlug];
     $nounWords = $seedWords(...$nounList[array_rand($nounList)]);
     $brand = $brands[array_rand($brands)];
     $color = $colors[array_rand($colors)];

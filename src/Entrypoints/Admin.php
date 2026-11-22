@@ -71,13 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handlePost($page, $action);
 }
 
-// Binary downloads leave before the HTML layout starts, otherwise the PDF is wrapped in admin markup.
-if ($page === 'invoice_pdf' || $page === 'delivery_note') {
-    $page === 'invoice_pdf' ? pageInvoicePdf() : pageDeliveryNotes();
-    exit;
-}
-if ($page === 'import' && $action === 'template') {
-    handleImportTemplate();
+// Downloads (PDF, CSV import template) leave before the HTML layout starts, otherwise they are wrapped in admin markup.
+if ($page === 'invoice_pdf' || $page === 'delivery_note' || ($page === 'import' && $action === 'template')) {
+    match ($page) { 'invoice_pdf' => pageInvoicePdf(), 'delivery_note' => pageDeliveryNotes(), default => handleImportTemplate() };
     exit;
 }
 

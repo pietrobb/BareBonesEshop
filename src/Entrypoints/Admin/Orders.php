@@ -933,8 +933,7 @@ function handleOrderEmailResend(): void {
     try {
         $res = MailService::resend($logId, $orderId);
         if (MailService::logged($res)) {
-            // R25: not "sent again". R55 (review round 20, UX): an information, not an error (the shop sends by its log adapter).
-            setFlash('info', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']]));
+            setFlash('info', I18n::format('admin.order.msg.email_logged', ['adapter' => $res['adapter']])); // R25: not "sent again"; R55 UX: info, not an error
         } elseif (($res['status'] ?? '') === 'sent') {
             setFlash('ok', I18n::format('admin.order.msg.email_resent', ['adapter' => $res['adapter'] ?? '']));
         } else {
