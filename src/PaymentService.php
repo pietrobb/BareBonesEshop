@@ -526,14 +526,26 @@ class PaymentService {
      * their key or their provider refund id): that money is already promised back, so no new refund may claim it.
      */
     public static function unbookedCreditAmount(int $orderId): int {
-        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(r.amount), 0) FROM order_refunds r
-            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND NOT EXISTS (
-                SELECT 1 FROM payment_transactions t
-                WHERE t.order_id = r.order_id AND t.store_id = r.store_id
-                  AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded')
-                  AND (t.idempotency_key = r.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))");
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(r.amount), 0) FROM order_refunds r WHERE " . self::UNBOOKED_CREDIT);
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
         return max(0, (int)$stmt->fetchColumn());
+    }
+
+    private const UNBOOKED_CREDIT = "r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND NOT EXISTS (
+        SELECT 1 FROM payment_transactions t
+        WHERE t.order_id = r.order_id AND t.store_id = r.store_id
+          AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded')
+          AND (t.idempotency_key = r.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))";
+
+    /**
+     * The pending credit notes of unbookedCreditAmount(), oldest first.
+     *
+     * @return list<array{id:mixed, amount:mixed, idempotency_key:mixed, payment_reference:mixed}>
+     */
+    private static function pendingItemRefunds(int $orderId): array {
+        $stmt = Db::get()->prepare("SELECT r.id, r.amount, r.idempotency_key, r.payment_reference FROM order_refunds r WHERE " . self::UNBOOKED_CREDIT . ' ORDER BY r.id');
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        return array_values($stmt->fetchAll(\PDO::FETCH_ASSOC));
     }
 
     /** What a new refund (admin request, cancellation, manual refund) may still claim: the balance less pending credit notes. */
@@ -1742,22 +1754,35 @@ class PaymentService {
                 $after = $settled ? Orders::byId($orderId) : null;
                 return $after !== null && self::bookRefundWithin($after, $provider, '', $balance - $inFlight, $eventType, $eventKey . ':outside', $payload);
             }
-            // R39 (low): an item refund (credit note) GoPay/ThePay accepted without a refund id that refunds the whole
-            // remaining balance: the payment reported refunded settles it. Was: it stayed pending for good.
-            $item = $request === null ? self::unconfirmedItemRefund($order) : null;
-            if ($item !== null && strtolower((string)($data['state'] ?? '')) === 'refunded' && $currency === $orderCurrency
-                && $item['amount'] === self::refundableBalance($orderId) && self::unbookedCreditAmount($orderId) === $item['amount']) {
-                return self::bookRefundWithin($order, $provider, '', $item['amount'], $eventType, $eventKey,
-                    $payload + ['settles_refund_request' => $item['request_key']], $item['refund_id'], $eventKey);
-            }
-            // R51 (review round 51, low): the whole payment refunded in the GoPay/ThePay dashboard, no refund of the shop
-            // in flight: the remaining balance is booked as a refund outside the shop (like a Stripe dashboard refund), so
-            // the order closes. Was: only logged, the order stayed paid. A partial refund there names no amount and stays a
-            // log entry.
+            // R39 (low): item refunds (credit notes) still pending when the payment is reported refunded are settled by it.
+            // R51 (low): the whole payment refunded in the GoPay/ThePay dashboard, no refund of the shop in flight: the
+            // remaining balance is booked as a refund outside the shop (like a Stripe dashboard refund), so the order closes.
+            // R54 (review round 19, medium 3): every pending credit note is a refund in flight, whatever its job's state
+            // (queued, being sent, accepted with or without a refund id). Was: one not yet accepted was ignored, the whole
+            // balance booked outside the shop and its credit note then declined (money booked with no credit note), and an
+            // accepted one smaller than the balance ignored the event for good (the payment stayed paid). Each is booked
+            // with its credit note; only the rest is a refund outside the shop. A partial refund there names no amount and
+            // stays a log entry.
             $balance = self::refundableBalance($orderId);
-            if ($request === null && $item === null && strtolower((string)($data['state'] ?? '')) === 'refunded' && $currency === $orderCurrency
-                && in_array($from, ['paid', 'partially_refunded', 'disputed'], true) && $balance > 0) {
-                return self::bookRefundWithin($order, $provider, '', $balance, $eventType, $eventKey, $payload);
+            $pending = $request === null ? self::pendingItemRefunds($orderId) : [];
+            $inFlightItems = array_sum(array_map(static fn(array $row): int => (int)$row['amount'], $pending));
+            if ($request === null && strtolower((string)($data['state'] ?? '')) === 'refunded' && $currency === $orderCurrency && $balance > 0
+                && ($pending !== [] ? $inFlightItems <= $balance && !self::refundsByHand($order) : in_array($from, ['paid', 'partially_refunded', 'disputed'], true))) {
+                $rest = $balance - $inFlightItems;
+                $booked = false;
+                $current = $order;
+                foreach ($pending as $i => $row) {
+                    $reference = (string)($row['payment_reference'] ?? '');
+                    // A reference that is the payment's own id (GoPay names no refund ids) identifies no refund.
+                    $refundId = $reference === (string)($order['payment_id'] ?? '') ? '' : $reference;
+                    // The last one settles under the event's key when nothing else is booked (R39), so a redelivery finds it.
+                    $key = $rest === 0 && $i === array_key_last($pending) ? $eventKey : $eventKey . ':credit:' . (int)$row['id'];
+                    $booked = self::bookRefundWithin($current, $provider, $refundId, (int)$row['amount'], $eventType, $key,
+                        $payload + ['settles_refund_request' => (string)$row['idempotency_key']], (int)$row['id'], $reference !== '' ? $reference : $key) || $booked;
+                    $current = Orders::byId($orderId) ?? $current;
+                }
+                if ($rest > 0) $booked = self::bookRefundWithin($current, $provider, '', $rest, $eventType, $eventKey, $payload) || $booked;
+                return $booked;
             }
             self::recordEvent($orderId, $eventType, 'ignored', (int)($data['amount'] ?? 0), $currency ?: $orderCurrency, $eventKey,
                 $payload + ['payment_status' => $from], $provider, (string)($data['provider_ref'] ?? ''));
@@ -2177,7 +2202,7 @@ class PaymentService {
      * whose money all went back (a full manual refund, a refund in the PayU/GoPay dashboard) is cancelled first; it
      * stayed paid and could still be shipped.
      */
-    private static function closeRefundedOrder(int $orderId, string $note): void {
+    public static function closeRefundedOrder(int $orderId, string $note): void {
         $order = Orders::byId($orderId);
         if ($order && (string)($order['payment_status'] ?? '') === 'refunded' && in_array((string)$order['status'], ['paid', 'processing'], true)) {
             OrderWorkflow::transition($orderId, 'cancelled', $note);
