@@ -381,6 +381,7 @@ final class WebInstaller
                 if ($mailError !== null) throw new RuntimeException("Cannot save the e-mail settings ({$mailError})");
             }
             $stores = self::configureStore($root, $config, $v);
+            self::priceInStoreCurrency(Db::get(), $stores);
             self::configurePayments(Db::get(), $stores, $v);
             $default = (string)($stores['default_store'] ?? 'default');
             $owner = AdminIdentity::createWithStore($v['admin_user'], $v['admin_password'], 'owner', true, $default, true);
@@ -681,6 +682,50 @@ final class WebInstaller
             if (Setup::legalIdentityProblems($other['legal']) !== []) $stores['stores'][$otherId]['public'] = false;
         }
         return $stores;
+    }
+
+    /** R53: provider scopes the migrations price in another currency (20261022230000_currency_price_lists). */
+    public const PRICE_LISTS = ['czk' => 'cz', 'huf' => 'hu', 'pln' => 'pl'];
+    /** The provider tables of a scope, parents first. */
+    private const PROVIDER_TABLES = ['shipping_zones', 'shipping_zone_countries', 'shipping_methods', 'shipping_rates',
+        'payment_methods', 'payment_method_countries', 'payment_method_shipping'];
+
+    /**
+     * R53 (review round 53, medium 3): a shop installed in CZK kept the default store's shipping and payment prices in
+     * euro cents (GLS 2.99 Kč, free shipping from 50 Kč, cash on delivery 3 Kč). The default store's provider scope now
+     * takes the methods, rates, zones and fees the migrations priced in its currency (the sample CZ, HU and PL stores'
+     * lists) in place of its EUR ones. A currency without such a list (USD) keeps the EUR amounts; the setup doctor warns
+     * when a store's shipping prices do not fit its currency.
+     */
+    public static function priceInStoreCurrency(PDO $db, array $stores): void
+    {
+        $id = (string)($stores['default_store'] ?? 'default');
+        $store = is_array($stores['stores'][$id] ?? null) ? $stores['stores'][$id] : [];
+        $scope = (string)($store['provider_scope'] ?? $id);
+        $source = self::PRICE_LISTS[strtolower((string)($store['currency'] ?? 'eur'))] ?? null;
+        if ($source === null || $source === $scope) return;
+        $has = $db->prepare('SELECT COUNT(*) FROM shipping_methods WHERE store_id = ?');
+        $has->execute([$source]);
+        if ((int)$has->fetchColumn() === 0) return;
+        $db->beginTransaction();
+        try {
+            foreach (array_reverse(self::PROVIDER_TABLES) as $table) $db->prepare("DELETE FROM {$table} WHERE store_id = ?")->execute([$scope]);
+            foreach (self::PROVIDER_TABLES as $table) {
+                $rows = $db->prepare("SELECT * FROM {$table} WHERE store_id = ?");
+                $rows->execute([$source]);
+                foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    unset($row['id']);
+                    $row['store_id'] = $scope;
+                    $columns = array_keys($row);
+                    $db->prepare("INSERT INTO {$table} (" . implode(', ', $columns) . ') VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ')')
+                        ->execute(array_values($row));
+                }
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     /**
