@@ -552,6 +552,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   order, 0,1-0,8 s per checkout at 500 000 orders). The update from 2.1.2 refreshes the MySQL statistics of orders,
   their lines and invoices before the OSS backfills: after a bulk import or a restore they counted the order lines as
   none, and the backfills scanned them once per invoice and open order (100 000 orders: 107 s, was 6-16 min).
+- **Backups, logs and GDPR (review round 53, low).** `cli/restore.php --quiet` only shortens the output: without
+  `--yes` it still asks before it creates a missing MySQL `db_name` or restores (was: created and restored unasked).
+  `--list` prints the full SHA-256 of each backup and, on a `files=` line, its files archive's path, size and SHA-256
+  (was: 12 characters and `files=yes`), the values `sha256sum` prints, as the runbook's own SHA-256 list needs them.
+  Whether a restored source is one file or a directory comes from this shop's configuration, not from the backup's
+  metadata (a forged "directory" turned a missing GDPR salt file into a directory). Copies set aside in
+  `<backup_recovery_dir>/from-backup/` are created 0600 in 0700 directories (was: the mode of the directory above).
+  `cli/gdpr-gc.php --dry-run`, the command `cli/staging-preflight.php` recommends, works (was: "Unknown arg"); with
+  `--apply` it is refused. The PHP error log (e.g. "Checkout failed") masks IBANs, international phone numbers, the
+  values MySQL quotes (`Duplicate entry '…'`) and the value after a name, phone, IBAN or address key of a gateway
+  message. A GDPR erasure also deletes the `/api/v1` replay responses that name one of the person's order numbers
+  (a response stored before the order's e-mail was corrected named the old address only).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

@@ -209,10 +209,39 @@ class Logger
      */
     public static function phpLog(string $line): void
     {
-        $masked = (string)preg_replace('/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '[email]', self::maskSecrets($line));
+        $masked = self::maskPersonal((string)preg_replace('/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '[email]', self::maskSecrets($line)));
         error_log((string)preg_replace_callback('/[\x00-\x1F\x7F]/', static fn(array $m): string => match ($m[0]) {
             "\n" => '\n', "\r" => '\r', "\t" => '\t', default => sprintf('\x%02X', ord($m[0])),
         }, $masked));
+    }
+
+    /** Keys whose value is a customer's name, phone, bank account or address (first_name, "customerPhone", iban, street…). */
+    private const PERSONAL_KEY = '(?<![a-z])(?:(?:first|last|full|given|family|customer|billing|shipping|company|account|holder|recipient|contact|card)[_-]?)?(?:name|phone|telephone|mobile|tel|iban|street|address|city|zip|postcode|postal[_-]?code)(?:[_-]?(?:line)?\d)?(?![a-z])';
+
+    /**
+     * R53 (review round 53, low): the personal data a database or payment gateway puts into an exception message — an
+     * IBAN (mod-97 valid), an international phone number (+/00, 8–15 digits), the value MySQL quotes (Duplicate entry
+     * '…', Incorrect string value: '…') and the value after a name/phone/IBAN/address key — never reaches the PHP log.
+     */
+    private static function maskPersonal(string $text): string
+    {
+        $text = (string)preg_replace_callback('/\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]){11,30}\b/', static function (array $m): string {
+            $iban = str_replace(' ', '', $m[0]);
+            $digits = '';
+            foreach (str_split(substr($iban, 4) . substr($iban, 0, 4)) as $c) $digits .= ctype_digit($c) ? $c : (string)(ord($c) - 55);
+            $rest = 0;
+            foreach (str_split($digits, 7) as $chunk) $rest = (int)(($rest . $chunk)) % 97;
+            return $rest === 1 ? '[iban]' : $m[0];
+        }, $text);
+        $text = (string)preg_replace('/((?:Duplicate entry|(?:Truncated )?Incorrect [\w ]+ value:?)\s*)\'(?:[^\'\\\\]|\\\\.|\'\')*\'/i', "\$1'[value]'", $text);
+        $key = self::PERSONAL_KEY;
+        $text = (string)preg_replace('/(' . $key . '(?:\\\\*["\'\]])?\s*(?:=>|[=:](?!>))\s*)(\\\\*["\'])(?!\[personal)(?:(?!\2).)*\2/i', '$1$2[personal]$2', $text);
+        // Unquoted, the value runs on over further capitalised words (Ján Novák) or digit groups (0905 123 456).
+        $text = (string)preg_replace('/((?i:' . $key . ')\s*(?:=>|[=:](?!>))\s*)(?![\["\'\\\\])[^\s"\'&,;}]+(?:[ \t]+(?:[A-Z\x80-\xFF][^\s"\'&,;}|]*|\+?\d[\d-]*(?![^\s"\'&,;}|])))*/', '$1[personal]', $text);
+        return (string)preg_replace_callback('/(?<![\w+.\/:-])(?:\+|00)[1-9](?:[ .\/-]?\(?\d\)?){7,16}(?![\w]|[.\/-]\d)/', static function (array $m): string {
+            $digits = strlen((string)preg_replace('/\D/', '', $m[0])) - (str_starts_with($m[0], '00') ? 2 : 0);
+            return $digits >= 8 && $digits <= 15 ? '[phone]' : $m[0];
+        }, $text);
     }
 
     public static function redact(array $value): array

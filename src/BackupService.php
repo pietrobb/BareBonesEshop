@@ -1413,7 +1413,7 @@ class BackupService
                     $skippedSources[$name] = true;
                     continue;
                 }
-                $kind = (string)($kinds[$name] ?? '');
+                $kind = self::sourceKind($name, $root, (string)($kinds[$name] ?? ''));
                 if ($kind === 'file' && $rest !== '' && !str_contains($rest, '/')) {
                     [$target, $base] = [$root, dirname($root)];
                 } elseif ($kind === 'directory' && $rest !== '') {
@@ -1474,6 +1474,9 @@ class BackupService
                 $ownership = self::restoredFileOwnership($target, $directory['existing'], match ($name) {
                     'gdpr_salt', 'stores', 'config' => 0640, 'mail', 'jobs' => 0600, default => 0666,
                 });
+                // R53 (review round 53, low): a copy set aside holds secrets (config.php) or quarantined scripts; it and the
+                // directories created for it are the operator's only (0600/0700), not modelled on the directory above.
+                if ($isAside) [$ownership['mode'], $ownership['dir_mode']] = [0600, 0700];
                 // R27 (run 397): a file or directory this user cannot give the owner and group it must have is refused.
                 $keep = $ownership['uid'] !== null && $ownership['gid'] !== null ? FileOwnership::cannotKeep($target, $ownership['uid'], $ownership['gid']) : null;
                 if ($keep === null && $directory['create'] !== [] && $ownership['dir_uid'] !== null && $ownership['dir_gid'] !== null) {
@@ -1777,6 +1780,24 @@ class BackupService
      */
     private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
 
+    /** The default sources that are one file (defaultFileSources()); the others are directories. */
+    private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'config'];
+    private const DIRECTORY_SOURCES = ['invoices', 'uploads', 'legal', 'downloads', 'jobs', 'themes'];
+
+    /**
+     * R53 (review round 53, low): whether a restored source is one file or a directory is this shop's, not the backup
+     * metadata's (which whoever can write the backup storage writes too): a default source by its name, another by its
+     * configured path here; only a source that exists in neither form goes by the metadata.
+     */
+    private static function sourceKind(string $name, string $root, string $recorded): string
+    {
+        if (in_array($name, self::FILE_SOURCES, true)) return 'file';
+        if (in_array($name, self::DIRECTORY_SOURCES, true)) return 'directory';
+        if (is_dir($root)) return 'directory';
+        if (is_file($root)) return 'file';
+        return $recorded;
+    }
+
     /** R53: sources the web server serves directly. */
     private const WEB_SOURCES = ['themes', 'uploads'];
 
@@ -1974,11 +1995,21 @@ class BackupService
 
     public static function list(): array
     {
-        // Files archives are companions of a database backup, not restore points of their own.
-        $rows = array_values(array_filter(
-            self::$storage->list(),
-            static fn(array $row): bool => !str_ends_with((string)($row['path'] ?? ''), '.files.tar')
-        ));
+        // Files archives are companions of a database backup, not restore points of their own. R53 (review round 53,
+        // low): their SHA-256 and size go with the backup row (files_sha256, files_size): the runbook's own SHA-256 list
+        // must cover the files archive too (config.php, themes), which the restore verifies the same way.
+        $archives = [];
+        $rows = [];
+        foreach (self::$storage->list() as $row) {
+            if (str_ends_with((string)($row['path'] ?? ''), '.files.tar')) $archives[(string)$row['path']] = $row;
+            else $rows[] = $row;
+        }
+        foreach ($rows as $i => $row) {
+            $archive = $archives[(string)($row['meta']['files_archive'] ?? '')] ?? null;
+            if ($archive === null) continue;
+            $rows[$i]['files_sha256'] = (string)($archive['meta']['sha256'] ?? '');
+            $rows[$i]['files_size'] = (int)($archive['size'] ?? 0);
+        }
         // Newest first without relying on 1 s file mtimes or directory order: microsecond creation
         // stamp, else the metadata/mtime second, then the -N suffix reserveUniquePath() appends.
         usort($rows, static fn(array $a, array $b): int => self::orderKey($b) <=> self::orderKey($a));

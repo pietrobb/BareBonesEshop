@@ -10,7 +10,7 @@ require_once __DIR__ . '/cli-only.php';
  *   php cli/restore.php --latest                 Restore from newest backup (never a pre-restore-snapshot)
  *   php cli/restore.php --list                   List available backups (newest first)
  *   php cli/restore.php <path> --skip-snapshot   Don't take a pre-restore-snapshot (DANGEROUS; SQLite only)
- *   php cli/restore.php <path> --quiet           Minimal output
+ *   php cli/restore.php <path> --quiet           Minimal output (still asks for confirmation without --yes)
  *   php cli/restore.php <path> --yes             Skip interactive confirmation
  *   php cli/restore.php <path> --i-stopped-writers
  *                                                Required for a MySQL/MariaDB (.sql) restore: confirms web
@@ -75,10 +75,12 @@ try {
                 . "(stop web traffic, workers and cron first) and keeps the pre-restore-snapshot (no --skip-snapshot).\n");
             exit(1);
         }
-        if (!$yes && !$quiet) {
+        // R53 (review round 53, low): --quiet only shortens the output; only --yes skips the confirmation (a --quiet run
+        // created the database and restored into it unasked).
+        if (!$yes) {
             echo "db_name does not exist on this MySQL/MariaDB server. Create it empty and restore "
                 . ($positional[0] ?? 'the latest backup') . " into it? Type 'yes' to continue: ";
-            if (strtolower(trim((string)fgets(STDIN))) !== 'yes') { $emit('Aborted.'); exit(1); }
+            if (strtolower(trim((string)fgets(STDIN))) !== 'yes') { fwrite(STDERR, "Aborted.\n"); exit(1); }
             $yes = true;
         }
         if (!Db::createMissingMysqlDatabase()) throw $e;
@@ -95,10 +97,17 @@ if (isset($flags['list'])) {
     if (!$rows) { $emit('No backups found.'); exit(0); }
     foreach ($rows as $r) {
         $label = (string)($r['meta']['label'] ?? '?');
-        $sha   = substr((string)($r['meta']['sha256'] ?? ''), 0, 12);
+        // R53 (review round 53, low): the full SHA-256 (the runbook's list to compare before a restore), and the files
+        // archive's path, size and SHA-256 too.
+        $sha   = (string)($r['meta']['sha256'] ?? '');
         $size  = (int)($r['size'] ?? 0);
-        $files = !empty($r['meta']['files_archive']) ? '  files=yes' : '';
-        $emit(sprintf('%s  size=%d  sha=%s  label=%s%s', $r['path'], $size, $sha, $label, $files));
+        $files = '';
+        if (!empty($r['meta']['files_archive'])) {
+            $files = isset($r['files_sha256'])
+                ? sprintf("\n    files=%s  size=%d  sha256=%s", (string)$r['meta']['files_archive'], (int)$r['files_size'], (string)$r['files_sha256'])
+                : sprintf("\n    files=%s  MISSING from the backup storage", (string)$r['meta']['files_archive']);
+        }
+        $emit(sprintf('%s  size=%d  sha256=%s  label=%s%s', $r['path'], $size, $sha, $label, $files));
     }
     exit(0);
 }
@@ -146,10 +155,10 @@ if ($withFiles && $force) {
     $emit('WARNING: --force — live files that differ from the backup will be overwritten.');
 }
 
-if (!$yes && !$quiet) {
+if (!$yes) {
     echo "Type 'yes' to continue: ";
     $line = trim((string)fgets(STDIN));
-    if (strtolower($line) !== 'yes') { $emit('Aborted.'); exit(1); }
+    if (strtolower($line) !== 'yes') { fwrite(STDERR, "Aborted.\n"); exit(1); }
 }
 
 // R23: the shop (503) and the worker stay closed while the database and files are replaced, as during an update. A
