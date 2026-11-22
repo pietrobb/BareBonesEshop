@@ -571,7 +571,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   `.htaccess` into the web root while reporting them set aside. Each restore now creates
   `<backup_recovery_dir>/from-backup/<time>-<random>/` exclusively and 0700, refuses when `from-backup` is a symlink or
   the directory does not resolve inside the recovery directory, checks that again before each file, and prints that
-  directory. A theme file the live `themes/` lack is set aside too, not installed (low: a forged backup could add a
+  directory. A real `from-backup` that is not private (another owner, or group/other access) is refused too: its owner
+  could read the new directory's name and swap it for a symlink to the shop between the check and the write. A theme file the live `themes/` lack is set aside too, not installed (low: a forged backup could add a
   child theme `checkout.html` with its own script). A SQLite restore over a damaged live database whose invoice
   counters cannot be read completes with a warning to check the last numbers (low: since R50 it stopped there).
   `stores.json` and the e-mail settings larger than 8 MiB are not read (low: a 3 GB file held root's update check for a
@@ -582,6 +583,26 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the account page lists a download only once its delivery mail was sent. Low: a download whose request was killed
   records how far it got every 1 MiB and at each lease heartbeat (was: every 8 MiB), and once its lease lapsed it
   resumes for free from up to 1 MiB past that point (was: nearly always counted as a new download).
+- **GoPay/ThePay: a payment refunded in the dashboard while a credit note's refund is in flight (review round 54,
+  medium 3).** A credit note whose refund job had not reached GoPay yet: the whole balance was booked as refunded
+  outside the shop and the job then tried GoPay again, so money stood without its credit note. A credit note refund
+  GoPay had accepted, smaller than the balance: the REFUNDED notification was ignored for good and the payment stayed
+  unsettled. Every pending credit note is now booked with its credit note and only the rest as a refund outside the
+  shop; the credit note's job then only finishes the bookkeeping.
+- **A refund job that returned all the money closes the order (review round 54, medium 4).** A paid or processing order
+  whose whole payment the worker refunded stayed to be shipped; it is cancelled and closed as refunded, as the refund
+  notifications and a manual refund already did.
+- **The refund of a cancelled unshipped rest credits those goods (review round 54, medium 7).** Its credit note was
+  split over every VAT rate of the invoice, so the later return of the shipped goods was cut short (54.48 back of
+  60.00). It credits the goods that never shipped, at their own rates.
+- **Daily sales totals keep every change (review round 54, mediums 5 and 6).** On MySQL a change logged by a checkout
+  that committed while the totals were built was deleted unseen, and its day kept the old figures until `--rebuild`
+  (19 days under load). On SQLite the build failed with "database is locked" (a 500 on the reports) when a checkout
+  wrote meanwhile. Only the changes the build read are deleted, and every read is closed before it writes. Lows: the
+  changes of a day a worker built while a report request ran are no longer dropped; a zone off by a half or three
+  quarters of an hour (Kathmandu, Newfoundland) counts the orders of its day's first minutes on that day in the trend;
+  the rows inserted without a logged change are read 5 000 ids at a time, and the migration that adds the totals builds
+  for 3 seconds and leaves the rest to the worker job (was: every day at once, 10 s at 200 000 orders on MariaDB).
 - **Stock counts stay right when a feed and a goods receipt change the same SKU together.** `Warehouse::setStock`
   reads the stock it replaces under a row lock, so the stock movement journal matches the stock.
 - **Smaller fixes (review round 20).** A full refund entered by hand or from the dashboard closes the order as

@@ -1873,6 +1873,9 @@ class BackupService
         } elseif (($stat['mode'] & 0170000) !== 0040000) {
             throw new RuntimeException("Restore: {$root} is a symlink or not a directory; refusing to set copies aside through it");
         }
+        // R54 (capability review): a real from-backup others can list and change still let them read the new run's name and
+        // swap the run for a symlink to the application root between the check and the write. Only a private one is used.
+        self::assertPrivateDirectory($root);
         $run = $root . '/' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(6));
         if (!self::withMode(0700, static fn(): bool => @mkdir($run, 0700))) {
             throw new RuntimeException("Restore: cannot create {$run}");
@@ -1891,12 +1894,26 @@ class BackupService
             if ($stat === false || ($stat['mode'] & 0170000) !== 0040000) {
                 throw new RuntimeException("Restore: {$dir} is a symlink or not a directory; refusing to set copies aside through it");
             }
+            self::assertPrivateDirectory($dir);
         }
         $realRecovery = realpath(dirname($root));
         $realRun = realpath($run);
         if ($realRecovery === false || $realRun === false
             || str_replace('\\', '/', $realRun) !== rtrim(str_replace('\\', '/', $realRecovery), '/') . '/' . basename($root) . '/' . basename($run)) {
             throw new RuntimeException("Restore: {$run} does not resolve inside the private recovery directory; refusing");
+        }
+    }
+
+    /** $dir (lstat) belongs to this process's user and gives group and others no access: nobody else can rename its entries. */
+    private static function assertPrivateDirectory(string $dir): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') return;
+        clearstatcache(true, $dir);
+        $stat = @lstat($dir);
+        $owner = function_exists('posix_geteuid') ? posix_geteuid() : null;
+        if ($stat === false || ($owner !== null && (int)$stat['uid'] !== $owner) || ((int)$stat['mode'] & 0077) !== 0) {
+            throw new RuntimeException("Restore: {$dir} is not private (it must belong to this user with mode 0700); "
+                . 'move it away and run the restore again');
         }
     }
 

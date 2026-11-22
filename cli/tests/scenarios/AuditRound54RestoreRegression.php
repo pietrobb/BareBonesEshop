@@ -66,6 +66,35 @@ try {
         assert_equals([], $r54rLeaked, 'R54 restore: nothing is written into the shop through the symlinked from-backup');
         assert_true(str_contains($r54rError, 'symlink'), "R54 restore: the restore refuses and says why ({$r54rError})");
         unlink($r54rRecovery . '/from-backup');
+
+        // A real from-backup that others can list and change: the web user (setgid group of backup_recovery_dir) renamed root's
+        // away and made its own, read the new <time>-<random> name and swapped that run for a symlink to the shop between the
+        // check and the write. The restore refuses a from-backup that is not private to it.
+        mkdir($r54rRecovery . '/from-backup', 0777);
+        chmod($r54rRecovery . '/from-backup', 0777);
+        $r54rError = '';
+        $r54rOpenAside = null;
+        try {
+            $r54rOpenAside = BackupService::restoreFiles($r54rPath)['aside_dir'] ?? null;
+        } catch (Throwable $e) {
+            $r54rError = $e->getMessage();
+        }
+        assert_equals([null, []], [$r54rOpenAside, array_values(array_diff(scandir($r54rRecovery . '/from-backup') ?: [], ['.', '..']))],
+            'R54 restore: a from-backup others can write is refused, nothing is set aside in it (was: a run directory others can swap for a symlink)');
+        assert_true(str_contains($r54rError, 'private'), "R54 restore: the restore says from-backup is not private ({$r54rError})");
+        $r54rRm($r54rRecovery . '/from-backup');
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            mkdir($r54rRecovery . '/from-backup', 0700);
+            chown($r54rRecovery . '/from-backup', 65534);
+            $r54rError = '';
+            try {
+                BackupService::restoreFiles($r54rPath);
+            } catch (Throwable $e) {
+                $r54rError = $e->getMessage();
+            }
+            assert_true(str_contains($r54rError, 'private'), "R54 restore: a 0700 from-backup of another user is refused too ({$r54rError})");
+            $r54rRm($r54rRecovery . '/from-backup');
+        }
     }
 
     $r54rFiles = BackupService::restoreFiles($r54rPath);
