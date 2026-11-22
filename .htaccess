@@ -30,6 +30,8 @@ RewriteRule (?:^|/)(?:php_)?error_log$ - [F,L,NC]
 
 # Uploaded content must never be dispatched through a PHP handler.
 RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
+# Nor theme files: themes hold no script.
+RewriteRule ^themes/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
 
 # No web-server cache shortcut: the API serves its file cache itself, because entries live under
 # the resolved store namespace (cache/stores/<store>/<channel>/...) and are skipped for logged-in

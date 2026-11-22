@@ -1359,9 +1359,10 @@ class BackupService
      * extracted into a private staging directory by a strict tar reader that accepts only regular
      * files and directories with relative paths (no absolute paths, '..', links or devices). A live
      * file whose content differs from the backup is never overwritten silently: nothing is written
-     * unless force => true (cli/restore.php --force). Files absent from the backup are kept.
+     * unless force => true (cli/restore.php --force). Files absent from the backup are kept. Scripts and dotfiles of
+     * themes/ and uploads/ go to the private recovery directory, never into the web root.
      *
-     * Returns ['archive', 'written', 'unchanged', 'overwritten' => entries, 'skipped_sources' => names].
+     * Returns ['archive', 'written', 'unchanged', 'overwritten', 'set_aside', 'quarantined' => entries, 'skipped_sources' => names].
      */
     public static function restoreFiles(string $remotePath, array $opts = []): array
     {
@@ -1403,6 +1404,7 @@ class BackupService
             $targets = [];
             $unchanged = 0;
             $setAside = [];
+            $quarantined = [];
             $jobsRan = null;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
@@ -1420,8 +1422,15 @@ class BackupService
                     throw new RuntimeException("Restore: files archive entry {$entry} does not fit source {$name} ({$kind})");
                 }
                 $source = $stagingDir . '/' . $entry;
-                $isAside = false;
-                if (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
+                $isAside = $isQuarantined = false;
+                // R53: a script or a per-directory server config (.htaccess, .user.ini) never goes into a directory the web
+                // server serves, not even a missing one: a forged backup's themes/default/assets/shell.php ran after --files-only.
+                if (in_array($name, self::WEB_SOURCES, true) && self::runnableInWebRoot($rest)
+                    && !(is_file($target) && !is_link($target) && hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target)))) {
+                    $asideDir = self::asideDirectory();
+                    [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir . '/' . $name];
+                    $isAside = $isQuarantined = true;
+                } elseif (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
                     $differs = is_file($target) && !hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target));
                     if ($name === 'jobs' && !is_file($target)) $jobsRan ??= self::holdsAnyFile($root);
                     if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan)) {
@@ -1475,7 +1484,8 @@ class BackupService
                     continue;
                 }
                 $plan[] = [$entry, $source, $target, $base, $ownership, $overwrite];
-                if ($isAside) $setAside[] = $entry;
+                if ($isQuarantined) $quarantined[] = $entry;
+                elseif ($isAside) $setAside[] = $entry;
             }
             if ($refused !== []) {
                 throw new RuntimeException('Restore: ' . count($refused) . ' target(s) cannot be restored safely, nothing was written: '
@@ -1502,13 +1512,15 @@ class BackupService
             }
             self::log("RESTORE FILES OK src={$archivePath} written=" . count($plan) . " unchanged={$unchanged} overwritten=" . count($overwritten)
                 . ($skippedSources !== [] ? ' skipped_sources=' . implode(',', array_keys($skippedSources)) : '')
-                . ($setAside !== [] ? ' set_aside=' . count($setAside) : ''));
+                . ($setAside !== [] ? ' set_aside=' . count($setAside) : '')
+                . ($quarantined !== [] ? ' quarantined=' . count($quarantined) : ''));
             return [
                 'archive'         => $archivePath,
                 'written'         => count($plan),
                 'unchanged'       => $unchanged,
                 'overwritten'     => $overwritten,
                 'set_aside'       => $setAside,
+                'quarantined'     => $quarantined,
                 'skipped_sources' => array_keys($skippedSources),
             ];
         } finally {
@@ -1764,6 +1776,22 @@ class BackupService
      * and a queue that has already run would send its mails again. Only missing files are restored in place.
      */
     private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
+
+    /** R53: sources the web server serves directly. */
+    private const WEB_SOURCES = ['themes', 'uploads'];
+
+    /**
+     * Whether a file at $relative inside a web-served source could be run or could reconfigure the server: a dotfile
+     * or a file in a dot-directory (.htaccess, .user.ini), or a script name, also as an inner extension (shell.php.jpg
+     * runs where Apache maps handlers by any extension). Neither the shop's themes nor its uploads hold such a file.
+     */
+    private static function runnableInWebRoot(string $relative): bool
+    {
+        foreach (explode('/', $relative) as $segment) {
+            if (str_starts_with($segment, '.')) return true;
+        }
+        return preg_match('/\.(?:php[0-9]*|phps|phtml?|phar|inc|cgi|fcgi|pl|py|rb|sh|shtml|asp|aspx|jsp)(?:\.|$)/i', basename($relative)) === 1;
+    }
 
     /** R51: where restored copies are set aside — <backup_recovery_dir>/from-backup, private (0700), outside the web root. */
     public static function asideDirectory(): string

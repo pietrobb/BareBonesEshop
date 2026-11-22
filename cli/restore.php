@@ -274,6 +274,11 @@ if ($withFiles) {
         fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) from config.php, themes or the job queue differ from the live ones (or the queue"
             . " has already run) and were written to the private directory " . BackupService::asideDirectory() . ", not over them. Compare and move them in by hand.\n");
     }
+    if ($files['quarantined'] !== []) {
+        fwrite(STDERR, 'WARNING: ' . count($files['quarantined']) . ' script(s) or server config file(s) in themes/ or uploads/ (' . implode(', ', array_slice($files['quarantined'], 0, 5))
+            . (count($files['quarantined']) > 5 ? ', ...' : '') . ') were not restored into the web root but into ' . BackupService::asideDirectory()
+            . ". A shop's themes and uploads hold none: check where the backup came from.\n");
+    }
     foreach ($files['skipped_sources'] as $name) {
         fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");
     }

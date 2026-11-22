@@ -528,7 +528,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   restore writes a differing `config.php`, a changed theme file or the jobs of a queue that has already run into the
   private directory `<backup_recovery_dir>/from-backup/` (never the web root; the web server rules also deny
   `*.from-backup`) instead of over them. On a new MySQL/MariaDB server `cli/restore.php` creates the missing
-  `db_name` before importing.
+  `db_name` before importing. A restore never writes a script (`.php`, `.phtml`, `.phar`, `.cgi`… also as an inner
+  extension, `photo.php.jpg`) or a dotfile (`.htaccess`, `.user.ini`) into `themes/` or `uploads/`, not even a missing
+  one: it goes to the same private directory and `cli/restore.php` warns (review round 53: a forged backup's
+  `themes/default/assets/shell.php` ran after `--files-only`). `.htaccess` and `deploy/nginx.conf` deny PHP under
+  `themes/` as they do under `uploads/`.
 - **A GDPR erasure leaves less behind.** The phone is emptied in the customer snapshot of the erased customer's invoices
   (the issued PDFs stay as sent), the `/api/v1` replay responses that name the customer are deleted, and so are the
   per-customer coupon counters keyed by an unsalted hash of the e-mail.
