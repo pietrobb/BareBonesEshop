@@ -885,7 +885,8 @@ function handleProductSave(): void {
 
     $data = [
         ':sku'           => $form['sku'],
-        ':name'          => $form['name'],
+        // R55 (review round 20, low): name and summary without bidi controls and directional marks, as the import and API.
+        ':name'          => Security::typedText($form['name']),
         ':product_type'  => $form['product_type'] !== '' ? $form['product_type'] : 'simple',
         // R50 (high 3): the VAT rate class (books, food, ... are taxed at a reduced rate); BBF checked it against the list.
         ':vat_class'     => $form['vat_class'] !== '' ? strtolower($form['vat_class']) : (string)($old['vat_class'] ?? 'standard'),
@@ -894,7 +895,7 @@ function handleProductSave(): void {
         ':compare_price' => $comparePrice ?: null,
         ':stock'         => Security::int($form['stock']),
         ':status'        => $form['status'] !== '' ? $form['status'] : 'active',
-        ':summary'       => $form['summary'],
+        ':summary'       => Security::typedText($form['summary']),
         ':description'   => Security::sanitizeRichHtml($form['description']),
         ':weight_g'      => Security::int($form['weight_g']),
         // Empty per-product alert threshold = use the stock_alerts config default.

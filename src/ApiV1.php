@@ -228,8 +228,10 @@ class ApiV1 {
         if (array_key_exists('status', $body) && !in_array($body['status'], ['active', 'draft', 'archived'], true)) {
             throw new InvalidArgumentException('Invalid product status');
         }
+        // R55 (review round 20, low): checked as stored, without the bidi controls: "\u{202E}" alone passed and was saved empty.
+        if (array_key_exists('name', $body) && is_string($body['name'])) $body['name'] = Security::plainText($body['name']);
         if (array_key_exists('name', $body)
-            && (!is_string($body['name']) || trim($body['name']) === '' || strlen($body['name']) > 191)) {
+            && (!is_string($body['name']) || !mb_check_encoding($body['name'], 'UTF-8') || trim($body['name']) === '' || strlen($body['name']) > 191)) {
             throw new InvalidArgumentException('Invalid product name');
         }
 

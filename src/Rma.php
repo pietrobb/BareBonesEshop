@@ -73,7 +73,7 @@ class Rma {
             return [false, null, 'return_window_closed'];
         }
         // R54 (review round 19, low): without bidi controls (Security::plainText()).
-        $reason = trim(Security::plainText($reason));
+        $reason = Security::typedText($reason);
         if ($reason === '') {
             return [false, null, 'reason_required'];
         }

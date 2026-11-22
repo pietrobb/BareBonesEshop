@@ -247,6 +247,9 @@ class Logger
         $text = (string)preg_replace('/((?i:' . $key . ')\s*(?:=>|[=:](?!>))\s*)(?![\["\'\\\\])[^\s"\'&,;}]+(?:[ \t]+(?:[A-Z\x80-\xFF][^\s"\'&,;}|]*|\+?\d[\d-]*(?![^\s"\'&,;}|])))*/', '$1[personal]', $text);
         return (string)preg_replace_callback('/(?<![\w+.\/:-])(?:\+|00)[1-9](?:[ .\/-]?\(?\d\)?){7,16}(?![\w]|[.\/-]\d)/', static function (array $m): string {
             $digits = strlen((string)preg_replace('/\D/', '', $m[0])) - (str_starts_with($m[0], '00') ? 2 : 0);
+            // R55 (review round 20, low): an unbroken run of digits after 00 is an EAN, a variable symbol or a tracking
+            // number as often as a phone (was: all masked); a 00 number counts as a phone written in groups only.
+            if (str_starts_with($m[0], '00') && ctype_digit($m[0])) return $m[0];
             return $digits >= 8 && $digits <= 15 ? '[phone]' : $m[0];
         }, $text);
     }

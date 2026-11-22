@@ -840,6 +840,32 @@ class Setup
             && strlen((string)($integration['api_key'] ?? '')) >= 16;
     }
 
+    /**
+     * R55 (review round 20, low): operations.worker_cron is a schedule (five fields or @hourly…) with valid fields, alone
+     * or followed by a command that runs cli/worker.php. Was: any five words passed ("a b c d e"), and so did a line
+     * running another script.
+     */
+    private static function workerCronValid(string $cron): bool
+    {
+        if (preg_match('/^@(?:yearly|annually|monthly|weekly|daily|hourly)(?:\s+(.+))?$/', $cron, $m)) {
+            return !isset($m[1]) || preg_match('~(?:^|[\s/])worker\.php(?:\s|$)~', $m[1]) === 1;
+        }
+        $parts = preg_split('/\s+/', $cron, 6) ?: [];
+        if (count($parts) < 5) return false;
+        $names = ['jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec', 'sun|mon|tue|wed|thu|fri|sat'];
+        $ranges = [[0, 59, ''], [0, 23, ''], [1, 31, ''], [1, 12, $names[0]], [0, 7, $names[1]]];
+        foreach ($ranges as $i => [$min, $max, $words]) {
+            $value = $words === '' ? '\d+' : '(?:\d+|' . $words . ')';
+            foreach (explode(',', $parts[$i]) as $item) {
+                if (!preg_match('/^(?:\*|' . $value . '(?:-' . $value . ')?)(?:\/(\d+))?$/iD', $item, $f)) return false;
+                if (isset($f[1]) && (int)$f[1] < 1) return false;
+                preg_match_all('/\d+/', (string)preg_replace('/\/\d+$/', '', $item), $numbers);
+                foreach ($numbers[0] as $n) if ((int)$n < $min || (int)$n > $max) return false;
+            }
+        }
+        return !isset($parts[5]) || preg_match('~(?:^|[\s/])worker\.php(?:\s|$)~', $parts[5]) === 1;
+    }
+
     private static function operationsChecks(array $config, string $root, callable $add): void
     {
         $add(is_file($root . '/cli/worker.php') ? 'pass' : 'fail', 'operations.worker', 'Worker entry point ' . (is_file($root . '/cli/worker.php') ? 'present' : 'missing'), 'Restore cli/worker.php.');
@@ -847,7 +873,7 @@ class Setup
         $webWorker = WebWorker::enabled($config);
         // R54 (review round 19, UX): the schedule alone or the whole crontab line README asks to record (was: only the
         // five fields passed, and a line that failed was still reported as "configured").
-        $cronValid = preg_match('/^(?:@(?:yearly|annually|monthly|weekly|daily|hourly|reboot)|(?:[\d*\/,\-A-Za-z?]+\s+){4}[\d*\/,\-A-Za-z?]+)(?:\s+\S.*)?$/', $cron) === 1;
+        $cronValid = self::workerCronValid($cron);
         $add($cronValid || $webWorker ? 'pass' : 'warn', 'operations.cron', match (true) {
             $cronValid => 'Worker cron declaration recorded.',
             $webWorker => 'No cron: page requests run the worker (operations.web_worker).',

@@ -52,8 +52,8 @@ class Complaints {
         $refusal = self::refusal($order);
         if ($refusal !== null) return $fail($refusal);
         // R54 (review round 19, low): without bidi controls (Security::plainText()).
-        $defect = mb_substr(trim(Security::plainText($defect)), 0, 4000);
-        $name = Security::plainText($name);
+        $defect = mb_substr(Security::typedText($defect), 0, 4000);
+        $name = Security::typedText($name);
         if ($defect === '') return $fail('defect_required');
         if (!in_array($remedy, self::REMEDIES, true)) return $fail('remedy_required');
         $line = null;

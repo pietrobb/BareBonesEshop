@@ -570,6 +570,15 @@ class Security {
     }
 
     /**
+     * R55 (review round 20, low): plainText() of a field whose caller refuses an empty value, trimmed: text that is not
+     * UTF-8 is empty (refused as missing). Was: reviews, returns and complaints stored it with its bidi controls, and
+     * esc() then showed it empty.
+     */
+    public static function typedText(string $text): string {
+        return mb_check_encoding($text, 'UTF-8') ? trim(self::plainText($text)) : '';
+    }
+
+    /**
      * Scalar request value as a string. PHP turns name[]=x into an array; string-typed code
      * must see the default instead of crashing with a TypeError (HTTP 500).
      */
