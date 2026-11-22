@@ -319,7 +319,8 @@ try {
         ['Verkaufsübersicht', 'Bestellstatus', 'Zahlungsstatus', 'Gesamter Zeitraum', 'Positionen', 'Nummer, Name oder E-Mail']);
     $a154Run($a156Order + ['action' => 'status'], ['new_status' => 'a156-unknown', 'note' => '']);
     $a156Check('A15.6 de: order detail and its invalid-status flash are German', $a154Run($a156Order),
-        ['Ungültiger Bestellstatus.', 'Zahlungsart: A156 Bank', 'Überweisungsreferenz: ', 'Zahlungsreferenz: ', 'Zahlungsstatus: ', 'Status ändern',
+        // R54: the admin reads the method's current name in its language, not the snapshot label ("A156 Bank").
+        ['Ungültiger Bestellstatus.', 'Zahlungsart: Banküberweisung', 'Überweisungsreferenz: ', 'Zahlungsreferenz: ', 'Zahlungsstatus: ', 'Status ändern',
             'Zahlung ändern', 'Betrag (EUR)', 'Notiz...', 'Für den aktuellen Zahlungsstatus ist keine Erstattung möglich.', 'Positionen', 'Zwischensumme: ',
             'Gesamt: ', 'Zahlungsverlauf', 'Noch keine Zahlungsereignisse erfasst.', 'Rechnungen', 'Noch keine Rechnung ausgestellt.', '← Zurück zur Liste']);
     foreach ([
@@ -348,7 +349,7 @@ try {
     $a156Check('A15.6 de: CSRF refusal flash is German', $a154Run(['p' => 'customers', 'action' => 'a156'], ['csrf_token' => 'a156-wrong']), ['Ungültiges CSRF-Token.']);
     $a154Run(['p' => 'dashboard', 'lang' => 'en']);
     $a156Check('A15.6 en: order detail is English', $a154Run($a156Order),
-        ['Payment method: A156 Bank', 'Bank transfer reference number: ', 'Payment reference: ', 'Change status', 'Subtotal: ', 'Payment timeline', 'No invoice issued yet.'], $a156English);
+        ['Payment method: Bank transfer', 'Bank transfer reference number: ', 'Payment reference: ', 'Change status', 'Subtotal: ', 'Payment timeline', 'No invoice issued yet.'], $a156English);
     $a156Check('A15.6 en: customers and returns are English', $a154Run(['p' => 'customer', 'id' => $a156Customer]), ['Profile', 'Last sign-in', 'Unblock account', 'Addresses (0)'], ['Uložiť']);
     $a156Check('A15.6 en: returns page is English', $a154Run(['p' => 'rma']), ['Returns and complaints', 'Approve', 'Reject', 'Reason'], $a156English);
     $a154Run(['p' => 'dashboard', 'lang' => 'de']);
