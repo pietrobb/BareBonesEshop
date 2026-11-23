@@ -372,9 +372,15 @@ final class InvoiceService
      * could credit more at its rate than the invoice has left there: negative VAT at that rate. The lines of a capped
      * key are scaled down together (gross in proportion, the last line takes the remainder; net in proportion, capped
      * at the uncredited base). Keys the invoice never had are left as they are.
+     * R57 (review round 22, V1): with $spill, what the caps took is credited at the invoice's other rates that still
+     * have it uncredited (spillLines()). Money refunded outside the returns now comes off the return that counts it,
+     * whatever rates its credit note credited; the later return of the goods at those rates found them lowered and was
+     * cut short by that share (A 20 € at 23 % + B 10 € at 5 %, 10 € refunded with its credit note, A returned: 10 €,
+     * then B: 6.67 € instead of 10 €).
      * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
      */
-    private static function capToUncredited(array $lines, array $rates, array $source): array {
+    private static function capToUncredited(array $lines, array $rates, array $source, bool $spill = false): array {
+        $wanted = array_sum(array_map(static fn(array $line): int => (int)$line['gross'], $lines));
         $sourceKeys = array_map('strval', array_keys(json_decode((string)$source['vat_breakdown'], true) ?: []));
         $byKey = [];
         foreach ($lines as $index => $line) {
@@ -404,7 +410,49 @@ final class InvoiceService
             }
             foreach ($indexes as $i) $lines[$i]['vat'] = (int)$lines[$i]['gross'] - (int)$lines[$i]['net'];
         }
+        $short = $wanted - array_sum(array_map(static fn(array $line): int => (int)$line['gross'], $lines));
+        if ($spill && $short > 0 && $lines !== []) $lines = [...$lines, ...self::spillLines($lines, $rates, $short)];
         return self::creditTotals($lines);
+    }
+
+    /**
+     * R57 (V1): lines crediting $short at the rates of $rates (uncredited()['rates']) these lines leave room at, the most
+     * room first. Each names the goods of the first line, with no units (credit_note_items.rma_item_id negative: it is
+     * no unit of a return), so a return's credit note still credits its goods' whole value when an earlier return used
+     * up the money a refund credit note had credited at their rate.
+     * @return list<array>
+     */
+    private static function spillLines(array $lines, array $rates, int $short): array {
+        $used = [];
+        foreach ($lines as $line) {
+            $key = self::lineKey($line);
+            $used[$key]['gross'] = ($used[$key]['gross'] ?? 0) + (int)$line['gross'];
+            $used[$key]['net'] = ($used[$key]['net'] ?? 0) + (int)$line['net'];
+        }
+        $room = [];
+        foreach ($rates as $key => $rate) {
+            $left = (int)$rate['gross'] - (int)($used[(string)$key]['gross'] ?? 0);
+            if ($left > 0) $room[(string)$key] = $left;
+        }
+        arsort($room);
+        $base = $lines[0];
+        $spilled = [];
+        foreach ($room as $key => $left) {
+            $key = (string)$key;
+            if ($short <= 0 || count($spilled) >= 15) break;
+            $gross = min($left, $short);
+            $netLeft = max(0, (int)$rates[$key]['net'] - (int)($used[$key]['net'] ?? 0));
+            $net = min($netLeft, (int)round((int)$rates[$key]['net'] * $gross / max(1, (int)$rates[$key]['gross'])), $gross);
+            $supply = $rates[$key]['supply'] ?? [];
+            $spilled[] = [
+                'order_item_id' => (int)$base['order_item_id'], 'rma_item_id' => -((int)$base['rma_item_id'] * 16 + count($spilled) + 1),
+                'sku' => (string)$base['sku'], 'name' => (string)$base['name'], 'quantity' => 0, 'unit_gross' => 0,
+                'gross' => $gross, 'net' => $net, 'vat' => $gross - $net,
+                'rate_basis_points' => (int)round((float)explode(' ', $key)[0] * 100),
+            ] + (isset($supply['country']) ? ['country' => (string)$supply['country'], 'supply' => (string)($supply['supply'] ?? 'oss')] : []);
+            $short -= $gross;
+        }
+        return $spilled;
     }
 
     /**
@@ -685,7 +733,7 @@ final class InvoiceService
         $full = (int)self::creditTotals($lines)[1]['gross'];
         $deduction = $outside > 0 ? self::outsideDeduction((int)$order['id'], $lines) : [];
         $less = self::linesLess($lines, $deduction);
-        $owed = $less === [] ? 0 : (int)self::capToUncredited($less, self::uncredited($db, $source)['rates'], $source)[1]['gross'];
+        $owed = $less === [] ? 0 : (int)self::capToUncredited($less, self::uncredited($db, $source)['rates'], $source, true)[1]['gross'];
         return [$full, $owed, $deduction];
     }
 
@@ -711,7 +759,7 @@ final class InvoiceService
      * what those rates have uncredited (capToUncredited()): it comes off the lines at those rates only. R51 took all of it
      * off the first return, so the share credited at the other rates came off twice: from this return and from the
      * capped rest of the return at those rates (goodwill 10 € on 20 € at 23 % and 10 € at 5 %, then both returned: 26.67
-     * € of 30 €). Money without a credit note (key '') comes off any line. Returns counted before R56 recorded no keys:
+     * € of 30 €). The rest of the money (key '') comes off any line. Returns counted before R56 recorded no keys:
      * what is left in all caps the per-key rests.
      * @return array<string, int>
      */
@@ -748,7 +796,11 @@ final class InvoiceService
             $taken = min($gross, $pools[$key] ?? 0);
             if ($taken > 0) $deduction[(string)$key] = $taken;
         }
-        $free = min($remaining - array_sum($pools), array_sum($value) - array_sum($deduction));
+        // R57 (review round 22, high V1): the rest of that money always comes off this return, whatever rates its credit
+        // note credited. Was: only money without a credit note, so the share credited at rates this return does not have
+        // was paid out again (B 10 € at 5 % returned after 10 € refunded in the dashboard: 6.67 € more). The rate the
+        // later return of the other goods then lacks is moved by capToUncredited() ($spill).
+        $free = min($remaining - array_sum($deduction), array_sum($value) - array_sum($deduction));
         if ($free > 0) $deduction[''] = $free;
         return $deduction;
     }
@@ -819,7 +871,7 @@ final class InvoiceService
             WHERE r.store_id=:store AND r.idempotency_key=:key");
         $existing->execute([':store' => StoreContext::current()->id(), ':key' => $idempotencyKey]);
         if ($row = $existing->fetch(PDO::FETCH_ASSOC)) {
-            $priorStmt = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund ORDER BY rma_item_id');
+            $priorStmt = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund AND rma_item_id > 0 ORDER BY rma_item_id');
             $priorStmt->execute([':refund' => (int)$row['refund_id']]);
             $priorQuantities = [];
             foreach ($priorStmt->fetchAll(PDO::FETCH_ASSOC) as $line) $priorQuantities[(int)$line['rma_item_id']] = (int)$line['quantity'];
@@ -832,7 +884,9 @@ final class InvoiceService
         [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         // R51 (R49 open): the outside money comes off the goods' full value, then the uncredited rest caps it (rmaCreditOwed()).
         $draftLines = $deductOutside ? self::lessOutside($fullLines, (int)$order['id'])[0] : $fullLines;
-        [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
+        // R57 (V1): once returns counted money refunded outside them, what the rate caps take is credited at other rates.
+        $spill = $deductOutside || Rma::outsideCounted((int)$order['id'])['total'] > 0;
+        [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source, $spill);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
@@ -858,7 +912,7 @@ final class InvoiceService
             $draftLines = $fullLines;
             $lessKeys = [];
             if ($deductOutside) [$draftLines, , , $less, $lessKeys] = self::lessOutside($fullLines, (int)$order['id']);
-            [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
+            [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source, $spill);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             $creditData = [
@@ -877,6 +931,7 @@ final class InvoiceService
                 : 'UPDATE rma_requests SET id = id WHERE id = ? AND store_id = ?')->execute([$rmaId, StoreContext::current()->id()]);
             $freshItems = array_column(Rma::items($rmaId), null, 'id');
             foreach ($lines as $line) {
+                if ((int)$line['rma_item_id'] < 0) continue; // R57: a line moving a rate cap (spillLines()) has no units
                 if ($line['quantity'] > self::uncommittedQuantity($freshItems[$line['rma_item_id']] ?? ['id' => $line['rma_item_id'], 'received_quantity' => 0])) {
                     throw new LogicException('Credit quantity exceeds received uncommitted quantity');
                 }
@@ -1045,6 +1100,9 @@ final class InvoiceService
     {
         $stmt = Db::get()->prepare("SELECT vat_breakdown, credit_snapshot FROM invoices WHERE refers_to_invoice_id = :source AND type = 'credit_note' AND store_id = :store AND status <> :cancelled");
         $stmt->execute([':source' => (int)$source['id'], ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
+        $gross = static fn(array $info): int => (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
+        $invoiceWeights = array_map(static fn($info): int => is_array($info) ? $gross($info) : 0, json_decode((string)$source['vat_breakdown'], true) ?: []);
+        $unshippedWeights = array_map(static fn(array $part): int => (int)$part['gross'], $unshipped);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $credit) {
             $snapshot = json_decode((string)($credit['credit_snapshot'] ?? ''), true);
             $breakdown = json_decode((string)$credit['vat_breakdown'], true) ?: [];
@@ -1052,8 +1110,13 @@ final class InvoiceService
             // R56 (review round 21, low): a refund credit note issued before R55 has no split; R54 credited the unshipped
             // goods' rates alone just the same, so one of those rates only counts as theirs. Was: skipped, and N1's double
             // credit of the unshipped goods' rate stayed for the orders refunded before the upgrade.
+            // R57 (review round 22, low): only when its rates are split like the unshipped goods and not like the invoice.
+            // Was: any such note whose rates the unshipped goods also have, so a refund split over the whole invoice (all
+            // a release before R54 issued) counted as theirs and the cancelled rest's refund then credited other rates.
+            $noteWeights = array_map(static fn($info): int => is_array($info) ? -$gross($info) : 0, $breakdown);
             $legacy = !array_key_exists('split', $snapshot) && ($snapshot['kind'] ?? '') === 'refund' && $breakdown !== []
-                && array_diff(array_map('strval', array_keys($breakdown)), array_map('strval', array_keys($unshipped))) === [];
+                && array_diff(array_map('strval', array_keys($breakdown)), array_map('strval', array_keys($unshipped))) === []
+                && self::splitLike($noteWeights, $unshippedWeights) && !self::splitLike($noteWeights, $invoiceWeights);
             if (($snapshot['split'] ?? '') !== 'unshipped' && !$legacy) continue;
             foreach ($breakdown as $key => $info) {
                 if (!is_array($info) || !isset($unshipped[(string)$key])) continue;
@@ -1062,6 +1125,25 @@ final class InvoiceService
             }
         }
         return array_filter($unshipped, static fn(array $part): bool => $part['gross'] > 0);
+    }
+
+    /**
+     * R57: whether gross per breakdown key $split is in proportion to $weights (within the cents a proportional split
+     * rounds off per key); a key $weights lacks never is.
+     * @param array<string|int, int> $split
+     * @param array<string|int, int> $weights
+     */
+    private static function splitLike(array $split, array $weights): bool
+    {
+        $weights = array_filter($weights, static fn(int $weight): bool => $weight > 0);
+        $total = array_sum($split);
+        $whole = array_sum($weights);
+        if ($total <= 0 || $whole <= 0) return false;
+        foreach ($split as $key => $part) if (!isset($weights[$key]) && $part > 0) return false;
+        foreach ($weights as $key => $weight) {
+            if (abs((int)($split[$key] ?? 0) * $whole - $weight * $total) > $whole * count($weights)) return false;
+        }
+        return true;
     }
 
     /**

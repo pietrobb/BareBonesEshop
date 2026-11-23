@@ -78,11 +78,12 @@ try {
             $r56gRma = $r56gReturn($r56gId, $r56gItems[$r56gSku], 1, $r56gTag . '-receipt-' . $r56gN);
             $r56gGot[$r56gSku] = $r56gRefund($r56gSource, $r56gRma, $r56gTag . '-credit-' . $r56gN);
         }
+        // R57 (review round 22, V1): the first return uses up all 10 € (was: only the share at its rate, so a lone return
+        // of B paid 6.67 € more); the second is paid in full, at the other rate for what the goodwill credited there (the
+        // return list names no amount then: no money refunded outside is left to take off).
+        $r56gExpected = $r56gLabel === 'A then B' ? ['R56G-BOOK' => [0, 1000], 'R56G-STD' => [1000, 1000]] : ['R56G-BOOK' => [0, 0], 'R56G-STD' => [0, 2000]];
         ksort($r56gGot);
-        $r56gStdShare = max($r56gShare);
-        $r56gBookShare = min($r56gShare);
-        assert_equals(['R56G-BOOK' => [1000 - $r56gBookShare, 1000 - $r56gBookShare], 'R56G-STD' => [2000 - $r56gStdShare, 2000 - $r56gStdShare]],
-            $r56gGot, "R56 goodwill {$r56gLabel}: each return pays its goods less the goodwill share credited at its rate (was: the first less all 10 €)");
+        assert_equals($r56gExpected, $r56gGot, "R56 goodwill {$r56gLabel}: the first return less all 10 € goodwill, the second in full (was: 26.67 € A first)");
         assert_equals(3000, 1000 + array_sum(array_column($r56gGot, 1)),
             "R56 goodwill {$r56gLabel}: goodwill + both returns = the 30 € paid (was: 26.67 € A first, 23.33 € B first)");
         assert_equals([3000, 0], [$r56gCredited($r56gSource), Rma::refundedOutsideReturns($r56gId)],
@@ -102,8 +103,8 @@ try {
         'R56 goodwill close: the first unit is closed without payout and records the 10 € it used at 23 %');
     $r56gSecond = $r56gRefund($r56gSource, $r56gReturn($r56gId, $r56gItems['R56G-STD'], 1, 'r56g-close-receipt-2'), 'r56g-close-credit-2');
     $r56gBook = $r56gRefund($r56gSource, $r56gReturn($r56gId, $r56gItems['R56G-BOOK'], 1, 'r56g-close-receipt-3'), 'r56g-close-credit-3');
-    assert_equals([[1000, 1000], [500, 500], 3000], [$r56gSecond, $r56gBook, 1500 + $r56gSecond[1] + $r56gBook[1]],
-        'R56 goodwill close: the second unit in full, the book less its 5 € share: 30 € back in all (was: 25 €)');
+    assert_equals([[500, 500], [0, 1000], 3000], [$r56gSecond, $r56gBook, 1500 + $r56gSecond[1] + $r56gBook[1]],
+        'R56 goodwill close: the second unit less the last 5 € of goodwill (R57), the book in full: 30 € back in all (was: 25 €)');
 
     // Money refunded outside without a credit note still comes off any return first (R49): B's return is closed on it,
     // the rest of it comes off A.
