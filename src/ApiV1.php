@@ -229,7 +229,8 @@ class ApiV1 {
             throw new InvalidArgumentException('Invalid product status');
         }
         // R55 (review round 20, low): checked as stored, without the bidi controls: "\u{202E}" alone passed and was saved empty.
-        if (array_key_exists('name', $body) && is_string($body['name'])) $body['name'] = Security::plainText($body['name']);
+        // R56 (review round 21, low): and without blank or invisible characters at its ends (Security::typedText()).
+        if (array_key_exists('name', $body) && is_string($body['name']) && mb_check_encoding($body['name'], 'UTF-8')) $body['name'] = Security::typedText($body['name']);
         if (array_key_exists('name', $body)
             && (!is_string($body['name']) || !mb_check_encoding($body['name'], 'UTF-8') || trim($body['name']) === '' || strlen($body['name']) > 191)) {
             throw new InvalidArgumentException('Invalid product name');
@@ -254,7 +255,7 @@ class ApiV1 {
             foreach ($allowed as $field) {
                 if (!array_key_exists($field, $body)) continue;
                 $set[] = "{$field}=:_{$field}";
-                $params[":_{$field}"] = $field === 'name' ? trim(Security::plainText((string)$body[$field])) : $body[$field];
+                $params[":_{$field}"] = $field === 'name' ? Security::typedText((string)$body[$field]) : $body[$field];
             }
             $set[] = 'updated_at=' . Db::now();
             Db::get()->prepare('UPDATE products SET ' . implode(', ', $set) . ' WHERE id=:id AND store_id=:store')->execute($params);
@@ -300,7 +301,7 @@ class ApiV1 {
         if (array_diff(array_keys($body), $allowed)) throw new InvalidArgumentException('Product contains unsupported fields');
         if (array_key_exists('vat_class', $body)) $body['vat_class'] = self::vatClass($body['vat_class']);
         $sku = self::sku($body['sku'] ?? null);
-        if (!is_string($body['name'] ?? null) || trim($body['name']) === '' || strlen($body['name']) > 191) {
+        if (!is_string($body['name'] ?? null) || Security::typedText($body['name']) === '' || strlen($body['name']) > 191) {
             throw new InvalidArgumentException('name is required (at most 191 bytes)');
         }
         if (!array_key_exists('price', $body)) throw new InvalidArgumentException('price is required');
@@ -330,7 +331,7 @@ class ApiV1 {
                 return self::error(422, 'unknown_category', 'category_id is not a category of this catalog') + ['store' => false];
             }
             $db = Db::get();
-            $row = ['sku' => $sku, 'name' => trim(Security::plainText($body['name'])), 'price' => $body['price'], 'status' => $status,
+            $row = ['sku' => $sku, 'name' => Security::typedText($body['name']), 'price' => $body['price'], 'status' => $status,
                 'weight_g' => $body['weight_g'] ?? 0, 'stock' => (string)($body['stock'] ?? 0)];
             if ($comparePrice !== null) $row['compare_price'] = $comparePrice;
             if ($slug !== null) $row['slug'] = $slug;

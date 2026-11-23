@@ -7,7 +7,7 @@
  */
 final class MethodLabels {
     /** Seeded [name, description] per kind and code (migrations 20260425064000, 20260425071000 and 20260801190000). */
-    private const SEEDED = [
+    public const SEEDED = [
         'shipping' => [
             'pickup' => ['Osobný odber', null],
             'packeta' => ['Packeta / Zásielkovňa', null],

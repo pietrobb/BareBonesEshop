@@ -159,6 +159,26 @@ try {
     assert_equals($a111OwnerBefore, $a111OwnerRow(), 'R6 install re-run leaves the existing owner (password, MFA, recovery codes) unchanged');
     $a111Seed = $a111Php(['cli/seed.php', '--count=3']);
     assert_equals(0, $a111Seed['code'], 'A11.1 README optional seed step works after install' . ($a111Seed['code'] !== 0 ? ': ' . substr($a111Seed['out'] . $a111Seed['err'], -400) : ''));
+    // R56 (review round 21, low): --help seeded 1000 products; a second run without --fresh failed on a foreign key;
+    // attribute values stayed Slovak in an English shop.
+    $a111Count = static function () use ($a111Private): array {
+        $db = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+        return [(int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn(), (int)$db->query('SELECT COUNT(*) FROM categories')->fetchColumn(),
+            $db->query("SELECT DISTINCT attr_value FROM product_attrs WHERE attr_name = 'color'")->fetchAll(PDO::FETCH_COLUMN)];
+    };
+    $a111Before = $a111Count();
+    $a111Help = $a111Php(['cli/seed.php', '--help']);
+    $a111Unknown = $a111Php(['cli/seed.php', '--cuont=5']);
+    assert_true($a111Help['code'] === 0 && str_contains($a111Help['out'], 'Usage:') && $a111Unknown['code'] === 2 && $a111Count()[0] === $a111Before[0],
+        'R56 seed: --help prints the usage and an unknown option is refused, neither seeds anything (was: 1000 products): ' . json_encode([$a111Help, $a111Unknown, $a111Count()[0], $a111Before[0]]));
+    $a111More = $a111Php(['cli/seed.php', '--count=2']);
+    $a111After = $a111Count();
+    assert_true($a111More['code'] === 0 && $a111After[0] === $a111Before[0] + 2 && $a111After[1] === $a111Before[1],
+        'R56 seed: a second run without --fresh adds its products to the same categories (was: a foreign key failure): '
+        . json_encode([$a111More['code'], substr($a111More['out'] . $a111More['err'], -300), $a111Before[0], $a111Before[1], $a111After[0], $a111After[1]]));
+    $a111Slovak = ['cierna', 'biela', 'cervena', 'modra', 'zelena', 'seda', 'hneda', 'zlta', 'oranzova', 'ruzova'];
+    assert_true($a111After[2] !== [] && array_intersect($a111After[2], $a111Slovak) === [],
+        'R56 seed: colour values in the shop\'s language (was: Slovak "cierna"): ' . json_encode($a111After[2], JSON_UNESCAPED_UNICODE));
     // R23 UX: the sample CZK, PLN, HUF and USD stores sold none of the seeded EUR products (no price in their currency).
     $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $a111Gaps = [];

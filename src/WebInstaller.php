@@ -403,6 +403,7 @@ final class WebInstaller
             }
             $stores = self::configureStore($root, $config, $v);
             self::priceInStoreCurrency(Db::get(), $stores);
+            if ($starter === null) self::localizeSampleMethods(Db::get(), $stores);
             self::configurePayments(Db::get(), $stores, $v);
             $default = (string)($stores['default_store'] ?? 'default');
             $owner = AdminIdentity::createWithStore($v['admin_user'], $v['admin_password'], 'owner', true, $default, true);
@@ -742,6 +743,85 @@ final class WebInstaller
                     $columns = array_keys($row);
                     $db->prepare("INSERT INTO {$table} (" . implode(', ', $columns) . ') VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ')')
                         ->execute(array_values($row));
+                }
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * R56 (review round 21, UX): a plain install outside Slovakia (de/EUR, en/USD) kept the default store's sample shipping
+     * and payment methods as seeded for a Slovak shop: Slovak names ("Osobný odber", "Dobierka"), a "Domestic SK" zone of
+     * Slovakia alone, the seller's own country priced in "Nearby EU" only up to 5 kg (a German order above 5 kg found no
+     * carrier) and cash on delivery for SK and CZ only. Methods still named as seeded now take the shop language's names
+     * (the other languages as their translations); a seller outside Slovakia gets the domestic zone, its rates and the
+     * payment countries for its own country, and Slovakia moves to the EU zone. A scope priced from another currency's
+     * list (priceInStoreCurrency()) or changed by hand is left alone.
+     */
+    public static function localizeSampleMethods(PDO $db, array $stores): void
+    {
+        $id = (string)($stores['default_store'] ?? 'default');
+        $store = is_array($stores['stores'][$id] ?? null) ? $stores['stores'][$id] : [];
+        $scope = (string)($store['provider_scope'] ?? $id);
+        $locale = strtolower((string)($store['default_locale'] ?? 'sk'));
+        $country = strtoupper((string)($store['legal']['country'] ?? ''));
+        $db->beginTransaction();
+        try {
+            if ($locale !== 'sk') {
+                foreach (MethodLabels::SEEDED as $kind => $methods) {
+                    $table = $kind === 'payment' ? 'payment_methods' : 'shipping_methods';
+                    $translated = Db::hasColumn($table, 'translations', $db);
+                    $find = $db->prepare('SELECT * FROM ' . $table . ' WHERE store_id = ? AND code = ?');
+                    foreach ($methods as $code => [$seededName, $seededDescription]) {
+                        $find->execute([$scope, $code]);
+                        $row = $find->fetch(PDO::FETCH_ASSOC);
+                        if (!is_array($row) || (string)$row['name'] !== $seededName) continue;
+                        $text = static function (string $suffix, string $in) use ($kind, $code): ?string {
+                            $key = "methods.{$kind}.{$code}{$suffix}";
+                            $value = I18n::tIn($key, $in);
+                            return $value === $key || $value === '' ? null : $value;
+                        };
+                        $set = ['name' => $text('', $locale) ?? $seededName];
+                        $describe = $seededDescription !== null && array_key_exists('description', $row) && (string)$row['description'] === $seededDescription;
+                        if ($describe) $set['description'] = $text('_desc', $locale) ?? $seededDescription;
+                        if ($translated) {
+                            $translations = json_decode((string)($row['translations'] ?? ''), true);
+                            $translations = is_array($translations) ? $translations : [];
+                            foreach (array_keys(self::LOCALES) as $other) {
+                                if ($other === $locale || isset($translations[$other])) continue;
+                                $texts = array_filter(['name' => $text('', $other), 'description' => $describe ? $text('_desc', $other) : null], 'is_string');
+                                if ($texts !== []) $translations[$other] = $texts;
+                            }
+                            ksort($translations);
+                            $set['translations'] = $translations === [] ? null : json_encode($translations, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+                        }
+                        $db->prepare('UPDATE ' . $table . ' SET ' . implode(', ', array_map(static fn(string $c): string => "{$c} = ?", array_keys($set))) . ' WHERE store_id = ? AND code = ?')
+                            ->execute([...array_values($set), $scope, $code]);
+                    }
+                }
+            }
+            $domestic = $db->prepare("SELECT country FROM shipping_zone_countries WHERE store_id = ? AND zone_code = 'domestic'");
+            $domestic->execute([$scope]);
+            if ($country !== '' && $country !== 'SK' && preg_match('/^[A-Z]{2}$/D', $country) === 1 && $domestic->fetchAll(PDO::FETCH_COLUMN) === ['SK']) {
+                $run = static fn(string $sql, array $params) => $db->prepare($sql)->execute($params);
+                // The seller's country leaves the zone it sat in (DE in "Nearby EU", CZ in "Czech Republic"), with its rates there.
+                $run("DELETE FROM shipping_rates WHERE store_id = ? AND country = ? AND zone_code <> 'domestic'", [$scope, $country]);
+                $run("DELETE FROM shipping_zone_countries WHERE store_id = ? AND country = ?", [$scope, $country]);
+                $run("UPDATE shipping_zone_countries SET country = ? WHERE store_id = ? AND zone_code = 'domestic' AND country = 'SK'", [$country, $scope]);
+                $run("UPDATE shipping_rates SET country = ? WHERE store_id = ? AND zone_code = 'domestic' AND country = 'SK'", [$country, $scope]);
+                $run("UPDATE shipping_zones SET name = ?, description = ? WHERE store_id = ? AND code = 'domestic' AND name = 'Domestic SK'",
+                    ["Domestic {$country}", "{$country} domestic shipping", $scope]);
+                $eu = $db->prepare("SELECT COUNT(*) FROM shipping_zones WHERE store_id = ? AND code = 'eu'");
+                $eu->execute([$scope]);
+                if ((int)$eu->fetchColumn() > 0) $run(Db::insertIgnore() . " INTO shipping_zone_countries (store_id, zone_code, country) VALUES (?, 'eu', 'SK')", [$scope]);
+                // A payment method offered in Slovakia (cash on delivery: SK and CZ) is offered in the seller's country too.
+                $methods = $db->prepare("SELECT method_code FROM payment_method_countries WHERE store_id = ? AND country = 'SK'");
+                $methods->execute([$scope]);
+                foreach ($methods->fetchAll(PDO::FETCH_COLUMN) as $method) {
+                    $run(Db::insertIgnore() . ' INTO payment_method_countries (store_id, method_code, country) VALUES (?, ?, ?)', [$scope, (string)$method, $country]);
                 }
             }
             $db->commit();

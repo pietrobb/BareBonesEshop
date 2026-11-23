@@ -2245,11 +2245,6 @@ class PaymentService {
     }
 
     /**
-     * A fully refunded payment closes its returned or cancelled order. R50: an order not shipped yet (paid, accepted)
-     * whose money all went back (a full manual refund, a refund in the PayU/GoPay dashboard) is cancelled first; it
-     * stayed paid and could still be shipped.
-     */
-    /**
      * R55 (review round 20, medium 4): a refund released (declined, failed, not executed, dropped by "paid") after the
      * rest of the money went back another way leaves the payment refunded; the order is closed as by any full refund.
      * Was: it stayed processing and could still be shipped. Inside a caller's transaction the caller closes it after
@@ -2259,6 +2254,11 @@ class PaymentService {
         if (!Db::get()->inTransaction()) self::closeRefundedOrder($orderId, $note);
     }
 
+    /**
+     * A fully refunded payment closes its returned or cancelled order. R50: an order not shipped yet (paid, accepted)
+     * whose money all went back (a full manual refund, a refund in the PayU/GoPay dashboard) is cancelled first; it
+     * stayed paid and could still be shipped.
+     */
     public static function closeRefundedOrder(int $orderId, string $note): void {
         $order = Orders::byId($orderId);
         if ($order && (string)($order['payment_status'] ?? '') === 'refunded' && in_array((string)$order['status'], ['paid', 'processing'], true)) {

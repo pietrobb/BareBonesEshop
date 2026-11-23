@@ -32,8 +32,9 @@ try {
     };
     $r54uLine = $r54uCron('* * * * * php /srv/shop/cli/worker.php');
     assert_equals('pass', $r54uLine[0], 'R54 doctor: the whole crontab line README asks to record passes (was: warn, only five fields passed)');
-    assert_equals('pass', $r54uCron('*/2 * * * *')[0], 'R54 doctor: the schedule alone still passes');
-    assert_equals('pass', $r54uCron('@hourly php /srv/shop/cli/worker.php')[0], 'R54 doctor: a @hourly line passes');
+    assert_equals('pass', $r54uCron('* * * * *')[0], 'R54 doctor: the schedule alone still passes');
+    // R56 (review round 21, low): the worker runs every minute; a valid schedule that runs it less often warns.
+    assert_equals('warn', $r54uCron('@hourly php /srv/shop/cli/worker.php')[0], 'R54/R56 doctor: a @hourly line is valid but warns (the worker runs every minute)');
     $r54uBad = $r54uCron('every minute');
     assert_true($r54uBad[0] === 'warn' && !str_contains($r54uBad[1], 'configured') && str_contains($r54uBad[1], 'neither'),
         'R54 doctor: a value that is no cron line warns and says so (was: "Worker cron declaration configured."): ' . $r54uBad[1]);
@@ -95,7 +96,7 @@ try {
             "R54 import {$r54uLang}: the help names the catalog currency and the vat_class column with its classes (was: euros, no vat_class): {$r54uHelp}");
     }
     // R55: the header row comes from ImportTemplates (cli/schema-build.php and the admin's download).
-    assert_true(in_array('vat_class', ImportTemplates::headers([], []), true) && str_contains((string)file_get_contents($r54uRoot . '/cli/schema-build.php'), 'ImportTemplates::headers('),
+    assert_true(in_array('vat_class', ImportTemplates::headers([], []), true) && str_contains((string)file_get_contents($r54uRoot . '/cli/schema-build.php'), 'ImportTemplates::template('), // R56: headers + sample row
         'R54 import: the generated CSV templates have a vat_class column');
 } catch (Throwable $e) { $r54uFail('import help', $e); } finally { I18n::setLocale($r54uLocale); }
 
