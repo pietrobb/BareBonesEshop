@@ -398,6 +398,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261113175958_analyze_order_tables` (review round 53): MySQL only, `ANALYZE TABLE` of `orders`,
   `order_items` and `invoices` before the OSS backfills (seconds). Dated before them, it also runs once on a shop that
   has them already, where it only refreshes the statistics.
+- **Migration** `20261123090000_rma_outside_refund_keys` (review round 21): adds `rma_requests.outside_refund_keys`,
+  per VAT rate what a return closed without payout used of the money refunded outside the returns (instant).
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address

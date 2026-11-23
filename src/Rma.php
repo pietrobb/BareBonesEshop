@@ -549,29 +549,54 @@ class Rma {
      * R55 (low): an item refund a GoPay/ThePay REFUNDED settled (no refund id) is referenced by the key of its booking.
      */
     public static function refundedOutsideReturns(int $orderId): int {
-        $order = Orders::byId($orderId);
-        if (!$order) return 0;
+        if (!Orders::byId($orderId)) return 0;
+        return max(0, array_sum(array_column(self::outsideRefunds($orderId), 1)) - self::outsideCounted($orderId)['total']);
+    }
+
+    /**
+     * R56 (M3): what returns of the order counted of the money refunded outside them, in all and per VAT breakdown key
+     * where they recorded it (since R56; '' is money without a credit note): closed without payout
+     * (rma_requests.outside_refund_applied / outside_refund_keys) or credited less it (credit_snapshot outside_applied /
+     * outside_applied_keys of a live item refund).
+     * @return array{total: int, keys: array<string, int>}
+     */
+    public static function outsideCounted(int $orderId): array {
         $db = Db::get();
         $store = StoreContext::current()->id();
-        $applied = $db->prepare('SELECT COALESCE(SUM(outside_refund_applied),0) FROM rma_requests WHERE order_id=:order AND store_id=:store');
+        $counted = ['total' => 0, 'keys' => []];
+        $add = static function (int $amount, mixed $keys) use (&$counted): void {
+            $counted['total'] += $amount;
+            foreach (is_array($keys) ? $keys : [] as $key => $value) $counted['keys'][(string)$key] = ($counted['keys'][(string)$key] ?? 0) + (int)$value;
+        };
+        $applied = $db->prepare('SELECT outside_refund_applied, outside_refund_keys FROM rma_requests WHERE order_id=:order AND store_id=:store AND outside_refund_applied > 0');
         $applied->execute([':order' => $orderId, ':store' => $store]);
-        $counted = (int)$applied->fetchColumn();
-        $applied->closeCursor();
+        foreach ($applied->fetchAll(PDO::FETCH_ASSOC) as $row) $add((int)$row['outside_refund_applied'], json_decode((string)($row['outside_refund_keys'] ?? ''), true));
         $credits = $db->prepare("SELECT i.credit_snapshot FROM order_refunds r JOIN invoices i ON i.id=r.credit_note_id
             WHERE r.order_id=:order AND r.store_id=:store AND r.rma_id IS NOT NULL AND " . self::LIVE_REFUND_SQL);
         $credits->execute([':order' => $orderId, ':store' => $store]);
-        foreach ($credits->fetchAll(PDO::FETCH_COLUMN) as $snapshot) $counted += (int)((json_decode((string)$snapshot, true) ?: [])['outside_applied'] ?? 0);
+        foreach ($credits->fetchAll(PDO::FETCH_COLUMN) as $snapshot) {
+            $data = json_decode((string)$snapshot, true) ?: [];
+            $add((int)($data['outside_applied'] ?? 0), $data['outside_applied_keys'] ?? null);
+        }
+        return $counted;
+    }
+
+    /**
+     * R56 (M3): the booked refunds of the order refundedOutsideReturns() counts, each [ledger key, amount].
+     * @return list<array{0: string, 1: int}>
+     */
+    public static function outsideRefunds(int $orderId): array {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
         $cancelledAfterShipping = self::cancellationRefunded($orderId) && Fulfillment::unshippedGross($orderId) !== null;
-        $stmt = $db->prepare("SELECT COALESCE(SUM(t.amount),0) FROM payment_transactions t
+        $stmt = $db->prepare("SELECT t.idempotency_key, t.amount FROM payment_transactions t
             WHERE t.order_id=:order AND t.store_id=:store AND t.status IN ('partially_refunded','refunded','refund_succeeded') AND t.amount>0
               AND t.idempotency_key <> :cancellation
               AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id=t.order_id AND r.store_id=t.store_id
                   AND (r.idempotency_key=t.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference<>''
                       AND (r.payment_reference=t.provider_ref OR r.payment_reference=t.idempotency_key))))");
         $stmt->execute([':order' => $orderId, ':store' => $store, ':cancellation' => $cancelledAfterShipping ? 'order_refund_' . $orderId : '']);
-        $booked = (int)$stmt->fetchColumn();
-        $stmt->closeCursor();
-        return max(0, $booked - $counted);
+        return array_map(static fn(array $row): array => [(string)($row['idempotency_key'] ?? ''), (int)$row['amount']], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /** R51: a refund of the order requested and not booked yet; a return is settled once it is (refundedOutsideReturns()). */
@@ -619,16 +644,17 @@ class Rma {
             $source = $rma && $rma['status'] === 'received' && $outside > 0 && !self::refundInFlight((int)$rma['order_id'])
                 ? InvoiceService::byOrderId((int)$rma['order_id']) : null;
             // R51: the outside money this return uses up is the goods' value it covers (at most all of that money).
-            [$full, $owed] = $source ? InvoiceService::rmaCreditOwed((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $outside) : [0, 1];
-            $value = min($full, $outside);
+            // R56 (M3): per VAT breakdown key (InvoiceService::outsideDeduction()), recorded so the next return takes the rest.
+            [, $owed, $keys] = $source ? InvoiceService::rmaCreditOwed((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $outside) : [0, 1, []];
+            $value = array_sum($keys);
             $pending = $db->prepare("SELECT COUNT(*) FROM order_refunds WHERE rma_id = ? AND store_id = ? AND status = 'pending'");
             $pending->execute([$rmaId, StoreContext::current()->id()]);
             $closable = $source && $owed === 0 && $value > 0 && (int)$pending->fetchColumn() === 0;
             $pending->closeCursor();
             if ($closable) {
                 $db->prepare('UPDATE rma_items SET refunded_quantity = received_quantity WHERE rma_id = ?')->execute([$rmaId]);
-                $db->prepare("UPDATE rma_requests SET status = 'refunded', outside_refund_applied = outside_refund_applied + ?, updated_at = " . Db::now() . ' WHERE id = ? AND store_id = ?')
-                    ->execute([$value, $rmaId, StoreContext::current()->id()]);
+                $db->prepare("UPDATE rma_requests SET status = 'refunded', outside_refund_applied = outside_refund_applied + ?, outside_refund_keys = ?, updated_at = " . Db::now() . ' WHERE id = ? AND store_id = ?')
+                    ->execute([$value, json_encode($keys, JSON_THROW_ON_ERROR | JSON_FORCE_OBJECT), $rmaId, StoreContext::current()->id()]);
                 $currency = (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur');
                 AuditLog::log('rma_status', $rmaId, 'received', 'refunded', 'Closed without payout: ' . I18n::price($value, $currency) . ' of ' . I18n::price($outside, $currency) . ' refunded outside the return counted');
             }

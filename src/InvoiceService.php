@@ -675,41 +675,127 @@ final class InvoiceService
      * R51 (R49 open): [the returned goods' full value, what their credit pays after $outside money refunded outside the
      * returns]. The outside money is taken off the goods' value, then the invoice's uncredited rest caps it: that money's
      * own credit note already lowered the rest, and deducting it from the capped credit took it off twice.
-     * @return array{0: int, 1: int}
+     * R56 (M3): the outside money per VAT breakdown key (outsideDeduction()); third, what it takes off this return.
+     * @return array{0: int, 1: int, 2: array<string, int>}
      */
     public static function rmaCreditOwed(int $sourceInvoiceId, int $rmaId, array $quantities, int $outside): array {
-        if (!$quantities) return [0, 0];
+        if (!$quantities) return [0, 0, []];
         $db = Db::get();
-        [$source, , , $lines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
+        [$source, $order, , $lines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         $full = (int)self::creditTotals($lines)[1]['gross'];
-        $capped = (int)self::capToUncredited($lines, self::uncredited($db, $source)['rates'], $source)[1]['gross'];
-        return [$full, max(0, min($capped, $full - max(0, $outside)))];
+        $deduction = $outside > 0 ? self::outsideDeduction((int)$order['id'], $lines) : [];
+        $less = self::linesLess($lines, $deduction);
+        $owed = $less === [] ? 0 : (int)self::capToUncredited($less, self::uncredited($db, $source)['rates'], $source)[1]['gross'];
+        return [$full, $owed, $deduction];
     }
 
     /**
      * R49 (capability review of finding 3): an item credit less the money of the order refunded outside its returns
      * that no other return counted yet (Rma::refundedOutsideReturns()): the customer gets what is still owed, never the
-     * same money twice. The lines are scaled down together (gross in proportion, the last line takes the remainder; net
-     * in proportion). Refused when that money covers the whole credit: the return is closed without payout instead.
-     * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>, 3: int}
+     * same money twice. Refused when that money covers the whole credit: the return is closed without payout instead.
+     * R56 (M3): taken per VAT breakdown key (outsideDeduction(), linesLess()); fourth and fifth, the money taken in all
+     * and per key, for the credit snapshot.
+     * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>, 3: int, 4: array<string, int>}
      */
-    private static function lessOutside(array $lines, array $totals, int $orderId): array {
-        $gross = (int)$totals['gross'];
-        $less = min(Rma::refundedOutsideReturns($orderId), $gross);
-        if ($less <= 0) return [...self::creditTotals($lines), 0];
-        if ($less >= $gross) throw new LogicException('Money refunded outside the return covers this credit: close the return without payout');
-        $target = $gross - $less;
-        $left = $target;
-        $last = count($lines) - 1;
-        foreach (array_keys($lines) as $position => $i) {
-            $lineGross = (int)$lines[$i]['gross'];
-            $scaled = $position === $last ? $left : intdiv($lineGross * $target, $gross);
-            $left -= $scaled;
-            $lines[$i]['net'] = $lineGross > 0 ? (int)round((int)$lines[$i]['net'] * $scaled / $lineGross) : 0;
-            $lines[$i]['gross'] = $scaled;
-            $lines[$i]['vat'] = $scaled - (int)$lines[$i]['net'];
+    private static function lessOutside(array $lines, int $orderId): array {
+        $deduction = self::outsideDeduction($orderId, $lines);
+        if ($deduction === []) return [...self::creditTotals($lines), 0, []];
+        $less = self::linesLess($lines, $deduction);
+        if ($less === []) throw new LogicException('Money refunded outside the return covers this credit: close the return without payout');
+        return [...self::creditTotals($less), array_sum($deduction), $deduction];
+    }
+
+    /**
+     * R56 (M3): what the money refunded outside the order's returns (and not counted by one yet) takes off these return
+     * lines, per VAT breakdown key. A refund with a credit note credited the invoice at that note's rates, which lowered
+     * what those rates have uncredited (capToUncredited()): it comes off the lines at those rates only. R51 took all of it
+     * off the first return, so the share credited at the other rates came off twice: from this return and from the
+     * capped rest of the return at those rates (goodwill 10 € on 20 € at 23 % and 10 € at 5 %, then both returned: 26.67
+     * € of 30 €). Money without a credit note (key '') comes off any line. Returns counted before R56 recorded no keys:
+     * what is left in all caps the per-key rests.
+     * @return array<string, int>
+     */
+    private static function outsideDeduction(int $orderId, array $lines): array {
+        $remaining = Rma::refundedOutsideReturns($orderId);
+        if ($remaining <= 0) return [];
+        $db = Db::get();
+        $pools = [];
+        foreach (Rma::outsideRefunds($orderId) as [$ledgerKey, $amount]) {
+            $note = $ledgerKey !== '' ? self::refundCreditByKey($db, $orderId, $ledgerKey) : null;
+            if (!$note || (string)($note['status'] ?? '') === self::STATUS_CANCELLED) continue;
+            foreach (json_decode((string)$note['vat_breakdown'], true) ?: [] as $key => $info) {
+                $gross = is_array($info) ? -((int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0)) : 0;
+                $gross = min($gross, $amount);
+                if ($gross <= 0) continue;
+                $pools[(string)$key] = ($pools[(string)$key] ?? 0) + $gross;
+                $amount -= $gross;
+            }
         }
-        return [...self::creditTotals($lines), $less];
+        foreach (Rma::outsideCounted($orderId)['keys'] as $key => $counted) {
+            if ($key !== '' && isset($pools[$key])) $pools[$key] = max(0, $pools[$key] - $counted);
+        }
+        $over = array_sum($pools) - $remaining;
+        foreach ($pools as $key => $pool) {
+            if ($over <= 0) break;
+            $cut = min($pool, $over);
+            $pools[$key] -= $cut;
+            $over -= $cut;
+        }
+        $value = [];
+        foreach ($lines as $line) $value[self::lineKey($line)] = ($value[self::lineKey($line)] ?? 0) + (int)$line['gross'];
+        $deduction = [];
+        foreach ($value as $key => $gross) {
+            $taken = min($gross, $pools[$key] ?? 0);
+            if ($taken > 0) $deduction[(string)$key] = $taken;
+        }
+        $free = min($remaining - array_sum($pools), array_sum($value) - array_sum($deduction));
+        if ($free > 0) $deduction[''] = $free;
+        return $deduction;
+    }
+
+    /**
+     * R56 (M3): credit lines less $deduction (outsideDeduction()): each key's lines less that key's share, then all less
+     * the money without a key in proportion to what is left per key; the lines of a key are scaled down together (gross
+     * in proportion, the last line takes the remainder; net in proportion). [] when nothing is left.
+     */
+    private static function linesLess(array $lines, array $deduction): array {
+        if ($deduction === []) return $lines;
+        $byKey = [];
+        foreach ($lines as $i => $line) $byKey[self::lineKey($line)][] = $i;
+        $value = $left = [];
+        foreach ($byKey as $key => $indexes) {
+            $value[$key] = array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['gross'], $indexes));
+            $left[$key] = $value[$key] - min($value[$key], (int)($deduction[(string)$key] ?? 0));
+        }
+        $rest = array_sum($left);
+        $free = (int)($deduction[''] ?? 0);
+        if ($free >= $rest) return [];
+        $shareLeft = $free;
+        $keys = array_keys(array_filter($left, static fn(int $gross): bool => $gross > 0));
+        foreach ($keys as $position => $key) {
+            $share = $position === count($keys) - 1 ? $shareLeft : intdiv($left[$key] * $free, $rest);
+            $share = min($share, $left[$key]);
+            $shareLeft -= $share;
+            $left[$key] -= $share;
+        }
+        foreach ($byKey as $key => $indexes) {
+            $target = $left[$key];
+            $remaining = $target;
+            foreach ($indexes as $position => $i) {
+                $lineGross = (int)$lines[$i]['gross'];
+                $scaled = $position === count($indexes) - 1 ? $remaining : intdiv($lineGross * $target, max(1, $value[$key]));
+                $remaining -= $scaled;
+                $lines[$i]['net'] = $lineGross > 0 ? (int)round((int)$lines[$i]['net'] * $scaled / $lineGross) : 0;
+                $lines[$i]['gross'] = $scaled;
+                $lines[$i]['vat'] = $scaled - (int)$lines[$i]['net'];
+            }
+        }
+        return $lines;
+    }
+
+    /** The VAT breakdown key of a credit line (capToUncredited(), creditTotals()). */
+    private static function lineKey(array $line): string {
+        return (string)VatService::breakdownKey((int)$line['rate_basis_points'], (string)($line['country'] ?? ''), (string)($line['supply'] ?? ''));
     }
 
     /**
@@ -745,7 +831,7 @@ final class InvoiceService
 
         [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         // R51 (R49 open): the outside money comes off the goods' full value, then the uncredited rest caps it (rmaCreditOwed()).
-        $draftLines = $deductOutside ? self::lessOutside($fullLines, self::creditTotals($fullLines)[1], (int)$order['id'])[0] : $fullLines;
+        $draftLines = $deductOutside ? self::lessOutside($fullLines, (int)$order['id'])[0] : $fullLines;
         [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
@@ -770,7 +856,8 @@ final class InvoiceService
             // R15 high 3: under the lock again, each VAT rate capped at what the invoice still has uncredited at that rate.
             $less = 0;
             $draftLines = $fullLines;
-            if ($deductOutside) [$draftLines, , , $less] = self::lessOutside($fullLines, self::creditTotals($fullLines)[1], (int)$order['id']);
+            $lessKeys = [];
+            if ($deductOutside) [$draftLines, , , $less, $lessKeys] = self::lessOutside($fullLines, (int)$order['id']);
             [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
@@ -779,7 +866,7 @@ final class InvoiceService
                 'source_fingerprint' => (string)($snapshot['fingerprint'] ?? ''),
                 'rounding' => 'source_component_prefix_allocation', 'currency' => (string)$source['currency'],
                 'lines' => $lines, 'totals' => $totals,
-            ] + ($less > 0 ? ['outside_applied' => $less] : []);
+            ] + ($less > 0 ? ['outside_applied' => $less, 'outside_applied_keys' => (object)$lessKeys] : []);
             $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
             // R14 #2: all credit notes on one invoice together never exceed it.
             if ($totals['gross'] > self::uncredited($db, $source)['gross']) throw new LogicException('Credit exceeds what the invoice still has uncredited');
