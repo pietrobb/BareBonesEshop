@@ -1793,11 +1793,15 @@ class PaymentService {
             // accepted one smaller than the balance ignored the event for good (the payment stayed paid). Each is booked
             // with its credit note; only the rest is a refund outside the shop. A partial refund there names no amount and
             // stays a log entry.
+            // R56 (review round 21, medium 2): also a refund_pending payment with nothing in flight: the shop's refund job
+            // booked its money (refund_succeeded) and has not moved the payment on yet (settleRefundJob()). Was: ignored,
+            // the event's id used up, so GoPay's later notifications and polls were dropped as duplicates (3000 refunded
+            // there, 500 in the ledger, the order still to be shipped).
             $balance = self::refundableBalance($orderId);
             $pending = $request === null ? self::pendingItemRefunds($orderId) : [];
             $inFlightItems = array_sum(array_map(static fn(array $row): int => (int)$row['amount'], $pending));
             if ($request === null && strtolower((string)($data['state'] ?? '')) === 'refunded' && $currency === $orderCurrency && $balance > 0
-                && ($pending !== [] ? $inFlightItems <= $balance && !self::refundsByHand($order) : in_array($from, ['paid', 'partially_refunded', 'disputed'], true))) {
+                && ($pending !== [] ? $inFlightItems <= $balance && !self::refundsByHand($order) : in_array($from, ['paid', 'partially_refunded', 'disputed', 'refund_pending'], true))) {
                 $rest = $balance - $inFlightItems;
                 $booked = false;
                 $current = $order;
@@ -2130,7 +2134,7 @@ class PaymentService {
             self::recordEvent($orderId, 'refund.failed', 'ignored', $amount, $currency, $eventKey, $payload + ['payment_status' => $from, 'booked' => $booked], $provider, $refundId);
             return false;
         });
-        IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'refund_id' => $refundId, 'released' => $released]);
+        IncidentMonitor::report('payment.refund_failed', 'payment', self::releasedSeverity($orderId, $released), ['order_id' => $orderId, 'refund_id' => $refundId, 'released' => $released]);
         if ($released) self::closeReleasedOrder($orderId, 'Refund failed, the money was refunded already');
         return $released;
     }
@@ -2173,9 +2177,18 @@ class PaymentService {
                 . AuditLogLabels::amount($amount, (string)($order['currency'] ?? 'eur')) . ' declined by the provider: ' . $reason);
             return true;
         });
-        IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'declined' => true, 'released' => $released]);
+        IncidentMonitor::report('payment.refund_failed', 'payment', self::releasedSeverity($orderId, $released), ['order_id' => $orderId, 'declined' => true, 'released' => $released]);
         if ($released) self::closeReleasedOrder($orderId, 'Refund declined, the money was refunded already');
         return $released;
+    }
+
+    /**
+     * R56 (review round 21, low): a released refund is critical (the customer may be unpaid) unless the payment is refunded
+     * in full after it (the money went back another way, e.g. in the GoPay/ThePay dashboard): then a warning. Was: a
+     * critical "refund failed" for a customer who had all the money.
+     */
+    private static function releasedSeverity(int $orderId, bool $released): string {
+        return $released && (string)(Orders::byId($orderId)['payment_status'] ?? '') === 'refunded' ? 'warning' : 'critical';
     }
 
     /** Whether the provider answered this order's refund request (not a credit note's item refund) as pending under $refundId. */

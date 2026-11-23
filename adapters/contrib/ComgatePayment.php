@@ -135,7 +135,15 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
         if (!preg_match(self::TRANS_ID, $paymentId) || $amount <= 0) {
             throw new \InvalidArgumentException('Comgate refund needs a transId and a positive amount');
         }
-        $response = $this->request('POST', '/v2.0/refund.json', ['transId' => $paymentId, 'amount' => $amount, 'test' => $this->test]);
+        try {
+            $response = $this->request('POST', '/v2.0/refund.json', ['transId' => $paymentId, 'amount' => $amount, 'test' => $this->test]);
+        } catch (\RuntimeException $e) {
+            // R56 (review round 21, low): Comgate refused it (4xx, e.g. the payment was refunded in its portal): a failed
+            // refund, so the shop checks the payment's state (PaymentService::refund()). Credentials, timeouts and
+            // throttling stay errors to retry.
+            if (in_array($e->getCode(), [401, 403, 408, 429], true) || $e->getCode() < 400 || $e->getCode() >= 500) throw $e;
+            return ['refund_id' => '', 'status' => 'failed', 'message' => $e->getMessage()];
+        }
         return ['refund_id' => '', 'status' => ($response['code'] ?? null) === 0 ? 'succeeded' : 'failed'];
     }
 

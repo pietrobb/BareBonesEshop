@@ -942,7 +942,10 @@ final class InvoiceService
                 $parts[$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
             }
             return $parts;
-        }, static function () use ($split): array { return $split['unshipped'] ? ['split' => 'unshipped'] : []; });
+        }, static function () use ($split, $itemRates): array {
+            // R56: every refund credit note names its split; one without (issued before R56) is read by unshippedUncredited().
+            return ['split' => $split['unshipped'] ? 'unshipped' : ($itemRates !== [] ? 'items' : 'invoice')];
+        });
     }
 
     /**
@@ -957,8 +960,15 @@ final class InvoiceService
         $stmt->execute([':source' => (int)$source['id'], ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $credit) {
             $snapshot = json_decode((string)($credit['credit_snapshot'] ?? ''), true);
-            if (!is_array($snapshot) || ($snapshot['split'] ?? '') !== 'unshipped') continue;
-            foreach (json_decode((string)$credit['vat_breakdown'], true) ?: [] as $key => $info) {
+            $breakdown = json_decode((string)$credit['vat_breakdown'], true) ?: [];
+            if (!is_array($snapshot) || !is_array($breakdown)) continue;
+            // R56 (review round 21, low): a refund credit note issued before R55 has no split; R54 credited the unshipped
+            // goods' rates alone just the same, so one of those rates only counts as theirs. Was: skipped, and N1's double
+            // credit of the unshipped goods' rate stayed for the orders refunded before the upgrade.
+            $legacy = !array_key_exists('split', $snapshot) && ($snapshot['kind'] ?? '') === 'refund' && $breakdown !== []
+                && array_diff(array_map('strval', array_keys($breakdown)), array_map('strval', array_keys($unshipped))) === [];
+            if (($snapshot['split'] ?? '') !== 'unshipped' && !$legacy) continue;
+            foreach ($breakdown as $key => $info) {
                 if (!is_array($info) || !isset($unshipped[(string)$key])) continue;
                 $unshipped[(string)$key]['gross'] += (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
                 $unshipped[(string)$key]['net'] += (int)($info['net'] ?? 0);
