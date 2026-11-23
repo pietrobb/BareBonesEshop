@@ -419,8 +419,47 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   switched VAT off ("Prodávající není plátcem DPH" on every page and invoice). The box now shows what checkout
   charges and a save without it keeps the setting. A store that was saved before this release while charging VAT
   may now be a non-payer by mistake: open Admin → Stores and seller and tick the box (with the VAT ID) where it applies.
+- **`setup.php doctor` warns when the worker runs less often than every minute (review round 21).** E-mails, refunds
+  and reports wait for the worker; `operations.worker_cron` of `@daily`, `@hourly` or `*/5 * * * *` now warns, and a
+  schedule that never runs (`0 0 31 2 *`) or a line that does not run `cli/worker.php` through PHP
+  (`* * * * * echo worker.php`) is reported as no crontab line. Record the worker's every-minute line.
 
 ### Changes
+
+- **CSV templates import as their product type, and admin-only attributes stay private (review round 21, mediums F1
+  and F2).** The admin's filled-in templates had no `product_type` column, so an e-book from the "Downloadable"
+  template was imported as a physical product (shipping charged, nothing delivered), and clothing as a simple one.
+  Each template now carries `product_type` filled in for its type and the admin import honours it; a template has one
+  sample row, opens in Excel (UTF-8 BOM, `;`) and names the types in the admin's language. Attributes marked
+  `admin_only` in `catalog.json` are no longer shown in the product page's parameters, in
+  `/api/v1/storefront/product` or in the feeds; `attr:download_url` is gone from the templates (digital delivery is
+  set up under the product's downloadable files).
+- **Reports keep working with a large backlog of changes (review round 21, medium M1).** A store whose reports nobody
+  opened (or a Galera cluster with gaps in the ids) read all its pending daily-sales changes at once and ran out of
+  memory at about 530 000 of them; every Reports request then failed. Changes are now applied in pages within the
+  request's time budget and removed as they go; the lock wait honours the 2 s limit and sparse ids are batched.
+- **A refund confirmed by the gateway just before its settlement job runs is no longer lost (review round 21, medium
+  M2).** A GoPay/ThePay REFUNDED notice arriving after the refund succeeded but before the job booked it was ignored
+  and its id used up, so the order stayed "processing" (shippable) with only part of the refund in the ledger. It now
+  settles the rest. A declined credit-note refund settles through REFUNDED on ThePay and Comgate too, a declined
+  admin refund is no critical incident, and credit notes issued before round 20 split their VAT as later ones do.
+- **A goodwill refund followed by returns pays the customer in full (review round 21, medium M3).** A goodwill refund
+  is credited across the order's VAT rates; the first return then deducted all of it and the second was capped by the
+  reduced rate (A 20 € at 23 % and B 10 € at 5 %, 10 € goodwill, both returned: 26.67 € or 23.33 € instead of 30 €).
+  Each return now deducts the goodwill share credited at its own rates.
+- **Smaller fixes (review round 21, lows).** Restored `uploads/` keeps only image, document and media files in the web
+  directory and `.htaccess` sends `nosniff` for everything in it; the domain test refuses IP literals, tests only added
+  domains within 8 s in all, and the main host is reserved without `app_url`; `/admin` cannot be a store's URL
+  prefix, a `domains[]` array in the post is refused instead of clearing the domains, and the seller form no longer
+  saves a store with neither a prefix nor a domain. Names of invisible characters alone (U+200B, U+00A0,
+  U+FEFF, U+2028) are refused in API v1, the product editor and reviews. `cli/seed.php --help` prints its usage
+  (an unknown option is refused) instead of seeding 1000 products, a second run without `--fresh` adds to the
+  catalog instead of failing, and attribute values are in the shop's language.
+- **A web install outside Slovakia gets its own sample shipping and payment (review round 21, UX).** In de/EUR or
+  en/USD the sample methods kept their Slovak names ("Osobný odber", "Dobierka"), the "Domestic SK" zone held Slovakia
+  alone and German orders above 5 kg found no carrier. The installer now names the methods in the shop's language
+  (the other languages as their translations) and makes the seller's country the domestic zone, with its rates and
+  cash on delivery; Slovakia moves to the EU zone. Existing shops are not changed.
 
 - **A product's VAT rate can be set (review round 20, high 3).** Books, food, medicines and other goods taxed at a
   reduced rate were invoiced at the standard rate, since `products.vat_class` was in no form. The product editor has a
