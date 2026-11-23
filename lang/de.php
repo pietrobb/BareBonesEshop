@@ -1442,6 +1442,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.templates' => 'Vorlagen',
     'admin.import.templates_download' => 'CSV-Vorlage für einen Produkttyp herunterladen:',
     'admin.import.sample_hint' => 'Eine Beispiel-CSV liegt in',
+    'admin.import.sample_name' => 'Muster – diese Zeile überschreiben oder löschen',
     'admin.import.rejected' => 'Die CSV-Datei wurde nicht angenommen:',
     'admin.import.done' => 'Import abgeschlossen: {count} Produkte.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',

@@ -1442,6 +1442,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.templates' => 'Sablonok',
     'admin.import.templates_download' => 'Töltse le a terméktípus CSV-sablonját:',
     'admin.import.sample_hint' => 'Minta CSV helye:',
+    'admin.import.sample_name' => 'Minta – írja felül vagy törölje ezt a sort',
     'admin.import.rejected' => 'A CSV-fájl nem lett elfogadva:',
     'admin.import.done' => 'Importálás kész: {count} termék.',
     'admin.import.partial' => 'Importálás: {imported} OK, {errors}.',

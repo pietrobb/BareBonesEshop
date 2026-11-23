@@ -14,11 +14,11 @@ try {
     $r55uTemplates = ImportTemplates::all();
     $r55uCatalog = array_keys((array)(json_decode((string)file_get_contents($r55uRoot . '/catalog.json'), true)['product_types'] ?? []));
     assert_true(isset($r55uTemplates['simple']) && array_diff($r55uCatalog, array_keys($r55uTemplates)) === []
-        && str_starts_with(ImportTemplates::csv($r55uTemplates['simple']), "sku,name,slug,category,price,") && in_array('vat_class', $r55uTemplates['simple'], true),
+        && str_starts_with(ImportTemplates::csv($r55uTemplates['simple']), "\xEF\xBB\xBFsku;name;slug;product_type;category;price;") && in_array('vat_class', $r55uTemplates['simple'], true), // R56: product_type, BOM, ";"
         'R55 import: a template per product type, simple included, generated without files on the server: ' . json_encode(array_keys($r55uTemplates)));
     $r55uStores = ['default_locale' => 'sk', 'stores' => ['a' => ['languages' => ['sk', 'en']], 'b' => ['languages' => ['de']]]];
     assert_equals(['name_en', 'summary_en', 'slug_en', 'name_de', 'summary_de', 'slug_de'],
-        array_slice(ImportTemplates::headers(['attributes' => ['color' => []]], $r55uStores), 15),
+        array_slice(ImportTemplates::headers(['attributes' => ['color' => []]], $r55uStores), 16),
         'R55 import: attributes, then the name/summary/slug of every language but the default one');
     $r55uAdmin = (string)file_get_contents($r55uRoot . '/src/Entrypoints/Admin.php');
     $r55uOps = (string)file_get_contents($r55uRoot . '/src/Entrypoints/Admin/Operations.php');

@@ -266,7 +266,7 @@ class Products {
     public static function attrs(int $productId): array {
         $stmt = Db::get()->prepare("SELECT pa.attr_name, pa.attr_value, pa.numeric_val FROM product_attrs pa JOIN products p ON p.id = pa.product_id WHERE pa.product_id = :pid AND p.store_id = :store ORDER BY pa.attr_name");
         $stmt->execute([':pid' => $productId, ':store' => StoreContext::current()->catalogId()]);
-        return $stmt->fetchAll();
+        return CatalogAttributes::publicRows($stmt->fetchAll()); // R56 F2: storefront, API and cache callers only
     }
 
     /**
@@ -282,7 +282,7 @@ class Products {
             ORDER BY pa.attr_name, cnt DESC
         ");
         $stmt->execute([':cat' => $categoryId, ':store' => StoreContext::current()->catalogId()]);
-        $rows = $stmt->fetchAll();
+        $rows = CatalogAttributes::publicRows($stmt->fetchAll());
 
         // Group by attribute name
         $filters = [];
@@ -874,7 +874,8 @@ class Products {
     private static function enrichWithContext(array $product, ProductEnrichmentContext $context): array {
         $product['description'] = Security::sanitizeRichHtml((string)($product['description'] ?? ''));
         $product['images'] = json_decode($product['images'] ?? '[]', true);
-        $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
+        $attrs = json_decode($product['attrs'] ?? '{}', true);
+        $product['attrs'] = is_array($attrs) ? CatalogAttributes::publicMap($attrs) : $attrs;
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);
         $product['category_ids'] = $context->categoryIds((int)($product['id'] ?? 0));
         $product = $context->applyCommerce($product);

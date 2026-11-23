@@ -1442,6 +1442,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.templates' => 'Szablony',
     'admin.import.templates_download' => 'Pobierz szablon CSV dla typu produktu:',
     'admin.import.sample_hint' => 'Przykładowy CSV znajduje się w',
+    'admin.import.sample_name' => 'Przykład – zastąp lub usuń ten wiersz',
     'admin.import.rejected' => 'Plik CSV nie został przyjęty:',
     'admin.import.done' => 'Import zakończony: {count} produktów.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',

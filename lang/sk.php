@@ -1421,6 +1421,7 @@ return [
     'admin.import.templates' => 'Šablóny',
     'admin.import.templates_download' => 'Stiahnite šablónu CSV pre typ produktu:',
     'admin.import.sample_hint' => 'Vzorový CSV nájdete v',
+    'admin.import.sample_name' => 'Vzor – prepíšte alebo zmažte tento riadok',
     'admin.import.rejected' => 'CSV súbor nebol prijatý:',
     'admin.import.done' => 'Import úspešný: {count} produktov.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',

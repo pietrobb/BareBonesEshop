@@ -85,8 +85,8 @@ $importDir = __DIR__ . '/../import';
 if (!is_dir($importDir)) mkdir($importDir, 0750, true);
 
 foreach ($catalog['product_types'] as $typeName => $typeDef) {
-    // R55: the same header row as the admin's template download (ImportTemplates).
-    file_put_contents("{$importDir}/template-{$typeName}.csv", ImportTemplates::csv(ImportTemplates::headers((array)$typeDef, $stores)));
+    // R55: the same template as the admin's download (ImportTemplates); R56: with product_type and a sample row.
+    file_put_contents("{$importDir}/template-{$typeName}.csv", (string)ImportTemplates::template((string)$typeName, 'Sample - replace or delete this row', $stores));
     echo "  [OK] import/template-{$typeName}.csv\n";
 }
 
