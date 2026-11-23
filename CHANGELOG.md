@@ -400,6 +400,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   has them already, where it only refreshes the statistics.
 - **Migration** `20261123090000_rma_outside_refund_keys` (review round 21): adds `rma_requests.outside_refund_keys`,
   per VAT rate what a return closed without payout used of the money refunded outside the returns (instant).
+- **Migration** `20261123120000_filter_tags_admin_only` (review round 22): writes every product's filter tags again
+  from its attributes, without the `admin_only` ones (a paid file's `download_url` was still in the tags written before
+  round 21 and could be found through the search); the full-text index follows. It reads the catalog in pages of 1000
+  products and writes only the tags that change.
+- **The storefront API's products no longer carry `filter_tags` and `translations` (review round 22).** The product
+  list, detail and search responses returned these raw columns (cached responses too); the product's texts already come
+  in the requested language. A client that read the translations asks for each language it needs.
+- **`shipping.json` methods are domestic in the store's own country (review round 22).** `Standardversand` and
+  `Expressversand` had Slovakia as their home zone in every shop: a German shop charged German buyers the EU rate and
+  Slovak buyers the domestic one. The home zone now follows the seller's country; a shop outside Slovakia that sells
+  through these methods should check their rates in Admin → Shipping, where they are now listed.
+- **`cli/seed.php --fresh` asks before it deletes orders (review round 22).** On a shop with orders it asks you to
+  type "delete" and, without a terminal, deletes nothing and exits 2. A script that reseeds a test shop adds `--yes`.
 - **Split wide `trusted_proxies` ranges before `apply` (review round 17, low 6).** This release ignores a public range
   wider than IPv4 /16 or IPv6 /32 (round 44), among them ranges Cloudflare publishes (`104.16.0.0/13`, `104.24.0.0/14`,
   `172.64.0.0/13`, `162.158.0.0/15`, `2a06:98c0::/29`); requests through them would count as the proxy's own address
@@ -420,11 +433,47 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   charges and a save without it keeps the setting. A store that was saved before this release while charging VAT
   may now be a non-payer by mistake: open Admin → Stores and seller and tick the box (with the VAT ID) where it applies.
 - **`setup.php doctor` warns when the worker runs less often than every minute (review round 21).** E-mails, refunds
-  and reports wait for the worker; `operations.worker_cron` of `@daily`, `@hourly` or `*/5 * * * *` now warns, and a
-  schedule that never runs (`0 0 31 2 *`) or a line that does not run `cli/worker.php` through PHP
-  (`* * * * * echo worker.php`) is reported as no crontab line. Record the worker's every-minute line.
+  and reports wait for the worker; `operations.worker_cron` of `@daily`, `@hourly` or `*/5 * * * *` now warns, a
+  schedule that never runs (`0 0 31 2 *`) is reported as such, and a line that does not run `cli/worker.php` through PHP
+  (`* * * * * echo worker.php`) as no crontab line, also with `web_worker` on (round 22). A quoted PHP binary or path
+  (`php "/var/www/my shop/cli/worker.php"`) is accepted. Record the worker's every-minute line.
 
 ### Changes
+
+- **Money refunded outside a return is no longer paid out again (review round 22, high V1).** Round 21 took such a
+  refund off a return only at the VAT rates of the returned goods, so the share credited at the order's other rates
+  was paid a second time (A 20 € at 23 % and B 10 € at 5 %, 10 € refunded in the gateway's dashboard, B returned:
+  16.67 € paid for a 10 € book). All of it now comes off the return; a later return at another rate gets what the
+  rate caps held back credited at a rate with room left. A credit note from before round 19 without its VAT split no
+  longer counts as the unshipped goods' credit, and a warning that follows a critical incident of the same code is
+  alerted as a warning.
+- **A refund ThePay or Comgate refused is settled (review round 22, medium S3).** Its payment's state was read with a
+  GoPay-style notification, which ThePay always refused as unverified; it is now read through the provider's own status
+  call. A refund the provider declined while the payment stayed paid (a partial one, or any on Comgate) is released as
+  declined: the payment goes back to paid or partially refunded and the merchant is told, instead of staying "refund
+  pending" with neither confirm nor release on the order.
+- **Admin-only attributes are gone from old filter tags, the search and the storefront API (review round 22, medium
+  S1, lows N3 and N4).** See the migration and API notes above; the SQLite search matches only the text columns, and
+  an attribute is admin-only in every spelling the filters accept (`download-url` too). A CSV `product_type` is
+  matched without case ("Downloadable") and an unknown type is refused for that row; the import names the downloadable
+  products it saved without a file (they are sold out until one is added).
+- **Apache no longer runs type-map, send-as-is or image-map files from `uploads/` (review round 22, medium S2).**
+  Debian and Ubuntu enable `AddHandler type-map var`, so a restored `m.var.jpg` passed the round 21 allowlist and Apache
+  served it with the `Content-Type` it named (a script on the shop's domain). `.htaccess` removes the `.var`, `.asis`,
+  `.map` and `.imap` handlers, refuses such names under `uploads/`, and a restore sets them aside like other active files.
+- **A daily-sales backlog spread over many days is built once per day (review round 22, medium S4).** Round 21 built
+  every touched day again in each batch of 50 000 changes (5 334 day builds instead of 381 for 200 000 changes). The
+  changes are read first and each day built once; a request stops reading at its deadline, and the Reports page
+  refreshes once instead of twice.
+- **Shipping in other countries and in the order (review round 22, UX S5 and S6).** `shipping.json` methods are
+  domestic in the seller's country (see above) and Admin → Shipping lists them; the order detail and the order list show
+  the shipping method. The web installer gives the storefront only the language chosen for the shop (a German shop no
+  longer offers Slovak and Czech; Admin → Stores adds more) and names the sample zones in that language.
+- **Smaller fixes (review round 22, lows).** A name of invisible or combining characters alone (U+200B, U+0301) is
+  refused in the checkout, the customer profile, B2B companies and the CSV import, and a trailing NUL is trimmed. The
+  domain test does not ask a domain that resolves to a local or private address (`localtest.me`, `127.0.0.1.nip.io`)
+  and names it, and the domains left when its 8 s are up are tested by the next save. Import, feed sync and bulk
+  order status messages put the count after a colon ("Produkty: 1", not "1 produktov").
 
 - **CSV templates import as their product type, and admin-only attributes stay private (review round 21, mediums F1
   and F2).** The admin's filled-in templates had no `product_type` column, so an e-book from the "Downloadable"
