@@ -110,12 +110,6 @@ parameters:
 			path: cli/i18n-parity.php
 
 		-
-			message: '#^Parameter \#1 \$string of function str_pad expects string, int\<1, max\> given\.$#'
-			identifier: argument.type
-			count: 1
-			path: cli/seed.php
-
-		-
 			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
 			identifier: nullCoalesce.variable
 			count: 1

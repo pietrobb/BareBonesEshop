@@ -229,7 +229,7 @@ for ($i = $offset + 1; $i <= $offset + $count; $i++) {
     ];
 
     $name = $localized($seedBase)['name'];
-    $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad($i, 6, '0', STR_PAD_LEFT);
+    $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad((string)$i, 6, '0', STR_PAD_LEFT);
     $slug = Import::slugify($name); // lower-cases before stripping, so "Premium" stays "premium"
 
     $price = $seedPrice(rand(299, 99900));

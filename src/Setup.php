@@ -895,7 +895,8 @@ class Setup
         if ($parts[2] !== '*' && $parts[4] === '*') {
             $longest = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
             $runs = false;
-            foreach ($sets[3] as $month) $runs = $runs || min($sets[2]) <= $longest[$month - 1];
+            $firstDay = min([31, ...$sets[2]]);
+            foreach ($sets[3] as $month) $runs = $runs || $firstDay <= $longest[$month - 1];
             if (!$runs) return null;
         }
         return $sets;
