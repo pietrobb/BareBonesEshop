@@ -24,12 +24,15 @@ try {
     }
     $r57uPattern = '#' . explode(' ', substr($r57uRule, strlen('RewriteRule ')))[0] . '#i';
     $r57uBlocked = [];
-    foreach (['uploads/m.var.jpg', 'uploads/a.asis.png', 'uploads/b.map.gif', 'uploads/s.php.jpg', 'uploads/products/photo.jpg', 'uploads/variant.jpg'] as $r57uPath) {
+    foreach (['uploads/m.var.jpg', 'uploads/a.asis.png', 'uploads/b.map.gif', 'uploads/c.imap.jpg', 'uploads/s.php.jpg', 'uploads/products/photo.jpg', 'uploads/variant.jpg'] as $r57uPath) {
         $r57uBlocked[$r57uPath] = preg_match($r57uPattern, $r57uPath) === 1;
     }
-    assert_equals(['uploads/m.var.jpg' => true, 'uploads/a.asis.png' => true, 'uploads/b.map.gif' => true, 'uploads/s.php.jpg' => true,
+    assert_equals(['uploads/m.var.jpg' => true, 'uploads/a.asis.png' => true, 'uploads/b.map.gif' => true, 'uploads/c.imap.jpg' => true, 'uploads/s.php.jpg' => true,
         'uploads/products/photo.jpg' => false, 'uploads/variant.jpg' => false], $r57uBlocked,
         'R57 S2 .htaccess: Apache refuses an upload whose name carries the var, asis or map handler extension (was: PHP only)');
+    $r57uRemoved = preg_match('/^\s*RemoveHandler\s+(.+)$/mi', $r57uHtaccess, $r57uMatch) === 1 ? preg_split('/\s+/', strtolower(trim($r57uMatch[1]))) : [];
+    assert_equals([], array_diff(['.var', '.asis', '.map', '.imap'], $r57uRemoved),
+        'R57 S2 .htaccess: the type-map, as-is and image-map handlers are removed (was: left to the distribution\'s AddHandler)');
 } catch (Throwable $e) {
     assert_true(false, 'R57 uploads type-map: ' . get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 }

@@ -77,7 +77,7 @@ foreach ($bbeRouterLines as $bbeRouterLine) {
         $bbeRouterIfDenies[] = ['#' . $m[1] . '#' . $m[2], '#' . $m[3] . '#' . $m[4]];
         continue;
     }
-    if (preg_match('/^(?:<\/If>|Require all denied|<\/?IfModule\b.*|AddOutputFilterByType\b.*|Expires(?:Active|ByType)\b.*)$/', $bbeRouterLine)) continue;
+    if (preg_match('/^(?:<\/If>|Require all denied|<\/?IfModule\b.*|RemoveHandler\b.*|AddOutputFilterByType\b.*|Expires(?:Active|ByType)\b.*)$/', $bbeRouterLine)) continue;
     $bbeRouterStop(500); // unknown directive: fail closed instead of silently serving
 }
 if ($bbeRouterRules === [] || $bbeRouterHeaderBlock !== null) $bbeRouterStop(500);
