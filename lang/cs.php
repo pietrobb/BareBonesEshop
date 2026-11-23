@@ -1442,6 +1442,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.templates' => 'Šablony',
     'admin.import.templates_download' => 'Stáhněte šablonu CSV pro typ produktu:',
     'admin.import.sample_hint' => 'Vzorový CSV najdete v',
+    'admin.import.sample_name' => 'Vzor – přepište nebo smažte tento řádek',
     'admin.import.rejected' => 'CSV soubor nebyl přijat:',
     'admin.import.done' => 'Import úspěšný: {count} produktů.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',

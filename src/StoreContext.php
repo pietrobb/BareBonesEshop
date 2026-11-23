@@ -117,7 +117,7 @@ class StoreContext {
      * whole JSON API in its own context, a /product store every product page.
      */
     public const RESERVED_PREFIXES = [
-        'api', 'product', 'category', 'page', 'wishlist', 'feeds', 'healthz', 'readyz',
+        'api', 'product', 'category', 'page', 'wishlist', 'feeds', 'healthz', 'readyz', 'admin',
         'assets', 'uploads', 'themes', 'vendor', 'import', 'storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src',
         'migrations', 'adapters', 'extensions', 'lang', 'demo', 'docs', 'forms', 'blocks', 'data', 'templates',
         'releases', 'tests', 'deploy', 'cache', 'test-results', 'playwright-report', 'parity-report',

@@ -22,6 +22,8 @@ final class SalesDaily {
     private const SETTLE_SECONDS = 900;
     /** Logged changes read per query (buildChanged()), ids per batch of logInserted(). */
     private const CHANGES_PAGE = 5000;
+    /** R56: logged changes built and deleted per batch (buildChanged()); a multiple of CHANGES_PAGE. */
+    private const CHANGES_BATCH = 50000;
     /** Tables whose new rows change the day of their order: SQL of (store_id, created_at) of the orders of rows id in (:from, :to]. */
     private const WATCHED = [
         'orders' => 'SELECT o.store_id, o.created_at FROM orders o WHERE o.id > :from AND o.id <= :to',
@@ -38,6 +40,8 @@ final class SalesDaily {
     private const TABLES = ['sales_daily', 'sales_daily_products', 'sales_daily_changes', 'sales_daily_state'];
     /** @var array<string, string> per store: the first day whose logged change this request did not build yet */
     private static array $staleFrom = [];
+    /** R56: the deadline of a refresh() with $seconds: on MySQL a lock wait ends with it (see transaction()). */
+    private static ?float $lockDeadline = null;
 
     /** R53: all four tables (one of them missing failed the reports with a 500); else the reports sum the orders. */
     public static function available(?PDO $db = null): bool {
@@ -106,7 +110,13 @@ final class SalesDaily {
     public static function refresh(string $storeId, ?float $seconds = null): bool {
         $db = Db::get();
         if (!self::available($db)) return false;
-        if (!self::refreshStore($db, $storeId, $seconds === null ? null : microtime(true) + $seconds)) self::queueRest($db);
+        $deadline = $seconds === null ? null : microtime(true) + $seconds;
+        self::$lockDeadline = $deadline;
+        try {
+            if (!self::refreshStore($db, $storeId, $deadline)) self::queueRest($db);
+        } finally {
+            self::$lockDeadline = null;
+        }
         return true;
     }
 
@@ -334,19 +344,19 @@ final class SalesDaily {
                 continue;
             }
             $stmt = $db->prepare($sql);
-            $next = $db->prepare("SELECT MIN(id) FROM {$table} WHERE id > ? AND id <= ?");
+            // The id that ends a batch of CHANGES_PAGE rows (none: fewer rows are left). Integers, inlined.
+            $end = $db->prepare("SELECT id FROM {$table} WHERE id > ? AND id <= ? ORDER BY id LIMIT 1 OFFSET " . (self::CHANGES_PAGE - 1));
             // R54 (low): a batch of ids at a time, each committed with how far it got. Was: every row since the last
-            // refresh in one read and one transaction (an import of 200 000 orders). R55 (review round 20, low): a batch
-            // starts at the next id there is (a gap of 100 million ids read 20 000 empty windows, 3-16 s) and stops at
-            // the deadline (the days are then summed from the orders until a later refresh logged the rest).
+            // refresh in one read and one transaction (an import of 200 000 orders). R55 (review round 20, low): it stops
+            // at the deadline (the days are then summed from the orders until a later refresh logged the rest).
+            // R56 (review round 21, low): a batch is CHANGES_PAGE rows, not a window of CHANGES_PAGE ids: ids far apart
+            // (an import into a sparse range) ran one row per transaction, 14 report requests of 2 s each.
             for ($from = $seen; $from < $max; $from = $to) {
                 if ($deadline !== null && $from > $seen && microtime(true) >= $deadline) return false;
-                $next->execute([$from, $max]);
-                $first = $next->fetchColumn();
-                $next->closeCursor();
-                if ($first === false || $first === null) $first = $max;
-                $from = max($from, (int)$first - 1);
-                $to = min($max, $from + self::CHANGES_PAGE);
+                $end->execute([$from, $max]);
+                $last = $end->fetchColumn();
+                $end->closeCursor();
+                $to = $last === false || $last === null ? $max : (int)$last;
                 $stmt->execute([':from' => $from, ':to' => $to]);
                 $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $stmt->closeCursor();
@@ -396,14 +406,51 @@ final class SalesDaily {
      * built from its orders when its turn comes.
      */
     private static function buildChanged(PDO $db, string $storeId, string $builtUntil, ?float $deadline): bool {
-        [$hours, $ranges] = self::visibleChanges($db, $storeId);
-        if ($ranges === []) return true;
+        // R56 (review round 21, medium 1): CHANGES_BATCH changes at a time, each batch's days built and its changes
+        // deleted before the next is read, until $deadline. Was: every change read at once (with their id runs as PHP
+        // arrays): 530 000 changes far apart (a store whose reports nobody opens, Galera's id steps) exceeded 128 MB
+        // and every report request answered 500 without ever getting further.
+        $after = 0;
+        do {
+            if ($after > 0 && $deadline !== null && microtime(true) >= $deadline) return self::staleAfter($db, $storeId, $after, $builtUntil);
+            [$hours, $ids, $after] = self::visibleChanges($db, $storeId, $after);
+            if ($ids === []) return true;
+            $full = count($ids) === self::CHANGES_BATCH;
+            if (!self::buildChangedBatch($db, $storeId, $builtUntil, $deadline, $hours, $ids)) {
+                if ($full) self::staleAfter($db, $storeId, $after, $builtUntil);
+                return false;
+            }
+        } while ($full);
+        return true;
+    }
+
+    /**
+     * The changes after id $after were not read: they may be of any built day, so the days from the first of them are
+     * summed from the orders (one MIN in SQL, nothing held in memory). Whether there are none.
+     */
+    private static function staleAfter(PDO $db, string $storeId, int $after, string $builtUntil): bool {
+        $stmt = $db->prepare('SELECT MIN(created_at) FROM sales_daily_changes WHERE store_id = ? AND id > ?');
+        $stmt->execute([$storeId, $after]);
+        $oldest = $stmt->fetchColumn();
+        $stmt->closeCursor();
+        if ($oldest === false || $oldest === null) return true;
+        self::$staleFrom[$storeId] = min(self::dayOf((string)$oldest), self::$staleFrom[$storeId] ?? $builtUntil, $builtUntil);
+        return false;
+    }
+
+    /**
+     * Build the days of one batch of changes ($hours, $ids from visibleChanges()) and delete those changes; whether all
+     * of its days were built before $deadline.
+     * @param list<string> $hours
+     * @param list<int> $ids
+     */
+    private static function buildChangedBatch(PDO $db, string $storeId, string $builtUntil, ?float $deadline, array $hours, array $ids): bool {
         $days = array_values(array_filter(self::daysOfHours($hours), static fn(string $day): bool => $day < $builtUntil));
         $built = self::buildDays($db, $storeId, $days, $deadline, null);
         // Built: the days before $days[$built] (all of them: before $builtUntil).
         $firstUnbuilt = $built === count($days) ? $builtUntil : $days[$built];
         if ($built < count($days)) self::$staleFrom[$storeId] = $firstUnbuilt;
-        self::transaction($db, static function () use ($db, $storeId, $ranges, $firstUnbuilt): void {
+        self::transaction($db, static function () use ($db, $storeId, $ids, $firstUnbuilt): void {
             // R54 (low): a change of a day not built at all is dropped (that day is built from its orders), but only of a
             // day not built by now: re-read under the writers' lock. A worker that built it meanwhile may have read its
             // order before the change committed; the change was deleted all the same and the day stayed wrong.
@@ -420,8 +467,8 @@ final class SalesDaily {
             // that are not consecutive, other stores' changes in between, ran one DELETE each: 400 000 changes 49 s).
             $delete = Db::isSqlite() ? 'DELETE FROM sales_daily_changes WHERE' : 'DELETE c FROM sales_daily_changes c FORCE INDEX (PRIMARY) WHERE';
             $params = array_merge([$storeId], $current === '' ? [] : $kept);
-            foreach (self::idChunks($ranges, 500) as $ids) {
-                $db->prepare("{$delete} store_id = ? AND id IN (" . implode(',', $ids) . "){$only}")->execute($params);
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $db->prepare("{$delete} store_id = ? AND id IN (" . implode(',', $chunk) . "){$only}")->execute($params);
             }
         });
         return $built === count($days);
@@ -434,44 +481,23 @@ final class SalesDaily {
      * until --rebuild. Only the ids read are deleted; one not visible yet is a gap between two runs and stays for the
      * next refresh. Medium 6: the cursor of that MAX(id) stayed open on SQLite and the build's write transaction failed
      * at once with "database is locked" when a checkout wrote meanwhile (the report answered 500): every read here is
-     * fetched whole and closed.
-     * @return array{0: list<string>, 1: list<array{0: int, 1: int}>}
+     * fetched whole and closed. R56: at most CHANGES_BATCH of them after id $after, as a flat list of ids.
+     * @return array{0: list<string>, 1: list<int>, 2: int} the hours, the ids and the last id read
      */
-    private static function visibleChanges(PDO $db, string $storeId): array {
+    private static function visibleChanges(PDO $db, string $storeId, int $after): array {
         $stmt = $db->prepare('SELECT id, SUBSTR(created_at, 1, 13) FROM sales_daily_changes WHERE store_id = ? AND id > ? ORDER BY id LIMIT ' . self::CHANGES_PAGE);
         $hours = [];
-        $ranges = [];
-        $after = 0;
+        $ids = [];
         do {
             $stmt->execute([$storeId, $after]);
             $rows = $stmt->fetchAll(PDO::FETCH_NUM);
             $stmt->closeCursor();
             foreach ($rows as [$id, $hour]) {
-                $id = (int)$id;
                 $hours[(string)$hour] = true;
-                $last = array_key_last($ranges);
-                if ($last !== null && $ranges[$last][1] === $id - 1) $ranges[$last][1] = $id;
-                else $ranges[] = [$id, $id];
-                $after = $id;
+                $ids[] = $after = (int)$id;
             }
-        } while (count($rows) === self::CHANGES_PAGE);
-        return [array_map('strval', array_keys($hours)), $ranges];
-    }
-
-    /**
-     * The ids of runs [first, last] in lists of at most $size.
-     * @param list<array{0: int, 1: int}> $ranges
-     * @return Generator<int, list<int>>
-     */
-    private static function idChunks(array $ranges, int $size): Generator {
-        $ids = [];
-        foreach ($ranges as [$from, $to]) {
-            for ($id = $from; $id <= $to; $id++) {
-                $ids[] = $id;
-                if (count($ids) === $size) { yield $ids; $ids = []; }
-            }
-        }
-        if ($ids !== []) yield $ids;
+        } while (count($rows) === self::CHANGES_PAGE && count($ids) < self::CHANGES_BATCH);
+        return [array_map('strval', array_keys($hours)), $ids, $after];
     }
 
     /**
@@ -548,14 +574,26 @@ final class SalesDaily {
             $work();
             return;
         }
-        $db->beginTransaction();
+        // R56 (review round 21, low): a report's refresh waits for the lock no longer than its own seconds (at least 1).
+        // Was: innodb_lock_wait_timeout (50 s) on every report request while `cli/sales-daily.php --rebuild` held it; the
+        // timeout fails the refresh and the report sums the orders (SalesReport).
+        $restoreWait = null;
+        if (!Db::isSqlite() && self::$lockDeadline !== null) {
+            $restoreWait = (int)$db->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
+            $db->exec('SET SESSION innodb_lock_wait_timeout = ' . max(1, (int)ceil(self::$lockDeadline - microtime(true))));
+        }
         try {
-            if (!Db::isSqlite()) $db->query("SELECT value FROM sales_daily_state WHERE state_key = 'lock' FOR UPDATE")->fetchAll();
-            $work();
-            $db->commit();
-        } catch (Throwable $e) {
-            if (Db::transactionOpen($db)) Db::rollBackOpen($db);
-            throw $e;
+            $db->beginTransaction();
+            try {
+                if (!Db::isSqlite()) $db->query("SELECT value FROM sales_daily_state WHERE state_key = 'lock' FOR UPDATE")->fetchAll();
+                $work();
+                $db->commit();
+            } catch (Throwable $e) {
+                if (Db::transactionOpen($db)) Db::rollBackOpen($db);
+                throw $e;
+            }
+        } finally {
+            if ($restoreWait !== null) $db->exec('SET SESSION innodb_lock_wait_timeout = ' . max(1, $restoreWait));
         }
     }
 }

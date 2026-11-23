@@ -95,6 +95,8 @@ RewriteRule ^(.+)$ redirect.php?path=/$1 [QSA,L]
     </FilesMatch>
     <If "%{REQUEST_FILENAME} =~ m#/uploads/#">
         Header always set Content-Security-Policy "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
+        # Any upload, not only the extensions listed above: never a type sniffed from its bytes (R56).
+        Header always set X-Content-Type-Options "nosniff"
     </If>
 </IfModule>
 

@@ -844,26 +844,62 @@ class Setup
      * R55 (review round 20, low): operations.worker_cron is a schedule (five fields or @hourly…) with valid fields, alone
      * or followed by a command that runs cli/worker.php. Was: any five words passed ("a b c d e"), and so did a line
      * running another script.
+     * R56 (review round 21, low): a schedule that never runs (0 0 31 2 *: no 31 February) is not valid, nor a command that
+     * only names worker.php without running it through PHP (echo worker.php).
      */
     private static function workerCronValid(string $cron): bool
     {
+        return self::workerCronSets($cron) !== null;
+    }
+
+    /** R56 (review round 21, low): whether a valid operations.worker_cron runs the worker every minute (@daily did not). */
+    private static function workerCronEveryMinute(string $cron): bool
+    {
+        $sets = self::workerCronSets($cron);
+        return $sets !== null && $sets !== [] && count($sets[0]) === 60 && count($sets[1]) === 24 && count($sets[2]) === 31
+            && count($sets[3]) === 12 && count(array_unique(array_map(static fn(int $d): int => $d % 7, $sets[4]))) === 7;
+    }
+
+    /**
+     * The minutes, hours, days, months and weekdays a valid operations.worker_cron runs on ([] for @hourly and the other
+     * macros), null when it is not valid (workerCronValid()).
+     * @return list<list<int>>|null
+     */
+    private static function workerCronSets(string $cron): ?array
+    {
+        $runsWorker = static fn(?string $command): bool => $command === null
+            || preg_match('~(?:^|[\s;&|(/])php[0-9.]*\s(?:[^;&|]*\s)?(?:\S*/)?worker\.php(?:\s|$)~', $command) === 1;
         if (preg_match('/^@(?:yearly|annually|monthly|weekly|daily|hourly)(?:\s+(.+))?$/', $cron, $m)) {
-            return !isset($m[1]) || preg_match('~(?:^|[\s/])worker\.php(?:\s|$)~', $m[1]) === 1;
+            return $runsWorker($m[1] ?? null) ? [] : null;
         }
         $parts = preg_split('/\s+/', $cron, 6) ?: [];
-        if (count($parts) < 5) return false;
-        $names = ['jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec', 'sun|mon|tue|wed|thu|fri|sat'];
-        $ranges = [[0, 59, ''], [0, 23, ''], [1, 31, ''], [1, 12, $names[0]], [0, 7, $names[1]]];
+        if (count($parts) < 5 || !$runsWorker($parts[5] ?? null)) return null;
+        $names = [explode('|', 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec'), explode('|', 'sun|mon|tue|wed|thu|fri|sat')];
+        $ranges = [[0, 59, []], [0, 23, []], [1, 31, []], [1, 12, $names[0]], [0, 7, $names[1]]];
+        $sets = [];
         foreach ($ranges as $i => [$min, $max, $words]) {
-            $value = $words === '' ? '\d+' : '(?:\d+|' . $words . ')';
+            $value = $words === [] ? '\d+' : '(?:\d+|' . implode('|', $words) . ')';
+            $number = static fn(string $v): int => ctype_digit($v) ? (int)$v : (int)array_search(strtolower($v), $words, true) + ($i === 3 ? 1 : 0);
+            $set = [];
             foreach (explode(',', $parts[$i]) as $item) {
-                if (!preg_match('/^(?:\*|' . $value . '(?:-' . $value . ')?)(?:\/(\d+))?$/iD', $item, $f)) return false;
-                if (isset($f[1]) && (int)$f[1] < 1) return false;
-                preg_match_all('/\d+/', (string)preg_replace('/\/\d+$/', '', $item), $numbers);
-                foreach ($numbers[0] as $n) if ((int)$n < $min || (int)$n > $max) return false;
+                if (!preg_match('/^(\*|(' . $value . ')(?:-(' . $value . '))?)(?:\/(\d+))?$/iD', $item, $f)) return null;
+                $step = isset($f[4]) ? (int)$f[4] : 1;
+                if ($step < 1) return null;
+                [$from, $to] = $f[1] === '*' ? [$min, $max] : [$number($f[2]), isset($f[3]) && $f[3] !== '' ? $number($f[3]) : (isset($f[4]) ? $max : $number($f[2]))];
+                if ($from < $min || $to > $max || $from > $to) return null;
+                for ($n = $from; $n <= $to; $n += $step) $set[$n] = $n;
             }
+            $sets[$i] = array_values($set);
         }
-        return !isset($parts[5]) || preg_match('~(?:^|[\s/])worker\.php(?:\s|$)~', $parts[5]) === 1;
+        // A day of the month no listed month has (and no weekday instead): the schedule never runs.
+        if ($parts[2] !== '*' && $parts[4] === '*') {
+            $longest = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            $runs = false;
+            $firstDay = min([31, ...$sets[2]]);
+            foreach ($sets[3] as $month) $runs = $runs || $firstDay <= $longest[$month - 1];
+            if (!$runs) return null;
+        }
+        return $sets;
     }
 
     private static function operationsChecks(array $config, string $root, callable $add): void
@@ -874,9 +910,13 @@ class Setup
         // R54 (review round 19, UX): the schedule alone or the whole crontab line README asks to record (was: only the
         // five fields passed, and a line that failed was still reported as "configured").
         $cronValid = self::workerCronValid($cron);
-        $add($cronValid || $webWorker ? 'pass' : 'warn', 'operations.cron', match (true) {
-            $cronValid => 'Worker cron declaration recorded.',
+        // R56 (review round 21, low): the worker runs every minute (e-mails, refunds, reports wait for it); a valid schedule
+        // that runs it less often warns.
+        $everyMinute = $cronValid && self::workerCronEveryMinute($cron);
+        $add($everyMinute || $webWorker ? 'pass' : 'warn', 'operations.cron', match (true) {
+            $everyMinute => 'Worker cron declaration recorded.',
             $webWorker => 'No cron: page requests run the worker (operations.web_worker).',
+            $cronValid => 'operations.worker_cron runs the worker less often than every minute: e-mails, refunds and reports wait for it.',
             $cron !== '' => 'operations.worker_cron is neither a cron schedule nor a crontab line.',
             default => 'Worker cron declaration not recorded.',
         }, 'Set operations.worker_cron to the worker\'s crontab line (or its schedule) and install that entry in the scheduler.');

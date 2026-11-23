@@ -500,7 +500,7 @@ final class StorefrontViewModel
         if (!is_array($value)) return [];
         $result = [];
         foreach ($value as $key => $item) {
-            if (!is_string($key) || !preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/', $key)) continue;
+            if (!is_string($key) || !preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/', $key) || CatalogAttributes::isAdminOnly($key)) continue;
             if (is_scalar($item) || $item === null) $result[$key] = $item;
             elseif (is_array($item)) $result[$key] = self::safeData($item);
         }

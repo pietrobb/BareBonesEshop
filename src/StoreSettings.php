@@ -1,13 +1,15 @@
 <?php
 /**
- * Merchant-editable part of stores.json: each store's storefront name, time zone, seller identity (legal block) and VAT
- * switches. Currency, URL prefix, domains, scopes and invoice prefixes stay file-only: changing them reprices the
- * store or breaks invoice numbering. The updater keeps the installed stores.json, so admin edits survive updates.
+ * Merchant-editable part of stores.json: each store's storefront name, time zone, seller identity (legal block), VAT
+ * switches, domains and URL prefix (saveDomains()). Currency, scopes and invoice prefixes stay file-only: changing them
+ * reprices the store or breaks invoice numbering. The updater keeps the installed stores.json, so admin edits survive updates.
  */
 final class StoreSettings {
     public const LEGAL_TEXT = ['name', 'street', 'city', 'zip', 'country', 'ico', 'dic', 'ic_dph', 'iban', 'bic', 'bank', 'email', 'phone', 'register_note'];
     private const REQUIRED = ['name', 'street', 'city', 'zip', 'country', 'email'];
     private const MAX_LENGTH = 200;
+    /** R56: the domain test's seconds for all the domains of one save (an admin request waited 10 × 4 s). */
+    private const PROBE_SECONDS = 8;
 
     private static ?string $path = null;
 
@@ -198,6 +200,8 @@ final class StoreSettings {
         // R54 (review round 19, UX): the store's own domains (StoreContext serves it there, its links use the first one);
         // a form without the field keeps them (was: only by editing stores.json).
         $domains = array_key_exists('domains', $input) ? self::parseDomains($input['domains'], $data['stores'], $storeId, $isDefault, $errors) : null;
+        // R56 (review round 21, low): nor through this form a store without a URL prefix and without a domain (saveDomains()).
+        if ($domains === [] && !$isDefault && rtrim((string)($store['url_prefix'] ?? ''), '/') === '') $errors[] = I18n::t('admin.stores.err.prefix_needs_domain');
         if ($errors) return ['ok' => false, 'errors' => $errors];
 
         $before = $store;
@@ -227,7 +231,12 @@ final class StoreSettings {
      * @return list<string>
      */
     private static function parseDomains(mixed $posted, array $stores, string $storeId, bool $isDefault, array &$errors): array {
-        $list = preg_split('/[\s,]+/', strtolower(trim(is_scalar($posted) ? (string)$posted : '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        // R56 (review round 21, low): domains[] (an array) was read as an empty field and removed every domain.
+        if ($posted !== null && !is_scalar($posted)) {
+            $errors[] = I18n::format('admin.stores.err.domains', ['domains' => '[]']);
+            return [];
+        }
+        $list = preg_split('/[\s,]+/', strtolower(trim((string)$posted)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $domains = array_values(array_unique(array_map(static fn(string $d): string => rtrim($d, '.'), $list)));
         $taken = [];
         foreach ($stores as $id => $other) {
@@ -236,8 +245,13 @@ final class StoreSettings {
         }
         // R55 (review round 20, medium M1): the host of app_url serves the default store. Another store given it took that
         // host over: one save left the main storefront 404, or showed that store in its place.
-        $appHost = strtolower(rtrim((string)parse_url((string)Security::configuredAppUrl(), PHP_URL_HOST), '.'));
-        $mainHost = array_values(array_filter($domains, static fn(string $d): bool => !$isDefault && $appHost !== '' && $d === $appHost));
+        $mainHosts = array_filter([strtolower(rtrim((string)parse_url((string)Security::configuredAppUrl(), PHP_URL_HOST), '.'))]);
+        // R56 (review round 21, low): without app_url, the host this admin request came through, unless a store has it
+        // as its own domain: that host serves the default store (nothing was reserved).
+        $requestHost = strtolower(rtrim((string)preg_replace('/:\d+$/', '', is_string($_SERVER['HTTP_HOST'] ?? null) ? $_SERVER['HTTP_HOST'] : ''), '.'));
+        $ownDomains = array_map(static fn($d): string => strtolower(rtrim(trim((string)$d), '.')), (array)($stores[$storeId]['domains'] ?? []));
+        if ($mainHosts === [] && $requestHost !== '' && !isset($taken[$requestHost]) && !in_array($requestHost, $ownDomains, true)) $mainHosts[] = $requestHost;
+        $mainHost = array_values(array_filter($domains, static fn(string $d): bool => !$isDefault && in_array($d, $mainHosts, true)));
         if ($mainHost !== []) $errors[] = I18n::format('admin.stores.err.domains_app_url', ['domain' => $mainHost[0]]);
         // A Unicode name is entered as punycode (the Host header carries that); the message gives it.
         $unicode = array_values(array_filter($domains, static fn(string $d): bool => preg_match('/[^\x00-\x7F]/', $d) === 1));
@@ -245,8 +259,11 @@ final class StoreSettings {
             $ascii = array_map(static fn(string $d): string => function_exists('idn_to_ascii') ? (string)(idn_to_ascii($d, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46) ?: '') : '', $unicode);
             $errors[] = I18n::format('admin.stores.err.domains_idn', ['domains' => implode(', ', $unicode), 'punycode' => implode(', ', array_filter($ascii)) ?: 'xn--…']);
         }
+        // R56 (review round 21, low): not an IP address (127.0.0.1, 0x7f.1): a host name's last label has a letter. The
+        // domain test then asked the server's own or the cloud metadata address.
         $bad = array_filter($domains, static fn(string $d): bool => !in_array($d, $mainHost, true) && !in_array($d, $unicode, true) && (!str_contains($d, '.') || strlen($d) > 253
-            || filter_var($d, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false || isset($taken[$d])));
+            || filter_var($d, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false || isset($taken[$d])
+            || preg_match('/(?:^|\.)(?:[0-9]+|0x[0-9a-f]*)$/', $d) === 1));
         if ($bad !== [] || count($domains) > 10) $errors[] = I18n::format('admin.stores.err.domains', ['domains' => implode(', ', $bad ?: $domains)]);
         return $domains;
     }
@@ -282,16 +299,19 @@ final class StoreSettings {
             $data['stores'][$storeId]['url_prefix'] = $prefix;
             if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
             AuditLog::log('store_settings', 0, ['store' => $storeId] + $before, ['store' => $storeId, 'domains' => $domains, 'url_prefix' => $prefix]);
-            return ['ok' => true, 'errors' => [], 'domains' => $domains];
+            return ['ok' => true, 'errors' => [], 'domains' => $domains,
+                'domains_before' => array_map(static fn($d): string => strtolower(rtrim(trim((string)$d), '.')), (array)$before['domains'])];
         });
         if (!$result['ok']) return $result;
-        $unreachable = self::unreachableDomains($result['domains']);
+        // R56 (review round 21, low): only the domains this save added (every save probed all ten, 40 s).
+        $unreachable = self::unreachableDomains(array_values(array_diff($result['domains'], $result['domains_before'])));
         return ['ok' => true, 'errors' => [], 'warning' => $unreachable === [] ? '' : I18n::format('admin.stores.domains_unreachable', ['domains' => implode(', ', $unreachable)])];
     }
 
     /**
      * The $domains whose /healthz (under app_url's scheme, port and path) does not answer as this shop. Only probed for
-     * an HTTPS app_url (JsonHttpClient: no redirects, no proxies, 4 s).
+     * an HTTPS app_url (JsonHttpClient: no redirects, no proxies, 4 s). R56: within PROBE_SECONDS for all of them; the
+     * domains left when they are up are not probed (nor reported).
      * @param list<string> $domains
      * @return list<string>
      */
@@ -299,9 +319,12 @@ final class StoreSettings {
         $appUrl = Security::configuredAppUrl();
         if ($appUrl === null || strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)) !== 'https') return [];
         $unreachable = [];
+        $deadline = microtime(true) + self::PROBE_SECONDS;
         foreach ($domains as $domain) {
+            $left = (int)floor($deadline - microtime(true));
+            if ($left < 1) break;
             try {
-                $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], 4);
+                $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], min(4, $left));
                 if (($health['service'] ?? '') !== 'bareboneseshop') $unreachable[] = $domain;
             } catch (Throwable $e) {
                 Logger::exception('store_settings.domain_probe_failed', $e, ['domain' => $domain]);

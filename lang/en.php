@@ -1416,6 +1416,7 @@ return [
     'admin.import.templates' => 'Templates',
     'admin.import.templates_download' => 'Download the CSV template for a product type:',
     'admin.import.sample_hint' => 'A sample CSV is in',
+    'admin.import.sample_name' => 'Sample – replace or delete this row',
     'admin.import.rejected' => 'The CSV file was not accepted:',
     'admin.import.done' => 'Import finished: {count} products.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',

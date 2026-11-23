@@ -225,7 +225,7 @@ class Import {
             $productId = (int)$existing['id'];
             $productType = self::updateProduct($existing, $data, $db);
         } else {
-            $productType = trim($data['product_type'] ?? 'simple');
+            $productType = trim((string)($data['product_type'] ?? '')) ?: 'simple'; // R56: an empty template cell is "simple"
             $productId = self::createProduct($data, $productType, $db, $createOnly);
         }
 
@@ -603,7 +603,7 @@ class Import {
      */
     public static function buildFilterTagsFromAttrs(array $attrs): string {
         $tags = '';
-        foreach ($attrs as $name => $value) {
+        foreach (CatalogAttributes::publicMap($attrs) as $name => $value) {
             $n = self::normalizeToken($name);
             $v = self::normalizeToken((string)$value);
             if ($n && $v) {

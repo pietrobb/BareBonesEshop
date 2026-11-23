@@ -1572,6 +1572,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.templates' => 'Plantillas',
     'admin.import.templates_download' => 'Descargue la plantilla CSV de un tipo de producto:',
     'admin.import.sample_hint' => 'Hay un CSV de ejemplo en',
+    'admin.import.sample_name' => 'Ejemplo: sustituya o elimine esta fila',
     'admin.import.rejected' => 'El archivo CSV no se aceptó:',
     'admin.import.done' => 'Importación finalizada: {count} productos.',
     'admin.import.partial' => 'Importación: {imported} correctos, {errors}.',

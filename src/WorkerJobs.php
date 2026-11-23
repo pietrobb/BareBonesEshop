@@ -386,6 +386,14 @@ final class WorkerJobs
             IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'released' => true]);
             return;
         }
+        // R56 (review round 21, low): a request the provider refused because its payment was refunded in the dashboard
+        // meanwhile was settled by the payment's REFUNDED status (PaymentService::refund()): the customer has the money.
+        // Was: the job failed and was retried until it died, with a critical incident.
+        if ($itemRefundId === 0 && in_array($status, ['failed', 'canceled', 'cancelled'], true) && $idempotencyKey !== ''
+            && PaymentService::refundSettledByEvent($orderId, $idempotencyKey)) {
+            PaymentService::closeRefundedOrder($orderId, "Payment refund settled by the provider's refunded status: {$paymentId}");
+            return;
+        }
         if ($status !== 'succeeded') {
             if ($status === 'error' && self::requeueRefundAfterError($payload, $job, $order)) return;
             throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");

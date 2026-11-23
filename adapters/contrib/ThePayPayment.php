@@ -139,7 +139,15 @@ class ThePayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAd
         if (!preg_match(self::UID, $paymentId) || $amount <= 0) {
             throw new \InvalidArgumentException('ThePay refund needs a payment uid and a positive amount');
         }
-        $this->request('POST', '/payments/' . $paymentId . '/refund', ['amount' => $amount, 'reason' => 'Refund from the shop'], false);
+        try {
+            $this->request('POST', '/payments/' . $paymentId . '/refund', ['amount' => $amount, 'reason' => 'Refund from the shop'], false);
+        } catch (\RuntimeException $e) {
+            // R56 (review round 21, low): ThePay refused it (4xx, e.g. the payment was refunded in its dashboard): a failed
+            // refund, as GoPay's FAILED result, so the shop checks the payment's state (PaymentService::refund()). Credentials,
+            // timeouts and throttling stay errors to retry.
+            if (in_array($e->getCode(), [401, 403, 408, 429], true) || $e->getCode() < 400 || $e->getCode() >= 500) throw $e;
+            return ['refund_id' => '', 'status' => 'failed', 'message' => $e->getMessage()];
+        }
         return ['refund_id' => '', 'status' => 'succeeded'];
     }
 

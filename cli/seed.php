@@ -8,7 +8,24 @@ require_once __DIR__ . '/cli-only.php';
  */
 require_once __DIR__ . '/../src/autoload.php';
 
-$args = getopt('', ['count:', 'fresh']);
+$usage = "Usage: php cli/seed.php [--count=1000] [--fresh]\n"
+    . "  --count=N  products to add (default 1000)\n"
+    . "  --fresh    delete the catalog, orders and stock first\n";
+// R56 (review round 21, low): --help (or anything this seeder does not know) prints the usage and seeds nothing (was:
+// getopt() dropped it and 1000 products were seeded).
+$args = getopt('h', ['count:', 'fresh', 'help']);
+if (isset($args['h']) || isset($args['help'])) {
+    echo $usage;
+    exit(0);
+}
+$given = array_slice($argv, 1);
+for ($i = 0; $i < count($given); $i++) {
+    if ($given[$i] === '--count' && ctype_digit((string)($given[$i + 1] ?? ''))) { $i++; continue; }
+    if (!preg_match('/^--(?:count=\d+|fresh)$/D', $given[$i])) {
+        fwrite(STDERR, "Unknown option: {$given[$i]}\n" . $usage);
+        exit(2);
+    }
+}
 $count = (int)($args['count'] ?? 1000);
 $fresh = isset($args['fresh']);
 
@@ -82,6 +99,13 @@ $categoryTree = [
 
 $catIds = []; // key => id
 $catStmt = $db->prepare(Db::insertIgnore() . " INTO categories (slug, name, parent_id, path, depth, sort_order, translations) VALUES (:slug, :name, :pid, :path, :depth, :sort, :trans)");
+// R56 (review round 21, low): a category an earlier run created is ignored by the insert; its id is looked up (was:
+// lastInsertId() of the ignored insert, and the products failed on the category foreign key).
+$catIdStmt = $db->prepare("SELECT id FROM categories WHERE store_id = 'default' AND path = :path");
+$categoryId = static function (string $path) use ($catIdStmt): int {
+    $catIdStmt->execute([':path' => $path]);
+    return (int)$catIdStmt->fetchColumn();
+};
 $catTranslations = static function (array $names) use ($seedOther): string {
     $translations = [];
     foreach ($seedOther as $locale) $translations[$locale] = ['name' => $names[$locale]];
@@ -96,7 +120,7 @@ foreach ($categoryTree as $rootKey => [$rootNames, $children]) {
         ':path' => $rootSlug, ':depth' => 0, ':sort' => $sort++,
         ':trans' => $catTranslations($rootNames),
     ]);
-    $rootId = (int)$db->lastInsertId();
+    $rootId = $categoryId($rootSlug);
     $catIds[$rootKey] = $rootId;
 
     foreach ($children as $childKey => $childNames) {
@@ -106,7 +130,7 @@ foreach ($categoryTree as $rootKey => [$rootNames, $children]) {
             ':path' => $rootSlug . '/' . $childSlug, ':depth' => 1, ':sort' => $sort++,
             ':trans' => $catTranslations($childNames),
         ]);
-        $catIds[$childKey] = (int)$db->lastInsertId();
+        $catIds[$childKey] = $categoryId($rootSlug . '/' . $childSlug);
     }
 }
 echo "  Created " . count($catIds) . " categories.\n\n";
@@ -147,6 +171,11 @@ $colorNames = [
     'hneda' => $seedWords('hnedá', 'hnědá', 'brown', 'braun'), 'zlta' => $seedWords('žltá', 'žlutá', 'yellow', 'gelb'),
     'oranzova' => $seedWords('oranžová', 'oranžová', 'orange', 'orange'), 'ruzova' => $seedWords('ružová', 'růžová', 'pink', 'rosa'),
 ];
+$materialNames = [
+    'bavlna' => $seedWords('bavlna', 'bavlna', 'cotton', 'Baumwolle'), 'polyester' => $seedWords('polyester', 'polyester', 'polyester', 'Polyester'),
+    'vlna' => $seedWords('vlna', 'vlna', 'wool', 'Wolle'), 'silk' => $seedWords('hodváb', 'hedvábí', 'silk', 'Seide'),
+    'nylon' => $seedWords('nylon', 'nylon', 'nylon', 'Nylon'), 'denim' => $seedWords('denim', 'denim', 'denim', 'Denim'),
+];
 $summaryText = $seedWords('{adj} {noun} od {brand}. Farba: {color}, veľkosť: {size}.', '{adj} {noun} od {brand}. Barva: {color}, velikost: {size}.',
     '{adj} {noun} by {brand}. Colour: {color}, size: {size}.', '{adj} {noun} von {brand}. Farbe: {color}, Größe: {size}.');
 
@@ -175,10 +204,15 @@ if (!$warehouse) {
 }
 $stockStmt = $db->prepare(Db::insertIgnore() . " INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES (:store, :wh, :sku, :qty, 0)");
 
+// R56 (review round 21, low): a run without --fresh numbers its products after those an earlier run seeded (was: the
+// same SKUs and slugs again, and the run failed).
+$seedPrefixes = implode(' OR ', array_map(static fn(string $root): string => 'sku LIKE ' . $db->quote(strtoupper(substr($root, 0, 3)) . '-%'), array_keys($categoryTree)));
+$offset = (int)$db->query('SELECT COALESCE(MAX(CAST(SUBSTR(sku, 5) AS ' . (Db::isSqlite() ? 'INTEGER' : 'UNSIGNED') . ")), 0) FROM products WHERE {$seedPrefixes}")->fetchColumn();
+
 $batchSize = 500;
 $db->beginTransaction();
 
-for ($i = 1; $i <= $count; $i++) {
+for ($i = $offset + 1; $i <= $offset + $count; $i++) {
     $cat = $leafCats[array_rand($leafCats)];
     $rootSlug = $cat['root'];
     $catId = $cat['id'];
@@ -195,7 +229,7 @@ for ($i = 1; $i <= $count; $i++) {
     ];
 
     $name = $localized($seedBase)['name'];
-    $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad($i, 6, '0', STR_PAD_LEFT);
+    $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad((string)$i, 6, '0', STR_PAD_LEFT);
     $slug = Import::slugify($name); // lower-cases before stripping, so "Premium" stays "premium"
 
     $price = $seedPrice(rand(299, 99900));
@@ -211,10 +245,12 @@ for ($i = 1; $i <= $count; $i++) {
 
     $material = $materials[array_rand($materials)];
 
-    $attrsJson = json_encode(['color' => $color, 'size' => $size, 'material' => $material, 'brand' => $brand]);
+    // R56 (review round 21, low): attribute values in the shop's language, as the names (was: Slovak "cierna", "bavlna").
+    $attrs = ['color' => $colorNames[$color][$seedBase], 'size' => $size, 'material' => $materialNames[$material][$seedBase], 'brand' => $brand];
+    $attrsJson = json_encode($attrs, JSON_UNESCAPED_UNICODE);
     $tags = json_encode(['bestseller', $rootSlug, $cat['slug']]);
 
-    $filterTags = "attr_color_{$color} attr_size_" . strtolower($size) . " attr_material_{$material} attr_brand_" . strtolower($brand);
+    $filterTags = Import::buildFilterTagsFromAttrs($attrs);
 
     $translated = [];
     foreach ($seedOther as $locale) {
@@ -249,16 +285,13 @@ for ($i = 1; $i <= $count; $i++) {
     $stockStmt->execute([':store' => $warehouse['store_id'], ':wh' => (int)$warehouse['id'], ':sku' => $sku, ':qty' => $stock]);
 
     // Attributes
-    $attrStmt->execute([':pid' => $productId, ':name' => 'color', ':val' => $color, ':num' => null]);
-    $attrStmt->execute([':pid' => $productId, ':name' => 'size', ':val' => $size, ':num' => null]);
-    $attrStmt->execute([':pid' => $productId, ':name' => 'material', ':val' => $material, ':num' => null]);
-    $attrStmt->execute([':pid' => $productId, ':name' => 'brand', ':val' => $brand, ':num' => null]);
+    foreach ($attrs as $attrName => $attrValue) $attrStmt->execute([':pid' => $productId, ':name' => $attrName, ':val' => $attrValue, ':num' => null]);
 
-    if ($i % $batchSize === 0) {
+    if (($i - $offset) % $batchSize === 0) {
         $db->commit();
         $db->beginTransaction();
         $elapsed = round((microtime(true) - $start) * 1000);
-        echo "  [{$i}/{$count}] {$elapsed}ms\n";
+        echo "  [" . ($i - $offset) . "/{$count}] {$elapsed}ms\n";
     }
 }
 

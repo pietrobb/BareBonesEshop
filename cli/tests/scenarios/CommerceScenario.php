@@ -18,6 +18,7 @@ $returnsCreditMigration = require TEST_CLI_DIR . '/../migrations/20260801210000_
 $returnsCreditMigration->up($pdo, true);
 $returnsCreditMigration->up($pdo, true);
 (require TEST_CLI_DIR . '/../migrations/20261119180000_rma_outside_refund_applied.php')->up($pdo, true);
+(require TEST_CLI_DIR . '/../migrations/20261123090000_rma_outside_refund_keys.php')->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_refunds'")->fetchColumn(), 'G8 migration: item refund ledger exists and migration is idempotent');
 
 // TEST 20: Pricing

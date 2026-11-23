@@ -573,9 +573,13 @@ class Security {
      * R55 (review round 20, low): plainText() of a field whose caller refuses an empty value, trimmed: text that is not
      * UTF-8 is empty (refused as missing). Was: reviews, returns and complaints stored it with its bidi controls, and
      * esc() then showed it empty.
+     * R56 (review round 21, low): trimmed of Unicode spaces and invisible format characters too (U+00A0, U+200B, U+FEFF,
+     * U+2028, Hangul fillers, the braille blank): a name of them alone passed as a name and showed blank.
      */
     public static function typedText(string $text): string {
-        return mb_check_encoding($text, 'UTF-8') ? trim(self::plainText($text)) : '';
+        if (!mb_check_encoding($text, 'UTF-8')) return '';
+        $blank = '[\s\p{Z}\p{Cf}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]+';
+        return (string)preg_replace("/^{$blank}|{$blank}$/u", '', self::plainText($text));
     }
 
     /**
