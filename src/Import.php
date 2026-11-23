@@ -213,7 +213,8 @@ class Import {
     private static function importRow(array $data, PDO $db, bool $createOnly = false): string {
         // R54 (review round 19, low): names and summaries without bidi controls (Security::plainText()).
         foreach ($data as $key => $value) {
-            if (is_string($value) && preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) $data[$key] = Security::plainText($value);
+            // R57 (review round 22, low): trimmed of invisible characters, so a name of them alone is missing (Security::typedText()).
+            if (is_string($value) && preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) $data[$key] = Security::typedText($value);
         }
         // Required fields
         $sku  = trim($data['sku'] ?? '');

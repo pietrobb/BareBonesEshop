@@ -12,10 +12,17 @@ final class StoreSettings {
     private const PROBE_SECONDS = 8;
 
     private static ?string $path = null;
+    /** @var null|callable(string): list<string> */
+    private static $resolver = null;
 
     /** Test hook: another stores.json (null = the application's). */
     public static function setPathForTesting(?string $path): void {
         self::$path = $path;
+    }
+
+    /** Test hook: the addresses a host name resolves to (null = DNS). */
+    public static function setResolverForTesting(?callable $resolver): void {
+        self::$resolver = $resolver;
     }
 
     /** Whether a legal block's seller charges VAT: a block without vat_registered is registered (checkout, storefront). */
@@ -300,38 +307,78 @@ final class StoreSettings {
             if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
             AuditLog::log('store_settings', 0, ['store' => $storeId] + $before, ['store' => $storeId, 'domains' => $domains, 'url_prefix' => $prefix]);
             return ['ok' => true, 'errors' => [], 'domains' => $domains,
-                'domains_before' => array_map(static fn($d): string => strtolower(rtrim(trim((string)$d), '.')), (array)$before['domains'])];
+                'domains_before' => array_map(static fn($d): string => strtolower(rtrim(trim((string)$d), '.')), (array)$before['domains']),
+                'untested_before' => array_map('strval', (array)($store['domains_untested'] ?? []))];
         });
         if (!$result['ok']) return $result;
         // R56 (review round 21, low): only the domains this save added (every save probed all ten, 40 s).
-        $unreachable = self::unreachableDomains(array_values(array_diff($result['domains'], $result['domains_before'])));
-        return ['ok' => true, 'errors' => [], 'warning' => $unreachable === [] ? '' : I18n::format('admin.stores.domains_unreachable', ['domains' => implode(', ', $unreachable)])];
+        // R57 (review round 22, low): and those an earlier save had no time left for (they were never tested).
+        $pending = array_values(array_intersect($result['domains'], $result['untested_before']));
+        $probe = self::probeDomains(array_values(array_unique(array_merge(array_diff($result['domains'], $result['domains_before']), $pending))));
+        if ($probe['untested'] !== $pending) {
+            self::locked(static function () use ($storeId, $probe): array {
+                $data = self::load();
+                if (!is_array($data['stores'][$storeId] ?? null)) return ['ok' => false];
+                $untested = array_values(array_intersect($probe['untested'], (array)($data['stores'][$storeId]['domains'] ?? [])));
+                if ($untested === []) unset($data['stores'][$storeId]['domains_untested']); else $data['stores'][$storeId]['domains_untested'] = $untested;
+                return ['ok' => self::write($data)];
+            });
+        }
+        $warnings = [];
+        foreach (['unreachable' => 'admin.stores.domains_unreachable', 'private' => 'admin.stores.domains_private', 'untested' => 'admin.stores.domains_untested'] as $kind => $key) {
+            if ($probe[$kind] !== []) $warnings[] = I18n::format($key, ['domains' => implode(', ', $probe[$kind])]);
+        }
+        return ['ok' => true, 'errors' => [], 'warning' => implode(' ', $warnings)];
     }
 
     /**
      * The $domains whose /healthz (under app_url's scheme, port and path) does not answer as this shop. Only probed for
      * an HTTPS app_url (JsonHttpClient: no redirects, no proxies, 4 s). R56: within PROBE_SECONDS for all of them; the
      * domains left when they are up are not probed (nor reported).
+     * R57 (review round 22, low): a domain resolving to a loopback, private or other non-public address (localtest.me,
+     * 127.0.0.1.nip.io) is not asked (the request reached the server's own or the cloud metadata address); the address
+     * checked is the one asked. The domains left at the deadline are 'untested': the next save tests them.
      * @param list<string> $domains
-     * @return list<string>
+     * @return array{unreachable: list<string>, private: list<string>, untested: list<string>}
      */
-    private static function unreachableDomains(array $domains): array {
+    private static function probeDomains(array $domains): array {
+        $probe = ['unreachable' => [], 'private' => [], 'untested' => []];
         $appUrl = Security::configuredAppUrl();
-        if ($appUrl === null || strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)) !== 'https') return [];
-        $unreachable = [];
+        if ($appUrl === null || strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)) !== 'https') return $probe;
+        $port = (int)(parse_url($appUrl, PHP_URL_PORT) ?: 443);
         $deadline = microtime(true) + self::PROBE_SECONDS;
         foreach ($domains as $domain) {
             $left = (int)floor($deadline - microtime(true));
-            if ($left < 1) break;
+            if ($left < 1) {
+                $probe['untested'][] = $domain;
+                continue;
+            }
+            $addresses = self::resolve($domain);
+            if (array_filter($addresses, static fn(string $ip): bool => !FeedImport::isPublicFeedIp($ip)) !== []) {
+                $probe['private'][] = $domain;
+                continue;
+            }
             try {
-                $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], min(4, $left));
-                if (($health['service'] ?? '') !== 'bareboneseshop') $unreachable[] = $domain;
+                $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], min(4, $left),
+                    $addresses === [] ? [] : ["{$domain}:{$port}:{$addresses[0]}"]);
+                if (($health['service'] ?? '') !== 'bareboneseshop') $probe['unreachable'][] = $domain;
             } catch (Throwable $e) {
                 Logger::exception('store_settings.domain_probe_failed', $e, ['domain' => $domain]);
-                $unreachable[] = $domain;
+                $probe['unreachable'][] = $domain;
             }
         }
-        return $unreachable;
+        return $probe;
+    }
+
+    /** @return list<string> the A and AAAA addresses of $host ([] when it does not resolve) */
+    private static function resolve(string $host): array {
+        if (self::$resolver !== null) return array_values((self::$resolver)($host));
+        $ips = [];
+        foreach (@dns_get_record($host, DNS_A | DNS_AAAA) ?: [] as $record) {
+            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
+            if (is_string($ip)) $ips[] = $ip;
+        }
+        return array_values(array_unique($ips ?: (@gethostbynamel($host) ?: [])));
     }
 
     /** Atomic replace: readers see the old or the new file, never a half-written one. */

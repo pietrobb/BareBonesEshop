@@ -19,7 +19,8 @@ class JsonHttpClient
         string $method = 'GET',
         ?array $payload = null,
         array $headers = [],
-        int $timeout = 15
+        int $timeout = 15,
+        array $resolve = []
     ): array {
         $baseUrl = rtrim(trim($baseUrl), '/');
         self::assertBaseUrl($baseUrl);
@@ -62,6 +63,8 @@ class JsonHttpClient
             CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
             CURLOPT_PROXY => '',
             CURLOPT_NOPROXY => '*',
+            // R57: host:port:address pins a checked address (no second DNS answer between the check and the request).
+            CURLOPT_RESOLVE => $resolve,
             CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$responseBody, &$tooLarge): int {
                 if (strlen($responseBody) + strlen($chunk) > 1048576) {
                     $tooLarge = true;

@@ -575,11 +575,14 @@ class Security {
      * esc() then showed it empty.
      * R56 (review round 21, low): trimmed of Unicode spaces and invisible format characters too (U+00A0, U+200B, U+FEFF,
      * U+2028, Hangul fillers, the braille blank): a name of them alone passed as a name and showed blank.
+     * R57 (review round 22, low): and of control characters (a trailing NUL was stored since trim() was replaced); text of
+     * combining marks alone (U+0301…) is empty too. The checkout, profile, B2B and CSV import names use this one check.
      */
     public static function typedText(string $text): string {
         if (!mb_check_encoding($text, 'UTF-8')) return '';
-        $blank = '[\s\p{Z}\p{Cf}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]+';
-        return (string)preg_replace("/^{$blank}|{$blank}$/u", '', self::plainText($text));
+        $blank = '[\s\p{Z}\p{Cf}\p{Cc}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]+';
+        $text = (string)preg_replace("/^{$blank}|{$blank}$/u", '', self::plainText($text));
+        return preg_match('/^[\p{M}\s\p{Z}\p{Cf}\p{Cc}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]*$/u', $text) === 1 ? '' : $text;
     }
 
     /**

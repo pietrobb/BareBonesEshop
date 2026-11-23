@@ -862,13 +862,15 @@ class Setup
 
     /**
      * The minutes, hours, days, months and weekdays a valid operations.worker_cron runs on ([] for @hourly and the other
-     * macros), null when it is not valid (workerCronValid()).
+     * macros), null when it is not valid (workerCronValid()); $never: not valid because the schedule never runs.
+     * R57 (review round 22, low): the PHP binary and the worker's path may be quoted ("/var/www/my shop/cli/worker.php").
      * @return list<list<int>>|null
      */
-    private static function workerCronSets(string $cron): ?array
+    private static function workerCronSets(string $cron, bool &$never = false): ?array
     {
+        $never = false;
         $runsWorker = static fn(?string $command): bool => $command === null
-            || preg_match('~(?:^|[\s;&|(/])php[0-9.]*\s(?:[^;&|]*\s)?(?:\S*/)?worker\.php(?:\s|$)~', $command) === 1;
+            || preg_match('~(?:^|[\s;&|(/"\'])php[0-9.]*["\']?\s(?:[^;&|]*\s)?["\']?(?:\S*/)?worker\.php["\']?(?:\s|$)~', $command) === 1;
         if (preg_match('/^@(?:yearly|annually|monthly|weekly|daily|hourly)(?:\s+(.+))?$/', $cron, $m)) {
             return $runsWorker($m[1] ?? null) ? [] : null;
         }
@@ -897,6 +899,7 @@ class Setup
             $runs = false;
             $firstDay = min([31, ...$sets[2]]);
             foreach ($sets[3] as $month) $runs = $runs || $firstDay <= $longest[$month - 1];
+            $never = !$runs;
             if (!$runs) return null;
         }
         return $sets;
@@ -909,15 +912,19 @@ class Setup
         $webWorker = WebWorker::enabled($config);
         // R54 (review round 19, UX): the schedule alone or the whole crontab line README asks to record (was: only the
         // five fields passed, and a line that failed was still reported as "configured").
-        $cronValid = self::workerCronValid($cron);
+        $never = false;
+        $cronValid = self::workerCronSets($cron, $never) !== null;
         // R56 (review round 21, low): the worker runs every minute (e-mails, refunds, reports wait for it); a valid schedule
         // that runs it less often warns.
         $everyMinute = $cronValid && self::workerCronEveryMinute($cron);
-        $add($everyMinute || $webWorker ? 'pass' : 'warn', 'operations.cron', match (true) {
+        // R57 (review round 22, low): a recorded schedule that is not valid warns with web_worker on too (was: passed as
+        // "no cron"), and one that never runs says so (0 0 31 2 * was "neither a cron schedule nor a crontab line").
+        $add($everyMinute || ($webWorker && ($cron === '' || $cronValid)) ? 'pass' : 'warn', 'operations.cron', match (true) {
             $everyMinute => 'Worker cron declaration recorded.',
+            $never => 'operations.worker_cron never runs: none of its months has that day of the month (0 0 31 2 *: no 31 February).',
+            $cron !== '' && !$cronValid => 'operations.worker_cron is neither a cron schedule nor a crontab line.',
             $webWorker => 'No cron: page requests run the worker (operations.web_worker).',
             $cronValid => 'operations.worker_cron runs the worker less often than every minute: e-mails, refunds and reports wait for it.',
-            $cron !== '' => 'operations.worker_cron is neither a cron schedule nor a crontab line.',
             default => 'Worker cron declaration not recorded.',
         }, 'Set operations.worker_cron to the worker\'s crontab line (or its schedule) and install that entry in the scheduler.');
         $backupPath = $root . '/config/backup.json';

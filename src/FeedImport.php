@@ -452,7 +452,8 @@ class FeedImport {
         return ['host' => $host, 'port' => $port, 'ip' => $ips[0]];
     }
 
-    private static function isPublicFeedIp(string $ip): bool {
+    /** R57: also the store domain test's (StoreSettings): a host that resolves to a non-public address is not asked. */
+    public static function isPublicFeedIp(string $ip): bool {
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return false;
         $packed = inet_pton($ip);
         if ($packed === false) return false;

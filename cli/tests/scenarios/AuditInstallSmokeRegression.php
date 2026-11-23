@@ -194,7 +194,17 @@ try {
     $a111SeedDb = null;
     assert_true(array_filter($a111Gaps) === [] && count($a111Gaps) >= 6 && (int)($a111Czk['price'] ?? 1) % 100 === 0 && (int)($a111Czk['price'] ?? 0) > (int)($a111Czk['eur'] ?? 0) * 20,
         'R23 UX: cli/seed.php prices every seeded product in the CZK, PLN, HUF and USD sample stores (whole korunas for CZK): ' . json_encode([$a111Gaps, $a111Czk]));
-    $a111SeedAgain = $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+    // R57 (review round 22, low): --fresh on a shop with orders deletes nothing without --yes (was: every order deleted).
+    $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $a111SeedDb->exec("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id)
+        VALUES ('R57-SEED-1', 'pending', 'unpaid', 'Ján', 'jan@example.com', 'cod', 100, 100, 'EUR', 'default')");
+    $a111SeedAsk = $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+    $a111SeedKept = (int)$a111SeedDb->query("SELECT COUNT(*) FROM orders WHERE order_number = 'R57-SEED-1'")->fetchColumn();
+    $a111SeedDb = null;
+    assert_true($a111SeedAsk['code'] === 2 && $a111SeedKept === 1 && str_contains($a111SeedAsk['err'], '--yes'),
+        'R57 seed: --fresh on a shop with orders deletes nothing without --yes (was: deleted every order): '
+        . json_encode([$a111SeedAsk['code'], $a111SeedKept, substr($a111SeedAsk['out'] . $a111SeedAsk['err'], -300)]));
+    $a111SeedAgain = $a111Php(['cli/seed.php', '--count=2', '--fresh', '--yes']);
     $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
     assert_true($a111SeedAgain['code'] === 0 && (int)$a111SeedDb->query("SELECT COUNT(*) FROM price_lists WHERE store_id = 'cz' AND code = 'sample-czk'")->fetchColumn() === 1
         && StoreCurrencyCoverage::unpriced($a111SeedDb, 'hu', $a111Stores['stores']['hu'])['count'] === 0, 'R23 UX: a second seed run (--fresh) reuses the sample price lists and prices the new products too: '
@@ -208,7 +218,7 @@ try {
     $a111CzkStores['stores']['default']['default_locale'] = 'cs'; // R55: and Czech
     file_put_contents($a111Private . '/stores.json', json_encode($a111CzkStores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     try {
-        $a111SeedCzk = $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+        $a111SeedCzk = $a111Php(['cli/seed.php', '--count=2', '--fresh', '--yes']);
         $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
         // R55 (review round 20, UX): the catalog is seeded in the default store's language, with real translations.
         $a111CsRoot = (string)$a111SeedDb->query("SELECT name FROM categories WHERE parent_id IS NULL AND path = 'obleceni'")->fetchColumn();
@@ -232,7 +242,7 @@ try {
             . json_encode([$a111SeedCzk['code'], $a111CzkRows, $a111CzkPrices, $a111CzkGap, substr($a111SeedCzk['out'] . $a111SeedCzk['err'], -300)]));
     } finally {
         file_put_contents($a111Private . '/stores.json', $a111StoresJson);
-        $a111Php(['cli/seed.php', '--count=2', '--fresh']);
+        $a111Php(['cli/seed.php', '--count=2', '--fresh', '--yes']);
     }
 
     // Documented subcommand CLIs: getopt() used to drop every option after the subcommand.

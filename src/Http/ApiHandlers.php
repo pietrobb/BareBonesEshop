@@ -672,7 +672,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                 + checkoutRefusal('checkout.error.field_too_long', 422, ['field' => $field, 'max_length' => $max]);
         }
     }
-    $name = trim(Security::str($input['name'] ?? ''));
+    $name = Security::typedText(Security::str($input['name'] ?? '')); // R57 (low): invisible or combining characters alone are no name
     $email = Security::email($input['email'] ?? '');
     $phone = trim(Security::str($input['phone'] ?? ''));
     $country = strtoupper(trim(Security::str($input['country'] ?? StoreContext::current()->marketCountry())));

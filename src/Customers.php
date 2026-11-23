@@ -659,6 +659,9 @@ class Customers {
      */
     public static function profileErrors(array $profile): array {
         $errors = self::invalidTextErrors($profile, ['name', 'phone']);
+        // R57 (review round 22, low): a name of invisible or combining characters alone, as the checkout refuses it.
+        $name = Security::str($profile['name'] ?? '');
+        if (!isset($errors['name']) && trim($name) !== '' && Security::typedText($name) === '') $errors['name'] = 'account.err_invalid_text';
         foreach (['name', 'phone'] as $field) {
             if (!isset($errors[$field]) && mb_strlen(trim(Security::str($profile[$field] ?? ''))) > self::ADDRESS_FIELD_MAX) $errors[$field] = 'account.err_address_too_long';
         }
