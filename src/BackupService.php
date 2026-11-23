@@ -1871,10 +1871,16 @@ class BackupService
         return preg_match('/\.(?:php[0-9]*|phps|phtml?|phar|inc|cgi|fcgi|pl|py|rb|sh|shtml|asp|aspx|jsp)(?:\.|$)/i', basename($relative)) === 1;
     }
 
-    /** R55: a file of uploads/ a browser runs or renders as active content from the shop's origin (scripts, pages, SVG, styles). */
+    /**
+     * R55: a file of uploads/ a browser could run or render as active content from the shop's origin. R56 (review round
+     * 21, low): an allowlist of the images, documents and media uploads hold, not a list of active types: Apache served
+     * .es, .ecma, .dat or a name without an extension with a type it sniffed (no nosniff outside its FilesMatch list),
+     * and CSP 'self' let a forged legal text load it as a script.
+     */
     private static function activeInBrowser(string $relative): bool
     {
-        return preg_match('/\.(?:m?js|cjs|wasm|x?html?|xht|svgz?|xml|xsl|css|swf)(?:\.|$)/i', basename($relative)) === 1;
+        return preg_match('/^[^.][^\/]*\.(?:jpe?g|png|gif|webp|avif|ico|bmp|pdf|mp4|webm|mp3|ogg)$/i', basename($relative)) !== 1
+            || preg_match('/\.(?:m?js|cjs|es|ecma|wasm|x?html?|xht|svgz?|xml|xsl|css|swf)\./i', basename($relative)) === 1;
     }
 
     /** R51: where restored copies are set aside — <backup_recovery_dir>/from-backup, private (0700), outside the web root. */
