@@ -94,9 +94,9 @@ RewriteRule ^(.+)$ redirect.php?path=/$1 [QSA,L]
         Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" "expr=%{HTTPS} == 'on'"
     </FilesMatch>
     <If "%{REQUEST_FILENAME} =~ m#/uploads/#">
+        Header always set Content-Security-Policy "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
         # Any upload, not only the extensions listed above: never a type sniffed from its bytes (R56).
         Header always set X-Content-Type-Options "nosniff"
-        Header always set Content-Security-Policy "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
     </If>
 </IfModule>
 

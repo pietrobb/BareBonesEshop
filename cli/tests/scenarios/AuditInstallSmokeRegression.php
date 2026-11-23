@@ -176,8 +176,14 @@ try {
     assert_true($a111More['code'] === 0 && $a111After[0] === $a111Before[0] + 2 && $a111After[1] === $a111Before[1],
         'R56 seed: a second run without --fresh adds its products to the same categories (was: a foreign key failure): '
         . json_encode([$a111More['code'], substr($a111More['out'] . $a111More['err'], -300), $a111Before[0], $a111Before[1], $a111After[0], $a111After[1]]));
-    $a111Slovak = ['cierna', 'biela', 'cervena', 'modra', 'zelena', 'seda', 'hneda', 'zlta', 'oranzova', 'ruzova'];
-    assert_true($a111After[2] !== [] && array_intersect($a111After[2], $a111Slovak) === [],
+    // The values must be words of the shop's language; the old code stored the ASCII keys ("cierna"). "biela" is both,
+    // so the check is "every value is a word of the language", not "no value is a key".
+    $a111SeedLocale = strtolower((string)($a111Stores['stores'][$a111Stores['default_store'] ?? 'default']['default_locale'] ?? $a111Stores['default_locale'] ?? 'en'));
+    $a111Colours = [
+        'sk' => ['čierna', 'biela', 'červená', 'modrá', 'zelená', 'sivá', 'hnedá', 'žltá', 'oranžová', 'ružová'],
+        'en' => ['black', 'white', 'red', 'blue', 'green', 'grey', 'brown', 'yellow', 'orange', 'pink'],
+    ][$a111SeedLocale] ?? [];
+    assert_true($a111Colours !== [] && $a111After[2] !== [] && array_diff($a111After[2], $a111Colours) === [],
         'R56 seed: colour values in the shop\'s language (was: Slovak "cierna"): ' . json_encode($a111After[2], JSON_UNESCAPED_UNICODE));
     // R23 UX: the sample CZK, PLN, HUF and USD stores sold none of the seeded EUR products (no price in their currency).
     $a111SeedDb = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);

@@ -26,7 +26,7 @@ try {
         'archive.zip' => true, '.hidden.png' => true], $r56dVerdict,
         'R56 restore: uploads keep only images, documents and media in the web root (was: .es, .ecma, .dat and names without an extension too)');
     $r56dHtaccess = (string)file_get_contents($r56dRoot . '/.htaccess');
-    assert_true(preg_match('#<If "%\{REQUEST_FILENAME\} =~ m\#/uploads/\#">\s*(?:\#[^\n]*\n\s*)?Header always set X-Content-Type-Options "nosniff"#', $r56dHtaccess) === 1,
+    assert_true(preg_match('#<If "%\{REQUEST_FILENAME\} =~ m\#/uploads/\#">(?:(?!</If>).)*Header always set X-Content-Type-Options "nosniff"#s', $r56dHtaccess) === 1,
         'R56 restore: Apache sends nosniff for every file of uploads/, not only the extensions it lists');
 
     $r56dStores = json_decode((string)file_get_contents($r56dRoot . '/stores.example.json'), true);
