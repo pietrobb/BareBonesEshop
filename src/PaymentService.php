@@ -432,9 +432,14 @@ class PaymentService {
         // R55 (low): GoPay/ThePay refuse the refund of a payment refunded in their dashboard meanwhile; the customer has the
         // money. The payment's REFUNDED status settles the refunds in flight first (applyRefundEvent()), the credit note
         // with its money. Was: the credit note released with a critical "refund failed", its money then booked outside it.
-        if ($status === 'failed' && $gateway instanceof PullVerifiedNotificationAdapter && !$db->inTransaction()) {
+        // R57 (review round 22, medium S3): the payment's state read through statusEvent(), which every such adapter builds
+        // from its own parameters. Was: a GoPay notification (['id' => …]) for all, which ThePay always refused as
+        // unverified: its refused refund released the credit note and the money was booked as a refund outside it. Only a
+        // refund report is applied: a PAID state (Comgate reports no refunds) says nothing about this refund.
+        if ($status === 'failed' && $gateway instanceof PaymentStatusEventAdapter && !$db->inTransaction()) {
             try {
-                self::handlePulledNotification(['id' => $paymentId], $gateway, self::providerName($gateway));
+                $event = $gateway->statusEvent($paymentId);
+                if ($event['event_type'] === 'refund.reported') self::applyProviderStatusEvent($event, self::providerName($gateway));
             } catch (\Throwable $e) {
                 Logger::warning('refund.status_check_failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
             }
@@ -791,6 +796,9 @@ class PaymentService {
     public static function refundJobSuperseded(int $orderId, string $executeKey): bool {
         $requestKey = self::refundRequestKey($executeKey);
         if ($requestKey === null) return false;
+        // R57 (review round 22, S3): released as declined or not executed (declinedRefundRequest(), releaseUnknownRefund()):
+        // the job run again pays nothing out. Was: it asked the provider again, or failed "reconcile manually".
+        if (self::transactionExists('refund-declined:' . $executeKey) || self::transactionExists('refund-not-executed:' . $executeKey)) return true;
         $params = [':order' => $orderId, ':store' => StoreContext::current()->id()];
         $own = Db::get()->prepare("SELECT id FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key AND status = 'refund_pending'");
         $own->execute($params + [':key' => $requestKey]);

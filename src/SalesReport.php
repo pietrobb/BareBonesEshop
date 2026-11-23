@@ -92,7 +92,9 @@ final class SalesReport {
         $db = Db::get();
         // R55 (review round 20, low): QUARTER groups an hour by its quarters (a zone off by a half or three quarters of
         // an hour starts its day on one); was by the minute, which ran out of memory at 300 000 orders.
-        $quarter = "CASE WHEN SUBSTR(o.created_at, 15, 2) < '15' THEN '00' WHEN SUBSTR(o.created_at, 15, 2) < '30' THEN '15' WHEN SUBSTR(o.created_at, 15, 2) < '45' THEN '30' ELSE '45' END";
+        // R57 (review round 22, low): the quarter's number from one minute read (was: a CASE of three string compares,
+        // in the select and the grouping, five times slower on MariaDB).
+        $quarter = Db::isSqlite() ? 'CAST(SUBSTR(o.created_at, 15, 2) AS INTEGER) / 15' : 'MINUTE(o.created_at) DIV 15';
         $length = $bucket === self::QUARTER ? 13 : $bucket;
         $columns = 'LOWER(o.currency) AS currency, ' . ($length > 0 ? "SUBSTR(o.created_at, 1, {$length})" : "''") . ' AS hour_utc'
             . ($bucket === self::QUARTER ? ", {$quarter} AS quarter" : '');
@@ -102,7 +104,7 @@ final class SalesReport {
             FROM orders o" . Db::forceIndex('orders', 'idx_orders_store_payment_cover', $db) . " WHERE {$where} GROUP BY {$group}");
         $stmt->execute($params);
         $rows = [];
-        $at = static fn(array $row): string => (string)$row['hour_utc'] . (isset($row['quarter']) ? ':' . $row['quarter'] : '');
+        $at = static fn(array $row): string => (string)$row['hour_utc'] . (isset($row['quarter']) ? ':' . sprintf('%02d', (int)$row['quarter'] * 15) : '');
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $rows[$row['currency'] . '|' . $at($row)] = ['currency' => (string)$row['currency'], 'hour_utc' => $at($row),
                 'orders' => (int)$row['orders'], 'revenue' => (int)$row['revenue']];
@@ -144,7 +146,7 @@ final class SalesReport {
      * the daily totals (migration not applied) everything is summed from the orders.
      * @return array{0: ?array{0: string, 1: string}, 1: list<array{0: string, 1: ?string}>}
      */
-    private static function parts(string $storeId, string $sinceUtc, ?DateTimeImmutable $now = null): array {
+    private static function parts(string $storeId, string $sinceUtc, ?DateTimeImmutable $now = null, bool $afterRefresh = false): array {
         // R55 (review round 20, medium 3): a refresh that fails (SQLite "database is locked" behind a writer holding it
         // for longer than the busy timeout, a MySQL lock wait timeout) answered the reports and the dashboard with a 500.
         // The report then sums the orders; the next request or the worker builds the days. The other reports of the same
@@ -152,7 +154,10 @@ final class SalesReport {
         $refreshed = false;
         if (!isset(self::$refreshFailed[$storeId])) {
             try {
-                $refreshed = SalesDaily::refresh($storeId, SalesDaily::$requestSeconds);
+                // R57 (review round 22, low): a second report of the same page reads what the first one's refresh left
+                // (the days it did not get to are summed from the orders, SalesDaily::builtUntil()). Was: the Reports
+                // page refreshed for the trend and again for the best sellers, twice the request's seconds.
+                $refreshed = $afterRefresh ? SalesDaily::available() : SalesDaily::refresh($storeId, SalesDaily::$requestSeconds);
             } catch (PDOException $e) {
                 if (Db::transactionOpen()) throw $e;
                 Logger::warning('sales_daily.refresh_failed', ['store' => $storeId, 'error' => $e->getMessage()]);
@@ -275,11 +280,12 @@ final class SalesReport {
      * was refunded of an order (a full or amount refund, shipping) off its lines in proportion to what is left of them,
      * so a product never shows more than the order brought in and an item refund never lowers another product.
      * SKU and name are those of the product's latest line of the period.
+     * $afterRefresh: another report of this request refreshed the store just before (trend() on the Reports page).
      * @return array<string, list<array{product_id:int, variant_id:?int, sku:string, name:string, quantity:int, revenue:int}>> currency => best sellers by revenue
      */
-    public static function topProducts(string $storeId, string $sinceUtc, int $limit = 10): array {
+    public static function topProducts(string $storeId, string $sinceUtc, int $limit = 10, bool $afterRefresh = false): array {
         $db = Db::get();
-        [$built, $raw] = self::parts($storeId, $sinceUtc);
+        [$built, $raw] = self::parts($storeId, $sinceUtc, null, $afterRefresh);
         $rawGroups = array_map(static fn(array $part): array => self::productGroups($storeId, $part[0], $part[1]), $raw);
         // R53: ranked in SQL (a year of a large catalogue took 3.1 s here): the $limit best sellers of the built days and
         // every built group of a product sold in the days summed from the orders, which may climb above them. Any other

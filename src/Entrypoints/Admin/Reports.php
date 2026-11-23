@@ -19,7 +19,7 @@ function pageReports(): void {
     $since = SalesReport::sinceUtc($days);
     $trend = SalesReport::trend($storeId, $days);
     $totals = SalesReport::totalsOf($trend);
-    $top = SalesReport::topProducts($storeId, $since);
+    $top = SalesReport::topProducts($storeId, $since, 10, true);
     $th = static fn(string $key): string => '<th>' . esc(I18n::t($key)) . '</th>';
     // R48 (review round 18, low 5): a top product links to the editor only for an admin who may open it.
     $canEdit = Security::adminCan((require __DIR__ . '/Permissions.php')['product']);

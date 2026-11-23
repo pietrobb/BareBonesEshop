@@ -30,15 +30,20 @@ class IncidentMonitor {
             $fingerprint = hash('sha256', $store . '|' . $code . '|' . $phase);
             $db->prepare(Db::insertIgnore() . " INTO operational_alert_state (fingerprint, store_id, code, phase, severity, correlation_id, window_started_at, notification_status, delivered_hashes) VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', '[]')")
                 ->execute([$fingerprint, $store, $code, $phase, $severity, Logger::correlationId(), $now]);
-            // Set the window start LAST: MySQL evaluates SET assignments left-to-right.
+            // Set the window start LAST: MySQL evaluates SET assignments left-to-right. The severity FIRST, from the old
+            // counts: R57 (review round 22, low) a critical stays only while it is in this window and not alerted yet.
+            // Was: critical for good, so every later warning of the code (a refund the provider declined after the
+            // money went back another way) was alerted as critical.
             $db->prepare("UPDATE operational_alert_state SET
+                severity = CASE WHEN :severity_new = 'critical' THEN 'critical'
+                    WHEN severity = 'critical' AND window_started_at > :since_severity AND occurrences > notified_count THEN 'critical'
+                    ELSE :severity END,
                 occurrences = CASE WHEN window_started_at <= :since_count THEN 1 ELSE occurrences + 1 END,
                 notified_count = CASE WHEN window_started_at <= :since_notified THEN 0 ELSE notified_count END,
-                severity = CASE WHEN severity = 'critical' THEN severity ELSE :severity END,
                 correlation_id = :correlation,
                 window_started_at = CASE WHEN window_started_at <= :since_window THEN :now ELSE window_started_at END
                 WHERE fingerprint = :fingerprint")
-                ->execute([':since_count' => $now - $cfg['window_seconds'], ':since_notified' => $now - $cfg['window_seconds'], ':since_window' => $now - $cfg['window_seconds'], ':now' => $now, ':severity' => $severity, ':correlation' => Logger::correlationId(), ':fingerprint' => $fingerprint]);
+                ->execute([':severity_new' => $severity, ':since_severity' => $now - $cfg['window_seconds'], ':since_count' => $now - $cfg['window_seconds'], ':since_notified' => $now - $cfg['window_seconds'], ':since_window' => $now - $cfg['window_seconds'], ':now' => $now, ':severity' => $severity, ':correlation' => Logger::correlationId(), ':fingerprint' => $fingerprint]);
             self::sweep();
         } catch (Throwable $e) {
             // Missing migrations, database outages and broken queues cannot fail a purchase.

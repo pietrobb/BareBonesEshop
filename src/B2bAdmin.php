@@ -227,7 +227,8 @@ final class B2bAdmin {
     private static function text(string $value, bool $required, string $label): string {
         $value = trim($value);
         // R55 (review round 20, low): not UTF-8, bidi controls and directional marks are refused too (the customer profile rule).
-        if (($value === '' && $required) || !mb_check_encoding($value, 'UTF-8') || mb_strlen($value) > self::MAX_TEXT
+        // R57 (review round 22, low): a required text of invisible or combining characters alone is missing (Security::typedText()).
+        if (($required && Security::typedText($value) === '') || !mb_check_encoding($value, 'UTF-8') || mb_strlen($value) > self::MAX_TEXT
             || preg_match('/[\x00-\x1F\x7F]|[\x{0080}-\x{009F}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{2028}\x{2029}]/u', $value)) {
             self::fail(I18n::format('admin.msg.field_required', ['label' => $label, 'max' => self::MAX_TEXT]));
         }

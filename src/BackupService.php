@@ -1876,11 +1876,14 @@ class BackupService
      * 21, low): an allowlist of the images, documents and media uploads hold, not a list of active types: Apache served
      * .es, .ecma, .dat or a name without an extension with a type it sniffed (no nosniff outside its FilesMatch list),
      * and CSP 'self' let a forged legal text load it as a script.
+     * R57 (review round 22, medium S2): nor an inner extension Apache maps to a handler: Debian/Ubuntu enable
+     * "AddHandler type-map var", so m.var.jpg was a type map naming its own Content-Type (text/javascript); asis sends
+     * its own headers, map is the image-map handler.
      */
     private static function activeInBrowser(string $relative): bool
     {
         return preg_match('/^[^.][^\/]*\.(?:jpe?g|png|gif|webp|avif|ico|bmp|pdf|mp4|webm|mp3|ogg)$/i', basename($relative)) !== 1
-            || preg_match('/\.(?:m?js|cjs|es|ecma|wasm|x?html?|xht|svgz?|xml|xsl|css|swf)\./i', basename($relative)) === 1;
+            || preg_match('/\.(?:m?js|cjs|es|ecma|wasm|x?html?|xht|svgz?|xml|xsl|css|swf|var|asis|map|imap)\./i', basename($relative)) === 1;
     }
 
     /** R51: where restored copies are set aside — <backup_recovery_dir>/from-backup, private (0700), outside the web root. */

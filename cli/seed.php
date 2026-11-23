@@ -8,12 +8,13 @@ require_once __DIR__ . '/cli-only.php';
  */
 require_once __DIR__ . '/../src/autoload.php';
 
-$usage = "Usage: php cli/seed.php [--count=1000] [--fresh]\n"
+$usage = "Usage: php cli/seed.php [--count=1000] [--fresh [--yes]]\n"
     . "  --count=N  products to add (default 1000)\n"
-    . "  --fresh    delete the catalog, orders and stock first\n";
+    . "  --fresh    delete the catalog, orders and stock first (asks first when there are orders)\n"
+    . "  --yes      with --fresh: delete without asking\n";
 // R56 (review round 21, low): --help (or anything this seeder does not know) prints the usage and seeds nothing (was:
 // getopt() dropped it and 1000 products were seeded).
-$args = getopt('h', ['count:', 'fresh', 'help']);
+$args = getopt('h', ['count:', 'fresh', 'yes', 'help']);
 if (isset($args['h']) || isset($args['help'])) {
     echo $usage;
     exit(0);
@@ -21,7 +22,7 @@ if (isset($args['h']) || isset($args['help'])) {
 $given = array_slice($argv, 1);
 for ($i = 0; $i < count($given); $i++) {
     if ($given[$i] === '--count' && ctype_digit((string)($given[$i + 1] ?? ''))) { $i++; continue; }
-    if (!preg_match('/^--(?:count=\d+|fresh)$/D', $given[$i])) {
+    if (!preg_match('/^--(?:count=\d+|fresh|yes)$/D', $given[$i])) {
         fwrite(STDERR, "Unknown option: {$given[$i]}\n" . $usage);
         exit(2);
     }
@@ -34,6 +35,22 @@ echo "========================\n";
 echo "Target: {$count} products\n\n";
 
 $db = Db::get();
+
+// R57 (review round 22, low): --fresh deletes the shop's orders; with orders it asks (or needs --yes) first (was: deleted
+// them at once, a mistyped command on a live shop lost every order).
+$orders = $fresh ? (int)$db->query("SELECT COUNT(*) FROM orders")->fetchColumn() : 0;
+if ($orders > 0 && !isset($args['yes'])) {
+    $question = "--fresh deletes the orders, the whole catalog and the stock of this shop (orders: {$orders}, " . Db::driver() . " database).\n";
+    if (!function_exists('stream_isatty') || !stream_isatty(STDIN)) {
+        fwrite(STDERR, $question . "Nothing deleted: run it again with --yes to delete them.\n");
+        exit(2);
+    }
+    echo $question . "Type \"delete\" to delete them: ";
+    if (strtolower(trim((string)fgets(STDIN))) !== 'delete') {
+        fwrite(STDERR, "Nothing deleted.\n");
+        exit(2);
+    }
+}
 
 if ($fresh) {
     echo "FRESH mode: clearing data...\n";

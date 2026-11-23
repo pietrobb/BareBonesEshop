@@ -93,16 +93,16 @@ try {
     assert_equals(['cancelled', 'refund_pending'], $oplState($h2), 'H2: cancellation refund is recorded on the ledger (refund_pending)');
     assert_equals(700, (int)($h2Refund[0]['payload']['amount'] ?? 0), 'H2: cancellation refunds the refundable balance, not order.total');
     $oplGateway('failed');
-    $h2Failed = false;
-    try { WorkerJobs::handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]); } catch (RuntimeException $e) { $h2Failed = true; }
-    assert_true($h2Failed, 'H2: a declined provider refund fails the job instead of passing silently');
-    assert_equals(['cancelled', 'refund_pending'], $oplState($h2), 'H2: a failed refund leaves the order unrefunded and visible');
+    // R57 (review round 22, S3): a declined refund is released, not left refund_pending for ever: the payment goes back to
+    // what was refunded before, the merchant gets a critical incident and may request the refund anew.
+    WorkerJobs::handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]);
+    assert_equals(['cancelled', 'partially_refunded'], $oplState($h2), 'H2: a declined refund is released, the order unrefunded and visible (was: refund_pending for ever)');
+    assert_equals(1, $oplIncidents('payment.refund_failed', $h2), 'H2: a declined provider refund tells the merchant instead of passing silently');
     $oplGateway('succeeded');
     MockPayment::$refunds = [];
-    $h2Retry = false;
-    try { WorkerJobs::handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]); } catch (RuntimeException $e) { $h2Retry = str_contains($e->getMessage(), 'did not succeed'); }
-    assert_true($h2Retry, 'H2: without provider idempotency a retry is refused (no double refund)');
-    assert_equals([], MockPayment::$refunds, 'H2: the refused retry never reached the provider');
+    WorkerJobs::handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]);
+    assert_equals(['cancelled', 'partially_refunded'], $oplState($h2), 'H2: the released job run again changes nothing (no double refund)');
+    assert_equals([], MockPayment::$refunds, 'H2: the released job run again never reached the provider');
 
     $h2b = $oplOrder('paid', 'paid', 'mock_opl_h2b');
     OrderWorkflow::transition($h2b, 'cancelled', 'H2 cancel paid order');

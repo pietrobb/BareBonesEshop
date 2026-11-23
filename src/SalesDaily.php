@@ -22,8 +22,8 @@ final class SalesDaily {
     private const SETTLE_SECONDS = 900;
     /** Logged changes read per query (buildChanged()), ids per batch of logInserted(). */
     private const CHANGES_PAGE = 5000;
-    /** R56: logged changes built and deleted per batch (buildChanged()); a multiple of CHANGES_PAGE. */
-    private const CHANGES_BATCH = 50000;
+    /** R57: logged changes read per pass of buildChanged() (their ids packed, 8 bytes each); a multiple of CHANGES_PAGE. */
+    private const CHANGES_MAX = 2000000;
     /** Tables whose new rows change the day of their order: SQL of (store_id, created_at) of the orders of rows id in (:from, :to]. */
     private const WATCHED = [
         'orders' => 'SELECT o.store_id, o.created_at FROM orders o WHERE o.id > :from AND o.id <= :to',
@@ -406,22 +406,23 @@ final class SalesDaily {
      * built from its orders when its turn comes.
      */
     private static function buildChanged(PDO $db, string $storeId, string $builtUntil, ?float $deadline): bool {
-        // R56 (review round 21, medium 1): CHANGES_BATCH changes at a time, each batch's days built and its changes
-        // deleted before the next is read, until $deadline. Was: every change read at once (with their id runs as PHP
-        // arrays): 530 000 changes far apart (a store whose reports nobody opens, Galera's id steps) exceeded 128 MB
-        // and every report request answered 500 without ever getting further.
+        // R56 (review round 21, medium 1): the ids read are held packed (8 bytes each), not as PHP arrays: 530 000 changes
+        // far apart (a store whose reports nobody opens, Galera's id steps) exceeded 128 MB and every report request
+        // answered 500 without ever getting further.
+        // R57 (review round 22, medium S4): the changes are read first (all of them, up to CHANGES_MAX or $deadline), then
+        // each of their days is built once. Was: batches of 50 000, each touching nearly every day of a backlog spread
+        // over many days, so every batch built those days again: 200 000 changes took 5 334 day builds instead of 381,
+        // and 60 report requests left 165 000 of them. Reading stops at $deadline too (was: only checked between batches).
         $after = 0;
-        do {
-            if ($after > 0 && $deadline !== null && microtime(true) >= $deadline) return self::staleAfter($db, $storeId, $after, $builtUntil);
-            [$hours, $ids, $after] = self::visibleChanges($db, $storeId, $after);
-            if ($ids === []) return true;
-            $full = count($ids) === self::CHANGES_BATCH;
-            if (!self::buildChangedBatch($db, $storeId, $builtUntil, $deadline, $hours, $ids)) {
-                if ($full) self::staleAfter($db, $storeId, $after, $builtUntil);
-                return false;
+        while (true) {
+            [$hours, $ids, $after, $complete] = self::visibleChanges($db, $storeId, $after, $deadline);
+            if ($ids === '') return true;
+            $built = self::buildChangedBatch($db, $storeId, $builtUntil, $deadline, $hours, $ids);
+            if ($complete) return $built;
+            if (!$built || ($deadline !== null && microtime(true) >= $deadline)) {
+                return self::staleAfter($db, $storeId, $after, $builtUntil) && $built;
             }
-        } while ($full);
-        return true;
+        }
     }
 
     /**
@@ -442,9 +443,9 @@ final class SalesDaily {
      * Build the days of one batch of changes ($hours, $ids from visibleChanges()) and delete those changes; whether all
      * of its days were built before $deadline.
      * @param list<string> $hours
-     * @param list<int> $ids
+     * @param string $ids packed ('q*')
      */
-    private static function buildChangedBatch(PDO $db, string $storeId, string $builtUntil, ?float $deadline, array $hours, array $ids): bool {
+    private static function buildChangedBatch(PDO $db, string $storeId, string $builtUntil, ?float $deadline, array $hours, string $ids): bool {
         $days = array_values(array_filter(self::daysOfHours($hours), static fn(string $day): bool => $day < $builtUntil));
         $built = self::buildDays($db, $storeId, $days, $deadline, null);
         // Built: the days before $days[$built] (all of them: before $builtUntil).
@@ -467,8 +468,9 @@ final class SalesDaily {
             // that are not consecutive, other stores' changes in between, ran one DELETE each: 400 000 changes 49 s).
             $delete = Db::isSqlite() ? 'DELETE FROM sales_daily_changes WHERE' : 'DELETE c FROM sales_daily_changes c FORCE INDEX (PRIMARY) WHERE';
             $params = array_merge([$storeId], $current === '' ? [] : $kept);
-            foreach (array_chunk($ids, 500) as $chunk) {
-                $db->prepare("{$delete} store_id = ? AND id IN (" . implode(',', $chunk) . "){$only}")->execute($params);
+            for ($offset = 0, $length = strlen($ids); $offset < $length; $offset += 500 * 8) {
+                $chunk = unpack('q*', substr($ids, $offset, 500 * 8)) ?: [];
+                $db->prepare("{$delete} store_id = ? AND id IN (" . implode(',', array_map('intval', $chunk)) . "){$only}")->execute($params);
             }
         });
         return $built === count($days);
@@ -481,23 +483,28 @@ final class SalesDaily {
      * until --rebuild. Only the ids read are deleted; one not visible yet is a gap between two runs and stays for the
      * next refresh. Medium 6: the cursor of that MAX(id) stayed open on SQLite and the build's write transaction failed
      * at once with "database is locked" when a checkout wrote meanwhile (the report answered 500): every read here is
-     * fetched whole and closed. R56: at most CHANGES_BATCH of them after id $after, as a flat list of ids.
-     * @return array{0: list<string>, 1: list<int>, 2: int} the hours, the ids and the last id read
+     * fetched whole and closed. R57: at most CHANGES_MAX of them after id $after, until $deadline (a page at least),
+     * the ids packed ('q*').
+     * @return array{0: list<string>, 1: string, 2: int, 3: bool} the hours, the ids, the last id read and whether that
+     *     was the last change
      */
-    private static function visibleChanges(PDO $db, string $storeId, int $after): array {
+    private static function visibleChanges(PDO $db, string $storeId, int $after, ?float $deadline): array {
         $stmt = $db->prepare('SELECT id, SUBSTR(created_at, 1, 13) FROM sales_daily_changes WHERE store_id = ? AND id > ? ORDER BY id LIMIT ' . self::CHANGES_PAGE);
         $hours = [];
-        $ids = [];
+        $ids = '';
         do {
             $stmt->execute([$storeId, $after]);
             $rows = $stmt->fetchAll(PDO::FETCH_NUM);
             $stmt->closeCursor();
+            $page = [];
             foreach ($rows as [$id, $hour]) {
                 $hours[(string)$hour] = true;
-                $ids[] = $after = (int)$id;
+                $page[] = $after = (int)$id;
             }
-        } while (count($rows) === self::CHANGES_PAGE && count($ids) < self::CHANGES_BATCH);
-        return [array_map('strval', array_keys($hours)), $ids, $after];
+            if ($page !== []) $ids .= pack('q*', ...$page);
+            $complete = count($rows) < self::CHANGES_PAGE;
+        } while (!$complete && strlen($ids) < self::CHANGES_MAX * 8 && ($deadline === null || microtime(true) < $deadline));
+        return [array_map('strval', array_keys($hours)), $ids, $after, $complete];
     }
 
     /**

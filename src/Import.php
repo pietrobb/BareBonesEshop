@@ -81,6 +81,7 @@ class Import {
         $db = Db::get();
         $imported = 0;
         $errors = [];
+        $noDownload = [];
         $batchSize = 500;
         $batch = 0;
         $limitExceeded = false;
@@ -126,9 +127,12 @@ class Import {
             try {
                 $db->exec('SAVEPOINT row_import');
                 if ($productTypeOverride) $data['product_type'] = $productTypeOverride;
-                self::importProduct($data, $db);
+                $rowType = self::importProduct($data, $db);
                 $db->exec('RELEASE SAVEPOINT row_import');
                 $imported++;
+                // R57 (review round 22, low): a downloadable product without its file is "sold out" until one is uploaded.
+                $rowSku = trim((string)($data['sku'] ?? ''));
+                if ($rowType === 'downloadable' && count($noDownload) < 50 && !VariantAvailability::hasDownload($rowSku)) $noDownload[] = $rowSku;
             } catch (\Throwable $e) {
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
                 $errors[] = Str::clip("Line {$lineNum} (SKU: " . Str::clip((string)($data['sku'] ?? '?'), 64) . "): " . $e->getMessage());
@@ -150,6 +154,7 @@ class Import {
             'errors'   => $errors,
             'encoding' => $encoding, // 'windows-1250' when the file was converted
             'delimiter' => $delimiter,
+            'no_download' => $noDownload, // downloadable SKUs imported without an active file (first 50)
         ];
     }
 
@@ -189,24 +194,28 @@ class Import {
      * and the second upsert overwrote the first, still answering 201; a plain INSERT waits for the first and fails on
      * the unique SKU instead (PDOException 23000), an existing product is a DomainException.
      */
-    public static function importProduct(array $data, ?PDO $db = null, bool $createOnly = false): void {
+    /** @return string the product's type after the import */
+    public static function importProduct(array $data, ?PDO $db = null, bool $createOnly = false): string {
         $db = $db ?? Db::get();
         // product.updated is recorded with the change: a lone call runs in its own transaction.
         $ownsTransaction = !$db->inTransaction();
         if ($ownsTransaction) $db->beginTransaction();
         try {
-            self::importRow($data, $db, $createOnly);
+            $productType = self::importRow($data, $db, $createOnly);
             if ($ownsTransaction) $db->commit();
+            return $productType;
         } catch (Throwable $e) {
             if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
             throw $e;
         }
     }
 
-    private static function importRow(array $data, PDO $db, bool $createOnly = false): void {
+    /** @phpstan-impure writes the product (and may end the transaction on a driver error) */
+    private static function importRow(array $data, PDO $db, bool $createOnly = false): string {
         // R54 (review round 19, low): names and summaries without bidi controls (Security::plainText()).
         foreach ($data as $key => $value) {
-            if (is_string($value) && preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) $data[$key] = Security::plainText($value);
+            // R57 (review round 22, low): trimmed of invisible characters, so a name of them alone is missing (Security::typedText()).
+            if (is_string($value) && preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) $data[$key] = Security::typedText($value);
         }
         // Required fields
         $sku  = trim($data['sku'] ?? '');
@@ -225,7 +234,7 @@ class Import {
             $productId = (int)$existing['id'];
             $productType = self::updateProduct($existing, $data, $db);
         } else {
-            $productType = trim((string)($data['product_type'] ?? '')) ?: 'simple'; // R56: an empty template cell is "simple"
+            $productType = self::productType($data['product_type'] ?? ''); // R56: an empty template cell is "simple"
             $productId = self::createProduct($data, $productType, $db, $createOnly);
         }
 
@@ -256,6 +265,7 @@ class Import {
             }
         }
         if ($existing) Products::recordUpdated($productId, $existing);
+        return $productType;
     }
 
     /**
@@ -321,7 +331,7 @@ class Import {
         $name = trim($data['name']);
         $set = ['name' => $name];
         if ($has('slug')) $set['slug'] = trim((string)$data['slug']) ?: self::productSlug($name, (string)$existing['sku']);
-        if ($has('product_type')) $set['product_type'] = trim((string)$data['product_type']) ?: 'simple';
+        if ($has('product_type')) $set['product_type'] = self::productType($data['product_type']);
         if ($has('category')) $set['category_id'] = self::ensureCategory(trim((string)$data['category']) ?: 'uncategorized', $db);
         if ($has('price') && trim((string)$data['price']) !== '') $set['price'] = self::assertVariantFloor((int)$existing['id'], self::parsePriceToCents($data['price']));
         if ($has('compare_price')) $set['compare_price'] = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null;
@@ -599,12 +609,27 @@ class Import {
     }
 
     /**
+     * R57 (review round 22, N4): a product type of catalog.json, matched without regard to case ("Downloadable"); empty is
+     * "simple". Was: any text stored, so "Downloadable" was sold as a physical product and "<script>" was kept.
+     */
+    private static function productType(mixed $value): string {
+        $type = strtolower(trim(is_scalar($value) ? (string)$value : ''));
+        if ($type === '') return 'simple';
+        if (!array_key_exists($type, ImportTemplates::types())) {
+            throw new \InvalidArgumentException('Unknown product type "' . Str::clip(preg_replace('/[^\p{L}\p{N} _.-]/u', '?', (string)$value) ?? '', 40)
+                . '"; use one of: ' . implode(', ', array_keys(ImportTemplates::types())));
+        }
+        return $type;
+    }
+
+    /**
      * Build filter_tags string for FTS-based faceted filtering
      */
     public static function buildFilterTagsFromAttrs(array $attrs): string {
         $tags = '';
         foreach (CatalogAttributes::publicMap($attrs) as $name => $value) {
-            $n = self::normalizeToken($name);
+            if (!is_scalar($value)) continue;
+            $n = self::normalizeToken((string)$name);
             $v = self::normalizeToken((string)$value);
             if ($n && $v) {
                 $tags .= "attr_{$n}_{$v} ";

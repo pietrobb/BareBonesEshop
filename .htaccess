@@ -28,10 +28,16 @@ RewriteRule (?:^|/)[^/]*\.from-backup(?:/|$) - [F,L,NC]
 # PHP error logs that hosting panels (cPanel) write next to the scripts.
 RewriteRule (?:^|/)(?:php_)?error_log$ - [F,L,NC]
 
-# Uploaded content must never be dispatched through a PHP handler.
-RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
+# Uploaded content must never be dispatched through a PHP handler, nor through the type-map, send-as-is or image-map
+# handlers Debian/Ubuntu map by extension (AddHandler type-map var): m.var.jpg names its own Content-Type (R57).
+RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar|var|asis|i?map)(?:[./]|$) - [F,L,NC]
 # Nor theme files: themes hold no script.
-RewriteRule ^themes/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
+RewriteRule ^themes/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar|var|asis)(?:[./]|$) - [F,L,NC]
+# The shop serves no type map, as-is or image-map file: those handlers are off for every name (needs the same
+# AllowOverride FileInfo as the rewrite rules above).
+<IfModule mod_mime.c>
+    RemoveHandler .var .asis .map .imap
+</IfModule>
 
 # No web-server cache shortcut: the API serves its file cache itself, because entries live under
 # the resolved store namespace (cache/stores/<store>/<channel>/...) and are skipped for logged-in
