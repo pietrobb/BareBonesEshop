@@ -14,11 +14,32 @@ class Shipping {
         return self::$config;
     }
 
+    /**
+     * A zone's countries, upper case. R57 (review round 22, UX S5): "@store" is the current store's country (its seller
+     * country, legal.country). Was: the home zones named SK, so a German shop charged its German customers the EU rate
+     * (12.70) and a Slovak customer the domestic one (3.99).
+     * @return list<string>
+     */
+    private static function countriesOf(mixed $zone): array {
+        $countries = [];
+        foreach (is_array($zone) ? (array)($zone['countries'] ?? []) : [] as $code) {
+            if ($code === '@store') $code = self::storeCountry();
+            if (is_string($code)) $countries[] = strtoupper($code);
+        }
+        return $countries;
+    }
+
+    /** The current store's seller country (SK when it names none, as the VAT context reads it). */
+    public static function storeCountry(): string {
+        $store = class_exists('StoreContext') ? StoreContext::current()->config() : [];
+        return strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+    }
+
     /** Explicit country codes of the shipping.json zones; the '*' wildcard names no country. */
     public static function zoneCountries(): array {
         $codes = [];
         foreach (self::config()['zones'] ?? [] as $zone) {
-            foreach ((array)($zone['countries'] ?? []) as $code) {
+            foreach (self::countriesOf($zone) as $code) {
                 if (is_string($code) && preg_match('/^[A-Za-z]{2}$/', $code)) $codes[] = strtoupper($code);
             }
         }
@@ -130,20 +151,51 @@ class Shipping {
         $zones = [];
 
         foreach ($cfg['zones'] ?? [] as $zoneName => $zone) {
-            $countries = $zone['countries'] ?? [];
-            if (in_array($country, $countries)) {
+            if (in_array($country, self::countriesOf($zone), true)) {
                 $zones[] = $zoneName;
             }
         }
 
         // Wildcard zone as fallback
         foreach ($cfg['zones'] ?? [] as $zoneName => $zone) {
-            if (in_array('*', $zone['countries'] ?? []) && !in_array($zoneName, $zones)) {
+            if (in_array('*', self::countriesOf($zone), true) && !in_array($zoneName, $zones)) {
                 $zones[] = $zoneName;
             }
         }
 
         return $zones;
+    }
+
+    /**
+     * R57 (review round 22, UX S5): the shipping.json delivery methods as the admin's shipping page lists them, one row
+     * per zone rate with the zone's countries ("@store" resolved). Was: not shown, the merchant could not see what
+     * Standard/Express charged nor to whom.
+     * @return list<array{key: string, name: string, zone: string, countries: list<string>, base: int, per_kg: int, free_above: ?int, delivery_days: ?string}>
+     */
+    public static function overview(string $locale): array {
+        $cfg = self::config();
+        $rows = [];
+        foreach (is_array($cfg['methods'] ?? null) ? $cfg['methods'] : [] as $key => $method) {
+            if (!is_array($method)) continue;
+            $names = $method['name'] ?? $key;
+            $name = is_array($names) ? (string)($names[$locale] ?? $names['en'] ?? reset($names)) : (string)$names;
+            $rates = is_array($method['rates'] ?? null) ? $method['rates']
+                : (($method['price'] ?? null) === 0 ? array_fill_keys((array)($method['available_zones'] ?? []), ['base' => 0, 'per_kg' => 0]) : []);
+            // A country takes the rate of the first zone (in the zones' order) that lists it, so a later zone's row leaves it out.
+            $claimed = [];
+            foreach (is_array($cfg['zones'] ?? null) ? $cfg['zones'] : [] as $zone => $zoneCfg) {
+                if (!isset($rates[$zone]) || (isset($method['available_zones']) && !in_array($zone, (array)$method['available_zones'], true))) continue;
+                $rate = $rates[$zone];
+                $all = self::countriesOf($zoneCfg);
+                $countries = $all === ['*'] ? ['*'] : array_values(array_diff($all, $claimed));
+                $claimed = array_merge($claimed, $all);
+                $rows[] = ['key' => (string)$key, 'name' => $name, 'zone' => (string)$zone, 'countries' => $countries,
+                    'base' => (int)($rate['base'] ?? 0), 'per_kg' => (int)($rate['per_kg'] ?? 0),
+                    'free_above' => isset($method['free_above']) ? (int)$method['free_above'] : null,
+                    'delivery_days' => isset($method['delivery_days']) ? (string)$method['delivery_days'] : null];
+            }
+        }
+        return $rows;
     }
 
     /**

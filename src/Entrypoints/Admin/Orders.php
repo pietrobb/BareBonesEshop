@@ -190,7 +190,7 @@ function pageOrders(): void {
             <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
         </div>
         <table>
-            <tr><th><span class="sr-only"><?= esc(I18n::t('admin.orders.select')) ?></span></th><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.payment')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
+            <tr><th><span class="sr-only"><?= esc(I18n::t('admin.orders.select')) ?></span></th><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.payment')) ?></th><th><?= esc(I18n::t('admin.delivery_note.shipping_method')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <tr>
                 <td><input type="checkbox" name="order_ids[]" value="<?= (int)$o['id'] ?>" aria-label="<?= esc(I18n::t('admin.orders.select') . ' ' . $o['order_number']) ?>"></td>
@@ -200,6 +200,7 @@ function pageOrders(): void {
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc(OrderStatusLabels::order((string)$o['status'])) ?></span></td>
                 <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($o)) ?></span><br><span class="muted" title="<?= esc((string)($o['payment_method'] ?? '')) ?>"><?= esc(PaymentService::adminLabel($o)) ?></span></td>
+                <td class="muted" title="<?= esc((string)($o['shipping_method'] ?? '')) ?>" data-order-list-shipping><?= esc(ConsumerNotice::shippingMethod(['locale' => ''] + $o)) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$o['created_at'])) ?></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
@@ -270,6 +271,7 @@ function pageOrder(): void {
             <?php else: ?>
             <p class="muted"><?= esc(I18n::t('admin.order.final_status')) ?></p>
             <?php endif; ?>
+            <?php /* R57 (review round 22, UX S6): how it ships, in the admin's language */ if (($shippingLabel = ConsumerNotice::shippingMethod(['locale' => ''] + $order)) !== ''): ?><p class="muted" style="margin-top:.5rem" title="<?= esc((string)$order['shipping_method']) ?>" data-order-shipping><?= esc(I18n::t('admin.delivery_note.shipping_method')) ?>: <?= esc($shippingLabel) ?></p><?php endif; ?>
             <p class="muted" style="margin-top:.5rem" title="<?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method']) . (!empty($paymentSnapshot['provider']) ? ' · ' . (string)$paymentSnapshot['provider'] : '')) ?>"><?= esc(I18n::t('admin.order.payment_method')) ?>: <?= esc(PaymentService::adminLabel($order)) ?></p>
             <?php if (OrderWorkflow::isUnpaidInvoicePurchase($order) && (string)$order['status'] === 'pending'): ?>
             <p class="muted" data-invoice-purchase-hint><?= esc(I18n::format('admin.order.invoice_purchase_hint', ['days' => InvoiceService::paymentTermsDays($order, [])])) ?></p>

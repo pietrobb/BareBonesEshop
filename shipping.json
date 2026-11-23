@@ -28,9 +28,9 @@
     },
 
     "zones": {
-        "local":         {"countries": ["SK"]},
-        "domestic":      {"countries": ["SK"]},
-        "eu":            {"countries": ["CZ", "DE", "AT", "PL", "HU", "IT", "FR", "ES", "NL", "BE"]},
+        "local":         {"countries": ["@store"]},
+        "domestic":      {"countries": ["@store"]},
+        "eu":            {"countries": ["SK", "CZ", "DE", "AT", "PL", "HU", "IT", "FR", "ES", "NL", "BE"]},
         "international": {"countries": ["*"]}
     }
 }

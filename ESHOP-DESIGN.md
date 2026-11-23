@@ -1509,13 +1509,17 @@ This prevents a cache explosion as the rules grow.
     },
 
     "zones": {
-        "local":   {"countries": ["SK"]},
-        "domestic": {"countries": ["SK"]},
-        "eu":       {"countries": ["CZ","DE","AT","PL","HU","IT","FR","ES","NL","BE"]},
+        "local":   {"countries": ["@store"]},
+        "domestic": {"countries": ["@store"]},
+        "eu":       {"countries": ["SK","CZ","DE","AT","PL","HU","IT","FR","ES","NL","BE"]},
         "international": {"countries": ["*"]}
     }
 }
 ```
+
+`"@store"` is the current store's seller country (`legal.country` in stores.json). A country listed in several zones
+pays the rate of the first zone that lists it (a German shop: Germany `domestic`, Slovakia `eu`). Admin → Shipping lists
+these methods with their countries.
 
 ### tax.json
 

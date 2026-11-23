@@ -666,7 +666,10 @@ final class WebInstaller
         // R51 (low): every install was a Slovak shop in EUR; the form now picks the default language and the currency.
         if (($v['shop_locale'] ?? '') !== '') {
             $store['default_locale'] = $v['shop_locale'];
-            $store['languages'] = array_values(array_unique([$v['shop_locale'], ...array_map('strval', (array)($store['languages'] ?? []))]));
+            // R57 (review round 22, installer): only the chosen language. Was: the example's ["sk", "cs", "en"] stayed behind
+            // it, so a German shop offered Slovak and Czech pages (and hreflang links to them) it had no texts for.
+            // Admin → Stores adds languages.
+            $store['languages'] = [$v['shop_locale']];
             // R53 (low): the admin (and system e-mails) fall back to the top-level locale, "en" in the example.
             $stores['default_locale'] = $v['shop_locale'];
         }
@@ -710,6 +713,13 @@ final class WebInstaller
 
     /** R53: provider scopes the migrations price in another currency (20261022230000_currency_price_lists). */
     public const PRICE_LISTS = ['czk' => 'cz', 'huf' => 'hu', 'pln' => 'pl'];
+    /** The sample shipping zones as migration 20260425064000 seeds them: code => [name, description]. */
+    private const SEEDED_ZONES = [
+        'domestic' => ['Domestic SK', 'Slovakia domestic shipping'],
+        'cz' => ['Czech Republic', 'CZ cross-border shipping'],
+        'near_eu' => ['Nearby EU', 'AT/HU/PL/DE regional EU shipping'],
+        'eu' => ['European Union', 'Fallback EU shipping zone'],
+    ];
     /** The provider tables of a scope, parents first. */
     private const PROVIDER_TABLES = ['shipping_zones', 'shipping_zone_countries', 'shipping_methods', 'shipping_rates',
         'payment_methods', 'payment_method_countries', 'payment_method_shipping'];
@@ -812,8 +822,6 @@ final class WebInstaller
                 $run("DELETE FROM shipping_zone_countries WHERE store_id = ? AND country = ?", [$scope, $country]);
                 $run("UPDATE shipping_zone_countries SET country = ? WHERE store_id = ? AND zone_code = 'domestic' AND country = 'SK'", [$country, $scope]);
                 $run("UPDATE shipping_rates SET country = ? WHERE store_id = ? AND zone_code = 'domestic' AND country = 'SK'", [$country, $scope]);
-                $run("UPDATE shipping_zones SET name = ?, description = ? WHERE store_id = ? AND code = 'domestic' AND name = 'Domestic SK'",
-                    ["Domestic {$country}", "{$country} domestic shipping", $scope]);
                 $eu = $db->prepare("SELECT COUNT(*) FROM shipping_zones WHERE store_id = ? AND code = 'eu'");
                 $eu->execute([$scope]);
                 if ((int)$eu->fetchColumn() > 0) $run(Db::insertIgnore() . " INTO shipping_zone_countries (store_id, zone_code, country) VALUES (?, 'eu', 'SK')", [$scope]);
@@ -823,6 +831,19 @@ final class WebInstaller
                 foreach ($methods->fetchAll(PDO::FETCH_COLUMN) as $method) {
                     $run(Db::insertIgnore() . ' INTO payment_method_countries (store_id, method_code, country) VALUES (?, ?, ?)', [$scope, (string)$method, $country]);
                 }
+            }
+            // R57 (review round 22, installer): the sample zones still named as seeded take the shop language's names
+            // ("Inland DE", "Europäische Union"). Was: English ("Domestic DE", "Nearby EU") in every shop.
+            $domestic->execute([$scope]);
+            $home = $domestic->fetchAll(PDO::FETCH_COLUMN);
+            $home = count($home) === 1 ? (string)$home[0] : 'SK';
+            $rename = $db->prepare('UPDATE shipping_zones SET name = ? WHERE store_id = ? AND code = ? AND name = ?');
+            $describe = $db->prepare('UPDATE shipping_zones SET description = ? WHERE store_id = ? AND code = ? AND description = ?');
+            foreach (self::SEEDED_ZONES as $code => [$seededName, $seededDescription]) {
+                $name = strtr(I18n::tIn("install.zone.{$code}", $locale), ['{country}' => $home]);
+                $description = strtr(I18n::tIn("install.zone.{$code}_desc", $locale), ['{country}' => $home]);
+                if ($name !== "install.zone.{$code}") $rename->execute([$name, $scope, $code, $seededName]);
+                if ($description !== "install.zone.{$code}_desc") $describe->execute([$description, $scope, $code, $seededDescription]);
             }
             $db->commit();
         } catch (Throwable $e) {

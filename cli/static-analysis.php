@@ -215,7 +215,8 @@ $architectureBudgets = [
     // +7 lines R23 UX: checklist checks titled in the admin's language, the doctor's text in a details element.
     // +1 line, +1 coupling R30: CSV import row errors in the admin's language (ImportErrorLabels).
     // +1 function R55 UX: the CSV import templates are downloaded from the import page (handleImportTemplate).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 37, 'max_function_lines' => 74, 'coupling' => 23],
+    // +1 function R57: shippingFileMethods() lists the shipping.json methods on the shipping page.
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 38, 'max_function_lines' => 74, 'coupling' => 23],
     // Admin UI refresh: the dashboard moved out of Operations.php (tiles, 14-day revenue, health, checklist, incidents, monitoring).
     'src/Entrypoints/Admin/Dashboard.php' => ['lines' => 240, 'functions' => 11, 'max_function_lines' => 50, 'coupling' => 14],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
@@ -236,7 +237,8 @@ $architectureBudgets = [
     // +8 lines, +2 function lines R38: "Not executed" for a refund whose provider answer was lost; release without a provider check.
     // +4 lines R39: "Paid" is not offered for a refund the provider has, and on refund_pending it needs orders.refund.
     // +5 lines, +2 function lines R40: "Confirm executed" / "Not executed" post the refund the page showed (request key, amount).
-    /* R49: a received return names the money refunded outside it and what "Refunded" still pays after counting it */ 'src/Entrypoints/Admin/Orders.php' => ['lines' => 1018, 'functions' => 17, 'max_function_lines' => 331, 'coupling' => 25],
+    // +2 lines, +1 function line, +1 coupling R57: the detail and the list name the shipping method (ConsumerNotice::shippingMethod).
+    /* R49: a received return names the money refunded outside it and what "Refunded" still pays after counting it */ 'src/Entrypoints/Admin/Orders.php' => ['lines' => 1020, 'functions' => 17, 'max_function_lines' => 332, 'coupling' => 26],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
     // +23 lines, +1 function R38: fields that are not UTF-8 are refused with 400 naming the field (was HTTP 500).

@@ -110,6 +110,9 @@ $out = [
     'cod_translations' => json_decode((string)($col("SELECT translations FROM payment_methods WHERE store_id = 'default' AND code = 'cod'")[0] ?? ''), true),
     'domestic' => $col("SELECT country FROM shipping_zone_countries WHERE store_id = 'default' AND zone_code = 'domestic'"),
     'domestic_name' => $col("SELECT name FROM shipping_zones WHERE store_id = 'default' AND code = 'domestic'")[0] ?? null,
+    'near_eu_name' => $col("SELECT name FROM shipping_zones WHERE store_id = 'default' AND code = 'near_eu'")[0] ?? null,
+    'eu_name' => $col("SELECT name FROM shipping_zones WHERE store_id = 'default' AND code = 'eu'")[0] ?? null,
+    'eu_desc' => $col("SELECT description FROM shipping_zones WHERE store_id = 'default' AND code = 'eu'")[0] ?? null,
     'sk_zone' => $col("SELECT zone_code FROM shipping_zone_countries WHERE store_id = 'default' AND country = 'SK'"),
     'heavy' => (int)($col("SELECT COUNT(*) FROM shipping_rates WHERE store_id = 'default' AND active = 1 AND zone_code = " . $db->quote((string)$zone)
         . " AND country IN ('', " . $db->quote($country) . ") AND weight_from_g <= 8000 AND weight_to_g >= 8000")[0] ?? 0),
@@ -129,8 +132,11 @@ $r56lDe = $r56lInstall('de', 'DE', 'eur');
 assert_equals(['Selbstabholung', 'Nachnahme', 'Dobierka', 'Cash on delivery'],
     [$r56lDe['pickup'] ?? null, $r56lDe['cod'] ?? null, $r56lDe['cod_translations']['sk']['name'] ?? null, $r56lDe['cod_translations']['en']['name'] ?? null],
     'R56 install de/EUR: the sample methods are named in German, the other languages as translations (was: "Osobný odber", "Dobierka"): ' . json_encode($r56lDe, JSON_UNESCAPED_UNICODE));
-assert_equals([['DE'], 'Domestic DE', ['eu']], [$r56lDe['domestic'] ?? null, $r56lDe['domestic_name'] ?? null, $r56lDe['sk_zone'] ?? null],
-    'R56 install de/EUR: Germany is the domestic zone and Slovakia moves to the EU zone (was: "Domestic SK")');
+// R57 (review round 22, installer): the sample zones are named in the shop language (were English: "Domestic DE", "Nearby EU").
+assert_equals([['DE'], 'Inland DE', ['eu']], [$r56lDe['domestic'] ?? null, $r56lDe['domestic_name'] ?? null, $r56lDe['sk_zone'] ?? null],
+    'R56 install de/EUR: Germany is the domestic zone ("Inland DE" since R57) and Slovakia moves to the EU zone (was: "Domestic SK")');
+assert_equals(['Nahe EU', 'Europäische Union', 'Übrige EU-Länder'], [$r56lDe['near_eu_name'] ?? null, $r56lDe['eu_name'] ?? null, $r56lDe['eu_desc'] ?? null],
+    'R57 install de/EUR: the sample zones are named in German (was: "Nearby EU", "European Union", "Fallback EU shipping zone")');
 assert_true(($r56lDe['heavy'] ?? 0) > 0 && in_array('DE', (array)($r56lDe['cod_countries'] ?? []), true),
     'R56 install de/EUR: an 8 kg German order finds a carrier and cash on delivery is offered in Germany (was: GLS up to 5 kg only, COD SK/CZ)');
 $r56lEn = $r56lInstall('en', 'US', 'usd');
@@ -138,8 +144,8 @@ assert_equals(['In-store pickup', 'Cash on delivery', ['US'], 'Dobierka'],
     [$r56lEn['pickup'] ?? null, $r56lEn['cod'] ?? null, $r56lEn['domestic'] ?? null, $r56lEn['cod_translations']['sk']['name'] ?? null],
     'R56 install en/USD: English method names and the seller\'s country as the domestic zone: ' . json_encode($r56lEn, JSON_UNESCAPED_UNICODE));
 $r56lSk = $r56lInstall('sk', 'SK', 'eur');
-assert_equals(['Osobný odber', ['SK'], 'Domestic SK'], [$r56lSk['pickup'] ?? null, $r56lSk['domestic'] ?? null, $r56lSk['domestic_name'] ?? null],
-    'R56 install sk/EUR: the Slovak sample methods stay as seeded');
+assert_equals(['Osobný odber', ['SK'], 'Tuzemsko SK'], [$r56lSk['pickup'] ?? null, $r56lSk['domestic'] ?? null, $r56lSk['domestic_name'] ?? null],
+    'R56 install sk/EUR: the Slovak sample methods stay as seeded (the domestic zone named in Slovak since R57)');
 assert_true(str_contains((string)file_get_contents($r56lRepo . '/src/WebInstaller.php'), 'if ($starter === null) self::localizeSampleMethods(Db::get(), $stores);'),
     'R56 install: a plain web install localizes the sample methods (a demo starter keeps its own)');
 

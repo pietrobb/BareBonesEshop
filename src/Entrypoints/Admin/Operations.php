@@ -471,6 +471,7 @@ function pageShipping(): void {
     $shippingName = static fn(array $m): string => MethodLabels::name('shipping', (string)$m['code'], trim((string)($m['name'] ?? '')) ?: (string)$m['code']);
     ?>
     <h1><?= esc(I18n::t('admin.title.shipping')) ?></h1><p class="muted"><?= esc(I18n::format('admin.shipping.help_rates', ['currency' => strtoupper(StoreContext::current()->providerCurrency())])) ?></p><p class="muted"><?= esc(I18n::t('admin.shipping.help_legacy')) ?></p>
+    <?php shippingFileMethods(); ?>
     <div class="card">
         <h3><?= esc(I18n::t('admin.shipping.methods')) ?></h3>
         <div class="table-scroll"><table>
@@ -522,6 +523,25 @@ function pageShipping(): void {
         <?php endforeach; ?>
         <tr><form method="post" action="admin.php?p=shipping&action=rate_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select aria-label="<?= esc(I18n::t('admin.a11y.shipping_method')) ?>" name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>" title="<?= esc($m['code']) ?>"><?= esc($shippingName($m)) ?></option><?php endforeach; ?></select><br><select aria-label="<?= esc(I18n::t('admin.shipping.zone')) ?>" name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>" title="<?= esc($z['code']) ?>"><?= esc($zoneNames[$z['code']]) ?></option><?php endforeach; ?></select></td><td><input aria-label="<?= esc(I18n::t('admin.common.country')) ?>" name="country" maxlength="2" placeholder="SK" style="width:4rem"></td><td><input aria-label="<?= esc(I18n::t('admin.a11y.weight_from')) ?>" type="number" name="weight_from_g" value="0" style="width:6rem"><br><input aria-label="<?= esc(I18n::t('admin.a11y.weight_to')) ?>" type="number" name="weight_to_g" value="5000" style="width:6rem"></td><td><input aria-label="<?= esc(I18n::t('admin.shipping.volume')) ?>" type="number" name="volume_to_cm3" style="width:7rem"></td><td><input aria-label="<?= esc(I18n::t('admin.th.price')) ?>" inputmode="decimal" name="price" value="0" required style="width:6rem"></td><td><input aria-label="<?= esc(I18n::t('admin.shipping.cod')) ?>" inputmode="decimal" name="cod_surcharge" value="0" style="width:5rem"></td><td><input aria-label="<?= esc(I18n::t('admin.shipping.days')) ?>" name="delivery_days" style="width:4rem"></td><td><input aria-label="<?= esc(I18n::t('admin.common.sort_order')) ?>" type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> <?= esc(I18n::t('admin.common.active')) ?></label></td><td><button class="btn btn-sm btn-primary"><?= esc(I18n::t('admin.common.add')) ?></button></td></form></tr>
         </tbody></table></div>
+    </div>
+    <?php
+}
+/** R57 (review round 22, UX S5): the shipping.json delivery methods (Standard, Express) with their zones, countries and prices. */
+function shippingFileMethods(): void {
+    $fileMethods = Shipping::overview(I18n::locale());
+    $fileCurrency = Shipping::currency();
+    if ($fileMethods === []) return;
+    ?>
+    <div class="card">
+        <h3><?= esc(I18n::t('admin.shipping.file_methods')) ?></h3>
+        <div class="table-scroll"><table>
+            <thead><tr><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.shipping.zone')) ?></th><th><?= esc(I18n::t('admin.shipping.countries_in_zones')) ?></th><th><?= esc(I18n::t('admin.th.price')) ?></th><th><?= esc(I18n::t('admin.shipping.free_above')) ?></th><th><?= esc(I18n::t('admin.shipping.days')) ?></th></tr></thead>
+            <tbody>
+            <?php foreach ($fileMethods as $fm): ?>
+            <tr><td title="<?= esc($fm['key']) ?>"><?= esc($fm['name']) ?></td><td><?= esc($fm['zone']) ?></td><td><?= esc($fm['countries'] === ['*'] ? I18n::t('admin.shipping.all_countries') : implode(', ', $fm['countries'])) ?></td><td><?= esc(Money::decimal($fm['base'], $fileCurrency) . ' ' . $fileCurrency . ($fm['per_kg'] > 0 ? ' + ' . Money::decimal($fm['per_kg'], $fileCurrency) . '/kg' : '')) ?></td><td><?= esc($fm['free_above'] !== null ? Money::decimal($fm['free_above'], $fileCurrency) . ' ' . $fileCurrency : '') ?></td><td><?= esc($fm['delivery_days'] ?? '') ?></td></tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table></div>
     </div>
     <?php
 }
