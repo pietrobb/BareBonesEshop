@@ -847,9 +847,9 @@ class Setup
      * R56 (review round 21, low): a schedule that never runs (0 0 31 2 *: no 31 February) is not valid, nor a command that
      * only names worker.php without running it through PHP (echo worker.php).
      */
-    private static function workerCronValid(string $cron): bool
+    private static function workerCronValid(string $cron, bool &$never = false): bool
     {
-        return self::workerCronSets($cron) !== null;
+        return self::workerCronSets($cron, $never) !== null;
     }
 
     /** R56 (review round 21, low): whether a valid operations.worker_cron runs the worker every minute (@daily did not). */
@@ -913,7 +913,7 @@ class Setup
         // R54 (review round 19, UX): the schedule alone or the whole crontab line README asks to record (was: only the
         // five fields passed, and a line that failed was still reported as "configured").
         $never = false;
-        $cronValid = self::workerCronSets($cron, $never) !== null;
+        $cronValid = self::workerCronValid($cron, $never);
         // R56 (review round 21, low): the worker runs every minute (e-mails, refunds, reports wait for it); a valid schedule
         // that runs it less often warns.
         $everyMinute = $cronValid && self::workerCronEveryMinute($cron);

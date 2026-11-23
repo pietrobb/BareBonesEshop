@@ -439,7 +439,7 @@ class PaymentService {
         if ($status === 'failed' && $gateway instanceof PaymentStatusEventAdapter && !$db->inTransaction()) {
             try {
                 $event = $gateway->statusEvent($paymentId);
-                if (($event['event_type'] ?? '') === 'refund.reported') self::applyProviderStatusEvent($event, self::providerName($gateway));
+                if ($event['event_type'] === 'refund.reported') self::applyProviderStatusEvent($event, self::providerName($gateway));
             } catch (\Throwable $e) {
                 Logger::warning('refund.status_check_failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
             }

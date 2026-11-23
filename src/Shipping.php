@@ -40,7 +40,7 @@ class Shipping {
         $codes = [];
         foreach (self::config()['zones'] ?? [] as $zone) {
             foreach (self::countriesOf($zone) as $code) {
-                if (is_string($code) && preg_match('/^[A-Za-z]{2}$/', $code)) $codes[] = strtoupper($code);
+                if (preg_match('/^[A-Za-z]{2}$/', $code)) $codes[] = strtoupper($code);
             }
         }
         return array_values(array_unique($codes));

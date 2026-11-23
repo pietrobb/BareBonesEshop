@@ -372,7 +372,7 @@ final class StoreSettings {
 
     /** @return list<string> the A and AAAA addresses of $host ([] when it does not resolve) */
     private static function resolve(string $host): array {
-        if (self::$resolver !== null) return array_values((self::$resolver)($host));
+        if (self::$resolver !== null) return (self::$resolver)($host);
         $ips = [];
         foreach (@dns_get_record($host, DNS_A | DNS_AAAA) ?: [] as $record) {
             $ip = $record['ip'] ?? $record['ipv6'] ?? null;

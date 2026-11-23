@@ -210,6 +210,7 @@ class Import {
         }
     }
 
+    /** @phpstan-impure writes the product (and may end the transaction on a driver error) */
     private static function importRow(array $data, PDO $db, bool $createOnly = false): string {
         // R54 (review round 19, low): names and summaries without bidi controls (Security::plainText()).
         foreach ($data as $key => $value) {
