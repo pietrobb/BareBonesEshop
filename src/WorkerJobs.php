@@ -394,6 +394,14 @@ final class WorkerJobs
             PaymentService::closeRefundedOrder($orderId, "Payment refund settled by the provider's refunded status: {$paymentId}");
             return;
         }
+        // R57 (review round 22, S3): refused and not settled by the payment's state (a partial refund GoPay/ThePay refused,
+        // Comgate, which reports no refunds): released as a declined request, the payment back to paid / partially
+        // refunded and the merchant told. Was: the job failed, its retry found the attempt answered ("reconcile manually")
+        // and the payment stayed refund_pending with neither confirm nor release on the order.
+        if ($itemRefundId === 0 && in_array($status, ['failed', 'canceled', 'cancelled'], true) && $idempotencyKey !== ''
+            && PaymentService::declinedRefundRequest($orderId, $idempotencyKey, (string)($result['message'] ?? ('refund ' . $status)))) {
+            return;
+        }
         if ($status !== 'succeeded') {
             if ($status === 'error' && self::requeueRefundAfterError($payload, $job, $order)) return;
             throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");
