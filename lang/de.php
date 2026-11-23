@@ -1445,6 +1445,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.sample_name' => 'Muster – diese Zeile überschreiben oder löschen',
     'admin.import.rejected' => 'Die CSV-Datei wurde nicht angenommen:',
     'admin.import.done' => 'Import abgeschlossen: {count} Produkte.',
+    'admin.import.no_download' => 'Download-Produkte ohne Datei sind ausverkauft, bis Sie eine Datei hochladen: {skus}.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',
     'admin.import.err.empty' => 'Die CSV-Datei ist leer oder hat kein gültiges Format.',
     'admin.import.err.header' => 'Die CSV-Kopfzeile ist ungültig oder doppelt, enthält kein sku/name oder überschreitet die Grenzen.',

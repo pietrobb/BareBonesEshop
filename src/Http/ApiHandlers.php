@@ -61,12 +61,12 @@ function apiProducts(): array {
         && !$priceMin && !$priceMax && $sort === 'price_asc';
     if ($cacheable) {
         $cached = Cache::readCatalogJson(Cache::localePath($locale, "cat/{$catSlug}/page-1.json"), 3600);
-        if ($cached) return $cached;
+        if ($cached) return apiPublicProducts($cached);
     }
 
     $data = Products::byCategory($category['id'], $page, $perPage, $sort, $filters, $priceMin, $priceMax);
 
-    $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
+    $data['products'] = array_map('apiPublicProduct', Products::enrichMany(array_map([I18n::class, 'product'], $data['products'])));
 
     $data['category'] = Categories::enrich(I18n::category($category));
 
@@ -74,6 +74,22 @@ function apiProducts(): array {
         Cache::writeJson(Cache::localePath($locale, "cat/{$catSlug}/page-1.json"), $data);
     }
 
+    return $data;
+}
+
+/**
+ * R57 (review round 22, S1): a product as the storefront API returns it, without the raw filter_tags and translations
+ * columns (filter tags written before R56 still carried admin-only attribute values, e.g. a paid file's URL). Applied to
+ * cached responses too, which older versions wrote with them.
+ */
+function apiPublicProduct(mixed $product): mixed {
+    if (is_array($product)) unset($product['filter_tags'], $product['translations']);
+    return $product;
+}
+
+/** @param array<string, mixed> $data a response with a products list */
+function apiPublicProducts(array $data): array {
+    if (is_array($data['products'] ?? null)) $data['products'] = array_map('apiPublicProduct', $data['products']);
     return $data;
 }
 
@@ -87,13 +103,13 @@ function apiProduct(): array {
     $cacheable = empty($_SESSION['customer_id']);
     if ($cacheable) {
         $cached = Cache::readCatalogJson(Cache::localePath($locale, "product/{$slug}.json"), 3600);
-        if ($cached) return $cached;
+        if ($cached) return ['product' => apiPublicProduct($cached['product'] ?? null)] + $cached;
     }
 
     $product = Products::bySlug($slug);
     if (!$product) return ['error' => 'Product not found'];
 
-    $product = Products::enrich(I18n::product($product));
+    $product = apiPublicProduct(Products::enrich(I18n::product($product)));
     $product['variants'] = Products::variants($product['id']);
     $product['attributes'] = Products::attrs($product['id']);
 
@@ -112,7 +128,7 @@ function apiSearch(): array {
     }
 
     $data = Adapters::search()->search($q, ['page' => $page]);
-    $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
+    $data['products'] = array_map('apiPublicProduct', Products::enrichMany(array_map([I18n::class, 'product'], $data['products'])));
 
     return $data;
 }
@@ -1683,7 +1699,7 @@ function apiParametricSearch(): array {
     }
 
     $result = Products::parametricSearch($catId, $page, 24, $sort, $specFilters, $priceMin, $priceMax, $lang);
-    $result['products'] = Products::enrichMany($result['products']);
+    $result['products'] = array_map('apiPublicProduct', Products::enrichMany($result['products']));
     return $result;
 }
 

@@ -1419,6 +1419,7 @@ return [
     'admin.import.sample_name' => 'Sample – replace or delete this row',
     'admin.import.rejected' => 'The CSV file was not accepted:',
     'admin.import.done' => 'Import finished: {count} products.',
+    'admin.import.no_download' => 'Downloadable products without a file are sold out until you upload one: {skus}.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',
     'admin.import.err.empty' => 'The CSV is empty or not in a valid format.',
     'admin.import.err.header' => 'The CSV header is invalid or duplicated, lacks sku/name, or exceeds the limits.',

@@ -1445,6 +1445,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.sample_name' => 'Minta – írja felül vagy törölje ezt a sort',
     'admin.import.rejected' => 'A CSV-fájl nem lett elfogadva:',
     'admin.import.done' => 'Importálás kész: {count} termék.',
+    'admin.import.no_download' => 'A fájl nélküli letölthető termékek elfogytak, amíg nem tölt fel hozzájuk fájlt: {skus}.',
     'admin.import.partial' => 'Importálás: {imported} OK, {errors}.',
     'admin.import.err.empty' => 'A CSV üres vagy érvénytelen formátumú.',
     'admin.import.err.header' => 'A CSV fejléce érvénytelen vagy ismétlődő, hiányzik belőle a sku/name, vagy túllépi a korlátokat.',

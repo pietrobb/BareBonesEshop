@@ -1445,6 +1445,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.sample_name' => 'Przykład – zastąp lub usuń ten wiersz',
     'admin.import.rejected' => 'Plik CSV nie został przyjęty:',
     'admin.import.done' => 'Import zakończony: {count} produktów.',
+    'admin.import.no_download' => 'Produkty do pobrania bez pliku są wyprzedane, dopóki nie prześlesz pliku: {skus}.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',
     'admin.import.err.empty' => 'Plik CSV jest pusty lub ma nieprawidłowy format.',
     'admin.import.err.header' => 'Nagłówek CSV jest nieprawidłowy lub zduplikowany, brakuje w nim sku/name albo przekracza limity.',

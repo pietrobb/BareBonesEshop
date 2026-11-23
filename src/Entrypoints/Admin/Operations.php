@@ -139,6 +139,8 @@ function handleImportUpload(): void {
         'invalid' => ' ' . I18n::t('admin.import.invalid_encoding'),
         default => '',
     };
+    // R57 (review round 22, low): downloadable products imported without their file are "sold out" until one is uploaded.
+    if (!empty($result['no_download'])) $encodingNote .= ' ' . strtr(I18n::t('admin.import.no_download'), ['{skus}' => implode(', ', $result['no_download'])]);
     if ($result['success'] && $errCount === 0) {
         setFlash('ok', strtr(I18n::t('admin.import.done'), ['{count}' => (string)$result['imported']]) . $encodingNote);
     } else {

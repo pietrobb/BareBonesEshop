@@ -111,6 +111,14 @@ class Search {
         return Db::hasColumn('products', 'search_names') ? ['name', 'sku', 'summary', 'tags', 'search_names'] : ['name', 'sku', 'summary', 'tags'];
     }
 
+    /**
+     * An FTS5 query limited to textColumns(). R57 (review round 22, S1): was every column, filter_tags too, so a prefix
+     * search ("attr_download_url_https_…_zq") read a hidden attribute value character by character.
+     */
+    private static function textColumnsOnly(string $ftsQuery): string {
+        return '{' . implode(' ', self::textColumns()) . '} : (' . $ftsQuery . ')';
+    }
+
     /** MATCH(...) over textColumns() (MySQL). */
     private static function matchColumns(): string {
         return implode(', ', array_map(static fn(string $c): string => 'p.' . $c, self::textColumns()));
@@ -147,7 +155,7 @@ class Search {
             // every product and run one FTS lookup per row (tens of seconds at 50k products for "?q=a").
             $from = "FROM products_fts fts CROSS JOIN products p ON p.id = fts.rowid";
             $where = "products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'";
-            $params[':q'] = self::sanitizeFtsQuery($q);
+            $params[':q'] = self::textColumnsOnly(self::sanitizeFtsQuery($q));
             $select = 'p.*, rank';
             $relevance = 'rank';
         } else {
@@ -222,7 +230,7 @@ class Search {
         if (strlen($prefix) < 2) return [];
 
         if (Db::isSqlite()) {
-            $ftsQuery = '"' . self::escFts($prefix) . '" *';
+            $ftsQuery = self::textColumnsOnly('"' . self::escFts($prefix) . '" *');
             $stmt = $db->prepare("
                 SELECT DISTINCT p.name, p.slug
                 FROM products_fts fts

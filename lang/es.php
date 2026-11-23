@@ -1575,6 +1575,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.sample_name' => 'Ejemplo: sustituya o elimine esta fila',
     'admin.import.rejected' => 'El archivo CSV no se aceptó:',
     'admin.import.done' => 'Importación finalizada: {count} productos.',
+    'admin.import.no_download' => 'Los productos descargables sin archivo están agotados hasta que subas uno: {skus}.',
     'admin.import.partial' => 'Importación: {imported} correctos, {errors}.',
     'admin.import.err.empty' => 'El CSV está vacío o no tiene un formato válido.',
     'admin.import.err.header' => 'La cabecera del CSV no es válida o está duplicada, le falta sku/name o supera los límites.',

@@ -1424,6 +1424,7 @@ return [
     'admin.import.sample_name' => 'Vzor – prepíšte alebo zmažte tento riadok',
     'admin.import.rejected' => 'CSV súbor nebol prijatý:',
     'admin.import.done' => 'Import úspešný: {count} produktov.',
+    'admin.import.no_download' => 'Stiahnuteľné produkty bez súboru sú vypredané, kým k nim nenahráte súbor: {skus}.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',
     'admin.import.err.empty' => 'CSV je prázdne alebo v neplatnom formáte.',
     'admin.import.err.header' => 'Hlavička CSV je neplatná alebo zdvojená, chýba v nej sku/name alebo prekračuje limity.',

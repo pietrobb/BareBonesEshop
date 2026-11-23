@@ -114,6 +114,8 @@ class Products {
                 if (!is_array($values)) $values = [$values];
                 $orTokens = [];
                 // Only scalar values become tokens: a nested array from a JSON filter used to be a TypeError (500).
+                // R57 (review round 22, S1): no filter on an admin-only attribute (an exact-value oracle on old filter tags).
+                if (CatalogAttributes::isAdminOnly((string)$attrName)) continue;
                 foreach (array_slice(array_values(array_filter($values, 'is_scalar')), 0, self::MAX_FILTER_VALUES) as $v) {
                     $n = self::normalizeToken((string)$attrName);
                     $val = self::normalizeToken((string)$v);
@@ -135,10 +137,12 @@ class Products {
                 $where .= " AND p.id IN (
                     SELECT rowid FROM products_fts WHERE products_fts MATCH :fts
                 )";
+                // Only the filter tags: a product whose name happens to read "attr_x_y" is no match.
+                $params[':fts'] = 'filter_tags : (' . $ftsQuery . ')';
             } else {
                 $where .= " AND MATCH(p.filter_tags) AGAINST(:fts IN BOOLEAN MODE)";
+                $params[':fts'] = $ftsQuery;
             }
-            $params[':fts'] = $ftsQuery;
         }
 
         // Sort

@@ -1445,6 +1445,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.sample_name' => 'Vzor – přepište nebo smažte tento řádek',
     'admin.import.rejected' => 'CSV soubor nebyl přijat:',
     'admin.import.done' => 'Import úspěšný: {count} produktů.',
+    'admin.import.no_download' => 'Stahovatelné produkty bez souboru jsou vyprodané, dokud k nim nenahrajete soubor: {skus}.',
     'admin.import.partial' => 'Import: {imported} OK, {errors}.',
     'admin.import.err.empty' => 'CSV je prázdné nebo v neplatném formátu.',
     'admin.import.err.header' => 'Hlavička CSV je neplatná nebo zdvojená, chybí v ní sku/name nebo překračuje limity.',

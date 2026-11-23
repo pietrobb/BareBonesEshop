@@ -29,9 +29,13 @@ final class CatalogAttributes
         return self::$adminOnly;
     }
 
+    /**
+     * R57 (review round 22, N3): the filter token's normalisation (Str::normalizeToken()), so every spelling the filters and
+     * filter tags read as this attribute is admin-only too. Was: lower-cased only, "download-url" stayed public.
+     */
     private static function key(string $name): string
     {
-        return mb_strtolower(trim($name));
+        return Str::normalizeToken($name);
     }
 
     public static function isAdminOnly(string $name): bool
