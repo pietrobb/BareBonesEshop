@@ -116,8 +116,10 @@ final class OrderAddress
         }
         $input = self::flattenBillingInput($input);
         if (!self::billingRequested($input)) return ['address' => null, 'error' => null, 'error_code' => null];
+        // R58 (review round 23, low N2): trimmed of invisible characters (Security::typedText()), so a field of them alone
+        // (U+200B, U+3164, a combining mark) is missing. Was: trim() only, a blank billing name or street was invoiced.
         $text = static fn(string $key): string => is_string($input[$key] ?? null)
-            ? trim(Security::str((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $input[$key]))) : '';
+            ? Security::typedText((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $input[$key])) : '';
         $address = ['name' => $text('billing_name'), 'street' => $text('billing_street'), 'city' => $text('billing_city'),
             'zip' => $text('billing_zip'), 'country' => strtoupper($text('billing_country'))];
         if ($address['name'] === '' || $address['street'] === '' || $address['city'] === '' || $address['zip'] === '') {
@@ -126,7 +128,24 @@ final class OrderAddress
         if (!array_key_exists($address['country'], ShippingService::billingCountries())) {
             return ['address' => null, 'error' => I18n::t('checkout.error.billing_country_invalid'), 'error_code' => 'checkout.error.billing_country_invalid'];
         }
+        $zip = self::postcode($address['zip'], $address['country']);
+        if ($zip === null) return ['address' => null, 'error' => I18n::t('checkout.error.zip_invalid'), 'error_code' => 'checkout.error.zip_invalid'];
+        $address['zip'] = $zip;
         return ['address' => $address, 'error' => null, 'error_code' => null];
+    }
+
+    /** R58: countries whose postcode postcode() checks: five digits ("811 01"). */
+    private const FIVE_DIGIT_POSTCODES = ['SK', 'CZ'];
+
+    /**
+     * R58 (review round 23, low N2): a Slovak or Czech postcode as stored, its five digits ("81101"; typed "81101" or
+     * "811 01"), or null when it is not one. The digits alone, as carriers' interfaces take them and as every order and
+     * address stored so far mostly holds them. Postcodes of other countries are returned as given.
+     */
+    public static function postcode(string $zip, string $country): ?string
+    {
+        if (!in_array(strtoupper(trim($country)), self::FIVE_DIGIT_POSTCODES, true)) return $zip;
+        return preg_match('/^(\d{3})[ \x{00A0}]?(\d{2})$/u', trim($zip), $m) === 1 ? $m[1] . $m[2] : null;
     }
 
     /** A JSON billing_address object becomes the flat billing_* keys the form posts; flat keys win. */

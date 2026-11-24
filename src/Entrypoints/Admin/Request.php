@@ -53,6 +53,7 @@ function handlePost(string $page, string $action): void {
         'feeds:delete'      => handleFeedDelete(),
         'feeds:sync'        => handleFeedSync(),
         'shipping:method_save' => handleShippingMethodSave(),
+        'shipping:file_method_save' => handleShippingFileMethodSave(),
         'shipping:method_delete' => handleShippingMethodDelete(),
         'shipping:zone_save' => handleShippingZoneSave(),
         'shipping:zone_delete' => handleShippingZoneDelete(),

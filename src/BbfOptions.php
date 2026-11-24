@@ -40,11 +40,10 @@ class BbfOptions {
         return array_map(static fn(array $r): array => ['value' => (string)$r['id'], 'label' => $r['path'] ?: $r['name']], CatalogScope::categories());
     }
 
+    /** R58 (review round 23, low): each type by its catalog.json name in the admin's language ("Digital Download"), not "Downloadable". */
     private static function productTypes(): array {
-        $catalogFile = dirname(__DIR__) . '/catalog.json';
-        $types = file_exists($catalogFile)
-            ? array_keys(json_decode((string)file_get_contents($catalogFile), true)['product_types'] ?? [])
-            : [];
-        return array_map(static fn(string $t): array => ['value' => $t, 'label' => ucfirst($t)], array_values(array_unique(array_merge(['simple'], $types))));
+        $types = array_map('strval', array_keys(ImportTemplates::types()));
+        $locale = I18n::locale();
+        return array_map(static fn(string $t): array => ['value' => $t, 'label' => ImportTemplates::label($t, $locale)], array_values(array_unique(array_merge(['simple'], $types))));
     }
 }

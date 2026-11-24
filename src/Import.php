@@ -215,13 +215,23 @@ class Import {
         // R54 (review round 19, low): names and summaries without bidi controls (Security::plainText()).
         foreach ($data as $key => $value) {
             // R57 (review round 22, low): trimmed of invisible characters, so a name of them alone is missing (Security::typedText()).
-            if (is_string($value) && preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) $data[$key] = Security::typedText($value);
+            if (!is_string($value) || !preg_match('/^(name|summary)(_[a-z]{2})?$/', (string)$key)) continue;
+            // R58 (review round 23, low N4): a name's line breaks and tabs (a multi-line CSV cell) are spaces; other control
+            // characters are refused below.
+            if (str_starts_with((string)$key, 'name')) $value = (string)preg_replace('/[\t\r\n]+/', ' ', $value);
+            $data[$key] = Security::typedText($value);
         }
         // Required fields
         $sku  = trim($data['sku'] ?? '');
         $name = trim($data['name'] ?? '');
         if (!$sku || !$name) {
             throw new \InvalidArgumentException("Missing required field: sku or name");
+        }
+        // R58 (review round 23, low N4): a name with a control character inside ("\x01", ESC, DEL, U+2028) is refused.
+        foreach ($data as $key => $value) {
+            if (is_string($value) && preg_match('/^name(_[a-z]{2})?$/', (string)$key) && Security::hasControlCharacters($value)) {
+                throw new \InvalidArgumentException("Invalid {$key}: control characters are not allowed");
+            }
         }
 
         $catalog = self::assertSkuInCatalog($sku, $db);

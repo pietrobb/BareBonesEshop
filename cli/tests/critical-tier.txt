@@ -18,6 +18,8 @@ AuditCrFollowupCheckoutRegression.php
 CheckoutPaymentRedirectRegression.php
 SaveForLaterRegression.php
 AuditRound58StoresRegression.php
+AuditRound58ShippingUxRegression.php
+AuditRound58TextRegression.php
 
 # Payments, webhooks and refunds
 AuditPaymentsRegression.php

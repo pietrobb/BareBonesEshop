@@ -1521,6 +1521,12 @@ This prevents a cache explosion as the rules grow.
 pays the rate of the first zone that lists it (a German shop: Germany `domestic`, Slovakia `eu`). Admin → Shipping lists
 these methods with their countries.
 
+Checkout offers `standard` and `express` (never `pickup`) next to the store's own shipping methods, in stores charging in
+the file's `currency`. Do not edit shipping.json to change them: Admin → Shipping switches each one on or off and sets
+its prices per zone, free-shipping amount and delivery days, and keeps them in `shipping-methods.json` in the data
+directory (`private_runtime_dir`, read over shipping.json, only what differs from it), so an update never finds the core
+file modified. A web install whose default store has shipping methods of its own starts with both switched off.
+
 ### tax.json
 
 ```json

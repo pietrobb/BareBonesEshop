@@ -11,6 +11,8 @@ final class DataOverrides
     public const STORES_EXAMPLE = 'stores.example.json';
     /** Largest settings file (stores.json, mail settings) readRegularFile() reads: far above any real shop's. */
     public const MAX_SETTINGS_BYTES = 8 * 1048576;
+    /** R58: the merchant's settings of the shipping.json delivery methods (shippingMethods()). */
+    public const SHIPPING_METHODS = 'shipping-methods.json';
 
     private static ?string $testDir = null;
     private static ?string $suiteDir = null;
@@ -259,6 +261,31 @@ final class DataOverrides
             @rmdir(dirname($file));
         }
         return $written;
+    }
+
+    /**
+     * R58 (review round 23, medium S4): the merchant's settings of the shipping.json delivery methods (Standard, Express)
+     * from Admin → Shipping — on or off, prices per zone, free shipping and delivery days — kept in the data directory
+     * so shipping.json stays as shipped (a hand edit stopped every update at "installed file was locally modified").
+     * Shipping::config() lays them over shipping.json. [] when nothing was saved (or no data directory).
+     * @return array{methods?: array<string, array<string, mixed>>}
+     */
+    public static function shippingMethods(?array $config = null): array
+    {
+        $dir = self::dir($config);
+        if ($dir === null || !file_exists($dir . '/' . self::SHIPPING_METHODS)) return [];
+        $path = $dir . '/' . self::SHIPPING_METHODS;
+        $data = json_decode((string)PrivateOwner::run(static fn(): ?string => self::readRegularFile($path)), true);
+        return is_array($data) && is_array($data['methods'] ?? null) ? ['methods' => $data['methods']] : [];
+    }
+
+    /** Save the shipping.json method settings (shippingMethods()); false without a writable data directory. */
+    public static function saveShippingMethods(array $methods, ?array $config = null): bool
+    {
+        $dir = self::dir($config);
+        if ($dir === null || !self::ensureDir($dir)) return false;
+        $json = json_encode(['methods' => $methods === [] ? new stdClass() : $methods], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($json) && self::atomicWrite($dir . '/' . self::SHIPPING_METHODS, $json . "\n", 0640);
     }
 
     private static function currentStoreId(): string

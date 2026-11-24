@@ -38,6 +38,7 @@ final class AuditLogLabels {
         'supplier' => 'import', 'purchase_order' => 'import', 'warehouse' => 'import', 'feed' => 'import', 'import' => 'import',
         'promotion' => 'pricing.manage', 'price_list' => 'pricing.manage', 'review' => 'products.edit', 'digital_asset' => 'products.edit',
         'shipping_methods' => 'shipping.manage', 'shipping_zones' => 'shipping.manage', 'shipping_zone_countries' => 'shipping.manage', 'shipping_rates' => 'shipping.manage',
+        'shipping_file_method' => 'shipping.manage', // R58: Standard/Express settings of Admin → Shipping
         'payment_methods' => 'payments.manage', 'payment_method_countries' => 'payments.manage', 'payment_method_shipping' => 'payments.manage',
     ];
     /** R49: catalog entries anyone who sees the log may read (what the storefront shows anyway). */
