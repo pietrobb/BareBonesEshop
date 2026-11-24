@@ -35,7 +35,9 @@ final class CatalogAttributes
      */
     private static function key(string $name): string
     {
-        return Str::normalizeToken($name);
+        // R58 (review round 23, low): with runs of separators as one, so "download  url" and "Download--URL" (filter tokens
+        // download__url) are download_url too. Here only: Str::normalizeToken() itself keeps the stored filter tags' tokens.
+        return (string)preg_replace('/_+/', '_', Str::normalizeToken($name));
     }
 
     public static function isAdminOnly(string $name): bool

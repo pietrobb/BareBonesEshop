@@ -144,6 +144,10 @@ final class ConsumerNotice {
         if ($code === '') return '';
         $rate = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $rate = is_array($rate) ? $rate : [];
+        // R58 (review round 23, low): a shipping.json method by its name in the reader's language (the admin's in the order
+        // list and detail, `'locale' => ''`). Was: the label frozen in the customer's ("Standardversand" in a Slovak admin).
+        if (($rate['provider'] ?? null) === 'legacy' && in_array($code, Shipping::CHECKOUT_METHODS, true)
+            && ($name = Shipping::methodName($code, (string)($order['locale'] ?? '') ?: I18n::locale())) !== null) return $name;
         return MethodLabels::name('shipping', $code, (string)(($rate['label'] ?? '') ?: ($rate['name'] ?? '')) ?: ucfirst(str_replace('_', ' ', $code)),
             (string)($order['locale'] ?? '') ?: null);
     }

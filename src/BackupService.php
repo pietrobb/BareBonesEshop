@@ -1520,7 +1520,7 @@ class BackupService
                     continue;
                 }
                 $ownership = self::restoredFileOwnership($target, $directory['existing'], match ($name) {
-                    'gdpr_salt', 'stores', 'config' => 0640, 'mail', 'jobs' => 0600, default => 0666,
+                    'gdpr_salt', 'stores', 'shipping', 'config' => 0640, 'mail', 'jobs' => 0600, default => 0666,
                 });
                 // R53 (review round 53, low): a copy set aside holds secrets (config.php) or quarantined scripts; it and the
                 // directories created for it are the operator's only (0600/0700), not modelled on the directory above.
@@ -1822,6 +1822,8 @@ class BackupService
             'downloads' => (string)($appCfg['digital_assets_base_dir'] ?? $private . '/downloads'),
             // R28: the e-mail delivery settings (Admin → E-mail delivery); a restored shop logged its mail instead of sending it.
             'mail'      => $runtime !== '' ? $runtime . '/' . MailSettings::FILE : '',
+            // R58: the Standard/Express settings of Admin → Shipping (DataOverrides::shippingMethods()).
+            'shipping'  => $runtime !== '' ? $runtime . '/' . DataOverrides::SHIPPING_METHODS : '',
             // R50: config.php (database, payment gateway and API secrets), the file job queue (mails and invoices not
             // sent yet) and the themes the merchant created or edited were in no backup.
             'config'    => AppConfig::path($rootDir),
@@ -1838,7 +1840,7 @@ class BackupService
     private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
 
     /** The default sources that are one file (defaultFileSources()); the others are directories. */
-    private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'config'];
+    private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'shipping', 'config'];
     private const DIRECTORY_SOURCES = ['invoices', 'uploads', 'legal', 'downloads', 'jobs', 'themes'];
 
     /**

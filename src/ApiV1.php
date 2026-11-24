@@ -232,7 +232,8 @@ class ApiV1 {
         // R56 (review round 21, low): and without blank or invisible characters at its ends (Security::typedText()).
         if (array_key_exists('name', $body) && is_string($body['name']) && mb_check_encoding($body['name'], 'UTF-8')) $body['name'] = Security::typedText($body['name']);
         if (array_key_exists('name', $body)
-            && (!is_string($body['name']) || !mb_check_encoding($body['name'], 'UTF-8') || trim($body['name']) === '' || strlen($body['name']) > 191)) {
+            && (!is_string($body['name']) || !mb_check_encoding($body['name'], 'UTF-8') || trim($body['name']) === '' || strlen($body['name']) > 191
+                || Security::hasControlCharacters($body['name']))) { // R58 (review round 23, low N4): no control characters inside
             throw new InvalidArgumentException('Invalid product name');
         }
 
@@ -301,8 +302,9 @@ class ApiV1 {
         if (array_diff(array_keys($body), $allowed)) throw new InvalidArgumentException('Product contains unsupported fields');
         if (array_key_exists('vat_class', $body)) $body['vat_class'] = self::vatClass($body['vat_class']);
         $sku = self::sku($body['sku'] ?? null);
-        if (!is_string($body['name'] ?? null) || Security::typedText($body['name']) === '' || strlen($body['name']) > 191) {
-            throw new InvalidArgumentException('name is required (at most 191 bytes)');
+        if (!is_string($body['name'] ?? null) || Security::typedText($body['name']) === '' || strlen($body['name']) > 191
+            || Security::hasControlCharacters(Security::typedText($body['name']))) { // R58 (review round 23, low N4)
+            throw new InvalidArgumentException('name is required (at most 191 bytes, no control characters)');
         }
         if (!array_key_exists('price', $body)) throw new InvalidArgumentException('price is required');
         foreach (['price', 'stock', 'weight_g'] as $field) {

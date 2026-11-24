@@ -4,14 +4,80 @@
  * Zone-based shipping calculation from shipping.json.
  */
 class Shipping {
-    private static ?array $config = null;
+    /** R58 (review round 23, low): the shipping.json methods checkout offers (ShippingService::legacyRates()); its "pickup" is not one. */
+    public const CHECKOUT_METHODS = ['standard', 'express'];
 
-    private static function config(): array {
+    private static ?array $config = null;
+    /** shipping.json with the merchant's Admin → Shipping settings over it (DataOverrides::shippingMethods()). */
+    private static ?array $merged = null;
+
+    /** shipping.json as shipped (or as setConfig() gave it). */
+    public static function fileConfig(): array {
         if (!self::$config) {
             $file = __DIR__ . '/../shipping.json';
-            self::$config = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
+            $decoded = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
+            self::$config = is_array($decoded) ? $decoded : [];
         }
         return self::$config;
+    }
+
+    /**
+     * R58 (review round 23, medium S4): shipping.json with the merchant's settings of its checkout methods over it. Was:
+     * shipping.json alone, so turning Standard or Express off or changing a price meant editing a core file, and the
+     * updater then stopped at "installed file was locally modified".
+     */
+    private static function config(): array {
+        return self::$merged ??= self::withSettings(self::fileConfig(), DataOverrides::shippingMethods());
+    }
+
+    /** Read the merchant's settings again (after Admin → Shipping saved them). */
+    public static function forget(): void {
+        self::$merged = null;
+    }
+
+    /**
+     * $cfg with $settings (DataOverrides::shippingMethods()) applied to its checkout methods: "active" (false = not offered),
+     * "free_above" (null = none), "delivery_days", and "rates" per zone of the file (null = not offered in that zone).
+     * Settings of other methods or zones are ignored.
+     */
+    public static function withSettings(array $cfg, array $settings): array {
+        $zones = is_array($cfg['zones'] ?? null) ? $cfg['zones'] : [];
+        foreach (self::CHECKOUT_METHODS as $key) {
+            $own = $settings['methods'][$key] ?? null;
+            if (!is_array($own) || !is_array($cfg['methods'][$key] ?? null)) continue;
+            $method = $cfg['methods'][$key];
+            if (array_key_exists('active', $own)) $method['active'] = $own['active'] !== false;
+            if (array_key_exists('free_above', $own)) {
+                if (is_int($own['free_above']) && $own['free_above'] >= 0) $method['free_above'] = $own['free_above'];
+                elseif ($own['free_above'] === null) unset($method['free_above']);
+            }
+            if (is_string($own['delivery_days'] ?? null)) {
+                if (trim($own['delivery_days']) === '') unset($method['delivery_days']);
+                else $method['delivery_days'] = $own['delivery_days'];
+            }
+            foreach (is_array($own['rates'] ?? null) ? $own['rates'] : [] as $zone => $rate) {
+                if (!isset($zones[$zone])) continue;
+                if ($rate === null) {
+                    unset($method['rates'][$zone]);
+                } elseif (is_array($rate) && is_int($rate['base'] ?? null) && $rate['base'] >= 0) {
+                    $method['rates'][$zone] = ['base' => $rate['base'], 'per_kg' => max(0, (int)($rate['per_kg'] ?? 0))];
+                }
+            }
+            $cfg['methods'][$key] = $method;
+        }
+        return $cfg;
+    }
+
+    /** A method is offered unless the merchant turned it off. */
+    private static function isActive(array $method): bool {
+        return ($method['active'] ?? true) !== false;
+    }
+
+    /** A method's name in $locale (shipping.json names it per language), else in English; null when it has none. */
+    public static function methodName(string $key, string $locale): ?string {
+        $names = self::config()['methods'][$key]['name'] ?? null;
+        $name = is_array($names) ? ($names[$locale] ?? $names['en'] ?? reset($names)) : $names;
+        return is_string($name) && trim($name) !== '' ? $name : null;
     }
 
     /**
@@ -37,8 +103,17 @@ class Shipping {
 
     /** Explicit country codes of the shipping.json zones; the '*' wildcard names no country. */
     public static function zoneCountries(): array {
+        // R58 (review round 23, medium S4): not of a zone only methods turned off in Admin → Shipping (or the pickup
+        // checkout never offers from shipping.json) deliver to.
+        $cfg = self::config();
         $codes = [];
-        foreach (self::config()['zones'] ?? [] as $zone) {
+        foreach ($cfg['zones'] ?? [] as $name => $zone) {
+            $served = null;
+            foreach (is_array($cfg['methods'] ?? null) ? $cfg['methods'] : [] as $key => $method) {
+                if (!is_array($method) || (!isset($method['rates'][$name]) && !in_array($name, (array)($method['available_zones'] ?? []), true))) continue;
+                $served = $served === true || (in_array((string)$key, self::CHECKOUT_METHODS, true) && self::isActive($method));
+            }
+            if ($served === false) continue; // a zone no method names stays a destination, as before
             foreach (self::countriesOf($zone) as $code) {
                 if (preg_match('/^[A-Za-z]{2}$/', $code)) $codes[] = strtoupper($code);
             }
@@ -52,9 +127,10 @@ class Shipping {
         return preg_match('/^[A-Z]{3}$/', $currency) ? $currency : 'EUR';
     }
 
-    /** Override config (for testing) */
+    /** Override config (for testing); the merchant's Admin → Shipping settings still apply over it. */
     public static function setConfig(array $config): void {
         self::$config = $config;
+        self::$merged = null;
     }
 
     /**
@@ -69,6 +145,7 @@ class Shipping {
         $cfg = self::config();
         $methodCfg = $cfg['methods'][$method] ?? null;
         if (!$methodCfg) return -1; // unknown method is unavailable, never free
+        if (!self::isActive($methodCfg)) return -1; // R58: turned off in Admin → Shipping
 
         // Pickup is always free
         if (($methodCfg['price'] ?? null) === 0) return 0;
@@ -170,27 +247,36 @@ class Shipping {
      * R57 (review round 22, UX S5): the shipping.json delivery methods as the admin's shipping page lists them, one row
      * per zone rate with the zone's countries ("@store" resolved). Was: not shown, the merchant could not see what
      * Standard/Express charged nor to whom.
-     * @return list<array{key: string, name: string, zone: string, countries: list<string>, base: int, per_kg: int, free_above: ?int, delivery_days: ?string}>
+     * R58 (review round 23, medium S4 and lows): only the methods checkout offers (not "pickup", which it never offers from
+     * shipping.json), with "active" and the merchant's settings applied; with $editable a row for every zone those
+     * methods are priced for in shipping.json, base and per_kg null where the method is not offered.
+     * @return list<array{key: string, name: string, active: bool, zone: string, countries: list<string>, base: ?int, per_kg: ?int, free_above: ?int, delivery_days: ?string}>
      */
-    public static function overview(string $locale): array {
+    public static function overview(string $locale, bool $editable = false): array {
         $cfg = self::config();
+        $file = self::fileConfig();
+        $zones = is_array($cfg['zones'] ?? null) ? $cfg['zones'] : [];
+        $editableZones = [];
+        foreach (self::CHECKOUT_METHODS as $key) {
+            foreach ((array)($file['methods'][$key]['rates'] ?? []) as $zone => $rate) if (isset($zones[$zone])) $editableZones[$zone] = true;
+        }
         $rows = [];
-        foreach (is_array($cfg['methods'] ?? null) ? $cfg['methods'] : [] as $key => $method) {
+        foreach (self::CHECKOUT_METHODS as $key) {
+            $method = $cfg['methods'][$key] ?? null;
             if (!is_array($method)) continue;
-            $names = $method['name'] ?? $key;
-            $name = is_array($names) ? (string)($names[$locale] ?? $names['en'] ?? reset($names)) : (string)$names;
-            $rates = is_array($method['rates'] ?? null) ? $method['rates']
-                : (($method['price'] ?? null) === 0 ? array_fill_keys((array)($method['available_zones'] ?? []), ['base' => 0, 'per_kg' => 0]) : []);
+            $name = self::methodName($key, $locale) ?? ucfirst($key);
+            $rates = is_array($method['rates'] ?? null) ? $method['rates'] : [];
             // A country takes the rate of the first zone (in the zones' order) that lists it, so a later zone's row leaves it out.
             $claimed = [];
-            foreach (is_array($cfg['zones'] ?? null) ? $cfg['zones'] : [] as $zone => $zoneCfg) {
-                if (!isset($rates[$zone]) || (isset($method['available_zones']) && !in_array($zone, (array)$method['available_zones'], true))) continue;
-                $rate = $rates[$zone];
+            foreach ($zones as $zone => $zoneCfg) {
+                $offered = isset($rates[$zone]) && (!isset($method['available_zones']) || in_array($zone, (array)$method['available_zones'], true));
+                if (!$offered && !($editable && isset($editableZones[$zone]))) continue;
                 $all = self::countriesOf($zoneCfg);
                 $countries = $all === ['*'] ? ['*'] : array_values(array_diff($all, $claimed));
                 $claimed = array_merge($claimed, $all);
-                $rows[] = ['key' => (string)$key, 'name' => $name, 'zone' => (string)$zone, 'countries' => $countries,
-                    'base' => (int)($rate['base'] ?? 0), 'per_kg' => (int)($rate['per_kg'] ?? 0),
+                $rate = $offered ? $rates[$zone] : null;
+                $rows[] = ['key' => $key, 'name' => $name, 'active' => self::isActive($method), 'zone' => (string)$zone, 'countries' => $countries,
+                    'base' => $rate !== null ? (int)($rate['base'] ?? 0) : null, 'per_kg' => $rate !== null ? (int)($rate['per_kg'] ?? 0) : null,
                     'free_above' => isset($method['free_above']) ? (int)$method['free_above'] : null,
                     'delivery_days' => isset($method['delivery_days']) ? (string)$method['delivery_days'] : null];
             }

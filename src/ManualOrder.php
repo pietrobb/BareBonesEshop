@@ -66,6 +66,16 @@ final class ManualOrder {
         foreach (['name', 'phone', 'street', 'city', 'zip', 'company', 'notes'] as $field) {
             if (isset($buyer[$field]) && !is_string($buyer[$field])) return self::refusal('admin.order.manual.invalid');
         }
+        // R58 (review round 23, low N2): name, address and company trimmed of invisible characters (Security::typedText()),
+        // so one of them alone (U+200B, U+3164, a combining mark) is missing; a Slovak or Czech postcode is five digits.
+        foreach (['name', 'street', 'city', 'zip', 'company'] as $field) {
+            if (isset($buyer[$field])) $buyer[$field] = Security::typedText((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $buyer[$field]));
+        }
+        if (trim((string)($buyer['zip'] ?? '')) !== '') {
+            $zip = OrderAddress::postcode((string)$buyer['zip'], strtoupper(trim(Security::str($buyer['country'] ?? ''))));
+            if ($zip === null) return self::refusal('checkout.error.zip_invalid');
+            $buyer['zip'] = $zip;
+        }
         $name = mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', Security::str($buyer['name'] ?? ''))), 0, 255);
         $email = Security::email($buyer['email'] ?? '');
         if ($name === '' || !$email) return self::refusal('admin.order.manual.name_email');
