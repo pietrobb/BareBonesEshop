@@ -129,7 +129,9 @@ final class StorefrontSeo
         $links = [];
         foreach (is_array($config['stores'] ?? null) ? $config['stores'] : [] as $id => $store) {
             if (!is_array($store) || !StoreContext::isPublicConfig($store)) continue;
-            $country = strtoupper((string)($store['legal']['country'] ?? ''));
+            // R58 (review round 23, high V1): the country the store sells to, its seller's through legal.seller (a Slovak store
+            // of a Czech seller is "SK"; a store added in the admin had no country and was listed by name).
+            $country = StoreContext::marketCountryOf($store, (string)(SellerLegal::forStore($config, (string)$id)['country'] ?? ''));
             $name = (string)($store['name'] ?? $id);
             $url = Template::url((string)($store['url_prefix'] ?? '') . $alternates['pathNoPrefix']);
             $further = array_map(static fn($language): string => strtolower((string)$language), (array)($store['languages'] ?? []));
@@ -142,6 +144,9 @@ final class StorefrontSeo
                 'active' => (string)($store['id'] ?? $id) === $currentId,
             ];
         }
+        // R58: two stores of one country and currency (a German shop's /en store) are told apart by their names.
+        $labels = array_count_values(array_column($links, 'label'));
+        foreach ($links as $i => $link) if ($labels[$link['label']] > 1) $links[$i]['label'] = $link['title'];
         return count($links) > 1 ? $links : [];
     }
 

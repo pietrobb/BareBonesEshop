@@ -52,7 +52,7 @@ $footerCategories = array_filter($footerCategories, static fn(array $category): 
 // R8: anyone (guests too) reopens the banner from the footer (?cookie_settings=1) with the current choice ticked.
 $cookieChoice = json_decode((string)($_COOKIE['cc_v1'] ?? ''), true);
 $cookieSettings = ($_GET['cookie_settings'] ?? '') === '1';
-$adr = ConsumerNotice::adr($store->legal());
+$adr = ConsumerNotice::adr($store->sellerLegal());
 $shell = [
     't' => I18n::all(),
     'brand' => $brand,

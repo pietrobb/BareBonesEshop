@@ -79,7 +79,7 @@ final class DeliveryNote {
 
     /** One print-ready HTML document, one page per order. */
     public static function html(array $notes): string {
-        $seller = (string)(StoreContext::current()->legal()['name'] ?? '');
+        $seller = (string)(StoreContext::current()->sellerLegal()['name'] ?? '');
         $out = '<!DOCTYPE html><html lang="' . esc(I18n::locale()) . '"><head><meta charset="UTF-8"><title>' . esc(I18n::t('admin.delivery_note.title')) . '</title>'
             . '<style>body{font:14px/1.4 system-ui,sans-serif;color:#000;margin:0}.note{padding:24px;page-break-after:always}.note:last-child{page-break-after:auto}'
             . 'table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #999;padding:6px;text-align:left}td.qty,th.qty{text-align:right}'
@@ -110,7 +110,7 @@ final class DeliveryNote {
     /** One A4 PDF, each order starting on a new page; long orders continue on further pages. */
     public static function pdf(array $notes): string {
         $pdf = new MinimalPdf();
-        $seller = (string)(StoreContext::current()->legal()['name'] ?? '');
+        $seller = (string)(StoreContext::current()->sellerLegal()['name'] ?? '');
         self::eachInOrderLocale($notes, static function (array $note) use ($pdf, $seller): void {
             $order = $note['order'];
             $pdf->addPage();

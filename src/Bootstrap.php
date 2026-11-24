@@ -173,7 +173,9 @@ class Bootstrap {
         // announced language-region qualified by the store's seller country (en-HU), so each code still has one URL.
         $regional = [];
         foreach ($public as $id => $store) {
-            $country = strtoupper((string)($store['legal']['country'] ?? ''));
+            // R58 (review round 23, high V1): the country the store sells to (StoreContext::marketCountryOf()), its seller's through
+            // legal.seller: a store added in the admin has no legal.country, and a Slovak store of a Czech seller is en-SK.
+            $country = StoreContext::marketCountryOf($store, (string)(SellerLegal::forStore($storesCfg, (string)$id)['country'] ?? ''));
             if (!preg_match('/^[A-Z]{2}$/', $country)) continue;
             $prefix = $store['url_prefix'] ?? '';
             foreach ((array)($store['languages'] ?? []) as $locale) {

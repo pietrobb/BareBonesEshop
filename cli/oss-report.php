@@ -126,8 +126,8 @@ function collect(string $from, string $to, ?string $storeCode): array
     // credit notes of an unprefixed series ("CN-2026…") contain a hyphen, so they are matched by their own prefix.
     if ($storeCode !== null) {
         $stores = json_decode((string)@file_get_contents(DataOverrides::storesPath()), true);
-        $legal = $stores['stores'][$storeCode]['legal'] ?? [];
-        $legal = is_array($legal) ? $legal : [];
+        // R58 (review round 23, high V1): a store sharing a seller (legal.seller) issues in that seller's series.
+        $legal = SellerLegal::forStore(is_array($stores) ? $stores : [], $storeCode);
         $prefix = InvoiceService::numberPrefix($legal, 'invoice');
         $invoiceSeries = $prefix === '' ? "i.number NOT LIKE '%-%'" : 'i.number LIKE :prefix';
         if ($prefix !== '') $params[':prefix'] = $prefix . '%';

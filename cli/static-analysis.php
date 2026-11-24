@@ -168,7 +168,7 @@ foreach ($entrypointBudgets as $relative => $budget) {
 
 $architectureBudgets = [
     // Loads Shared/Request/StoreScope always and only the route's page modules (Admin/Modules.php).
-    'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
+    /* -3 lines R58 (review round 23, medium S3): the admin languages are the shipped ones (I18n::shippedLocales()) */ 'src/Entrypoints/Admin.php' => ['lines' => 282, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
     // +2 functions, +10 lines R10: own or owner password/TOTP changes and creating an owner need the actor's current password; the legacy session that creates the first DB account is handed off and ended.
     'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 300, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
     // R14 UX4: every signed-in admin account changes its own password and TOTP (current password, per-session throttle).
@@ -267,7 +267,8 @@ $architectureBudgets = [
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
     // +9 lines, +1 function R48: adminStoreIdentityIssue words the seller-identity badge in the admin's language.
-    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 118, 'functions' => 4, 'max_function_lines' => 78, 'coupling' => 7],
+    // +6 lines, +4 max_function_lines R58 (review round 23, medium S3): the storefront languages field, a failed save keeps the ticked ones.
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 124, 'functions' => 4, 'max_function_lines' => 82, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.

@@ -29,10 +29,9 @@ class Shipping {
         return $countries;
     }
 
-    /** The current store's seller country (SK when it names none, as the VAT context reads it). */
+    /** The current store's seller country (SK when it names none, as the VAT context reads it). R58: through legal.seller. */
     public static function storeCountry(): string {
-        $store = class_exists('StoreContext') ? StoreContext::current()->config() : [];
-        return strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+        return class_exists('StoreContext') ? StoreContext::current()->sellerCountry() : SellerLegal::FALLBACK_COUNTRY;
     }
 
     /** Explicit country codes of the shipping.json zones; the '*' wildcard names no country. */

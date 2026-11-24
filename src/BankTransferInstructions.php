@@ -16,7 +16,8 @@ final class BankTransferInstructions {
             || in_array((string)($order['status'] ?? ''), self::CLOSED_STATUSES, true)) {
             return null;
         }
-        $legal ??= StoreContext::current()->legal();
+        // R58 (review round 23, high V1): the seller's account (legal.seller): a store added in Admin → Stores has none of its own.
+        $legal ??= StoreContext::current()->sellerLegal();
         $iban = self::storeIban($legal);
         if ($iban === '') return null;
         $bic = strtoupper(trim((string)($legal['bic'] ?? '')));
@@ -203,7 +204,7 @@ final class BankTransferInstructions {
 
     /** The store's IBAN normalised (no spaces, upper case), '' when missing or invalid: the store cannot be paid by transfer. */
     public static function storeIban(?array $legal = null): string {
-        $legal ??= StoreContext::current()->legal();
+        $legal ??= StoreContext::current()->sellerLegal();
         $iban = strtoupper(preg_replace('/\s+/', '', (string)($legal['iban'] ?? '')) ?? '');
         return self::validIban($iban) ? $iban : '';
     }

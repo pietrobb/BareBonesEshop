@@ -36,6 +36,8 @@ try {
     StoreSettings::setPathForTesting($r56dDir . '/stores.json');
     $r56dCfg->setValue(null, ['app_url' => 'https://shop.example'] + (array)$r56dCfgBefore);
     $r56dRead = static fn(string $store, string $key): mixed => json_decode((string)file_get_contents($r56dDir . '/stores.json'), true)['stores'][$store][$key] ?? null;
+    // R58 (review round 23, low N1): a name without a DNS address is no longer asked; these names stand for public hosts.
+    StoreSettings::setResolverForTesting(static fn(string $host): array => ['93.184.216.34']);
     $r56dCalls = [];
     JsonHttpClient::setFixtureTransport(static function (string $method, string $url) use (&$r56dCalls): array {
         $r56dCalls[] = $url;
@@ -87,6 +89,7 @@ try {
     assert_true(false, 'R56 uploads/domains: ' . get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
     JsonHttpClient::setFixtureTransport(null);
+    StoreSettings::setResolverForTesting(null);
     $r56dCfg->setValue(null, $r56dCfgBefore);
     StoreSettings::setPathForTesting(null);
     if ($r56dHost === null) unset($_SERVER['HTTP_HOST']); else $_SERVER['HTTP_HOST'] = $r56dHost;

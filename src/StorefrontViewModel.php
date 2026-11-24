@@ -343,7 +343,7 @@ final class StorefrontViewModel
      */
     private static function vatNote(): string
     {
-        $legal = StoreContext::current()->legal();
+        $legal = StoreContext::current()->sellerLegal();
         if (!VatService::isEuCountry(strtoupper((string)($legal['country'] ?? '')))) return '';
         $registered = StoreSettings::vatRegistered($legal);
         return I18n::t($registered ? 'price_incl_vat' : 'price_no_vat');

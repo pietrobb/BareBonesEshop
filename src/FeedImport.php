@@ -464,6 +464,8 @@ class FeedImport {
                 ['100.64.0.0', 10],  // RFC 6598 carrier-grade NAT (provider-internal hosts)
                 ['192.0.0.0', 24],   // RFC 6890 IETF protocol assignments
                 ['198.18.0.0', 15],  // RFC 2544 benchmarking
+                // R58 (review round 23, low N1): documentation (RFC 5737) and multicast space are no web server either.
+                ['192.0.2.0', 24], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4],
             ] as [$network, $bits]) {
                 $mask = (-1 << (32 - $bits)) & 0xFFFFFFFF;
                 if (($long & $mask) === (ip2long($network) & $mask)) return false;
@@ -481,7 +483,9 @@ class FeedImport {
         ] as [$prefix, $length]) {
             if (substr($packed, 0, $length) === $prefix) return false;
         }
-        return true;
+        // R58 (low N1): multicast ff00::/8 and the deprecated site-local fec0::/10.
+        $first = ord($packed[0]);
+        return $first !== 0xFF && !($first === 0xFE && (ord($packed[1]) & 0xC0) === 0xC0);
     }
 
     // ─── XML Parser (<SHOP><SHOPITEM>) ───────────────────────

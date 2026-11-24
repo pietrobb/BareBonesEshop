@@ -1720,24 +1720,13 @@ final class InvoiceService
 
     /**
      * Seller of a configured store: the legal entity whose invoice and credit-note number series (and counters) the
-     * store's documents use.
-     * - A store with its own non-empty `legal` block is its own seller, unless legal.seller names another store that
-     *   is a seller itself: storefronts of one company then share that store's series and counter (its prefixes;
-     *   their own legal fields only override the printed seller details).
-     * - A store without a `legal` block is no seller of its own (as before per-seller numbering, when its documents
-     *   used the store found by the order's currency): it invoices as the first seller selling in the order's
-     *   currency, else as the default store's seller, else as the first seller configured.
+     * store's documents use. R58 (review round 23, high V1): resolved by SellerLegal, which checkout, shipping, payments
+     * and the legal pages read too, so an invoice never names another seller than the one the order was priced for.
      * Null for an unknown store, or a legal.seller that names no seller (numberingConflicts() reports it).
      */
     public static function sellerCode(array $root, string $storeCode, ?string $currency = null): ?string
     {
-        $stores = self::storeMap($root);
-        if (!isset($stores[$storeCode])) return null;
-        $legal = self::legalBlock($stores[$storeCode]);
-        if ($legal === null) return self::fallbackSeller($root, $currency);
-        $target = trim((string)($legal['seller'] ?? ''));
-        if ($target === '' || $target === $storeCode) return $storeCode;
-        return self::ownsSeries($stores, $target) ? $target : null;
+        return SellerLegal::sellerCode($root, $storeCode, $currency);
     }
 
     /**
@@ -1759,7 +1748,7 @@ final class InvoiceService
             if ($legal === null) continue;
             $target = trim((string)($legal['seller'] ?? ''));
             if ($target !== '' && $target !== $storeId) {
-                if (!self::ownsSeries($stores, $target)) {
+                if (!SellerLegal::ownsSeries($stores, $target)) {
                     foreach (['invoice', 'credit_note'] as $type) {
                         $conflicts["{$storeId}/{$type}"] = "Store {$storeId}: legal.seller '{$target}' is not a store with its own legal block; name a seller store or remove legal.seller in stores.json";
                     }
@@ -1768,7 +1757,7 @@ final class InvoiceService
             }
             foreach (['invoice', 'credit_note'] as $type) $byPrefix[self::numberPrefix($legal, $type)][] = "{$storeId}/{$type}";
         }
-        $default = self::defaultSeller($root);
+        $default = SellerLegal::defaultSeller($root);
         foreach ($byPrefix as $prefix => $series) {
             if (count($series) < 2) continue;
             $owner = null;
@@ -1808,62 +1797,12 @@ final class InvoiceService
     /** @return array<string,array<mixed>> */
     private static function storeMap(array $root): array
     {
-        $stores = [];
-        foreach ((array)($root['stores'] ?? []) as $code => $store) {
-            if (is_array($store)) $stores[(string)$code] = $store;
-        }
-        return $stores;
+        return SellerLegal::storeMap($root);
     }
 
     private static function legalBlock(array $store): ?array
     {
-        return is_array($store['legal'] ?? null) && $store['legal'] !== [] ? $store['legal'] : null;
-    }
-
-    /** True when the store is a seller of its own (own legal block, no legal.seller naming another store). */
-    private static function ownsSeries(array $stores, string $code): bool
-    {
-        $legal = isset($stores[$code]) ? self::legalBlock($stores[$code]) : null;
-        if ($legal === null) return false;
-        $target = trim((string)($legal['seller'] ?? ''));
-        return $target === '' || $target === $code;
-    }
-
-    private static function defaultSeller(array $root): ?string
-    {
-        $default = (string)($root['default_store'] ?? '');
-        $stores = self::storeMap($root);
-        if ($default === '' || !isset($stores[$default]) || self::legalBlock($stores[$default]) === null) return null;
-        return self::sellerCode($root, $default);
-    }
-
-    private static function fallbackSeller(array $root, ?string $currency): ?string
-    {
-        $stores = self::storeMap($root);
-        if ($currency !== null && $currency !== '') {
-            foreach ($stores as $code => $store) {
-                if (self::legalBlock($store) === null || strtolower((string)($store['currency'] ?? '')) !== strtolower($currency)) continue;
-                $seller = self::sellerCode($root, $code);
-                if ($seller !== null) return $seller;
-            }
-        }
-        $default = self::defaultSeller($root);
-        if ($default !== null) return $default;
-        foreach (array_keys($stores) as $code) {
-            if (self::ownsSeries($stores, $code)) return $code;
-        }
-        return null;
-    }
-
-    /** Legal details a store's documents print: its seller's, with the store's own fields over them (never the prefixes). */
-    private static function effectiveLegal(array $root, string $storeCode, string $sellerCode): array
-    {
-        $stores = self::storeMap($root);
-        $sellerLegal = isset($stores[$sellerCode]) ? (self::legalBlock($stores[$sellerCode]) ?? []) : [];
-        $own = isset($stores[$storeCode]) ? self::legalBlock($stores[$storeCode]) : null;
-        if ($own === null || $storeCode === $sellerCode) return $sellerLegal;
-        unset($own['seller'], $own['invoice_prefix'], $own['credit_note_prefix']);
-        return array_replace($sellerLegal, $own);
+        return SellerLegal::legalBlock($store);
     }
 
     /** Identity of the seller of $order (name, address, ids, e-mail, phone) for consumer notices; [] when none is configured. */
@@ -1875,7 +1814,7 @@ final class InvoiceService
         $orderStore = (string)($order['store_id'] ?? '');
         $code = isset($stores[$orderStore]) ? $orderStore : self::detectStoreCode($order, $root);
         $seller = self::sellerCode($root, $code, strtolower((string)($order['currency'] ?? '')));
-        return $seller === null ? [] : self::sellerSnapshot(self::effectiveLegal($root, $code, $seller));
+        return $seller === null ? [] : self::sellerSnapshot(SellerLegal::effective($root, $code, $seller));
     }
 
     /**
@@ -1896,7 +1835,7 @@ final class InvoiceService
             throw new \RuntimeException('Invoice numbering configuration conflict: ' . $conflict . ' (see php cli/setup.php doctor)');
         }
         $store = $stores[$storeCode] ?? $stores[$sellerCode] ?? [];
-        $store['legal'] = self::effectiveLegal($root, $storeCode, $sellerCode);
+        $store['legal'] = SellerLegal::effective($root, $storeCode, $sellerCode);
         return [$sellerCode, $store];
     }
 
@@ -1934,7 +1873,7 @@ final class InvoiceService
         if ($ico === '' && $name === '') return null;
         $stores = self::storeMap($root);
         foreach ($stores as $code => $store) {
-            if (!self::ownsSeries($stores, $code)) continue;
+            if (!SellerLegal::ownsSeries($stores, $code)) continue;
             $legal = self::legalBlock($store) ?? [];
             if (trim((string)($legal['ico'] ?? '')) === $ico && trim((string)($legal['name'] ?? '')) === $name) return $code;
         }

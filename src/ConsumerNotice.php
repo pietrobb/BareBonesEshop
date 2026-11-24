@@ -104,7 +104,7 @@ final class ConsumerNotice {
 
     /** The seller of $order: its identity from the invoicing seller, ADR and other legal keys from the store. */
     public static function sellerLegal(array $order): array {
-        return InvoiceService::sellerIdentity($order) + (StoreContext::hasCurrent() ? StoreContext::current()->legal() : []);
+        return InvoiceService::sellerIdentity($order) + (StoreContext::hasCurrent() ? StoreContext::current()->sellerLegal() : []);
     }
 
     /** Variables of the order confirmation e-mail. */
