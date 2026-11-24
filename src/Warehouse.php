@@ -655,11 +655,35 @@ class Warehouse {
             Db::get()->prepare($sql)->execute($params);
             return;
         }
-        $touchOne = Db::get()->prepare($touch . ' AND v.sku = :tsku)');
-        $stmt = Db::get()->prepare($sql . ' AND sku = :sku');
-        foreach ($skus as $sku) {
-            $touchOne->execute($touchParams + [':tsku' => $sku]);
-            $stmt->execute($params + [':sku' => $sku]);
+        // R58 (review round 23, verification): the variants of a SKU are found by a plain read and updated by id. Was: a
+        // filter "product_id IN (SELECT id FROM products WHERE store_id = …)" and "products WHERE store_id = …" in the
+        // UPDATEs, which on MySQL/MariaDB lock every product row of the store they scan: two checkouts of different
+        // products deadlocked (1213) often enough under load that the order's three attempts ran out and the buyer got
+        // a 503. The ledger sums stay locking reads inside the UPDATE, as before.
+        $find = Db::get()->prepare('SELECT v.id, v.product_id FROM variants v JOIN products p ON p.id = v.product_id
+            WHERE v.sku = :sku AND p.store_id = :catalog ORDER BY v.id');
+        $changed = Db::get()->prepare('SELECT v.id, v.product_id FROM variants v WHERE v.sku = :sku
+            AND v.stock <> (SELECT COALESCE(SUM(ws.qty - ws.reserved), 0) FROM warehouse_stock ws WHERE ws.sku = v.sku AND ws.store_id = :store)
+            AND EXISTS (SELECT 1 FROM warehouse_stock w2 WHERE w2.sku = v.sku AND w2.store_id = :store2)');
+        foreach (array_values(array_unique(array_map('strval', $skus))) as $sku) {
+            $find->execute([':sku' => $sku, ':catalog' => StoreContext::current()->catalogId()]);
+            $variants = $find->fetchAll(PDO::FETCH_ASSOC);
+            if ($variants === []) continue;
+            $ids = array_map(static fn(array $row): int => (int)$row['id'], $variants);
+            $changed->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId(), ':store2' => StoreContext::current()->catalogId()]);
+            $productIds = [];
+            foreach ($changed->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if (in_array((int)$row['id'], $ids, true)) $productIds[(int)$row['product_id']] = (int)$row['product_id'];
+            }
+            if ($productIds !== []) {
+                sort($productIds);
+                Db::get()->exec('UPDATE products SET stock_updated_at = ' . Db::now() . ' WHERE id IN (' . implode(',', $productIds) . ')');
+            }
+            Db::get()->prepare('UPDATE variants SET stock = (SELECT COALESCE(SUM(ws.qty - ws.reserved), 0) FROM warehouse_stock ws
+                    WHERE ws.sku = variants.sku AND ws.store_id = :store)
+                WHERE id IN (' . implode(',', $ids) . ')
+                  AND EXISTS (SELECT 1 FROM warehouse_stock w2 WHERE w2.sku = variants.sku AND w2.store_id = :store2)')
+                ->execute([':store' => StoreContext::current()->catalogId(), ':store2' => StoreContext::current()->catalogId()]);
         }
     }
 

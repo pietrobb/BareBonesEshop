@@ -516,6 +516,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   1500 or an unknown code) is no longer released as declined, which invited a second refund though Comgate may have
   refunded: only a refused request (1400, 1401, 1402) is declined, any other code leaves the refund pending with
   "refund outcome unknown" for the merchant to confirm or release after checking the Comgate portal.
+- **Concurrent checkouts of different products no longer fail on MySQL/MariaDB (review round 23, found in
+  verification).** Mirroring a variant's ledger stock locked every product row of the store, so two checkouts of
+  different products deadlocked; under load the order's three attempts ran out and the buyer got "checkout failed"
+  (503). A stock sync now locks only the rows of its own SKU.
 - **The store domain test asks no name without an address (review round 23, low N1).** A domain whose DNS returns no
   address is reported as not answering instead of being asked unpinned (libcurl answered `*.localhost` itself with
   127.0.0.1). Names of the local network (`.localhost`, `.local`, `.localdomain`, `.internal`, `.lan`, `.arpa`) are
