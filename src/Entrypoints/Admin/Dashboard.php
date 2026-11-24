@@ -9,6 +9,8 @@ const DASHBOARD_TREND_DAYS = 14;
 function pageDashboard(): void {
     $db = Db::get();
     $storeId = StoreContext::current()->id();
+    // R58 (review round 23, low L2): this page's reports refresh the daily sales totals at most once.
+    $salesOnce = SalesReport::refreshOnce();
     $count = static function (string $sql, array $params) use ($db): int {
         $stmt = $db->prepare($sql);
         $stmt->execute($params);
