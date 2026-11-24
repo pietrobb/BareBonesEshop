@@ -17,6 +17,8 @@ function pageReports(): void {
     $days = is_string($raw) && in_array((int)$raw, SalesReport::PERIODS, true) ? (int)$raw : 30;
     $storeId = StoreContext::current()->id();
     $since = SalesReport::sinceUtc($days);
+    // R58 (review round 23, low L2): this page's reports refresh the daily sales totals at most once.
+    $salesOnce = SalesReport::refreshOnce();
     $trend = SalesReport::trend($storeId, $days);
     $totals = SalesReport::totalsOf($trend);
     $top = SalesReport::topProducts($storeId, $since, 10, true);
