@@ -2262,6 +2262,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.manual_order' => 'Objednávka zadaná v administraci',
     'admin.audit.note.items_edited' => 'Položky objednávky upraveny v administraci',
     'admin.audit.note.item_credit' => 'Vystaven dobropis za položky',
+    'admin.audit.note.outside_balance_credit' => 'Vystaven dobropis k vrácení uzavřenému bez výplaty (dobropis přesunut na sazby DPH vráceného zboží)',
     'admin.audit.note.invoice_issued' => 'Faktura vystavena',
     'admin.audit.note.csv_import' => 'Import CSV',
     'admin.audit.note.cache_flushed' => 'Mezipaměť vyprázdněna',

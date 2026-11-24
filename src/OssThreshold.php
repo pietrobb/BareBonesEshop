@@ -181,16 +181,22 @@ final class OssThreshold
         [$goods, $digital] = self::distance($order, (string)($source['vat_scenario'] ?? ''), $sellerCountry);
         if (!$goods && !$digital) return 0;
         $credited = abs((int)($doc['total_net'] ?? 0));
+        $sourceNet = (int)($source['total_net'] ?? 0);
         $itemLines = array_values(array_filter((array)($credit['lines'] ?? []), static fn($line): bool => is_array($line) && isset($line['order_item_id'])));
         if ($itemLines !== []) {
+            // R58 (review round 23, S1): a line giving a rate back (negative gross, InvoiceService::outsideLines()) reverses
+            // a refund's credit by amount: its share is added back as that credit took it; the goods lines are the rest.
+            $back = 0;
+            foreach ($itemLines as $line) if ((int)($line['gross'] ?? 0) < 0) $back += (int)($line['net'] ?? 0);
+            if ($back !== 0) $credited = -(int)($doc['total_net'] ?? 0) - $back;
             $digitalItems = self::digitalItemIds($db, (int)$order['id']);
             $digitalNet = 0;
-            foreach ($itemLines as $line) if (isset($digitalItems[(int)$line['order_item_id']])) $digitalNet += abs((int)($line['net'] ?? 0));
+            foreach ($itemLines as $line) if ((int)($line['gross'] ?? 0) >= 0 && isset($digitalItems[(int)$line['order_item_id']])) $digitalNet += abs((int)($line['net'] ?? 0));
             $digitalNet = min($credited, $digitalNet);
-            return -(($goods ? $credited - $digitalNet : 0) + ($digital ? $digitalNet : 0));
+            $backShare = $back !== 0 && $sourceNet > 0 ? (int)round($back * self::storedNet($db, (int)$source['id']) / $sourceNet) : 0;
+            return -(($goods ? $credited - $digitalNet : 0) + ($digital ? $digitalNet : 0)) - $backShare;
         }
         // Credited by amount (a refund, a cancellation): the invoice's distance share of what it credits.
-        $sourceNet = (int)($source['total_net'] ?? 0);
         if ($sourceNet <= 0) return 0;
         return -(int)round($credited * self::storedNet($db, (int)$source['id']) / $sourceNet);
     }

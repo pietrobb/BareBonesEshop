@@ -652,6 +652,9 @@ class Rma {
             $closable = $source && $owed === 0 && $value > 0 && (int)$pending->fetchColumn() === 0;
             $pending->closeCursor();
             if ($closable) {
+                // R58 (review round 23, medium S1): the goods credited at their own rates, the money's credit at the
+                // other rates reversed (a credit note of nothing in all), before the units count as refunded.
+                InvoiceService::balanceClosedReturn((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $keys);
                 $db->prepare('UPDATE rma_items SET refunded_quantity = received_quantity WHERE rma_id = ?')->execute([$rmaId]);
                 $db->prepare("UPDATE rma_requests SET status = 'refunded', outside_refund_applied = outside_refund_applied + ?, outside_refund_keys = ?, updated_at = " . Db::now() . ' WHERE id = ? AND store_id = ?')
                     ->execute([$value, json_encode($keys, JSON_THROW_ON_ERROR | JSON_FORCE_OBJECT), $rmaId, StoreContext::current()->id()]);

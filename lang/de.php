@@ -2262,6 +2262,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.manual_order' => 'Bestellung im Admin erfasst',
     'admin.audit.note.items_edited' => 'Bestellpositionen im Admin bearbeitet',
     'admin.audit.note.item_credit' => 'Gutschrift für Positionen ausgestellt',
+    'admin.audit.note.outside_balance_credit' => 'Gutschrift zu einer ohne Auszahlung abgeschlossenen Rücksendung ausgestellt (auf die MwSt.-Sätze der zurückgesandten Ware umgebucht)',
     'admin.audit.note.invoice_issued' => 'Rechnung ausgestellt',
     'admin.audit.note.csv_import' => 'CSV-Import',
     'admin.audit.note.cache_flushed' => 'Cache geleert',

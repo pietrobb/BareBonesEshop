@@ -2262,6 +2262,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.manual_order' => 'Rendelés rögzítve az adminban',
     'admin.audit.note.items_edited' => 'Rendelési tételek szerkesztve az adminban',
     'admin.audit.note.item_credit' => 'Jóváíró számla kiállítva a tételekre',
+    'admin.audit.note.outside_balance_credit' => 'Jóváíró számla kiállítva a kifizetés nélkül lezárt visszaküldéshez (a jóváírás a visszaküldött áruk áfakulcsaira került)',
     'admin.audit.note.invoice_issued' => 'Számla kiállítva',
     'admin.audit.note.csv_import' => 'CSV-importálás',
     'admin.audit.note.cache_flushed' => 'Gyorsítótár ürítve',

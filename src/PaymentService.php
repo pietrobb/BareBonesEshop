@@ -2196,7 +2196,15 @@ class PaymentService {
      * critical "refund failed" for a customer who had all the money.
      */
     private static function releasedSeverity(int $orderId, bool $released): string {
-        return $released && (string)(Orders::byId($orderId)['payment_status'] ?? '') === 'refunded' ? 'warning' : 'critical';
+        return $released ? self::refundFailedSeverity($orderId) : 'critical';
+    }
+
+    /**
+     * R58 (review round 23, low): the severity of a released refund (a request or an item refund, WorkerJobs): a warning
+     * when the payment is refunded in full (the customer has all the money), else critical.
+     */
+    public static function refundFailedSeverity(int $orderId): string {
+        return (string)(Orders::byId($orderId)['payment_status'] ?? '') === 'refunded' ? 'warning' : 'critical';
     }
 
     /** Whether the provider answered this order's refund request (not a credit note's item refund) as pending under $refundId. */

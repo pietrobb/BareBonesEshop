@@ -156,8 +156,14 @@ function collect(string $from, string $to, ?string $storeCode): array
             // refund failed (InvoiceService::reverseCredit()) adds it back in its own period.
             $sign = (json_decode((string)($row['credit_snapshot'] ?? ''), true)['kind'] ?? null) === 'reversal' ? 1 : -1;
             $rates = [];
-            foreach ((json_decode((string)($row['vat_breakdown'] ?? '{}'), true) ?: []) as $rateKey => $group) {
-                $rates[$rateKey] = ['net' => $sign * abs((int)($group['net'] ?? 0)), 'vat' => $sign * abs((int)($group['vat'] ?? 0))]
+            $groups = json_decode((string)($row['vat_breakdown'] ?? '{}'), true) ?: [];
+            // R58 (review round 23, S1): a credit note that gives rates back (InvoiceService::outsideLines()) has groups
+            // of both signs, each counted as stored; one of a single sign reduces (a reversal adds back) by its amounts.
+            $signs = array_map(static fn($group): int => (is_array($group) ? (int)($group['net'] ?? 0) + (int)($group['vat'] ?? 0) : 0) <=> 0, $groups);
+            $mixed = in_array(1, $signs, true) && in_array(-1, $signs, true);
+            foreach ($groups as $rateKey => $group) {
+                $rates[$rateKey] = ($mixed ? ['net' => (int)($group['net'] ?? 0), 'vat' => (int)($group['vat'] ?? 0)]
+                    : ['net' => $sign * abs((int)($group['net'] ?? 0)), 'vat' => $sign * abs((int)($group['vat'] ?? 0))])
                     + array_intersect_key((array)$group, ['country' => true, 'supply' => true]);
             }
         } elseif ($financialJson !== '') {

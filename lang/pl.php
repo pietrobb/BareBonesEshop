@@ -2262,6 +2262,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.manual_order' => 'Zamówienie wprowadzone w panelu',
     'admin.audit.note.items_edited' => 'Pozycje zamówienia edytowane w panelu',
     'admin.audit.note.item_credit' => 'Wystawiono korektę za pozycje',
+    'admin.audit.note.outside_balance_credit' => 'Wystawiono korektę do zwrotu zamkniętego bez wypłaty (korekta przeniesiona na stawki VAT zwróconych towarów)',
     'admin.audit.note.invoice_issued' => 'Wystawiono fakturę',
     'admin.audit.note.csv_import' => 'Import CSV',
     'admin.audit.note.cache_flushed' => 'Wyczyszczono pamięć podręczną',

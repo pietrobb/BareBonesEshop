@@ -2292,6 +2292,7 @@ return [
     'admin.audit.note.manual_order' => 'Objednávka zadaná v administrácii',
     'admin.audit.note.items_edited' => 'Položky objednávky upravené v administrácii',
     'admin.audit.note.item_credit' => 'Vystavený dobropis za položky',
+    'admin.audit.note.outside_balance_credit' => 'Vystavený dobropis k vráteniu uzavretému bez výplaty (dobropis presunutý na sadzby DPH vráteného tovaru)',
     'admin.audit.note.invoice_issued' => 'Faktúra vystavená',
     'admin.audit.note.csv_import' => 'Import CSV',
     'admin.audit.note.cache_flushed' => 'Cache vyprázdnená',

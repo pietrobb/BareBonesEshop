@@ -2223,6 +2223,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.audit.note.manual_order' => 'Pedido introducido en la administración',
     'admin.audit.note.items_edited' => 'Líneas del pedido editadas en la administración',
     'admin.audit.note.item_credit' => 'Factura rectificativa de artículos emitida',
+    'admin.audit.note.outside_balance_credit' => 'Factura rectificativa de una devolución cerrada sin pago emitida (abono trasladado a los tipos de IVA de los artículos devueltos)',
     'admin.audit.note.invoice_issued' => 'Factura emitida',
     'admin.audit.note.csv_import' => 'Importación CSV',
     'admin.audit.note.cache_flushed' => 'Caché vaciada',

@@ -2283,6 +2283,7 @@ return [
     'admin.audit.note.manual_order' => 'Order entered in the admin',
     'admin.audit.note.items_edited' => 'Order items edited in the admin',
     'admin.audit.note.item_credit' => 'Credit note for items issued',
+    'admin.audit.note.outside_balance_credit' => 'Credit note for a return closed without payout issued (credit moved to the returned goods\' VAT rates)',
     'admin.audit.note.invoice_issued' => 'Invoice issued',
     'admin.audit.note.csv_import' => 'CSV import',
     'admin.audit.note.cache_flushed' => 'Cache cleared',

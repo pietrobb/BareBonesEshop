@@ -235,6 +235,8 @@ final class AuditLogLabels {
         'Expired unpaid offline order' => 'expired_offline', 'The payment provider declined the item refund' => 'item_refund_declined',
         // R36: the receipt of a return entered in the admin stayed in English.
         'Admin receipt' => 'return_receipt',
+        // R58: the credit note of a return closed without payout (InvoiceService::balanceClosedReturn()).
+        'Return closed without payout: credit moved to the returned goods\' rates' => 'outside_balance_credit',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';
