@@ -55,6 +55,10 @@ function pageStoreSettings(): void {
                     <?php foreach (DateTimeZone::listIdentifiers() as $identifier): ?><option<?= $identifier === $zone ? ' selected' : '' ?>><?= esc($identifier) ?></option><?php endforeach; ?>
                 </select>
                 <small class="muted" id="store-<?= esc($storeId) ?>-timezone-hint"><?= esc(I18n::t('admin.stores.timezone_hint')) ?></small></div>
+            <?php /* R58 (review round 23, medium S3): the storefront languages; the default one is always offered */ $storeLocale = (string)($store['default_locale'] ?? 'en'); $storeLanguages = array_map('strval', (array)($draft['languages'] ?? ($store['languages'] ?? []))); ?>
+            <fieldset class="form-row" data-store-languages aria-describedby="store-<?= esc($storeId) ?>-languages-hint"><legend><?= esc(I18n::t('admin.stores.field.languages')) ?></legend><input type="hidden" name="languages[]" value="<?= esc($storeLocale) ?>">
+                <?php foreach (I18n::shippedLocales() as $lc): ?><label style="display:inline-block;margin-right:.75rem" lang="<?= esc($lc) ?>"><input type="checkbox" name="languages[]" value="<?= esc($lc) ?>"<?= $lc === $storeLocale || in_array($lc, $storeLanguages, true) ? ' checked' : '' ?><?= $lc === $storeLocale ? ' disabled' : '' ?>> <?= esc(I18n::localeName($lc)) ?></label><?php endforeach; ?>
+                <small class="muted" id="store-<?= esc($storeId) ?>-languages-hint" style="display:block"><?= esc(I18n::t('admin.stores.languages_hint')) ?></small></fieldset>
             <?php if ($seller !== null): ?>
             <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p>
             <?php else: ?>
@@ -109,7 +113,9 @@ function handleStoreSettingsSave(bool $domains = false): void {
     $result = $domains ? StoreSettings::saveDomains($storeId, $_POST['domains'] ?? '', $_POST['url_prefix'] ?? null) : StoreSettings::save($storeId, $input);
     if (!$result['ok']) {
         setFlash('err', implode(' ', $result['errors']));
-        $GLOBALS[$domains ? 'adminStoreDomainsDraft' : 'adminStoreDraft'][$storeId] = array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);
+        // R58: the ticked languages (languages[]) stay ticked too.
+        $GLOBALS[$domains ? 'adminStoreDomainsDraft' : 'adminStoreDraft'][$storeId] = (is_array($_POST['languages'] ?? null) ? ['languages' => array_map('strval', array_filter($_POST['languages'], 'is_scalar'))] : [])
+            + array_map(static fn($v): string => is_scalar($v) ? (string)$v : '', $_POST);
         return;
     }
     setFlash(empty($result['warning']) ? 'ok' : 'warn', trim(I18n::format('admin.stores.saved', ['store' => $storeId]) . ' ' . ($result['warning'] ?? '')));

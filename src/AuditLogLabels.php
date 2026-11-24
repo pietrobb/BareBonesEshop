@@ -38,6 +38,7 @@ final class AuditLogLabels {
         'supplier' => 'import', 'purchase_order' => 'import', 'warehouse' => 'import', 'feed' => 'import', 'import' => 'import',
         'promotion' => 'pricing.manage', 'price_list' => 'pricing.manage', 'review' => 'products.edit', 'digital_asset' => 'products.edit',
         'shipping_methods' => 'shipping.manage', 'shipping_zones' => 'shipping.manage', 'shipping_zone_countries' => 'shipping.manage', 'shipping_rates' => 'shipping.manage',
+        'shipping_file_method' => 'shipping.manage', // R58: Standard/Express settings of Admin → Shipping
         'payment_methods' => 'payments.manage', 'payment_method_countries' => 'payments.manage', 'payment_method_shipping' => 'payments.manage',
     ];
     /** R49: catalog entries anyone who sees the log may read (what the storefront shows anyway). */
@@ -235,6 +236,8 @@ final class AuditLogLabels {
         'Expired unpaid offline order' => 'expired_offline', 'The payment provider declined the item refund' => 'item_refund_declined',
         // R36: the receipt of a return entered in the admin stayed in English.
         'Admin receipt' => 'return_receipt',
+        // R58: the credit note of a return closed without payout (InvoiceService::balanceClosedReturn()).
+        'Return closed without payout: credit moved to the returned goods\' rates' => 'outside_balance_credit',
     ];
     /** "Admin <entity>" notes of a plain admin save. */
     private const SAVED_ENTITIES = 'category|brand|promotion|price list|supplier|purchase order|shipment|digital asset save';

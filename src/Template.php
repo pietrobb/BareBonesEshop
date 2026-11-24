@@ -43,7 +43,7 @@ class Template {
             'title_pattern' => '%page% — %store%',
             'logo_url' => '',
             'footer_text' => '',
-            'contact' => (array)($config['legal'] ?? []),
+            'contact' => StoreContext::current()->sellerLegal(),
         ], $theme, $store);
     }
 

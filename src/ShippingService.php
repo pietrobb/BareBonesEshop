@@ -215,7 +215,7 @@ class ShippingService
     private static function legacyRates(string $country, int $weightG, int $subtotal, string $currency, array $covered): array
     {
         $rates = [];
-        $legacyMethods = Shipping::currency() === $currency ? ['standard', 'express'] : [];
+        $legacyMethods = Shipping::currency() === $currency ? Shipping::CHECKOUT_METHODS : [];
         foreach ($legacyMethods as $method) {
             if (in_array($method, $covered, true)) continue;
 

@@ -353,7 +353,9 @@ final class WorkerJobs
                 Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => ['status' => 'declined', 'message' => $e->getMessage()]]);
                 if ($itemRefundId > 0) {
                     Rma::failRefund($itemRefundId, 'Refund declined by the provider: ' . $e->getMessage());
-                    IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'declined' => true]);
+                    // R58 (review round 23, low): a warning when the payment is refunded in full (refunded in the provider's
+                    // dashboard before the job ran: the customer has all the money), as for a request (R56). Was: critical.
+                    IncidentMonitor::report('payment.refund_failed', 'payment', PaymentService::refundFailedSeverity($orderId), ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'declined' => true]);
                 } else {
                     PaymentService::declinedRefundRequest($orderId, $idempotencyKey, $e->getMessage());
                 }
@@ -383,7 +385,8 @@ final class WorkerJobs
         if ($itemRefundId > 0 && in_array($status, ['failed', 'canceled', 'cancelled'], true)) {
             // R55 (low): settled by the payment's REFUNDED status meanwhile (PaymentService::refund()): the customer has the money.
             if ((string)(Rma::refundById($itemRefundId)['status'] ?? '') === 'succeeded') return;
-            IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'released' => true]);
+            // R58 (review round 23, low): a warning when the payment is refunded in full after the release (as above).
+            IncidentMonitor::report('payment.refund_failed', 'payment', PaymentService::refundFailedSeverity($orderId), ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'released' => true]);
             return;
         }
         // R56 (review round 21, low): a request the provider refused because its payment was refunded in the dashboard

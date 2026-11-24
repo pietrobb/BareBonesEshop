@@ -91,14 +91,14 @@ try {
     SalesDaily::refresh('default');
     $out['backlog'] = [$changes(), $changes('second'), $wrong(), SalesDaily::builtUntil('default') === SalesDaily::openDay()];
 
-    // Medium 1, within the report's seconds: a batch is built, the changes not read yet (an older day) are summed
-    // from the orders, not read from the stale built day.
-    $db->prepare('UPDATE orders SET total = 1900 WHERE id = ?')->execute([$byDay[20]]);
-    $logChanges(3000001, 60000, 1, 'default', $at(3));
-    $logChanges(3100001, 1, 1, 'default', $at(20));
+    // Medium 1, within the report's seconds: a batch is built, the changes not read yet are summed from the orders, not
+    // read from the stale built day. R58: the changes are read oldest day first, so the one not read is of a later day.
+    $db->prepare('UPDATE orders SET total = 1900 WHERE id = ?')->execute([$byDay[3]]);
+    $logChanges(3000001, 60000, 1, 'default', $at(20));
+    $logChanges(2900001, 1, 1, 'default', $at(3));
     SalesDaily::refresh('default', 0.0);
     $stale = SalesDaily::builtUntil('default');
-    $out['partial'] = [$stale <= SalesDaily::dayOf($at(20)), $changes() > 0 && $changes() < 60001];
+    $out['partial'] = [$stale <= SalesDaily::dayOf($at(3)) && $wrong() === [], $changes() > 0 && $changes() < 60001];
     SalesDaily::refresh('default');
     $out['partialDone'] = [$changes(), $wrong()];
 

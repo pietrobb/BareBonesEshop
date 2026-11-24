@@ -405,6 +405,7 @@ final class WebInstaller
             self::priceInStoreCurrency(Db::get(), $stores);
             if ($starter === null) self::localizeSampleMethods(Db::get(), $stores);
             self::configurePayments(Db::get(), $stores, $v);
+            $shippingPath = self::fileShippingMethodsOff(Db::get(), $stores, $config);
             $default = (string)($stores['default_store'] ?? 'default');
             $owner = AdminIdentity::createWithStore($v['admin_user'], $v['admin_password'], 'owner', true, $default, true);
             if ($starter !== null) self::baselineRelease($starter, $config, $root);
@@ -415,6 +416,7 @@ final class WebInstaller
             @unlink($root . '/config.php');
             // The SMTP password in it is encrypted with the key of the config.php just removed: nobody could open it.
             if (isset($mailPath)) @unlink($mailPath);
+            if (isset($shippingPath)) @unlink($shippingPath);
             if ($seeded || (is_file($database) && $starter === null)) {
                 foreach (['', '-wal', '-shm', '-journal'] as $suffix) @unlink($database . $suffix);
             }
@@ -850,6 +852,26 @@ final class WebInstaller
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * R58 (review round 23, medium S4): a new shop whose default store has shipping methods of its own (the migrations'
+     * GLS, Packeta and pickup) does not also offer the shipping.json methods, Standard 3.99 and Express 7.99 €, prices the
+     * merchant never set: they start switched off in Admin → Shipping, ready to switch on. Shops installed before keep
+     * them as they were. Returns the settings file written, or null when none was.
+     */
+    public static function fileShippingMethodsOff(PDO $db, array $stores, array $config): ?string
+    {
+        $id = (string)($stores['default_store'] ?? 'default');
+        $store = is_array($stores['stores'][$id] ?? null) ? $stores['stores'][$id] : [];
+        $active = $db->prepare('SELECT COUNT(*) FROM shipping_methods WHERE store_id = ? AND active = 1');
+        $active->execute([(string)($store['provider_scope'] ?? $id)]);
+        if ((int)$active->fetchColumn() === 0 || ($dir = DataOverrides::dir($config)) === null) return null;
+        $settings = DataOverrides::shippingMethods($config)['methods'] ?? [];
+        foreach (Shipping::CHECKOUT_METHODS as $key) $settings[$key] ??= ['active' => false];
+        if (!DataOverrides::saveShippingMethods($settings, $config)) throw new RuntimeException('Cannot write the shipping method settings');
+        Shipping::forget();
+        return $dir . '/' . DataOverrides::SHIPPING_METHODS;
     }
 
     /**

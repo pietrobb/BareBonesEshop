@@ -20,6 +20,19 @@ set_error_handler(static function(int $severity, string $message, string $file, 
     if (!(error_reporting() & $severity)) return false;
     throw new ErrorException($message, 0, $severity, $file, $line);
 });
+final class R54sStatement extends PDOStatement {
+    public static ?Closure $onRead = null;
+    protected function __construct() {}
+    public function execute(?array $params = null): bool {
+        $result = parent::execute($params);
+        if (self::$onRead !== null && str_starts_with($this->queryString, 'SELECT id, created_at FROM sales_daily_changes')) {
+            $onRead = self::$onRead;
+            self::$onRead = null;
+            $onRead();
+        }
+        return $result;
+    }
+}
 $connect = static function() use ($driver, $target): PDO {
     $db = $driver === 'mysql'
         ? new PDO(getenv('TEST_MYSQL_DSN'), getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '', [PDO::ATTR_EMULATE_PREPARES => false])
@@ -68,16 +81,13 @@ try {
     if ($driver === 'sqlite') {
         // Medium 6: a checkout commits on another connection while the build reads the logged changes.
         $fired = false;
-        // ShopPDO is a plain PDO, so Pdo\Sqlite::createFunction() is not available; PHP 8.5 only deprecates this one.
-        @$db->sqliteCreateFunction('SUBSTR', static function($value, $start, $length = null) use (&$fired, $other, $at) {
-            if (!$fired) {
-                $fired = true;
-                $other->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, shipping_addr, payment_method, subtotal, total, currency, store_id, locale, created_at)
-                    VALUES ('R54S-CHECKOUT', 'pending', 'pending', 'R54S', 'r54s@example.test', '{}', 'card', 500, 500, 'eur', 'default', 'sk', ?)")->execute([gmdate('Y-m-d H:i:s')]);
-            }
-            $value = (string)$value;
-            return $length === null ? substr($value, (int)$start - 1) : substr($value, (int)$start - 1, (int)$length);
-        }, -1);
+        // R58: when the read of the changes has started (was: from SUBSTR() of that read, which reads created_at as it is now).
+        R54sStatement::$onRead = static function() use (&$fired, $other): void {
+            $fired = true;
+            $other->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, shipping_addr, payment_method, subtotal, total, currency, store_id, locale, created_at)
+                VALUES ('R54S-CHECKOUT', 'pending', 'pending', 'R54S', 'r54s@example.test', '{}', 'card', 500, 500, 'eur', 'default', 'sk', ?)")->execute([gmdate('Y-m-d H:i:s')]);
+        };
+        $db->setAttribute(PDO::ATTR_STATEMENT_CLASS, [R54sStatement::class]);
         $db->prepare('UPDATE orders SET total = 1300 WHERE id = ?')->execute([$byDay[8]]);
         SalesDaily::touchOrders([$byDay[8]]);
         try {

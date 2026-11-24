@@ -243,6 +243,7 @@ function pageProduct(): void {
     ?>
     <h1><?= $product ? esc(strtr(I18n::t('admin.common.edit_named'), ['{name}' => $product['name']])) : esc(I18n::t('admin.title.product_new')) ?></h1>
     <p class="muted"><?= esc(I18n::format('admin.product.prices_in', ['currency' => adminProductCurrency($product ?: null)])) ?></p>
+    <?php /* R58 (review round 23, low): the required main category offered only "—" on a fresh shop, with no way on */ if ($categories === []): ?><p class="flash flash-warn" data-no-categories><?= esc(I18n::t('admin.product.no_categories')) ?> <a href="admin.php?p=categories"><?= esc(I18n::t('admin.product.create_category')) ?></a></p><?php endif; ?>
     <?php if ($product): ?><form method="post" action="admin.php?p=product&amp;id=<?= (int)$product['id'] ?>&amp;action=duplicate"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.product.duplicate')) ?></button></form><?php endif; ?>
     <div class="card">
         <?php ob_start(); ?>

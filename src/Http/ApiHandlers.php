@@ -83,7 +83,12 @@ function apiProducts(): array {
  * cached responses too, which older versions wrote with them.
  */
 function apiPublicProduct(mixed $product): mixed {
-    if (is_array($product)) unset($product['filter_tags'], $product['translations']);
+    if (!is_array($product)) return $product;
+    unset($product['filter_tags'], $product['translations']);
+    // R58 (review round 23, low): and without admin-only attributes, also in a cached response written before R56 or under
+    // a spelling the check missed then ("download  url"). Was: a cached product returned its attrs/attributes as cached.
+    if (is_array($product['attrs'] ?? null)) $product['attrs'] = CatalogAttributes::publicMap($product['attrs']);
+    if (is_array($product['attributes'] ?? null)) $product['attributes'] = CatalogAttributes::publicRows($product['attributes']);
     return $product;
 }
 
@@ -333,7 +338,9 @@ function apiFilters(): array {
 
     $locale = I18n::locale();
     $cached = Cache::readCatalogJson(Cache::localePath($locale, "cat/{$catSlug}/filters.json"), 3600);
-    if ($cached) return $cached;
+    // R58 (review round 23, low): a cached answer is filtered as a fresh one, without the admin-only attributes.
+    if ($cached) return ['filters' => array_values(array_filter((array)($cached['filters'] ?? []),
+        static fn(mixed $filter): bool => is_array($filter) && !CatalogAttributes::isAdminOnly((string)($filter['attr_name'] ?? ''))))] + $cached;
 
     $raw = Products::filterValues($category['id']);
 
@@ -664,6 +671,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         }
     }
     $input = CheckoutService::withoutBidiControls($input);
+    // R58 (review round 23, low N2): the address and company trimmed of invisible characters (Security::typedText()), so
+    // one of them alone (U+200B, U+3164, a combining mark) is missing, not a blank street on the label and the invoice.
+    foreach (['street', 'city', 'zip', 'company'] as $field) {
+        if (is_string($input[$field] ?? null)) $input[$field] = Security::typedText($input[$field]);
+    }
     // R18: unbounded lengths reached VARCHAR(191) columns (MySQL refused the order: an incident, not a message).
     foreach (CheckoutService::FIELD_MAX_LENGTH as $field => $max) {
         if (str_starts_with($field, 'billing_') && !OrderAddress::billingRequested($input)) continue;
@@ -761,10 +773,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $shippingMethod = 'digital';
     } elseif (trim((string)($input['street'] ?? '')) === '' || trim((string)($input['city'] ?? '')) === '' || trim((string)($input['zip'] ?? '')) === '') {
         return checkoutRefusal('checkout.error.address_required');
+    } elseif (($zip = OrderAddress::postcode(trim(Security::str($input['zip'])), $country)) === null) {
+        return checkoutRefusal('checkout.error.zip_invalid', 422, ['field' => 'zip']); // R58 (low N2): SK/CZ five digits
     } elseif (!array_key_exists($country, ShippingService::destinationCountries())) {
         // Only countries the checkout offers; a wildcard zone price is not a destination by itself.
         return checkoutRefusal('checkout.error.shipping_unavailable');
     }
+    $deliveryZip = $digitalOnly ? '' : $zip; // R58: a Slovak or Czech one as its five digits
 
     $consentContext = [
         'country' => $country,
@@ -824,7 +839,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if (!$digitalOnly) {
         // Point-delivery carriers: the chosen pick-up point must be on the carrier's list for this address.
         $pickupInput = $input['pickup_point'] ?? '';
-        $pickup = ShippingService::choosePickupPoint($selectedRate, $country, trim(Security::str($input['zip'] ?? '')), is_string($pickupInput) ? $pickupInput : '');
+        $pickup = ShippingService::choosePickupPoint($selectedRate, $country, $deliveryZip, is_string($pickupInput) ? $pickupInput : '');
         if ($pickup['error'] !== null) return checkoutRefusal((string)$pickup['error']);
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
@@ -914,7 +929,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'address'        => [
             'street'  => $digitalOnly ? '' : trim(Security::str($input['street'] ?? '')),
             'city'    => $digitalOnly ? '' : trim(Security::str($input['city'] ?? '')),
-            'zip'     => $digitalOnly ? '' : trim(Security::str($input['zip'] ?? '')),
+            'zip'     => $deliveryZip,
             'country' => $country,
         ] + ($billing['address'] === null ? $buyerCompany['fields'] : []),
         'billing_address' => $billing['address'] === null ? null : $billing['address'] + $buyerCompany['fields'],

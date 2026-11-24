@@ -23,8 +23,26 @@ final class SalesReport {
     private const REFUNDED = "('partially_refunded', 'refunded', 'refund_succeeded')";
     /** @var array<string, true> R55: stores whose SalesDaily::refresh() failed in this request */
     public static array $refreshFailed = [];
+    /** @var ?array<string, true> R58: while a page's refreshOnce() is held, the stores its reports refreshed */
+    private static ?array $pageRefreshed = null;
     /** revenueBy() bucket: UTC hour and its quarter ('Y-m-d H:i'). */
     private const QUARTER = -1;
+
+    /**
+     * R58 (review round 23, low L2): an admin page holds the returned object while it renders: its reports refresh each
+     * store's daily totals at most once, the later ones read what that refresh left (the days it did not get to are
+     * summed from the orders). It ends when the object is released (the page function returns). Was: the dashboard
+     * refreshed for today's revenue and again for the trend, 9.7 s under a backlog of 1.59 million changes on MySQL.
+     */
+    public static function refreshOnce(): object {
+        $previous = self::$pageRefreshed;
+        self::$pageRefreshed ??= [];
+        $end = static function () use ($previous): void { self::$pageRefreshed = $previous; };
+        return new class($end) {
+            public function __construct(private readonly Closure $end) {}
+            public function __destruct() { ($this->end)(); }
+        };
+    }
 
     /**
      * FROM clause of revenue orders `o` with `r.refunded` = what was refunded of each, and its parameters (merge them
@@ -147,6 +165,16 @@ final class SalesReport {
      * @return array{0: ?array{0: string, 1: string}, 1: list<array{0: string, 1: ?string}>}
      */
     private static function parts(string $storeId, string $sinceUtc, ?DateTimeImmutable $now = null, bool $afterRefresh = false): array {
+        $from = SalesDaily::dayOf($sinceUtc);
+        $raw = [];
+        if (SalesDaily::dayStartUtc($from) !== $sinceUtc) {
+            $from = SalesDaily::nextDay($from);
+            $raw[] = [$sinceUtc, SalesDaily::dayStartUtc($from)];
+        }
+        // R58 (review round 23, low L2): a period without a closed day (today's revenue on the dashboard and the order
+        // list) is summed from the orders whatever the built days are, so it does not refresh them. Was: a refresh for
+        // it, 4.95 s for the order list under a backlog of changes on MySQL.
+        if ($from >= SalesDaily::openDay($now)) return [null, [[$sinceUtc, null]]];
         // R55 (review round 20, medium 3): a refresh that fails (SQLite "database is locked" behind a writer holding it
         // for longer than the busy timeout, a MySQL lock wait timeout) answered the reports and the dashboard with a 500.
         // The report then sums the orders; the next request or the worker builds the days. The other reports of the same
@@ -156,8 +184,14 @@ final class SalesReport {
             try {
                 // R57 (review round 22, low): a second report of the same page reads what the first one's refresh left
                 // (the days it did not get to are summed from the orders, SalesDaily::builtUntil()). Was: the Reports
-                // page refreshed for the trend and again for the best sellers, twice the request's seconds.
-                $refreshed = $afterRefresh ? SalesDaily::available() : SalesDaily::refresh($storeId, SalesDaily::$requestSeconds);
+                // page refreshed for the trend and again for the best sellers, twice the request's seconds. R58: any
+                // report of a page that opened refreshOnce() after the first one that refreshed.
+                if ($afterRefresh || isset(self::$pageRefreshed[$storeId])) {
+                    $refreshed = SalesDaily::available();
+                } else {
+                    if (self::$pageRefreshed !== null) self::$pageRefreshed[$storeId] = true;
+                    $refreshed = SalesDaily::refresh($storeId, SalesDaily::$requestSeconds);
+                }
             } catch (PDOException $e) {
                 if (Db::transactionOpen()) throw $e;
                 Logger::warning('sales_daily.refresh_failed', ['store' => $storeId, 'error' => $e->getMessage()]);
@@ -165,12 +199,6 @@ final class SalesReport {
             }
         }
         if (!$refreshed) return [null, [[$sinceUtc, null]]];
-        $from = SalesDaily::dayOf($sinceUtc);
-        $raw = [];
-        if (SalesDaily::dayStartUtc($from) !== $sinceUtc) {
-            $from = SalesDaily::nextDay($from);
-            $raw[] = [$sinceUtc, SalesDaily::dayStartUtc($from)];
-        }
         $to = min(SalesDaily::openDay($now), SalesDaily::builtUntil($storeId));
         if ($from >= $to) return [null, [[$sinceUtc, null]]];
         $raw[] = [SalesDaily::dayStartUtc($to), null];

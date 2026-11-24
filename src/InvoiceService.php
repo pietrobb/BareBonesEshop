@@ -372,15 +372,13 @@ final class InvoiceService
      * could credit more at its rate than the invoice has left there: negative VAT at that rate. The lines of a capped
      * key are scaled down together (gross in proportion, the last line takes the remainder; net in proportion, capped
      * at the uncredited base). Keys the invoice never had are left as they are.
-     * R57 (review round 22, V1): with $spill, what the caps took is credited at the invoice's other rates that still
-     * have it uncredited (spillLines()). Money refunded outside the returns now comes off the return that counts it,
-     * whatever rates its credit note credited; the later return of the goods at those rates found them lowered and was
-     * cut short by that share (A 20 € at 23 % + B 10 € at 5 %, 10 € refunded with its credit note, A returned: 10 €,
-     * then B: 6.67 € instead of 10 €).
+     * R58 (review round 23, medium S1): R57 credited what the caps took at the invoice's other rates with room left
+     * ($spill), even a rate with nothing returned; money refunded outside the returns now reverses its own credit at
+     * those rates on the return that counts it (outsideLines()), so a later return finds its goods' rate uncredited.
+     * Lines with negative gross (such a reversal) are never capped.
      * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
      */
-    private static function capToUncredited(array $lines, array $rates, array $source, bool $spill = false): array {
-        $wanted = array_sum(array_map(static fn(array $line): int => (int)$line['gross'], $lines));
+    private static function capToUncredited(array $lines, array $rates, array $source): array {
         $sourceKeys = array_map('strval', array_keys(json_decode((string)$source['vat_breakdown'], true) ?: []));
         $byKey = [];
         foreach ($lines as $index => $line) {
@@ -410,49 +408,7 @@ final class InvoiceService
             }
             foreach ($indexes as $i) $lines[$i]['vat'] = (int)$lines[$i]['gross'] - (int)$lines[$i]['net'];
         }
-        $short = $wanted - array_sum(array_map(static fn(array $line): int => (int)$line['gross'], $lines));
-        if ($spill && $short > 0 && $lines !== []) $lines = [...$lines, ...self::spillLines($lines, $rates, $short)];
         return self::creditTotals($lines);
-    }
-
-    /**
-     * R57 (V1): lines crediting $short at the rates of $rates (uncredited()['rates']) these lines leave room at, the most
-     * room first. Each names the goods of the first line, with no units (credit_note_items.rma_item_id negative: it is
-     * no unit of a return), so a return's credit note still credits its goods' whole value when an earlier return used
-     * up the money a refund credit note had credited at their rate.
-     * @return list<array>
-     */
-    private static function spillLines(array $lines, array $rates, int $short): array {
-        $used = [];
-        foreach ($lines as $line) {
-            $key = self::lineKey($line);
-            $used[$key]['gross'] = ($used[$key]['gross'] ?? 0) + (int)$line['gross'];
-            $used[$key]['net'] = ($used[$key]['net'] ?? 0) + (int)$line['net'];
-        }
-        $room = [];
-        foreach ($rates as $key => $rate) {
-            $left = (int)$rate['gross'] - (int)($used[(string)$key]['gross'] ?? 0);
-            if ($left > 0) $room[(string)$key] = $left;
-        }
-        arsort($room);
-        $base = $lines[0];
-        $spilled = [];
-        foreach ($room as $key => $left) {
-            $key = (string)$key;
-            if ($short <= 0 || count($spilled) >= 15) break;
-            $gross = min($left, $short);
-            $netLeft = max(0, (int)$rates[$key]['net'] - (int)($used[$key]['net'] ?? 0));
-            $net = min($netLeft, (int)round((int)$rates[$key]['net'] * $gross / max(1, (int)$rates[$key]['gross'])), $gross);
-            $supply = $rates[$key]['supply'] ?? [];
-            $spilled[] = [
-                'order_item_id' => (int)$base['order_item_id'], 'rma_item_id' => -((int)$base['rma_item_id'] * 16 + count($spilled) + 1),
-                'sku' => (string)$base['sku'], 'name' => (string)$base['name'], 'quantity' => 0, 'unit_gross' => 0,
-                'gross' => $gross, 'net' => $net, 'vat' => $gross - $net,
-                'rate_basis_points' => (int)round((float)explode(' ', $key)[0] * 100),
-            ] + (isset($supply['country']) ? ['country' => (string)$supply['country'], 'supply' => (string)($supply['supply'] ?? 'oss')] : []);
-            $short -= $gross;
-        }
-        return $spilled;
     }
 
     /**
@@ -732,8 +688,8 @@ final class InvoiceService
         [$source, $order, , $lines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         $full = (int)self::creditTotals($lines)[1]['gross'];
         $deduction = $outside > 0 ? self::outsideDeduction((int)$order['id'], $lines) : [];
-        $less = self::linesLess($lines, $deduction);
-        $owed = $less === [] ? 0 : (int)self::capToUncredited($less, self::uncredited($db, $source)['rates'], $source, true)[1]['gross'];
+        $less = self::outsideLines($lines, $deduction, $source);
+        $owed = $less === [] ? 0 : max(0, (int)self::capToUncredited($less, self::uncredited($db, $source)['rates'], $source)[1]['gross']);
         return [$full, $owed, $deduction];
     }
 
@@ -745,11 +701,11 @@ final class InvoiceService
      * and per key, for the credit snapshot.
      * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>, 3: int, 4: array<string, int>}
      */
-    private static function lessOutside(array $lines, int $orderId): array {
+    private static function lessOutside(array $lines, int $orderId, array $source): array {
         $deduction = self::outsideDeduction($orderId, $lines);
         if ($deduction === []) return [...self::creditTotals($lines), 0, []];
-        $less = self::linesLess($lines, $deduction);
-        if ($less === []) throw new LogicException('Money refunded outside the return covers this credit: close the return without payout');
+        $less = self::outsideLines($lines, $deduction, $source);
+        if ((int)self::creditTotals($less)[1]['gross'] <= 0) throw new LogicException('Money refunded outside the return covers this credit: close the return without payout');
         return [...self::creditTotals($less), array_sum($deduction), $deduction];
     }
 
@@ -798,9 +754,21 @@ final class InvoiceService
         }
         // R57 (review round 22, high V1): the rest of that money always comes off this return, whatever rates its credit
         // note credited. Was: only money without a credit note, so the share credited at rates this return does not have
-        // was paid out again (B 10 € at 5 % returned after 10 € refunded in the dashboard: 6.67 € more). The rate the
-        // later return of the other goods then lacks is moved by capToUncredited() ($spill).
+        // was paid out again (B 10 € at 5 % returned after 10 € refunded in the dashboard: 6.67 € more).
         $free = min($remaining - array_sum($deduction), array_sum($value) - array_sum($deduction));
+        // R58 (review round 23, medium S1): under the keys that money's credit notes credited it at beyond these goods'
+        // value at that key (the largest rest first), which this return's credit note reverses (outsideLines()); key ''
+        // only for money without a credit note. Was: all of it under '', taken off the returned goods at their own rate,
+        // so the goods stayed partly uncredited and the money stayed credited at the rates of goods the customer kept.
+        $rests = [];
+        foreach ($pools as $key => $pool) $rests[(string)$key] = $pool - (int)($deduction[(string)$key] ?? 0);
+        arsort($rests);
+        foreach ($rests as $key => $rest) {
+            $taken = min($rest, $free);
+            if ($taken <= 0) continue;
+            $deduction[(string)$key] = (int)($deduction[(string)$key] ?? 0) + $taken;
+            $free -= $taken;
+        }
         if ($free > 0) $deduction[''] = $free;
         return $deduction;
     }
@@ -845,6 +813,76 @@ final class InvoiceService
         return $lines;
     }
 
+    /**
+     * R58 (review round 23, medium S1): the credit lines of returned goods less the money refunded outside the returns
+     * that $deduction (outsideDeduction()) takes off them: the goods at their own rates less the share credited at those
+     * rates and less money without a credit note (linesLess()), and per key a reversing line (negative gross) of what
+     * that money's credit notes credited there beyond the goods' value at it, so the credit note credits the goods at
+     * their own rates and gives the other rates back what that money took from them. Gross in all: the goods' value less
+     * $deduction. Each reversing line names returned goods (credit_note_items.rma_item_id negative: no units), never more
+     * than their line credits, so no order item is credited more than its value or less than nothing. A key the invoice
+     * does not have comes off the goods like money without a credit note. [] when nothing is left.
+     * Was (R57): all of it off the goods' own rates, and a later return of goods at the other rates credited what their
+     * rate lacked at whatever rate had room (spillLines(), even 19 % for 2 € of returned 5 % books).
+     * @return list<array>
+     */
+    private static function outsideLines(array $lines, array $deduction, array $source): array {
+        if ($deduction === []) return $lines;
+        $breakdown = json_decode((string)$source['vat_breakdown'], true) ?: [];
+        $own = [];
+        foreach ($lines as $line) $own[self::lineKey($line)] = ($own[self::lineKey($line)] ?? 0) + (int)$line['gross'];
+        $reversing = [];
+        foreach ($deduction as $key => $amount) {
+            $key = (string)$key;
+            // What exceeds the goods' value at their own key was credited there for goods the customer kept: reversed too.
+            $excess = (int)$amount - (int)($own[$key] ?? 0);
+            if ($key === '' || $excess <= 0) continue;
+            if (isset($own[$key])) $deduction[$key] = (int)$own[$key];
+            else unset($deduction[$key]);
+            $info = $breakdown[$key] ?? null;
+            $gross = is_array($info) ? (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0) : 0;
+            if (!is_array($info) || $gross <= 0) {
+                $deduction[''] = (int)($deduction[''] ?? 0) + $excess;
+                continue;
+            }
+            $net = min($excess, (int)round($excess * max(0, (int)($info['net'] ?? 0)) / $gross));
+            $reversing[$key] = ['gross' => $excess, 'net' => $net, 'supply' => self::supplyOf($info)];
+        }
+        $less = self::linesLess($lines, $deduction);
+        if ($less === [] || $reversing === []) return $less;
+        // Spread over the goods lines in proportion to what each credits (the cents rounding leaves to any with room).
+        $room = array_map(static fn(array $line): int => (int)$line['gross'], $less);
+        $value = max(1, array_sum($room));
+        $count = [];
+        $lines = $less;
+        foreach ($reversing as $key => $part) {
+            $takes = [];
+            foreach ($less as $i => $line) $takes[$i] = min($room[$i], intdiv($part['gross'] * (int)$line['gross'], $value));
+            for ($left = $part['gross'] - array_sum($takes), $i = 0; $left > 0 && $i < count($less); $i++) {
+                $more = min($left, $room[$i] - $takes[$i]);
+                $takes[$i] += $more;
+                $left -= $more;
+            }
+            $takes = array_filter($takes, static fn(int $take): bool => $take > 0);
+            [$left, $netLeft] = [$part['gross'], $part['net']];
+            foreach ($takes as $i => $take) {
+                $base = $less[$i];
+                $net = $take === $left ? $netLeft : min($netLeft, (int)round($part['net'] * $take / $part['gross']));
+                $room[$i] -= $take;
+                $left -= $take;
+                $netLeft -= $net;
+                $number = $count[(int)$base['rma_item_id']] = ($count[(int)$base['rma_item_id']] ?? 0) + 1;
+                $lines[] = [
+                    'order_item_id' => (int)$base['order_item_id'], 'rma_item_id' => -((int)$base['rma_item_id'] * 16 + $number),
+                    'sku' => (string)$base['sku'], 'name' => (string)$base['name'], 'quantity' => 0, 'unit_gross' => 0,
+                    'gross' => -$take, 'net' => -$net, 'vat' => -($take - $net),
+                    'rate_basis_points' => (int)round((float)explode(' ', (string)$key)[0] * 100),
+                ] + (isset($part['supply']['country']) ? ['country' => (string)$part['supply']['country'], 'supply' => (string)($part['supply']['supply'] ?? 'oss')] : []);
+            }
+        }
+        return $lines;
+    }
+
     /** The VAT breakdown key of a credit line (capToUncredited(), creditTotals()). */
     private static function lineKey(array $line): string {
         return (string)VatService::breakdownKey((int)$line['rate_basis_points'], (string)($line['country'] ?? ''), (string)($line['supply'] ?? ''));
@@ -883,10 +921,8 @@ final class InvoiceService
 
         [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         // R51 (R49 open): the outside money comes off the goods' full value, then the uncredited rest caps it (rmaCreditOwed()).
-        $draftLines = $deductOutside ? self::lessOutside($fullLines, (int)$order['id'])[0] : $fullLines;
-        // R57 (V1): once returns counted money refunded outside them, what the rate caps take is credited at other rates.
-        $spill = $deductOutside || Rma::outsideCounted((int)$order['id'])['total'] > 0;
-        [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source, $spill);
+        $draftLines = $deductOutside ? self::lessOutside($fullLines, (int)$order['id'], $source)[0] : $fullLines;
+        [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
@@ -911,8 +947,8 @@ final class InvoiceService
             $less = 0;
             $draftLines = $fullLines;
             $lessKeys = [];
-            if ($deductOutside) [$draftLines, , , $less, $lessKeys] = self::lessOutside($fullLines, (int)$order['id']);
-            [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source, $spill);
+            if ($deductOutside) [$draftLines, , , $less, $lessKeys] = self::lessOutside($fullLines, (int)$order['id'], $source);
+            [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             $creditData = [
@@ -931,7 +967,7 @@ final class InvoiceService
                 : 'UPDATE rma_requests SET id = id WHERE id = ? AND store_id = ?')->execute([$rmaId, StoreContext::current()->id()]);
             $freshItems = array_column(Rma::items($rmaId), null, 'id');
             foreach ($lines as $line) {
-                if ((int)$line['rma_item_id'] < 0) continue; // R57: a line moving a rate cap (spillLines()) has no units
+                if ((int)$line['rma_item_id'] < 0) continue; // R58: a reversing line (outsideLines()) has no units
                 if ($line['quantity'] > self::uncommittedQuantity($freshItems[$line['rma_item_id']] ?? ['id' => $line['rma_item_id'], 'received_quantity' => 0])) {
                     throw new LogicException('Credit quantity exceeds received uncommitted quantity');
                 }
@@ -1015,6 +1051,84 @@ final class InvoiceService
     }
 
     /**
+     * R58 (review round 23, medium S1): the credit note of a return closed without payout (Rma::closeWithoutPayout())
+     * whose goods the money refunded outside the returns covered while that money's credit notes credited it at other
+     * rates: the goods at their own rates and the reversal of that money's credit at the other rates (outsideLines()),
+     * nothing in all, so no money moves and no item refund is booked. Was: no credit note, so the returned goods stayed
+     * uncredited and the money stayed credited at the rates of the goods kept (A 20 € at 23 % and B 10 € at 5 %, 20 €
+     * refunded in the dashboard, A returned and closed: 6.67 € uncredited at 23 %, 6.67 € too little at 5 %; R57 then
+     * credited B's later return partly at 23 %). Null when nothing is credited at another rate (or nothing is left
+     * after the caps). In the caller's transaction, under the order lock, before the return's units count as refunded.
+     * @param array<string, int> $deduction the outside money the return uses up per key (rmaCreditOwed())
+     */
+    public static function balanceClosedReturn(int $sourceInvoiceId, int $rmaId, array $quantities, array $deduction): ?array
+    {
+        if (!$quantities || $deduction === []) return null;
+        $db = Db::get();
+        [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
+        $key = 'outside_balance:' . $rmaId;
+        if ($row = self::refundCreditByKey($db, (int)$order['id'], $key)) return $row;
+        $draft = self::outsideLines($fullLines, $deduction, $source);
+        if (array_filter($draft, static fn(array $line): bool => (int)$line['gross'] < 0) === []) return null;
+        [$lines, $totals, $breakdown] = self::capToUncredited($draft, self::uncredited($db, $source)['rates'], $source);
+        if ($totals['gross'] !== 0) return null;
+        [$sellerCode, $store] = self::creditSeller($source, $order);
+        $issuedAt = ShopTime::dateIn('Y-m-d', StoreContext::timezoneFor($store));
+        $year = (int)substr($issuedAt, 0, 4);
+        $creditData = [
+            'version' => 1, 'kind' => 'outside_balance', 'source_invoice_id' => $sourceInvoiceId, 'refund_key' => $key, 'rma_id' => $rmaId,
+            'source_fingerprint' => (string)($snapshot['fingerprint'] ?? ''), 'currency' => (string)$source['currency'],
+            'lines' => $lines, 'totals' => $totals, 'outside_applied_keys' => (object)$deduction,
+        ];
+        $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, self::numberPrefix($store['legal'] ?? [], 'credit_note'));
+        $db->prepare("INSERT INTO invoices
+            (order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,
+             total_net, total_vat, total_gross, currency, vat_breakdown,
+             customer_snapshot, seller_snapshot, payment_method, locale, status, download_token,
+             type, refers_to_invoice_id, vat_scenario, reverse_charge_note_key, financial_snapshot, credit_snapshot)
+            VALUES (:order, :store, :number, :issued, :delivery, :due, :path,
+             :net, :vat, :gross, :currency, :breakdown, :customer, :seller, :payment, :locale, 'issued', :token,
+             'credit_note', :source, :scenario, :note, :financial, :credit)")->execute([
+            ':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':number' => $number,
+            ':issued' => $issuedAt, ':delivery' => $issuedAt, ':due' => $issuedAt,
+            ':path' => sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number)),
+            ':net' => -$totals['net'], ':vat' => -$totals['vat'], ':gross' => 0,
+            ':currency' => (string)$source['currency'], ':breakdown' => json_encode($breakdown, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            ':customer' => (string)$source['customer_snapshot'], ':seller' => (string)$source['seller_snapshot'],
+            ':payment' => (string)$source['payment_method'], ':locale' => (string)$source['locale'],
+            ':token' => self::tokenHash(bin2hex(random_bytes(32))), ':source' => $sourceInvoiceId, ':scenario' => $source['vat_scenario'] ?? null,
+            ':note' => $source['reverse_charge_note_key'] ?? null, ':financial' => (string)$source['financial_snapshot'],
+            ':credit' => json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        ]);
+        $invoiceId = (int)$db->lastInsertId();
+        self::recordSeller($db, $invoiceId, $sellerCode);
+        OssThreshold::record($db, $invoiceId);
+        // Its lines name the returned goods; refund_id 0: no item refund (its units are refunded by the closing).
+        $lineInsert = $db->prepare("INSERT INTO credit_note_items
+            (credit_note_id, refund_id, order_item_id, rma_item_id, sku, name, quantity, unit_gross, gross, net, vat, rate_basis_points)
+            VALUES (:credit, 0, :order_item, :rma_item, :sku, :name, :quantity, :unit, :gross, :net, :vat, :rate)");
+        foreach ($lines as $line) {
+            $lineInsert->execute([
+                ':credit' => $invoiceId, ':order_item' => $line['order_item_id'], ':rma_item' => $line['rma_item_id'],
+                ':sku' => $line['sku'], ':name' => $line['name'], ':quantity' => $line['quantity'], ':unit' => $line['unit_gross'],
+                ':gross' => $line['gross'], ':net' => $line['net'], ':vat' => $line['vat'], ':rate' => $line['rate_basis_points'],
+            ]);
+        }
+        AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => $sourceInvoiceId, 'rma_id' => $rmaId, 'gross' => 0], 'Return closed without payout: credit moved to the returned goods\' rates');
+        $invoice = self::byId($invoiceId);
+        // Written in the caller's transaction: a PDF that cannot be written does not undo the closing (regeneratePdf()).
+        try {
+            $pdf = self::renderPdf($invoice, self::creditRows($lines), json_decode((string)$source['seller_snapshot'], true) ?: [],
+                json_decode((string)$source['customer_snapshot'], true) ?: [], ['rates' => $breakdown, 'vat_total' => -$totals['vat'], 'services_only' => self::servicesOnly($order)]);
+            self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
+        } catch (Throwable $e) {
+            Logger::warning('invoice.pdf_failed', ['invoice_id' => $invoiceId, 'error' => $e->getMessage()]);
+        }
+        return $invoice;
+    }
+
+    /**
      * Credit note of money returned without an item return (completeManualRefund(), creditBookedRefund()): the
      * amount comes off the order's invoice in proportion to its VAT breakdown, one "Refund" row per VAT rate. It books
      * nothing on the refund ledger (the payment ledger already holds the refund). Null when the order has no issued
@@ -1042,11 +1156,20 @@ final class InvoiceService
             $ofUnshipped = $unshipped !== null;
             if ($unshipped !== null) $itemRates = self::unshippedUncredited($source, $unshipped);
             $own = [];
+            $back = [];
             foreach ($itemRates as $key => $part) {
                 $key = (string)$key;
+                if ($part['gross'] < 0) $back[$key] = $part;
                 if (!isset($rates[$key]) || $part['gross'] <= 0) continue;
                 $gross = min($part['gross'], $rates[$key]['gross']);
                 $own[$key] = ['gross' => $gross, 'net' => (int)round($part['net'] * $gross / $part['gross'])];
+            }
+            // R58 (review round 23, medium S1): the reversed credit note gave rates back (outsideLines()): its money,
+            // paid out after all, credits exactly what that note did, those rates taken again, while the invoice has it.
+            if ($back !== [] && $own !== [] && $amount === array_sum(array_column($itemRates, 'gross'))
+                && array_sum(array_column($own, 'gross')) === array_sum(array_column($itemRates, 'gross')) - array_sum(array_column($back, 'gross'))
+                && self::creditedAtLeast($source, $rates, $back)) {
+                return $own + $back;
             }
             if ($own !== [] && $amount <= array_sum(array_column($own, 'gross'))) {
                 $rates = $own;
@@ -1088,6 +1211,23 @@ final class InvoiceService
             // R56: every refund credit note names its split; one without (issued before R56) is read by unshippedUncredited().
             return ['split' => $split['unshipped'] ? 'unshipped' : ($itemRates !== [] ? 'items' : 'invoice')];
         });
+    }
+
+    /**
+     * R58: whether $source has, per key of $back (negative gross), at least that much credited so far (invoiced less
+     * $rates, uncredited()['rates']): a key given back never exceeds what the invoice has at it.
+     * @param array<string, array{gross: int, net: int}> $back
+     */
+    private static function creditedAtLeast(array $source, array $rates, array $back): bool
+    {
+        $breakdown = json_decode((string)$source['vat_breakdown'], true) ?: [];
+        foreach ($back as $key => $part) {
+            $info = $breakdown[(string)$key] ?? null;
+            if (!is_array($info)) return false;
+            $credited = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0) - (int)($rates[(string)$key]['gross'] ?? 0);
+            if (-(int)$part['gross'] > $credited) return false;
+        }
+        return true;
     }
 
     /**
@@ -1241,14 +1381,17 @@ final class InvoiceService
             $lines = [];
             $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
             $breakdown = [];
+            $sourceBreakdown = json_decode((string)$source['vat_breakdown'], true) ?: [];
             foreach ($split($rates, $uncredited, $source) as $key => $part) {
                 $key = (string)$key;
                 $gross = (int)$part['gross'];
-                if ($gross <= 0 || !isset($rates[$key])) continue;
-                $net = max(0, min((int)$part['net'], $gross));
-                $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $rates[$key]['supply'];
+                // R58: a key given back (negative gross, creditRefund() of a released item refund) is one of the invoice's.
+                $supply = $gross < 0 && is_array($sourceBreakdown[$key] ?? null) ? self::supplyOf($sourceBreakdown[$key]) : ($rates[$key]['supply'] ?? null);
+                if ($gross === 0 || $supply === null || ($gross > 0 && !isset($rates[$key]))) continue;
+                $net = $gross > 0 ? max(0, min((int)$part['net'], $gross)) : min(0, max((int)$part['net'], $gross));
+                $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $supply;
                 foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $name => $value) $totals[$name] += $value;
-                $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $rates[$key]['supply'];
+                $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $supply;
             }
             if ($totals['gross'] > $uncredited) throw new LogicException('The credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] <= 0) {
@@ -1471,9 +1614,11 @@ final class InvoiceService
         $breakdown = [];
         foreach (json_decode((string)$credit['vat_breakdown'], true) ?: [] as $rateKey => $info) {
             if (!is_array($info)) continue;
-            $breakdown[(string)$rateKey] = ['net' => abs((int)($info['net'] ?? 0)), 'vat' => abs((int)($info['vat'] ?? 0))] + self::supplyOf($info);
+            // R58 (review round 23, S1): negated, not made positive: a key a credit note gave back (outsideLines()) is
+            // taken again by its reversal.
+            $breakdown[(string)$rateKey] = ['net' => -(int)($info['net'] ?? 0), 'vat' => -(int)($info['vat'] ?? 0)] + self::supplyOf($info);
         }
-        $totals = ['gross' => abs((int)$credit['total_gross']), 'net' => abs((int)$credit['total_net']), 'vat' => abs((int)$credit['total_vat'])];
+        $totals = ['gross' => -(int)$credit['total_gross'], 'net' => -(int)$credit['total_net'], 'vat' => -(int)$credit['total_vat']];
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
@@ -1720,24 +1865,13 @@ final class InvoiceService
 
     /**
      * Seller of a configured store: the legal entity whose invoice and credit-note number series (and counters) the
-     * store's documents use.
-     * - A store with its own non-empty `legal` block is its own seller, unless legal.seller names another store that
-     *   is a seller itself: storefronts of one company then share that store's series and counter (its prefixes;
-     *   their own legal fields only override the printed seller details).
-     * - A store without a `legal` block is no seller of its own (as before per-seller numbering, when its documents
-     *   used the store found by the order's currency): it invoices as the first seller selling in the order's
-     *   currency, else as the default store's seller, else as the first seller configured.
+     * store's documents use. R58 (review round 23, high V1): resolved by SellerLegal, which checkout, shipping, payments
+     * and the legal pages read too, so an invoice never names another seller than the one the order was priced for.
      * Null for an unknown store, or a legal.seller that names no seller (numberingConflicts() reports it).
      */
     public static function sellerCode(array $root, string $storeCode, ?string $currency = null): ?string
     {
-        $stores = self::storeMap($root);
-        if (!isset($stores[$storeCode])) return null;
-        $legal = self::legalBlock($stores[$storeCode]);
-        if ($legal === null) return self::fallbackSeller($root, $currency);
-        $target = trim((string)($legal['seller'] ?? ''));
-        if ($target === '' || $target === $storeCode) return $storeCode;
-        return self::ownsSeries($stores, $target) ? $target : null;
+        return SellerLegal::sellerCode($root, $storeCode, $currency);
     }
 
     /**
@@ -1759,7 +1893,7 @@ final class InvoiceService
             if ($legal === null) continue;
             $target = trim((string)($legal['seller'] ?? ''));
             if ($target !== '' && $target !== $storeId) {
-                if (!self::ownsSeries($stores, $target)) {
+                if (!SellerLegal::ownsSeries($stores, $target)) {
                     foreach (['invoice', 'credit_note'] as $type) {
                         $conflicts["{$storeId}/{$type}"] = "Store {$storeId}: legal.seller '{$target}' is not a store with its own legal block; name a seller store or remove legal.seller in stores.json";
                     }
@@ -1768,7 +1902,7 @@ final class InvoiceService
             }
             foreach (['invoice', 'credit_note'] as $type) $byPrefix[self::numberPrefix($legal, $type)][] = "{$storeId}/{$type}";
         }
-        $default = self::defaultSeller($root);
+        $default = SellerLegal::defaultSeller($root);
         foreach ($byPrefix as $prefix => $series) {
             if (count($series) < 2) continue;
             $owner = null;
@@ -1808,62 +1942,12 @@ final class InvoiceService
     /** @return array<string,array<mixed>> */
     private static function storeMap(array $root): array
     {
-        $stores = [];
-        foreach ((array)($root['stores'] ?? []) as $code => $store) {
-            if (is_array($store)) $stores[(string)$code] = $store;
-        }
-        return $stores;
+        return SellerLegal::storeMap($root);
     }
 
     private static function legalBlock(array $store): ?array
     {
-        return is_array($store['legal'] ?? null) && $store['legal'] !== [] ? $store['legal'] : null;
-    }
-
-    /** True when the store is a seller of its own (own legal block, no legal.seller naming another store). */
-    private static function ownsSeries(array $stores, string $code): bool
-    {
-        $legal = isset($stores[$code]) ? self::legalBlock($stores[$code]) : null;
-        if ($legal === null) return false;
-        $target = trim((string)($legal['seller'] ?? ''));
-        return $target === '' || $target === $code;
-    }
-
-    private static function defaultSeller(array $root): ?string
-    {
-        $default = (string)($root['default_store'] ?? '');
-        $stores = self::storeMap($root);
-        if ($default === '' || !isset($stores[$default]) || self::legalBlock($stores[$default]) === null) return null;
-        return self::sellerCode($root, $default);
-    }
-
-    private static function fallbackSeller(array $root, ?string $currency): ?string
-    {
-        $stores = self::storeMap($root);
-        if ($currency !== null && $currency !== '') {
-            foreach ($stores as $code => $store) {
-                if (self::legalBlock($store) === null || strtolower((string)($store['currency'] ?? '')) !== strtolower($currency)) continue;
-                $seller = self::sellerCode($root, $code);
-                if ($seller !== null) return $seller;
-            }
-        }
-        $default = self::defaultSeller($root);
-        if ($default !== null) return $default;
-        foreach (array_keys($stores) as $code) {
-            if (self::ownsSeries($stores, $code)) return $code;
-        }
-        return null;
-    }
-
-    /** Legal details a store's documents print: its seller's, with the store's own fields over them (never the prefixes). */
-    private static function effectiveLegal(array $root, string $storeCode, string $sellerCode): array
-    {
-        $stores = self::storeMap($root);
-        $sellerLegal = isset($stores[$sellerCode]) ? (self::legalBlock($stores[$sellerCode]) ?? []) : [];
-        $own = isset($stores[$storeCode]) ? self::legalBlock($stores[$storeCode]) : null;
-        if ($own === null || $storeCode === $sellerCode) return $sellerLegal;
-        unset($own['seller'], $own['invoice_prefix'], $own['credit_note_prefix']);
-        return array_replace($sellerLegal, $own);
+        return SellerLegal::legalBlock($store);
     }
 
     /** Identity of the seller of $order (name, address, ids, e-mail, phone) for consumer notices; [] when none is configured. */
@@ -1875,7 +1959,7 @@ final class InvoiceService
         $orderStore = (string)($order['store_id'] ?? '');
         $code = isset($stores[$orderStore]) ? $orderStore : self::detectStoreCode($order, $root);
         $seller = self::sellerCode($root, $code, strtolower((string)($order['currency'] ?? '')));
-        return $seller === null ? [] : self::sellerSnapshot(self::effectiveLegal($root, $code, $seller));
+        return $seller === null ? [] : self::sellerSnapshot(SellerLegal::effective($root, $code, $seller));
     }
 
     /**
@@ -1896,7 +1980,7 @@ final class InvoiceService
             throw new \RuntimeException('Invoice numbering configuration conflict: ' . $conflict . ' (see php cli/setup.php doctor)');
         }
         $store = $stores[$storeCode] ?? $stores[$sellerCode] ?? [];
-        $store['legal'] = self::effectiveLegal($root, $storeCode, $sellerCode);
+        $store['legal'] = SellerLegal::effective($root, $storeCode, $sellerCode);
         return [$sellerCode, $store];
     }
 
@@ -1934,7 +2018,7 @@ final class InvoiceService
         if ($ico === '' && $name === '') return null;
         $stores = self::storeMap($root);
         foreach ($stores as $code => $store) {
-            if (!self::ownsSeries($stores, $code)) continue;
+            if (!SellerLegal::ownsSeries($stores, $code)) continue;
             $legal = self::legalBlock($store) ?? [];
             if (trim((string)($legal['ico'] ?? '')) === $ico && trim((string)($legal['name'] ?? '')) === $name) return $code;
         }
@@ -2544,7 +2628,8 @@ final class InvoiceService
     {
         return array_map(static fn(array $line): array => [
             'name' => (string)$line['name'], 'qty' => (int)$line['quantity'], 'rate' => (int)$line['rate_basis_points'] / 100,
-            'net' => -abs((int)$line['net']), 'gross' => -abs((int)$line['gross']),
+            // R58: a reversing line (outsideLines(), negative gross) is printed positive: it gives that rate back.
+            'net' => -(int)$line['net'], 'gross' => -(int)$line['gross'],
         ] + self::supplyOf($line), $lines);
     }
 

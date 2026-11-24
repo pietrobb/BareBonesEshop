@@ -17,6 +17,10 @@ AuditCouponRaceRegression.php
 AuditCrFollowupCheckoutRegression.php
 CheckoutPaymentRedirectRegression.php
 SaveForLaterRegression.php
+AuditRound58StoresRegression.php
+AuditRound58ShippingUxRegression.php
+AuditRound58TextRegression.php
+AuditRound58StockDeadlockRegression.php
 
 # Payments, webhooks and refunds
 AuditPaymentsRegression.php
@@ -30,6 +34,8 @@ PaymentMonitoringRegression.php
 AuditGopayRegression.php
 AuditComgateRegression.php
 AuditThepayRegression.php
+AuditRound58CreditVatRegression.php
+AuditRound58RefundLowsRegression.php
 
 # Orders, stock and invoices
 AuditOrderAdminRegression.php

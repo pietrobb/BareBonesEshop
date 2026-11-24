@@ -29,12 +29,9 @@ require_once __DIR__ . '/../src/autoload.php';
 function vatBackfillSeller(array $stores, string $storeId): array
 {
     $all = is_array($stores['stores'] ?? null) ? $stores['stores'] : [];
-    $default = $all[$stores['default_store'] ?? ''] ?? (reset($all) ?: []);
-    $store = $all[$storeId] ?? $default;
-    // A store without its own legal block sells as the default store's seller.
-    if (empty($store['legal']['country'])) $store = $default;
-    $country = strtoupper((string)($store['legal']['country'] ?? 'SK'));
-    return ['country' => $country !== '' ? $country : 'SK', 'oss' => (bool)($store['oss_enabled'] ?? false)];
+    $code = isset($all[$storeId]) ? $storeId : (string)($stores['default_store'] ?? array_key_first($all));
+    // R58 (review round 23, high V1): the store's seller (legal.seller, SellerLegal), as checkout and the invoices read it.
+    return ['country' => SellerLegal::country(SellerLegal::forStore($stores, $code)), 'oss' => (bool)($all[$code]['oss_enabled'] ?? false)];
 }
 
 /**

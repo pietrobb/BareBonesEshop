@@ -437,14 +437,106 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   schedule that never runs (`0 0 31 2 *`) is reported as such, and a line that does not run `cli/worker.php` through PHP
   (`* * * * * echo worker.php`) as no crontab line, also with `web_worker` on (round 22). A quoted PHP binary or path
   (`php "/var/www/my shop/cli/worker.php"`) is accepted. Record the worker's every-minute line.
+- **Migration** `20261124090000_filter_tags_admin_only_spellings` (review round 23): writes every product's filter tags
+  again from its attributes, without admin-only attributes spelled with runs of separators (`download  url`,
+  `Download--URL`, which round 22's check missed). It reads the catalog in pages of 1000 products and writes only the
+  tags that change.
+- **Migration** `20261124120000_sales_daily_changes_by_day` (review round 23): adds the index
+  `sales_daily_changes (store_id, created_at, id)` and drops `idx_sales_daily_changes_store`, which is no longer read.
+  It only touches the table of pending daily-sales changes (seconds, even with a large backlog).
+- **Check the orders of stores added in Admin → Stores (review round 23, high V1).** Up to this release a store added
+  there (`"legal": {"seller": "default"}`) charged VAT, chose the `shipping.json` home zone and pre-selected the buyer's
+  country as a Slovak seller. Its invoices named your real seller, but at the Slovak rate (a Czech or German shop's
+  added store charged 23 %), and bank transfer was not offered in it. From this release such a store sells as the
+  seller it names; `stores.json` does not change. If your seller is not in Slovakia, review the orders and invoices of
+  such stores and correct them with credit notes where needed. A `legal.seller` naming no seller (a missing store, a
+  loop) is priced like a store without a legal block and still refused for invoicing (`php cli/setup.php doctor`
+  reports it).
+- **Standard and Express delivery move to Admin → Shipping (review round 23, medium S4).** Shops installed before keep
+  them exactly as `shipping.json` prices them until the merchant changes them in Admin → Shipping. A shop that edited
+  `shipping.json` by hand: enter the same prices or switches in Admin → Shipping, then restore the shipped file (for
+  example `git checkout shipping.json`, or take it from the release) so the updater accepts the next package. While the
+  file is modified, the updater refuses packages that change it.
+- **Slovak and Czech postcodes are stored as five digits (review round 23, low N2).** Checkout, the address book and
+  manual orders accept `811 01` and `81101` and store `81101`; a Slovak or Czech postcode of another form is refused.
+  Postcodes stored before are not changed.
 
 ### Changes
+
+- **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
+  home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
+  and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as
+  well. Was: Slovakia, so a Czech shop's `/sk` store charged its Czech buyers 23 % instead of 21 %, a German shop's `/en`
+  store charged Germans the EU shipping rate and treated Slovaks as domestic buyers, and bank transfer was missing. The
+  store switcher and regional hreflang name the country a store sells to (a Slovak store of a Czech seller is "SK");
+  two stores with the same country and currency are listed by name.
+- **The admin speaks every language; Admin → Stores sets a storefront's languages (review round 23, medium S3).** The
+  admin language links list every shipped language, no longer only the storefronts' (a German install had no English
+  admin). Each store's form has a "Storefront languages" field; the store's default language always stays. The language
+  switcher, hreflang links and sitemap follow it, and the installer's hint says where languages are added.
+- **A return's credit note credits the returned goods at their own VAT rates (review round 23, medium S1).** Round 22
+  took money refunded outside the returns (a goodwill refund, one made in the gateway's dashboard) off the return whole,
+  which paid the customer right, but its credit note left that money credited at the rates of the goods kept: two
+  14.50 € items at 23 % kept and three 12 € books at 5 % returned after 23.82 € refunded in the dashboard left 10.63 € of
+  the books uncredited at 5 % and 18.37 € instead of 29 € at 23 %, and a later return could be credited at a rate with
+  nothing returned. The return's credit note now credits its goods in full at their rates and gives the other rates
+  back what that money took from them (rows of those rates with a positive amount, the payout unchanged); a return
+  closed without payout gets a credit note of 0.00 doing the same. Once every return is in, each rate has the goods kept
+  at it uncredited. The reversal of a declined item refund's credit note, and the credit note of such a refund paid out
+  after all, keep those rates; the OSS report and threshold read such credit notes by their signs.
+- **A large daily-sales backlog no longer stalls the reports on MySQL/MariaDB (review round 23, medium S2 and low
+  L1).** Every report request read the store's pending changes again from the first one and built a single day when
+  its 2 s ran out: at 700 000 changes a request took 3.3–4.8 s and removed a few hundred of them, the worker built one
+  day per 20 s job (about 4 hours), and every report summed from the orders meanwhile. Changes are now read oldest day
+  first, a month of days at a time, built and removed before the next: 700 000 changes are gone after 14 report requests
+  of at most 2.4 s, the worker clears 1.6 million in three jobs, and a request does little after its 2 s.
+- **The dashboard and the order list no longer wait for the daily totals (review round 23, low L2).** Today's revenue
+  is always summed from the orders, yet it refreshed the daily totals first, and the dashboard refreshed again for its
+  trend (10 s for the dashboard and 5 s for the order list under a large backlog). Today's revenue no longer refreshes,
+  and a page's reports refresh at most once.
+- **Standard and Express delivery are set in Admin → Shipping, not in `shipping.json` (review round 23, medium S4).**
+  Admin → Shipping switches the two `shipping.json` methods on or off and sets their price and per-kg rate per zone,
+  the free-shipping amount and the delivery days; a zone left without a price is not served. The settings are kept in
+  `shipping-methods.json` in the data directory (included in backups), only where they differ from `shipping.json`, so
+  the core file stays as shipped (editing it stopped every update at "installed file was locally modified"). The list
+  names zones by name, no longer shows the in-store pickup (checkout never offered it from that file), and a store
+  charging another currency says the methods are not offered there instead of listing EUR prices. The order list and
+  detail name these methods in the admin's language. A new web install whose default store has shipping methods of its
+  own (GLS, Packeta, pickup) starts with Standard (3.99 €) and Express (7.99 €) switched off.
+- **Addresses, postcodes and product names (review round 23, lows N2 and N4).** In checkout (street, city, postcode,
+  company, billing name and address), the address book and the manual admin order, a field of invisible or combining
+  characters alone (U+200B, U+3164, U+0301) counts as missing, and such a company as none. Slovak and Czech postcodes
+  must be five digits (see the upgrade note). A product name with a control character inside (`\x01`, ESC, DEL, U+2028)
+  is refused by the product editor (which now names the field in the admin's language), the CSV import (line breaks in a
+  multi-line cell become spaces) and API v1.
+- **Refunds and incidents (review round 23, lows).** An item refund the gateway declined or released after the payment
+  was refunded in full raised a critical "refund failed" although the customer had all the money; it is now a warning,
+  as for a refund request. A critical incident held back by the alert cooldown is always e-mailed: a warning of the same
+  code reported after the window ended no longer drops it. A Comgate refund that ended in a server error (1100, 1200,
+  1500 or an unknown code) is no longer released as declined, which invited a second refund though Comgate may have
+  refunded: only a refused request (1400, 1401, 1402) is declined, any other code leaves the refund pending with
+  "refund outcome unknown" for the merchant to confirm or release after checking the Comgate portal.
+- **Concurrent checkouts of different products no longer fail on MySQL/MariaDB (review round 23, found in
+  verification).** Mirroring a variant's ledger stock locked every product row of the store, so two checkouts of
+  different products deadlocked; under load the order's three attempts ran out and the buyer got "checkout failed"
+  (503). A stock sync now locks only the rows of its own SKU.
+- **The store domain test asks no name without an address (review round 23, low N1).** A domain whose DNS returns no
+  address is reported as not answering instead of being asked unpinned (libcurl answered `*.localhost` itself with
+  127.0.0.1). Names of the local network (`.localhost`, `.local`, `.localdomain`, `.internal`, `.lan`, `.arpa`) are
+  refused as store domains. Documentation, multicast and site-local addresses count as non-public for the domain test
+  and feed imports.
+- **Admin-only attributes and smaller fixes (review round 23, lows).** `download  url` and `Download--URL` are
+  admin-only like `download_url`, and cached `/api` product and filter responses written before are filtered when read.
+  The default theme shows the language switcher only with more than one language. The product type select uses the
+  catalog.json names ("Digital Download"), and the product editor of a catalog without categories links to Admin →
+  Categories. Slovak, Czech and Polish messages put the count after a colon (bulk price change, guest erasure, feed
+  stopped). A decomposed "Ján Novák" becomes the slug `jan-novak`.
 
 - **Money refunded outside a return is no longer paid out again (review round 22, high V1).** Round 21 took such a
   refund off a return only at the VAT rates of the returned goods, so the share credited at the order's other rates
   was paid a second time (A 20 € at 23 % and B 10 € at 5 %, 10 € refunded in the gateway's dashboard, B returned:
-  16.67 € paid for a 10 € book). All of it now comes off the return; a later return at another rate gets what the
-  rate caps held back credited at a rate with room left. A credit note from before round 19 without its VAT split no
+  16.67 € paid for a 10 € book). All of it now comes off the return (round 23 credits the return at its goods' own
+  VAT rates, see above). A credit note from before round 19 without its VAT split no
   longer counts as the unshipped goods' credit, and a warning that follows a critical incident of the same code is
   alerted as a warning.
 - **A refund ThePay or Comgate refused is settled (review round 22, medium S3).** Its payment's state was read with a

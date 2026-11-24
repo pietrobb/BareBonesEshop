@@ -600,8 +600,12 @@ class Customers {
         $errors = self::invalidTextErrors($address, ['name', 'company', 'ico', 'dic', 'vat_id', 'street', 'city', 'zip', 'country', 'phone']);
         foreach (['name', 'street', 'city', 'zip', 'country'] as $field) {
             if (isset($errors[$field])) continue;
-            if (trim((string)($address[$field] ?? '')) === '') $errors[$field] = 'account.err_address_required';
+            // R58 (review round 23, low N2): a field of invisible characters alone (U+200B, U+3164, a combining mark) is empty.
+            if (Security::typedText(Security::str($address[$field] ?? '')) === '') $errors[$field] = 'account.err_address_required';
         }
+        // R58 (low N2): a Slovak or Czech postcode is five digits ("811 01"); other countries' are not checked.
+        if (!isset($errors['zip']) && !isset($errors['country'])
+            && OrderAddress::postcode(Security::str($address['zip'] ?? ''), Security::str($address['country'] ?? '')) === null) $errors['zip'] = 'account.err_address_zip';
         // R31: a billing address may be in any country the buyer is registered in, not only where the shop delivers.
         $countries = ($address['type'] ?? null) === 'billing' ? ShippingService::billingCountries() : ShippingService::destinationCountries();
         if (!isset($errors['country']) && !isset($countries[strtoupper((string)$address['country'])])) {
@@ -640,12 +644,12 @@ class Customers {
         );
         $ins->execute(array_merge([
             $customerId, $type, $isDefault,
-            trim(Security::str($data['name'] ?? '')),
-            trim(Security::str($data['company'] ?? '')),
+            Security::typedText(Security::str($data['name'] ?? '')),
+            Security::typedText(Security::str($data['company'] ?? '')),
             self::normalizedVatId($data['vat_id'] ?? ''),
-            trim(Security::str($data['street'] ?? '')),
-            trim(Security::str($data['city'] ?? '')),
-            trim(Security::str($data['zip'] ?? '')),
+            Security::typedText(Security::str($data['street'] ?? '')),
+            Security::typedText(Security::str($data['city'] ?? '')),
+            self::addressZip($data['zip'] ?? '', $data['country'] ?? ''),
             strtoupper(trim(Security::str($data['country'] ?? ''))),
             trim(Security::str($data['phone'] ?? '')),
         ], array_map(static fn(string $c): string => self::normalizedCompanyId($data[$c] ?? ''), $ids)));
@@ -693,6 +697,18 @@ class Customers {
         return strtoupper((string)preg_replace('/[\s.-]+/', '', Security::str($value)));
     }
 
+    /** R58: a postcode as stored, trimmed, a Slovak or Czech one as its five digits (OrderAddress::postcode()). */
+    private static function addressZip(mixed $zip, mixed $country): string {
+        $zip = Security::typedText(Security::str($zip));
+        return OrderAddress::postcode($zip, Security::str($country)) ?? $zip;
+    }
+
+    private static function addressCountry(int $customerId, int $addressId): string {
+        $stmt = Db::get()->prepare('SELECT country FROM customer_addresses WHERE id = ? AND customer_id = ?');
+        $stmt->execute([$addressId, $customerId]);
+        return (string)$stmt->fetchColumn();
+    }
+
     /** An IČO or DIČ as the checkout stores it: without spaces, upper case. */
     private static function normalizedCompanyId(mixed $value): string {
         return strtoupper((string)preg_replace('/\s+/', '', Security::str($value)));
@@ -724,6 +740,8 @@ class Customers {
                     $k === 'country' => strtoupper(trim(Security::str($data[$k]))),
                     $k === 'vat_id' => self::normalizedVatId($data[$k]), // R35: as the checkout stores it
                     in_array($k, self::ADDRESS_COMPANY_IDS, true) => self::normalizedCompanyId($data[$k]), // R34: as a new address
+                    $k === 'zip' => self::addressZip($data[$k], $data['country'] ?? self::addressCountry($customerId, $addressId)),
+                    in_array($k, ['name', 'company', 'street', 'city'], true) => Security::typedText(Security::str($data[$k])), // R58: as a new address
                     default => trim(Security::str($data[$k])),
                 };
             }

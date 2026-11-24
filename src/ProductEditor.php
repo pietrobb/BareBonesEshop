@@ -42,7 +42,12 @@ final class ProductEditor {
      */
     public static function validate(array $form, array $post, int $id, ?array $old): array|string {
         // R55 (review round 20, low): a name of bidi controls only (or not UTF-8) is no name (was: stored, shown empty).
-        if (Security::typedText((string)$form['name']) === '') return I18n::format('admin.msg.field_required', ['label' => 'name', 'max' => self::MAX_LENGTH['name']]);
+        // R58 (review round 23, low N4): nor one with a control character inside ("\x01", ESC, DEL, U+2028), as the message
+        // says, and the message names the field in the admin's language (was: the raw "name").
+        $name = Security::typedText((string)$form['name']);
+        if ($name === '' || Security::hasControlCharacters($name)) {
+            return I18n::format('admin.msg.field_required', ['label' => I18n::t('admin.th.name'), 'max' => self::MAX_LENGTH['name']]);
+        }
         $slug = Security::slug($form['slug'] !== '' ? $form['slug'] : $form['name']);
         if ($slug === '') return I18n::t('admin.msg.product.slug_from_name');
         $db = Db::get();
@@ -291,6 +296,7 @@ final class ProductEditor {
                 $value = $fields[$field] ?? '';
                 if (!is_scalar($value)) return I18n::t('admin.msg.product.tr_invalid');
                 $value = in_array($field, ['name', 'summary'], true) ? Security::typedText((string)$value) : trim((string)$value);
+                if ($field === 'name' && Security::hasControlCharacters($value)) return I18n::t('admin.msg.product.tr_invalid'); // R58 (low N4)
                 if ($field === 'description' && $value !== '') $value = Security::sanitizeRichHtml($value);
                 if ($field === 'slug') {
                     $name = is_scalar($fields['name'] ?? null) ? trim((string)$fields['name']) : '';

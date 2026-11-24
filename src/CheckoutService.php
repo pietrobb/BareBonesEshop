@@ -53,7 +53,7 @@ class CheckoutService {
             }
         }
         if ($others !== []) return sprintf(I18n::t('payment_unavailable_shipping'), $chosen, implode(', ', $others));
-        $email = trim((string)(StoreContext::current()->legal()['email'] ?? ''));
+        $email = trim((string)(StoreContext::current()->sellerLegal()['email'] ?? ''));
         return $email !== '' ? sprintf(I18n::t('payment_unavailable_contact'), $email) : I18n::t('payment_unavailable');
     }
 
@@ -77,7 +77,11 @@ class CheckoutService {
      */
     public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null, string $billingCountry = '', string $company = '', string $declaredResidence = '', string $ipCountry = '', bool $declarationDecided = false): array {
         $store = StoreContext::current()->config();
-        $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+        // R58 (review round 23, high V1): the seller's country and VAT status through legal.seller (StoreContext::sellerLegal()),
+        // as the invoice names them. Was: the store's own block, so a store added in Admin → Stores ({"seller": "default"})
+        // of a Czech shop charged its Czech buyers 23 % Slovak VAT.
+        $sellerLegal = StoreContext::current()->sellerLegal();
+        $sellerCountry = SellerLegal::country($sellerLegal);
         $vatIdValid = false;
         $vatIdStatus = null;
         if ($vatId !== '' && $knownVatIdStatus !== null) {
@@ -129,7 +133,7 @@ class CheckoutService {
         if ($vatIdValid && $vatIdOfSeller) $residence = $sellerCountry;
         $context = [
             'seller_country'        => $sellerCountry,
-            'seller_vat_registered' => StoreSettings::vatRegistered((array)($store['legal'] ?? [])),
+            'seller_vat_registered' => StoreSettings::vatRegistered($sellerLegal),
             // R39 (low): the VAT payer's OSS registration, whichever of its stores it was switched on in.
             'seller_oss_enabled'    => OssThreshold::sellerOssEnabled(StoreContext::current()->id(), $store),
             // Goods are supplied where they are delivered (or collected); a download where the buyer lives (R33).

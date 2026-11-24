@@ -71,7 +71,11 @@ class Str {
 
     /** URL slug: "Košeľa Žltá" → "kosela-zlta". */
     public static function slug(string $s): string {
+        // R58 (review round 23, low): composed first (NFC), so "Ján" typed or pasted decomposed (a + U+0301, macOS file
+        // names, some keyboards) is "jan", not "ja-n"; without intl a combining mark left over is dropped, not a word break.
+        if (class_exists('Normalizer') && is_string($nfc = Normalizer::normalize($s, Normalizer::FORM_C))) $s = $nfc;
         $s = strtr(self::removeDiacritics($s), self::$slugLetters);
+        $s = preg_replace('/\p{Mn}+/u', '', $s) ?? $s;
         return trim((string)preg_replace('/[^a-z0-9]+/', '-', $s), '-');
     }
 }

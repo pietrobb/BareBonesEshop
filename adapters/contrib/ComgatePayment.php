@@ -23,6 +23,8 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
     private const STATES = ['PENDING', 'AUTHORIZED', 'PAID', 'CANCELLED'];
     private const LANGS = ['bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'et', 'fi', 'fr', 'hr', 'hu', 'it', 'lt', 'lv', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sl', 'sk', 'sv', 'uk', 'vi'];
     private const TRANS_ID = '/^[A-Za-z0-9-]{1,64}$/D';
+    /** Result codes of a refund Comgate refused (apidoc.comgate.cz, result codes): the request, not its outcome. */
+    private const REFUND_REFUSED = [1400, 1401, 1402];
 
     private string $merchant;
     private string $secret;
@@ -144,7 +146,15 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
             if (in_array($e->getCode(), [401, 403, 408, 429], true) || $e->getCode() < 400 || $e->getCode() >= 500) throw $e;
             return ['refund_id' => '', 'status' => 'failed', 'message' => $e->getMessage()];
         }
-        return ['refund_id' => '', 'status' => ($response['code'] ?? null) === 0 ? 'succeeded' : 'failed'];
+        $code = $response['code'] ?? null;
+        if ($code === 0) return ['refund_id' => '', 'status' => 'succeeded'];
+        // R58 (review round 23, low): only a refusal of the request (14xx: 1400 bad request, 1401 the payment is
+        // cancelled, 1402 more than can be refunded) is a failed refund, which the shop releases as declined. Any other
+        // code (1100 unknown error, 1200 database error, 1500 unexpected error, an unknown one) says nothing about
+        // whether Comgate refunded: an error, so the retried job asks the merchant to confirm or release it (Comgate
+        // takes no idempotency key). Was: failed, released with the payment back to paid, inviting a second refund.
+        if (in_array($code, self::REFUND_REFUSED, true)) return ['refund_id' => '', 'status' => 'failed', 'message' => 'Comgate refused the refund: code ' . $code];
+        throw new \RuntimeException('Comgate refund error: code ' . (is_int($code) ? $code : -1));
     }
 
     public function statusEvent(string $paymentId): array {

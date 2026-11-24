@@ -168,7 +168,7 @@ foreach ($entrypointBudgets as $relative => $budget) {
 
 $architectureBudgets = [
     // Loads Shared/Request/StoreScope always and only the route's page modules (Admin/Modules.php).
-    'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
+    /* -3 lines R58 (review round 23, medium S3): the admin languages are the shipped ones (I18n::shippedLocales()) */ 'src/Entrypoints/Admin.php' => ['lines' => 282, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
     // +2 functions, +10 lines R10: own or owner password/TOTP changes and creating an owner need the actor's current password; the legacy session that creates the first DB account is handed off and ended.
     'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 300, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
     // R14 UX4: every signed-in admin account changes its own password and TOTP (current password, per-session throttle).
@@ -189,7 +189,8 @@ $architectureBudgets = [
     // +14 lines, +1 function, +1 coupling R16 low: product prices are typed in the currency, not in cents (Money).
     // +4 lines R18 feeds: a stock-only product save moves stock_updated_at, and rebuilds feeds only across in/out of stock.
     // +14 lines, +1 function, +2 coupling R18 currency: lossless CZK/HUF amounts, a new shared-catalog product in its currency.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1335, 'functions' => 27, 'max_function_lines' => 210, 'coupling' => 24],
+    // +1 line R58: the product editor links to the categories when the catalog has none (the main category is required).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1336, 'functions' => 27, 'max_function_lines' => 210, 'coupling' => 24],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
@@ -215,8 +216,10 @@ $architectureBudgets = [
     // +7 lines R23 UX: checklist checks titled in the admin's language, the doctor's text in a details element.
     // +1 line, +1 coupling R30: CSV import row errors in the admin's language (ImportErrorLabels).
     // +1 function R55 UX: the CSV import templates are downloaded from the import page (handleImportTemplate).
-    // +1 function R57: shippingFileMethods() lists the shipping.json methods on the shipping page.
+    // +1 function R57: shippingFileMethods() lists the shipping.json methods on the shipping page (R58: moved to ShippingFile.php).
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 38, 'max_function_lines' => 74, 'coupling' => 23],
+    // R58: Standard/Express of shipping.json switched and priced on the shipping page (settings in the data directory).
+    'src/Entrypoints/Admin/ShippingFile.php' => ['lines' => 120, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 7],
     // Admin UI refresh: the dashboard moved out of Operations.php (tiles, 14-day revenue, health, checklist, incidents, monitoring).
     'src/Entrypoints/Admin/Dashboard.php' => ['lines' => 240, 'functions' => 11, 'max_function_lines' => 50, 'coupling' => 14],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
@@ -255,7 +258,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],
     // R8 complaints list and the written decision; the transitions live in Complaints.
     'src/Entrypoints/Admin/Complaints.php' => ['lines' => 70, 'functions' => 2, 'max_function_lines' => 55, 'coupling' => 4],
-    'src/Entrypoints/Admin/Request.php' => ['lines' => 90, 'functions' => 1, 'max_function_lines' => 9, 'coupling' => 2],
+    // +1 line R58: shipping:file_method_save.
+    'src/Entrypoints/Admin/Request.php' => ['lines' => 91, 'functions' => 1, 'max_function_lines' => 9, 'coupling' => 2],
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
     // +5 lines R21: a flash message lists its details (the rows an import or feed sync refused, and why).
@@ -267,7 +271,8 @@ $architectureBudgets = [
     // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
     // +9 lines, +1 function R48: adminStoreIdentityIssue words the seller-identity badge in the admin's language.
-    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 118, 'functions' => 4, 'max_function_lines' => 78, 'coupling' => 7],
+    // +6 lines, +4 max_function_lines R58 (review round 23, medium S3): the storefront languages field, a failed save keeps the ticked ones.
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 124, 'functions' => 4, 'max_function_lines' => 82, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.

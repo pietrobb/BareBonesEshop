@@ -586,6 +586,15 @@ class Security {
     }
 
     /**
+     * R58 (review round 23, low N4): a one-line text (a product name) with a control character inside — C0 and C1
+     * controls, ESC, DEL — or a line or paragraph separator (U+2028, U+2029). typedText() trims them only at the ends:
+     * "\x01", ESC sequences and U+2028 inside a name were stored and reached feeds, e-mails and invoices.
+     */
+    public static function hasControlCharacters(string $text): bool {
+        return preg_match('/[\p{Cc}\x{2028}\x{2029}]/u', $text) === 1;
+    }
+
+    /**
      * Scalar request value as a string. PHP turns name[]=x into an array; string-typed code
      * must see the default instead of crashing with a TypeError (HTTP 500).
      */

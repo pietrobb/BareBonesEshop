@@ -30,6 +30,14 @@ class IncidentMonitor {
             $fingerprint = hash('sha256', $store . '|' . $code . '|' . $phase);
             $db->prepare(Db::insertIgnore() . " INTO operational_alert_state (fingerprint, store_id, code, phase, severity, correlation_id, window_started_at, notification_status, delivered_hashes) VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', '[]')")
                 ->execute([$fingerprint, $store, $code, $phase, $severity, Logger::correlationId(), $now]);
+            // R58 (review round 23, low): a critical not alerted yet (held back by the cooldown) starts the new window with
+            // its occurrences still pending, so the update below keeps it critical and the sweep alerts it. Was: the
+            // window rolled over (severity from this report, counts reset), and a warning of the code reported before
+            // the next cron sweep dropped the pending critical: it was never e-mailed. MySQL assigns left to right:
+            // occurrences reads the notified count before it is reset.
+            $db->prepare("UPDATE operational_alert_state SET occurrences = occurrences - notified_count, notified_count = 0, window_started_at = :now
+                WHERE fingerprint = :fingerprint AND severity = 'critical' AND occurrences > notified_count AND window_started_at <= :since")
+                ->execute([':now' => $now, ':fingerprint' => $fingerprint, ':since' => $now - $cfg['window_seconds']]);
             // Set the window start LAST: MySQL evaluates SET assignments left-to-right. The severity FIRST, from the old
             // counts: R57 (review round 22, low) a critical stays only while it is in this window and not alerted yet.
             // Was: critical for good, so every later warning of the code (a refund the provider declined after the
