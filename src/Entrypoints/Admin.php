@@ -22,12 +22,9 @@ $adminStores = adminActivateStore($storesCfg);
 $pagePermissions = require __DIR__ . '/Admin/Permissions.php';
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['admin_switch_store'])) handleStoreSwitch($pagePermissions);
 
-// Admin locale: URL ?lang=xx (persisted in session) → session → system default.
-$adminSupportedLocales = [];
-foreach ($storesCfg['stores'] ?? [] as $s) {
-    foreach ($s['languages'] ?? [] as $lc) $adminSupportedLocales[$lc] = true;
-}
-$adminSupportedLocales = array_keys($adminSupportedLocales) ?: [$storesCfg['default_locale'] ?? 'en'];
+// Admin locale: URL ?lang=xx (persisted in session) → session → system default. R58 (review round 23, medium S3): every
+// shipped language, not only the storefronts' (a German install offering German only had no English admin).
+$adminSupportedLocales = I18n::shippedLocales();
 if (!empty($_GET['lang']) && in_array($_GET['lang'], $adminSupportedLocales, true)) {
     $_SESSION['admin_locale'] = $_GET['lang'];
 }

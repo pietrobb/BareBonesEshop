@@ -17,6 +17,7 @@ AuditCouponRaceRegression.php
 AuditCrFollowupCheckoutRegression.php
 CheckoutPaymentRedirectRegression.php
 SaveForLaterRegression.php
+AuditRound58StoresRegression.php
 
 # Payments, webhooks and refunds
 AuditPaymentsRegression.php

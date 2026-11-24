@@ -159,6 +159,23 @@ class I18n {
         return str_replace('{count}', $display ?? (string)$count, self::t($key . '_' . $form));
     }
 
+    /**
+     * R58 (review round 23, medium S3): the languages the shop ships texts for (lang/<locale>.php), sorted: what the admin
+     * can be shown in and what Admin → Stores can add to a storefront.
+     * @return list<string>
+     */
+    public static function shippedLocales(): array {
+        $locales = array_map(static fn(string $file): string => basename($file, '.php'), glob(dirname(__DIR__) . '/lang/*.php') ?: []);
+        $locales = array_values(array_filter($locales, static fn(string $locale): bool => preg_match('/^[a-z]{2}$/', $locale) === 1));
+        sort($locales);
+        return $locales;
+    }
+
+    /** A language's own name (Deutsch, Čeština), as the installer lists it; the upper-case code for another one. */
+    public static function localeName(string $locale): string {
+        return WebInstaller::LOCALES[$locale] ?? strtoupper($locale);
+    }
+
     /** UI translation in another locale (e-mails of an order placed in that locale); unknown locales use the current one. */
     public static function tIn(string $key, string $locale): string {
         $current = self::locale();

@@ -2,7 +2,7 @@
 /** Catalog data presenters. Storefront markup is owned by the active theme. */
 function renderLegalPage(string $page): string {
     if (!in_array($page, ConsumerNotice::LEGAL_PAGES, true)) return Template::render('storefront/status-message', ['message' => I18n::t('product_not_found')]);
-    return Template::render('storefront/legal-page', ['content_html' => ConsumerNotice::renderLegal($page, I18n::locale(), StoreContext::current()->legal())]);
+    return Template::render('storefront/legal-page', ['content_html' => ConsumerNotice::renderLegal($page, I18n::locale(), StoreContext::current()->sellerLegal())]);
 }
 
 function renderHome(): string {

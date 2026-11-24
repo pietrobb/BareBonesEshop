@@ -1471,7 +1471,8 @@ class GdprService {
         }
         $result = [];
         foreach ((array)(Bootstrap::stores()['stores'] ?? []) as $storeId => $store) {
-            $country = strtoupper(trim((string)($store['legal']['country'] ?? '')));
+            // R58 (review round 23, high V1): the retention of the store's seller (legal.seller), whose books keep the rows.
+            $country = strtoupper(trim((string)(SellerLegal::ofStore((string)$storeId)['country'] ?? '')));
             if (isset($periods[$country])) $result[$country][] = (string)$storeId;
         }
         return $result;

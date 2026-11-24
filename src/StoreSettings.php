@@ -200,6 +200,9 @@ final class StoreSettings {
         // A form without the field (an older admin page) keeps the store's zone.
         $timezone = array_key_exists('timezone', $input) ? $text('timezone') : (string)($store['timezone'] ?? '');
         if (array_key_exists('timezone', $input) && StoreContext::configuredTimezone(['timezone' => $timezone]) === null) $errors[] = I18n::t('admin.stores.err.timezone');
+        // R58 (review round 23, medium S3): the storefront's languages (was: stores.json only, while the installer and its
+        // hint said Admin → Stores adds them). A form without the field keeps them; the default language always stays.
+        $languages = array_key_exists('languages', $input) ? self::parseLanguages($input['languages'], (string)($store['default_locale'] ?? 'en'), $errors) : null;
         // The default store is always public. A hidden store goes public only once its own seller identity is entered.
         $isDefault = $storeId === (string)($data['default_store'] ?? '');
         $public = $isDefault || (isset($input['public']) ? $input['public'] === '1' : StoreContext::isPublicConfig($store));
@@ -221,14 +224,34 @@ final class StoreSettings {
         if (in_array($input['cross_border_pricing'] ?? null, ['net', 'gross'], true)) $store['cross_border_pricing'] = $input['cross_border_pricing'];
         if ($timezone !== '') $store['timezone'] = $timezone;
         if ($domains !== null) $store['domains'] = $domains;
+        if ($languages !== null) $store['languages'] = $languages;
         $store['legal'] = $legal;
         if ($public) unset($store['public']); else $store['public'] = false;
         $data['stores'][$storeId] = $store;
         if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
         AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'timezone' => $before['timezone'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'cross_border_pricing' => $before['cross_border_pricing'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
             ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'cross_border_pricing' => $store['cross_border_pricing'] ?? null, 'public' => $public, 'legal' => $store['legal']]
-            + ($domains !== null ? ['domains' => $domains, 'domains_before' => $before['domains'] ?? []] : []));
+            + ($domains !== null ? ['domains' => $domains, 'domains_before' => $before['domains'] ?? []] : [])
+            + ($languages !== null ? ['languages' => $languages, 'languages_before' => $before['languages'] ?? []] : []));
         return ['ok' => true, 'errors' => []];
+    }
+
+    /**
+     * R58 (review round 23, medium S3): the posted storefront languages (languages[]): locales the shop ships texts for
+     * (I18n::shippedLocales()), the store's default language first and always included.
+     * @param list<string> $errors
+     * @return list<string>
+     */
+    private static function parseLanguages(mixed $posted, string $defaultLocale, array &$errors): array {
+        $posted = is_scalar($posted) ? preg_split('/[\s,]+/', (string)$posted, -1, PREG_SPLIT_NO_EMPTY) : $posted;
+        if (!is_array($posted) || array_filter($posted, static fn($l): bool => !is_string($l)) !== []) {
+            $errors[] = I18n::t('admin.stores.err.languages');
+            return [];
+        }
+        $languages = array_values(array_unique(array_map(static fn(string $l): string => strtolower(trim($l)), $posted)));
+        $unknown = array_diff($languages, I18n::shippedLocales());
+        if ($unknown !== []) $errors[] = I18n::t('admin.stores.err.languages');
+        return array_values(array_unique(array_merge([$defaultLocale], array_diff($languages, $unknown))));
     }
 
     /**
@@ -270,7 +293,10 @@ final class StoreSettings {
         // domain test then asked the server's own or the cloud metadata address.
         $bad = array_filter($domains, static fn(string $d): bool => !in_array($d, $mainHost, true) && !in_array($d, $unicode, true) && (!str_contains($d, '.') || strlen($d) > 253
             || filter_var($d, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false || isset($taken[$d])
-            || preg_match('/(?:^|\.)(?:[0-9]+|0x[0-9a-f]*)$/', $d) === 1));
+            || preg_match('/(?:^|\.)(?:[0-9]+|0x[0-9a-f]*)$/', $d) === 1
+            // R58 (review round 23, low N1): nor a name of the local network (RFC 6761/6762, 8375, ICANN .internal), which
+            // the resolver or libcurl answers locally (*.localhost is 127.0.0.1): no public shop is there.
+            || preg_match('/(?:^|\.)(?:localhost|localdomain|local|internal|lan|arpa)$/', $d) === 1));
         if ($bad !== [] || count($domains) > 10) $errors[] = I18n::format('admin.stores.err.domains', ['domains' => implode(', ', $bad ?: $domains)]);
         return $domains;
     }
@@ -354,13 +380,19 @@ final class StoreSettings {
                 continue;
             }
             $addresses = self::resolve($domain);
+            // R58 (review round 23, low N1): a name without an address is not asked. The request went out unpinned and
+            // libcurl answers *.localhost itself with 127.0.0.1: the probe reached the server's own loopback.
+            if ($addresses === []) {
+                $probe['unreachable'][] = $domain;
+                continue;
+            }
             if (array_filter($addresses, static fn(string $ip): bool => !FeedImport::isPublicFeedIp($ip)) !== []) {
                 $probe['private'][] = $domain;
                 continue;
             }
             try {
                 $health = JsonHttpClient::request(Security::storeAppUrl($appUrl, ['domains' => [$domain]]), '/healthz', 'GET', null, [], min(4, $left),
-                    $addresses === [] ? [] : ["{$domain}:{$port}:{$addresses[0]}"]);
+                    ["{$domain}:{$port}:{$addresses[0]}"]);
                 if (($health['service'] ?? '') !== 'bareboneseshop') $probe['unreachable'][] = $domain;
             } catch (Throwable $e) {
                 Logger::exception('store_settings.domain_probe_failed', $e, ['domain' => $domain]);

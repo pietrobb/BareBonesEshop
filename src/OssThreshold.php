@@ -164,7 +164,7 @@ final class OssThreshold
     {
         $order = self::orderRow($db, (int)($doc['order_id'] ?? 0));
         if ($order === null) return 0;
-        $sellerCountry = self::sellerCountry(self::storeConfig((string)($doc['store_id'] ?? $order['store_id'] ?? 'default')));
+        $sellerCountry = self::sellerCountry((string)($doc['store_id'] ?? $order['store_id'] ?? 'default'));
         if ((string)($doc['type'] ?? 'invoice') !== 'credit_note') {
             [$goods, $digital] = self::distance($order, (string)($doc['vat_scenario'] ?? ''), $sellerCountry);
             if (!$goods && !$digital) return 0;
@@ -339,7 +339,7 @@ final class OssThreshold
         $scenario = (string)($order['vat_scenario'] ?? '');
         if (!in_array($scenario, [VatService::SCENARIO_OSS, VatService::SCENARIO_DOMESTIC_SUBTHRESH, VatService::SCENARIO_DOMESTIC, VatService::SCENARIO_EXPORT], true)) return 0;
         $store = self::storeConfig((string)($order['store_id'] ?? 'default'));
-        [$goods, $digital] = self::distance($order, $scenario, self::sellerCountry($store));
+        [$goods, $digital] = self::distance($order, $scenario, self::sellerCountry((string)($order['store_id'] ?? 'default'), $store));
         if (!$goods && !$digital) return 0;
         $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
         $total = is_array($snapshot) ? (int)($snapshot['totals']['net'] ?? 0) : (int)($order['net_total'] ?? 0);
@@ -568,7 +568,7 @@ final class OssThreshold
         $context = StoreContext::current();
         $store = $context->config();
         if (self::sellerOssEnabled($context->id(), $store) || !Db::tableExists('invoices', $db)) return null;
-        $sellerCountry = self::sellerCountry($store);
+        $sellerCountry = $context->sellerCountry();
         $order = [
             'store_id' => $context->id(),
             'shipping_addr' => json_encode($customer['address'] ?? [], JSON_UNESCAPED_UNICODE),
@@ -778,7 +778,7 @@ final class OssThreshold
         $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
         $snapshotNet = is_array($snapshot) ? (int)($snapshot['totals']['net'] ?? 0) : 0;
         if ($snapshotNet <= 0) return $net;
-        $country = self::sellerCountry(self::storeConfig((string)($order['store_id'] ?? 'default')));
+        $country = self::sellerCountry((string)($order['store_id'] ?? 'default'));
         $home = 0;
         $goodsRate = 0.0;
         $ancillary = 0;
@@ -1119,9 +1119,10 @@ final class OssThreshold
         return [$bound($year), $bound($year + 1)];
     }
 
-    private static function sellerCountry(array $store): string
+    /** R58 (review round 23, high V1): the country of the store's seller (legal.seller), as checkout charges VAT by it. */
+    private static function sellerCountry(string $storeId, ?array $store = null): string
     {
-        return strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+        return SellerLegal::country(SellerLegal::ofStore($storeId, $store));
     }
 
     // A signed update runs the migrations under the old release's Db class (v2.0.0 has no hasColumn()): the schema is

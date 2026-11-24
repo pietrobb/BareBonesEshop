@@ -104,12 +104,13 @@ class JsonLd {
     }
 
     /** The named store config, else the default store, falling back to the first store, then []. */
+    /** R58 (review round 23, high V1): with the legal block of the store's seller (legal.seller), as its invoices print it. */
     private static function store(array $storesCfg, ?string $storeId): array {
-        $stores = $storesCfg['stores'] ?? [];
-        if ($storeId !== null && isset($stores[$storeId]) && is_array($stores[$storeId])) return $stores[$storeId];
-        $key    = $storesCfg['default_store'] ?? '';
-        if ($key !== '' && isset($stores[$key])) return $stores[$key];
-        return $stores ? (array)reset($stores) : [];
+        $stores = is_array($storesCfg['stores'] ?? null) ? $storesCfg['stores'] : [];
+        $key = $storeId !== null && is_array($stores[$storeId] ?? null) ? $storeId : (string)($storesCfg['default_store'] ?? '');
+        if (!isset($stores[$key])) $key = (string)array_key_first($stores);
+        if (!is_array($stores[$key] ?? null)) return [];
+        return ['legal' => SellerLegal::forStore($storesCfg, $key)] + $stores[$key];
     }
 
     /** Store home: $base plus the store's url_prefix, always ending in '/'. */

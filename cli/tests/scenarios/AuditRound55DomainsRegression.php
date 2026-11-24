@@ -21,6 +21,8 @@ try {
     $r55dCfg->setValue(null, ['app_url' => 'https://shop.example:8443/eshop'] + (array)$r55dCfgBefore);
     $r55dDefault = (string)$r55dStores['default_store'];
     $r55dDomains = static fn(string $store): mixed => json_decode((string)file_get_contents($r55dDir . '/stores.json'), true)['stores'][$store]['domains'] ?? null;
+    // R58 (review round 23, low N1): a name without a DNS address is no longer asked; these names stand for public hosts.
+    StoreSettings::setResolverForTesting(static fn(string $host): array => ['93.184.216.34']);
     $r55dCalls = [];
     JsonHttpClient::setFixtureTransport(static function (string $method, string $url) use (&$r55dCalls): array {
         $r55dCalls[] = $url;
@@ -79,6 +81,7 @@ try {
     assert_true(false, 'R55 domains: ' . get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
     JsonHttpClient::setFixtureTransport(null);
+    StoreSettings::setResolverForTesting(null);
     $r55dCfg->setValue(null, $r55dCfgBefore);
     StoreSettings::setPathForTesting(null);
 }

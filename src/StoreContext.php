@@ -9,8 +9,11 @@ class StoreContext {
     private string $channel;
     private array $config;
     private string $providerCurrency;
+    /** R58: the stores.json root the store was resolved from (its legal.seller names another store of it). */
+    private array $root;
+    private ?array $sellerLegal = null;
 
-    private function __construct(string $id, string $channel, array $config, ?string $providerCurrency = null) {
+    private function __construct(string $id, string $channel, array $config, ?string $providerCurrency = null, array $root = []) {
         if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,39}$/', $id)) {
             throw new InvalidArgumentException('Invalid store ID');
         }
@@ -35,6 +38,7 @@ class StoreContext {
         $this->config['currency'] = $currency;
         $providerCurrency = strtolower((string)$providerCurrency);
         $this->providerCurrency = preg_match('/^[a-z]{3}$/', $providerCurrency) ? $providerCurrency : $currency;
+        $this->root = $root + ['stores' => [$id => $config]];
     }
 
     public static function resolve(
@@ -108,7 +112,8 @@ class StoreContext {
             throw new InvalidArgumentException("Channel {$channel} is not enabled for store {$storeId}");
         }
         $providerOwner = $stores[(string)($config['provider_scope'] ?? $storeId)] ?? null;
-        return new self($storeId, $channel, $config, is_array($providerOwner) ? (string)($providerOwner['currency'] ?? '') : null);
+        return new self($storeId, $channel, $config, is_array($providerOwner) ? (string)($providerOwner['currency'] ?? '') : null,
+            ['stores' => $stores, 'default_store' => $defaultId] + $rootConfig);
     }
 
     /**
@@ -168,8 +173,13 @@ class StoreContext {
 
     /** A store's wall clock: its `timezone`, else its seller country's, else DEFAULT_TIMEZONE. */
     public static function timezoneFor(array $storeConfig): string {
-        $country = strtoupper(trim((string)($storeConfig['legal']['country'] ?? '')));
-        return self::configuredTimezone($storeConfig) ?? self::COUNTRY_TIMEZONES[$country] ?? self::DEFAULT_TIMEZONE;
+        $configured = self::configuredTimezone($storeConfig);
+        if ($configured !== null) return $configured;
+        $legal = is_array($storeConfig['legal'] ?? null) ? $storeConfig['legal'] : [];
+        // R58 (review round 23, high V1): a store sharing a seller (legal.seller) keeps that seller's clock.
+        if (!isset($legal['country']) && is_string($legal['seller'] ?? null)) $legal = SellerLegal::ofStore($legal['seller']);
+        $country = strtoupper(trim((string)($legal['country'] ?? '')));
+        return self::COUNTRY_TIMEZONES[$country] ?? self::DEFAULT_TIMEZONE;
     }
 
     public function timezone(): string { return self::timezoneFor($this->config); }
@@ -205,7 +215,20 @@ class StoreContext {
     }
     /** R19: the currency the provider scope's amounts are entered in (that of the store owning the scope). */
     public function providerCurrency(): string { return $this->providerCurrency; }
+    /** The store's own legal block as stores.json has it; R58: a store sharing a seller has only legal.seller here, use sellerLegal(). */
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
+
+    /**
+     * R58 (review round 23, high V1): the legal details the store sells under: its seller's (legal.seller), with its own
+     * fields over them, as its invoices print them (SellerLegal). Was: the raw block, so a store added in Admin → Stores
+     * ({"seller": "default"}) charged Slovak VAT, had no IBAN for bank transfer and printed no seller on its legal pages.
+     */
+    public function sellerLegal(): array {
+        return $this->sellerLegal ??= SellerLegal::forStore($this->root, $this->id, $this->currency());
+    }
+
+    /** The seller's country (VAT, the shipping.json home zone, OSS), upper case; SK when the seller names none. */
+    public function sellerCountry(): string { return SellerLegal::country($this->sellerLegal()); }
 
     /** Countries of the store languages that name one country (en, de and es are spoken in several). */
     private const LOCALE_COUNTRY = ['sk' => 'SK', 'cs' => 'CZ', 'pl' => 'PL', 'hu' => 'HU'];
@@ -216,9 +239,18 @@ class StoreContext {
      * Slovakia and its Czech customers paid Slovak VAT.
      */
     public function marketCountry(): string {
-        $own = strtoupper(trim((string)($this->config['country'] ?? '')));
+        return self::marketCountryOf($this->config, $this->sellerCountry());
+    }
+
+    /**
+     * marketCountry() of a store record whose seller is in $sellerCountry ('' when the seller names none). R58 (review
+     * round 23, high V1): also the store switcher's and the regional hreflang's country, so a Slovak store of a Czech seller
+     * is "SK", not a second "CZ" next to the Czech store.
+     */
+    public static function marketCountryOf(array $storeConfig, string $sellerCountry): string {
+        $own = strtoupper(trim((string)($storeConfig['country'] ?? '')));
         if (preg_match('/^[A-Z]{2}$/', $own)) return $own;
-        return self::LOCALE_COUNTRY[$this->defaultLocale()] ?? (strtoupper(trim((string)($this->legal()['country'] ?? ''))) ?: 'SK');
+        return self::LOCALE_COUNTRY[(string)($storeConfig['default_locale'] ?? 'en')] ?? strtoupper(trim($sellerCountry));
     }
     public function config(): array { return $this->config; }
 
