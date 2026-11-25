@@ -487,6 +487,19 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   instead of 10 €. What a return's rate lacks is now credited at rates that have more uncredited than the goods not yet
   returned are worth there (the rates of goods already returned), never at the rate of goods the customer keeps. After
   round 23 no rate has such an excess, so returns of newer orders are credited as before.
+- **A store sharing a seller cannot change the seller's tax identity (review round 24, finding 4).** `name`, `country`,
+  `vat_registered`, `ico`, `dic` and `ic_dph` in the legal block of a store with `legal.seller` are ignored: one VAT
+  payer charged and invoiced another VAT in one number series (a store with `"vat_registered": false` printed 0 % "not
+  a VAT payer" invoices under the seller's Czech VAT ID). The doctor (`stores.legal_identity.<store>`) and Admin →
+  Stores name such fields; a store of another company or VAT registration needs a legal block of its own. Its other
+  fields (e-mail, phone, address) still print.
+- **Seller details, smaller fixes (review round 24, lows).** A store whose `legal.seller` names no seller (a missing
+  store, a loop) refuses checkout with an incident instead of taking an order it cannot invoice. `cli/vat-backfill.php`
+  reads OSS of the seller, as checkout does. A store without a legal block keeps the clock of the seller it sells as
+  (was: Europe/Bratislava). The WebSite schema carries the storefront's name (the company stays the Organization's).
+  Two stores of one country and currency show the country and currency in the store switcher, their names after it
+  (was: the names alone). Cached sitemaps and feeds are rebuilt when stores.json changes (a language added in
+  Admin → Stores appeared after 15 minutes).
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as

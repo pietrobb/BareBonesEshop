@@ -60,7 +60,7 @@ function pageStoreSettings(): void {
                 <?php foreach (I18n::shippedLocales() as $lc): ?><label style="display:inline-block;margin-right:.75rem" lang="<?= esc($lc) ?>"><input type="checkbox" name="languages[]" value="<?= esc($lc) ?>"<?= $lc === $storeLocale || in_array($lc, $storeLanguages, true) ? ' checked' : '' ?><?= $lc === $storeLocale ? ' disabled' : '' ?>> <?= esc(I18n::localeName($lc)) ?></label><?php endforeach; ?>
                 <small class="muted" id="store-<?= esc($storeId) ?>-languages-hint" style="display:block"><?= esc(I18n::t('admin.stores.languages_hint')) ?></small></fieldset>
             <?php if ($seller !== null): ?>
-            <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p>
+            <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p><?php $ignored = StoreSettings::identityIgnored($settings, $storeId); if ($ignored !== []): /* R59 */ ?><div class="flash flash-err" role="alert" data-store-identity-ignored><?= esc(I18n::format('admin.stores.identity_ignored', ['fields' => implode(', ', $ignored)])) ?></div><?php endif; ?>
             <?php else: ?>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr));gap:.25rem 1rem">
                 <?php foreach (StoreSettings::LEGAL_TEXT as $field): ?>

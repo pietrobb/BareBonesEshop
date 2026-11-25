@@ -39,6 +39,7 @@ AuditRound58CreditVatRegression.php
 AuditRound58RefundLowsRegression.php
 AuditRound59CloseRaceRegression.php
 AuditRound59LegacySpillRegression.php
+AuditRound59SellerRegression.php
 
 # Orders, stock and invoices
 AuditOrderAdminRegression.php

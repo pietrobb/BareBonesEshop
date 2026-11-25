@@ -30,6 +30,11 @@ final class StoreSettings {
         return !array_key_exists('vat_registered', $legal) || (bool)$legal['vat_registered'];
     }
 
+    /** R59 (review round 24, finding 4): the tax identity fields stores.json sets for a store sharing a seller, which are ignored. */
+    public static function identityIgnored(array $settings, string $storeId): array {
+        return array_keys(SellerLegal::identityOverrides($settings, $storeId));
+    }
+
     public static function path(): string {
         return self::$path ?? DataOverrides::storesPath();
     }

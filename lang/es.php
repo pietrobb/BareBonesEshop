@@ -2164,6 +2164,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.problem.iban' => '{field} {value}: dígitos de control no válidos',
     'admin.stores.ready' => 'Datos del vendedor completos',
     'admin.stores.shared_seller' => 'Factura como la tienda {seller}; edite el vendedor allí.',
+    'admin.stores.identity_ignored' => 'stores.json define {fields} para esta tienda; se ignoran: la tienda factura con la identidad fiscal de su vendedor.',
     'admin.stores.fixed' => 'Moneda {currency}, prefijo de factura {invoice_prefix}: se define en stores.json (cambiarlos afecta a los precios y a la numeración de facturas).',
     'admin.stores.not_writable' => 'El servidor web no puede escribir stores.json; el formulario no puede guardar. Dé permiso de escritura o edítelo en el servidor.',
     'admin.stores.saved' => 'Tienda {store} guardada.',

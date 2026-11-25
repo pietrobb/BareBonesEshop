@@ -2224,6 +2224,7 @@ return [
     'admin.stores.problem.iban' => '{field} {value}: invalid check digits',
     'admin.stores.ready' => 'Seller data set',
     'admin.stores.shared_seller' => 'Invoices as store {seller}; edit the seller there.',
+    'admin.stores.identity_ignored' => 'stores.json sets {fields} for this store; they are ignored: the store invoices under its seller\'s tax identity.',
     'admin.stores.fixed' => 'Currency {currency}, invoice prefix {invoice_prefix}: set in stores.json (changing them affects prices and invoice numbering).',
     'admin.stores.not_writable' => 'stores.json is not writable by the web server; the form cannot save. Make the file writable or edit it on the server.',
     'admin.stores.saved' => 'Store {store} saved.',

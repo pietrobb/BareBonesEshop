@@ -177,7 +177,9 @@ class StoreContext {
         if ($configured !== null) return $configured;
         $legal = is_array($storeConfig['legal'] ?? null) ? $storeConfig['legal'] : [];
         // R58 (review round 23, high V1): a store sharing a seller (legal.seller) keeps that seller's clock.
-        if (!isset($legal['country']) && is_string($legal['seller'] ?? null)) $legal = SellerLegal::ofStore($legal['seller']);
+        // R59 (review round 24, low): so does a store without a legal block, which sells as the seller SellerLegal falls back
+        // to (same currency, else the default store's). Was: Europe/Bratislava, whoever that seller is.
+        if (!isset($legal['country']) || is_string($legal['seller'] ?? null)) $legal = SellerLegal::ofStore("\0timezone", $storeConfig);
         $country = strtoupper(trim((string)($legal['country'] ?? '')));
         return self::COUNTRY_TIMEZONES[$country] ?? self::DEFAULT_TIMEZONE;
     }

@@ -2203,6 +2203,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.problem.iban' => '{field} {value}: neplatné kontrolní číslice',
     'admin.stores.ready' => 'Údaje prodejce vyplněny',
     'admin.stores.shared_seller' => 'Fakturuje jako obchod {seller}; prodejce upravte tam.',
+    'admin.stores.identity_ignored' => 'stores.json pro tento obchod nastavuje {fields}; ignorují se: obchod fakturuje pod daňovou identitou svého prodejce.',
     'admin.stores.fixed' => 'Měna {currency}, prefix faktur {invoice_prefix}: nastavuje stores.json (změna ovlivní ceny a číslování faktur).',
     'admin.stores.not_writable' => 'Webový server nemůže zapisovat do stores.json; formulář nelze uložit. Povolte zápis nebo soubor upravte na serveru.',
     'admin.stores.saved' => 'Obchod {store} uložen.',

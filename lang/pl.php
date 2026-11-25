@@ -2203,6 +2203,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.problem.iban' => '{field} {value}: nieprawidłowe cyfry kontrolne',
     'admin.stores.ready' => 'Dane sprzedawcy uzupełnione',
     'admin.stores.shared_seller' => 'Fakturuje jako sklep {seller}; edytuj sprzedawcę tam.',
+    'admin.stores.identity_ignored' => 'stores.json ustawia dla tego sklepu {fields}; są ignorowane: sklep fakturuje pod tożsamością podatkową swojego sprzedawcy.',
     'admin.stores.fixed' => 'Waluta {currency}, prefiks faktur {invoice_prefix}: ustawiane w stores.json (zmiana wpływa na ceny i numerację faktur).',
     'admin.stores.not_writable' => 'Serwer WWW nie może zapisać stores.json; formularza nie da się zapisać. Nadaj prawo zapisu lub edytuj plik na serwerze.',
     'admin.stores.saved' => 'Sklep {store} zapisany.',

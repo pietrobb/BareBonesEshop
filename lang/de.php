@@ -2203,6 +2203,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.problem.iban' => '{field} {value}: ungültige Prüfziffern',
     'admin.stores.ready' => 'Verkäuferdaten gesetzt',
     'admin.stores.shared_seller' => 'Rechnet als Shop {seller} ab; Verkäufer dort bearbeiten.',
+    'admin.stores.identity_ignored' => 'stores.json setzt für diesen Shop {fields}; diese werden ignoriert: Der Shop rechnet unter der Steueridentität seines Verkäufers ab.',
     'admin.stores.fixed' => 'Währung {currency}, Rechnungspräfix {invoice_prefix}: in stores.json festgelegt (eine Änderung wirkt sich auf Preise und Rechnungsnummern aus).',
     'admin.stores.not_writable' => 'stores.json ist für den Webserver nicht beschreibbar; das Formular kann nicht speichern. Schreibrechte setzen oder die Datei auf dem Server bearbeiten.',
     'admin.stores.saved' => 'Shop {store} gespeichert.',

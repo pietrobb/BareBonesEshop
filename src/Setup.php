@@ -228,6 +228,17 @@ class Setup
             ? 'Every seller has its own invoice and credit-note number series.'
             : 'Invoice numbering conflicts (these series are refused): ' . implode(' | ', array_map(static fn(string $series, string $message): string => "{$series}: {$message}", array_keys($numbering), $numbering)),
             'Give each store with its own legal block its own legal.invoice_prefix / legal.credit_note_prefix, or set legal.seller to the store whose series a storefront of the same company shares.');
+        // R59 (review round 24, finding 4): a store sharing a seller cannot change the seller's tax identity; such fields
+        // in stores.json are ignored (SellerLegal::effective()), which the merchant who wrote them must know.
+        foreach (is_array($stores) ? array_keys((array)($stores['stores'] ?? [])) : [] as $storeId) {
+            $ignored = SellerLegal::identityOverrides($stores, (string)$storeId);
+            if ($ignored === []) continue;
+            $seller = (string)($stores['stores'][$storeId]['legal']['seller'] ?? '');
+            $add('warn', 'stores.legal_identity.' . $storeId, "Store {$storeId} sets " . implode(', ', array_map(
+                static fn(string $field, array $values): string => $field . '=' . json_encode($values[0], JSON_UNESCAPED_UNICODE),
+                array_keys($ignored), $ignored)) . " in its legal block, but it invoices as store {$seller}: these fields are ignored and its documents carry {$seller}'s tax identity.",
+                "Remove them from stores.{$storeId}.legal, or give the store a legal block of its own (no legal.seller) if it is a different company or VAT registration.");
+        }
         // The shipped stores.json is an example: invoices, the imprint and transfer instructions would name its company.
         foreach (is_array($stores) ? ($stores['stores'] ?? []) : [] as $storeId => $store) {
             $legal = is_array($store['legal'] ?? null) ? $store['legal'] : null;

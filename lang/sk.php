@@ -2233,6 +2233,7 @@ return [
     'admin.stores.problem.iban' => '{field} {value}: neplatné kontrolné číslice',
     'admin.stores.ready' => 'Údaje predajcu vyplnené',
     'admin.stores.shared_seller' => 'Fakturuje ako obchod {seller}; predajcu upravte tam.',
+    'admin.stores.identity_ignored' => 'stores.json pre tento obchod nastavuje {fields}; ignorujú sa: obchod fakturuje pod daňovou identitou svojho predajcu.',
     'admin.stores.fixed' => 'Mena {currency}, prefix faktúr {invoice_prefix}: nastavuje stores.json (zmena ovplyvní ceny a číslovanie faktúr).',
     'admin.stores.not_writable' => 'Webový server nemôže zapisovať do stores.json; formulár sa nedá uložiť. Povoľte zápis alebo súbor upravte na serveri.',
     'admin.stores.saved' => 'Obchod {store} uložený.',

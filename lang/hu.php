@@ -2203,6 +2203,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.problem.iban' => '{field} {value}: érvénytelen ellenőrző számjegyek',
     'admin.stores.ready' => 'Eladói adatok kitöltve',
     'admin.stores.shared_seller' => 'A(z) {seller} üzletként számláz; az eladót ott szerkessze.',
+    'admin.stores.identity_ignored' => 'A stores.json ehhez az üzlethez ezeket állítja be: {fields}; ezek figyelmen kívül maradnak: az üzlet az eladója adóazonosságával számláz.',
     'admin.stores.fixed' => 'Pénznem {currency}, számlaelőtag {invoice_prefix}: a stores.json állítja be (módosítása az árakat és a számlaszámozást érinti).',
     'admin.stores.not_writable' => 'A webszerver nem tudja írni a stores.json fájlt; az űrlap nem menthető. Adjon írási jogot, vagy szerkessze a szerveren.',
     'admin.stores.saved' => '{store} üzlet mentve.',
