@@ -412,6 +412,110 @@ final class InvoiceService
     }
 
     /**
+     * capToUncredited() at what $source has uncredited now, plus legacySpill().
+     * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
+     */
+    private static function capCredit(PDO $db, array $lines, array $source, array $order): array {
+        $rates = self::uncredited($db, $source)['rates'];
+        $capped = self::capToUncredited($lines, $rates, $source);
+        $spill = self::legacySpill($db, $source, $order, $lines, $capped[0], $rates);
+        return $spill === [] ? $capped : self::creditTotals([...$capped[0], ...$spill]);
+    }
+
+    /**
+     * R59 (review round 24, finding 2): returns that counted money refunded outside the returns before R58 (closed without
+     * payout, or credited less that money) never reversed that money's credit at the rates of the goods kept, so the
+     * later return of those goods finds their rate short and capToUncredited() cuts it (A 20 € at 23 % closed under R57
+     * after 20 € refunded in the dashboard, then B 10 € at 5 %: 3.33 € instead of 10 €). What the caps take is credited
+     * at the rates that have more uncredited than the goods not returned yet are worth there (invoiced less the full
+     * value of the goods returned so far, returnedValue()), the largest excess first. After R58 no rate has such an
+     * excess, so nothing moves; unlike R57's spill, a rate whose goods the customer keeps is never credited for them.
+     * @return list<array>
+     */
+    private static function legacySpill(PDO $db, array $source, array $order, array $draft, array $capped, array $rates): array {
+        $positive = static fn(array $lines): int => array_sum(array_map(static fn(array $line): int => max(0, (int)$line['gross']), $lines));
+        $short = $positive($draft) - $positive($capped);
+        if ($short <= 0 || $capped === []) return [];
+        $returned = self::returnedValue($db, $source, $order);
+        if ($returned === []) return [];
+        $breakdown = json_decode((string)$source['vat_breakdown'], true) ?: [];
+        $used = [];
+        foreach ($capped as $line) {
+            $key = self::lineKey($line);
+            $used[$key]['gross'] = ($used[$key]['gross'] ?? 0) + (int)$line['gross'];
+            $used[$key]['net'] = ($used[$key]['net'] ?? 0) + (int)$line['net'];
+        }
+        $room = [];
+        foreach ($rates as $key => $rate) {
+            $key = (string)$key;
+            $info = $breakdown[$key] ?? null;
+            if (!is_array($info)) continue;
+            $kept = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0) - (int)($returned[$key] ?? 0);
+            $left = min((int)$rate['gross'] - $kept, (int)$rate['gross'] - (int)($used[$key]['gross'] ?? 0));
+            if ($left > 0) $room[$key] = $left;
+        }
+        arsort($room);
+        $base = $capped[0];
+        $number = 0;
+        foreach ($capped as $line) {
+            if ((int)$line['rma_item_id'] < 0 && (int)$line['order_item_id'] === (int)$base['order_item_id']) {
+                $number = max($number, -(int)$line['rma_item_id'] - (int)$base['rma_item_id'] * 16);
+            }
+        }
+        $spilled = [];
+        foreach ($room as $key => $left) {
+            $key = (string)$key;
+            if ($short <= 0 || $number >= 15) break;
+            $gross = min($left, $short);
+            $netLeft = max(0, (int)$rates[$key]['net'] - (int)($used[$key]['net'] ?? 0));
+            $net = min($netLeft, (int)round((int)$rates[$key]['net'] * $gross / max(1, (int)$rates[$key]['gross'])), $gross);
+            $supply = $rates[$key]['supply'] ?? [];
+            $spilled[] = [
+                'order_item_id' => (int)$base['order_item_id'], 'rma_item_id' => -((int)$base['rma_item_id'] * 16 + (++$number)),
+                'sku' => (string)$base['sku'], 'name' => (string)$base['name'], 'quantity' => 0, 'unit_gross' => 0,
+                'gross' => $gross, 'net' => $net, 'vat' => $gross - $net,
+                'rate_basis_points' => (int)round((float)explode(' ', $key)[0] * 100),
+            ] + (isset($supply['country']) ? ['country' => (string)$supply['country'], 'supply' => (string)($supply['supply'] ?? 'oss')] : []);
+            $short -= $gross;
+        }
+        return $spilled;
+    }
+
+    /**
+     * R59: per VAT breakdown key, the full value of the order's goods its returns took back so far (units credited by a
+     * live item credit note or counted as refunded, whichever is more), at the source invoice's snapshot prices.
+     * @return array<string, int>
+     */
+    private static function returnedValue(PDO $db, array $source, array $order): array {
+        $snapshot = json_decode((string)($source['financial_snapshot'] ?? ''), true);
+        if (!is_array($snapshot)) return [];
+        $components = array_values(array_filter((array)($snapshot['components'] ?? []), static fn($c): bool => is_array($c) && ($c['type'] ?? '') === 'product'));
+        $orderItems = Orders::items((int)$order['id']);
+        if (count($components) !== count($orderItems)) return [];
+        $stmt = $db->prepare("SELECT ri.order_item_id, ri.refunded_quantity,
+                COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
+                    WHERE cni.rma_item_id = ri.id AND " . Rma::LIVE_REFUND_SQL . "), 0) AS credited
+            FROM rma_items ri JOIN rma_requests q ON q.id = ri.rma_id WHERE q.order_id = :order AND q.store_id = :store");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        $units = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $units[(int)$row['order_item_id']] = ($units[(int)$row['order_item_id']] ?? 0) + max((int)$row['refunded_quantity'], (int)$row['credited']);
+        }
+        $value = [];
+        foreach ($orderItems as $position => $item) {
+            $ordered = (int)$item['quantity'];
+            $qty = min($ordered, (int)($units[(int)$item['id']] ?? 0));
+            if ($qty <= 0) continue;
+            $component = $components[$position];
+            $key = (string)VatService::breakdownKey((int)$component['rate_basis_points'],
+                isset($component['rate_country']) ? strtoupper((string)$component['rate_country']) : '',
+                isset($component['rate_country']) ? (string)($component['supply'] ?? 'oss') : '');
+            $value[$key] = ($value[$key] ?? 0) + self::proportionalSegment((int)$component['gross'], 0, $qty, $ordered);
+        }
+        return $value;
+    }
+
+    /**
      * Totals and VAT breakdown (negative) of credit lines.
      * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
      */
@@ -689,7 +793,7 @@ final class InvoiceService
         $full = (int)self::creditTotals($lines)[1]['gross'];
         $deduction = $outside > 0 ? self::outsideDeduction((int)$order['id'], $lines) : [];
         $less = self::outsideLines($lines, $deduction, $source);
-        $owed = $less === [] ? 0 : max(0, (int)self::capToUncredited($less, self::uncredited($db, $source)['rates'], $source)[1]['gross']);
+        $owed = $less === [] ? 0 : max(0, (int)self::capCredit($db, $less, $source, $order)[1]['gross']);
         return [$full, $owed, $deduction];
     }
 
@@ -922,7 +1026,7 @@ final class InvoiceService
         [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         // R51 (R49 open): the outside money comes off the goods' full value, then the uncredited rest caps it (rmaCreditOwed()).
         $draftLines = $deductOutside ? self::lessOutside($fullLines, (int)$order['id'], $source)[0] : $fullLines;
-        [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
+        [$lines, $totals, $breakdown] = self::capCredit($db, $draftLines, $source, $order);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
@@ -948,7 +1052,7 @@ final class InvoiceService
             $draftLines = $fullLines;
             $lessKeys = [];
             if ($deductOutside) [$draftLines, , , $less, $lessKeys] = self::lessOutside($fullLines, (int)$order['id'], $source);
-            [$lines, $totals, $breakdown] = self::capToUncredited($draftLines, self::uncredited($db, $source)['rates'], $source);
+            [$lines, $totals, $breakdown] = self::capCredit($db, $draftLines, $source, $order);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             $creditData = [

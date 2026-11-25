@@ -460,6 +460,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Slovak and Czech postcodes are stored as five digits (review round 23, low N2).** Checkout, the address book and
   manual orders accept `811 01` and `81101` and store `81101`; a Slovak or Czech postcode of another form is refused.
   Postcodes stored before are not changed.
+- **Returns that counted money refunded outside them before this release keep their credit notes (review round 24,
+  finding 2).** Such a return (closed without payout, or credited less that money) left the money credited at the rates
+  of the goods the customer kept, because the balancing credit note of round 23 did not exist yet. No document is
+  issued for them on update: the next return of that order credits what its own rate lacks at the rates whose goods
+  were already returned, so the customer still gets the goods' full value. Until every return of such an order is in,
+  the VAT report can show part of that money at the rates of the goods kept, as it did before the update.
 
 ### Changes
 
@@ -474,6 +480,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   refund) as unused and closed as well: three returns marked "Refunded" at once credited the customer 33.89 € for
   50.66 € of goods. The return is now looked up before its transaction opens, so after the lock each one sees what the
   others used.
+- **A return after one closed before round 23 pays its goods in full (review round 24, finding 2).** Round 23 dropped
+  the step that credited what a rate lacked at another rate, relying on the balancing credit note a closing issues now.
+  Returns closed before it have none, so the later return was cut to what its rate had left: A 20 € at 23 % and B 10 €
+  at 5 %, 20 € refunded in the gateway's dashboard, A closed without payout before the update, then B paid 3.33 €
+  instead of 10 €. What a return's rate lacks is now credited at rates that have more uncredited than the goods not yet
+  returned are worth there (the rates of goods already returned), never at the rate of goods the customer keeps. After
+  round 23 no rate has such an excess, so returns of newer orders are credited as before.
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as
