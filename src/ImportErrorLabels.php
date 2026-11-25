@@ -28,6 +28,7 @@ final class ImportErrorLabels {
         '/^Price must not exceed (.+)$/s' => ['price_max', ['max']],
         '/^Price must be at least (.+) \(a variant discount would make its price negative\)$/s' => ['price_min', ['min']],
         '/^Invalid status "(.*)" \(use (.+)\)$/s' => ['status', ['value', 'allowed']],
+        '/^Invalid (name(?:_[a-z]{2})?): control characters are not allowed$/s' => ['control_chars', ['field']], // R59 (low)
     ];
 
     public static function text(string $error): string {

@@ -1599,6 +1599,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.err.price_max' => 'El precio no puede superar {max}.',
     'admin.import.err.price_min' => 'El precio debe ser al menos {min} (un descuento de variante lo haría negativo).',
     'admin.import.err.status' => 'Estado no válido «{value}» (use {allowed}).',
+    'admin.import.err.control_chars' => 'El campo {field} contiene un carácter de control invisible; elimínelo e importe la fila de nuevo.',
     'admin.common.errors_count_one' => '1 error',
     'admin.common.errors_count_few' => '{count} errores',
     'admin.common.errors_count_many' => '{count} errores',

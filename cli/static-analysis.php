@@ -272,7 +272,7 @@ $architectureBudgets = [
     // +6 lines, +6 max_function_lines, +1 coupling (DateTimeZone) R18 UX: the store time zone select.
     // +9 lines, +1 function R48: adminStoreIdentityIssue words the seller-identity badge in the admin's language.
     // +6 lines, +4 max_function_lines R58 (review round 23, medium S3): the storefront languages field, a failed save keeps the ticked ones.
-    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 124, 'functions' => 4, 'max_function_lines' => 82, 'coupling' => 7],
+    /* R37: the store form offers cross_border_pricing (Cart::keepsNetAbroad() default, +1 coupling); R54: the owner edits the store's domains (+7, +5 in the page function); R55: domains and URL prefix in a form of their own (+7, +6); R59: the store's country field (hreflang de-AT), a function of its own (+12, +1) */ 'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 136, 'functions' => 5, 'max_function_lines' => 82, 'coupling' => 7],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     // +4 lines R18 UX: legal-text buttons named like the storefront footer links, not by page id.

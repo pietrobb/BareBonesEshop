@@ -524,6 +524,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   customers", sets the country a store sells to (checkout, store switcher, hreflang); empty, it is its language's
   country, else its seller's. **Set it for a store that sells to another country than its seller**: an `/at` store of a
   German seller without it is still `DE`, and its hreflang and English page fall back to the German store's.
+- **Addresses, CSV import and texts, smaller fixes (review round 24, lows).** A Slovak or Czech postcode is five ASCII
+  digits (was: full-width or Arabic-Indic digits passed). The checkout refuses a line or paragraph separator (U+2028,
+  U+2029) in a name or address field, as the address book does (was: kept inside the street, printed on labels). A CSV
+  whose cell holds a control byte (0x01, DEL, NUL) is no longer refused whole as "not a CSV": only its rows with one
+  are, and every refused row names its line and SKU in the admin's language (was: in English). A Vietnamese name gets a
+  readable slug ("Nguyễn" is `nguyen`, was `nguy-n`); existing slugs are not changed. Czech and Slovak required-field
+  messages read "Název: povinné pole" (was "Název je povinné").
+- **The daily-sales worker is fast again on SQLite (review round 24, low).** Since round 23 it deleted each batch's
+  changes before reading the next, rewriting most of the table every time: 1.6 million changes took 10.1 s (3.5 s
+  before). The worker and `cli/sales-daily.php` now delete 400 000 at a time in id order: 5.5 s; the rest is upkeep of
+  the index the oldest-day-first reading needs. Report requests delete as before. A page's reports refresh once also
+  when a page holds another's part (`SalesReport::refreshOnce()` counts its holders instead of restoring a copy).
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as
@@ -550,7 +562,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   its 2 s ran out: at 700 000 changes a request took 3.3–4.8 s and removed a few hundred of them, the worker built one
   day per 20 s job (about 4 hours), and every report summed from the orders meanwhile. Changes are now read oldest day
   first, a month of days at a time, built and removed before the next: 700 000 changes are gone after 14 report requests
-  of at most 2.4 s, the worker clears 1.6 million in three jobs, and a request does little after its 2 s.
+  of up to 2.8 s on MariaDB, the worker clears 1.6 million in three jobs, and a request does little after its 2 s.
 - **The dashboard and the order list no longer wait for the daily totals (review round 23, low L2).** Today's revenue
   is always summed from the orders, yet it refreshed the daily totals first, and the dashboard refreshed again for its
   trend (10 s for the dashboard and 5 s for the order list under a large backlog). Today's revenue no longer refreshes,

@@ -1469,6 +1469,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.err.price_max' => 'Der Preis darf {max} nicht überschreiten.',
     'admin.import.err.price_min' => 'Der Preis muss mindestens {min} betragen (ein Variantenrabatt würde ihn negativ machen).',
     'admin.import.err.status' => 'Ungültiger Status „{value}“ (zulässig: {allowed}).',
+    'admin.import.err.control_chars' => 'Das Feld {field} enthält ein unsichtbares Steuerzeichen; entfernen Sie es und importieren Sie die Zeile erneut.',
     'admin.common.errors_count_one' => '1 Fehler',
     'admin.common.errors_count_few' => '{count} Fehler',
     'admin.common.errors_count_many' => '{count} Fehler',

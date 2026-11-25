@@ -665,7 +665,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // then kept no address on SQLite) and the billing fields ended in a generic error.
     foreach (array_keys(CheckoutService::FIELD_MAX_LENGTH) as $field) {
         if (str_starts_with($field, 'billing_') && !OrderAddress::billingRequested($input)) continue;
-        if (is_string($input[$field] ?? null) && !mb_check_encoding($input[$field], 'UTF-8')) {
+        // R59 (review round 24, low): a line or paragraph separator (U+2028, U+2029) is refused, as the address book does
+        // (Customers::addressErrors()). Was: kept inside the street and printed on the label and the invoice.
+        if (is_string($input[$field] ?? null) && (!mb_check_encoding($input[$field], 'UTF-8') || preg_match('/[\x{2028}\x{2029}]/u', $input[$field]) === 1)) {
             return ['error' => I18n::format('checkout.error.field_invalid_named', ['field' => $label($field)])]
                 + checkoutRefusal('checkout.error.field_invalid', 422, ['field' => $field]);
         }

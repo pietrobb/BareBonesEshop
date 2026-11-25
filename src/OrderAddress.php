@@ -145,7 +145,8 @@ final class OrderAddress
     public static function postcode(string $zip, string $country): ?string
     {
         if (!in_array(strtoupper(trim($country)), self::FIVE_DIGIT_POSTCODES, true)) return $zip;
-        return preg_match('/^(\d{3})[ \x{00A0}]?(\d{2})$/u', trim($zip), $m) === 1 ? $m[1] . $m[2] : null;
+        // R59 (review round 24, low): ASCII digits only; with /u PHP's \d also took full-width and Arabic-Indic digits.
+        return preg_match('/^([0-9]{3})[ \x{00A0}]?([0-9]{2})$/u', trim($zip), $m) === 1 ? $m[1] . $m[2] : null;
     }
 
     /** A JSON billing_address object becomes the flat billing_* keys the form posts; flat keys win. */

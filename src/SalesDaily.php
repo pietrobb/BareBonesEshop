@@ -28,6 +28,13 @@ final class SalesDaily {
      * one batch's delete. Was R57's 2 000 000 per pass, deleted after the deadline in one go.
      */
     private const CHANGES_MAX = 50000;
+    /**
+     * R59 (review round 24, low): changes the worker, the CLI and the migration (refreshAll()) delete at once, in id order.
+     * R58 deleted each batch's changes before reading the next; a backlog's changes lie all over the table, so every
+     * batch rewrote nearly all of its pages again (SQLite: the worker took 13.3 s for 1.6 million changes, 4.3 s before
+     * R58). A report request still deletes once CHANGES_MAX have built.
+     */
+    private const CHANGES_DELETE_BULK = 400000;
     /** Tables whose new rows change the day of their order: SQL of (store_id, created_at) of the orders of rows id in (:from, :to]. */
     private const WATCHED = [
         'orders' => 'SELECT o.store_id, o.created_at FROM orders o WHERE o.id > :from AND o.id <= :to',
@@ -117,15 +124,15 @@ final class SalesDaily {
         $deadline = $seconds === null ? null : microtime(true) + $seconds;
         self::$lockDeadline = $deadline;
         try {
-            if (!self::refreshStore($db, $storeId, $deadline)) self::queueRest($db);
+            if (!self::refreshStore($db, $storeId, $deadline, false)) self::queueRest($db);
         } finally {
             self::$lockDeadline = null;
         }
         return true;
     }
 
-    /** refresh() of $storeId until $deadline (null: all of it); whether everything was built. */
-    private static function refreshStore(PDO $db, string $storeId, ?float $deadline): bool {
+    /** refresh() of $storeId until $deadline (null: all of it); whether everything was built. $bulk: see CHANGES_DELETE_BULK. */
+    private static function refreshStore(PDO $db, string $storeId, ?float $deadline, bool $bulk): bool {
         unset(self::$staleFrom[$storeId]);
         $state = self::state($db);
         if (($state['timezone:' . $storeId] ?? '') !== date_default_timezone_get()) {
@@ -139,7 +146,7 @@ final class SalesDaily {
         }
         $builtUntil = (string)($state['built_until:' . $storeId] ?? '');
         // The changed days first: the reports read the built days, a stale one would be wrong rather than slow.
-        if (!self::buildChanged($db, $storeId, $builtUntil, $deadline)) return false;
+        if (!self::buildChanged($db, $storeId, $builtUntil, $deadline, $bulk ? self::CHANGES_DELETE_BULK : self::CHANGES_MAX)) return false;
         $open = self::openDay();
         return $builtUntil >= $open || self::buildRange($db, $storeId, $builtUntil, $open, $deadline);
     }
@@ -193,7 +200,7 @@ final class SalesDaily {
                 // At least one store per call, so every call gets further.
                 if ($deadline !== null && !$first && microtime(true) >= $deadline) { $finished = false; break; }
                 $first = false;
-                if (!self::refreshStore($db, $storeId, $deadline)) $finished = false;
+                if (!self::refreshStore($db, $storeId, $deadline, true)) $finished = false;
             }
         } finally {
             date_default_timezone_set($previous);
@@ -408,7 +415,7 @@ final class SalesDaily {
      * are deleted with it (a change committed meanwhile stays for the next refresh). A change of a day not built yet is
      * dropped: that day is built from its orders when its turn comes.
      */
-    private static function buildChanged(PDO $db, string $storeId, string $builtUntil, ?float $deadline): bool {
+    private static function buildChanged(PDO $db, string $storeId, string $builtUntil, ?float $deadline, int $deleteAt = self::CHANGES_MAX): bool {
         // R56 (review round 21, medium 1): the ids read are held packed (8 bytes each), not as PHP arrays: 530 000 changes
         // far apart (a store whose reports nobody opens, Galera's id steps) exceeded 128 MB and every report request
         // answered 500 without ever getting further.
@@ -420,20 +427,30 @@ final class SalesDaily {
         // store's changes again from id 0 (on MariaDB a page near the end of 700 000 took up to 147 ms) until its deadline,
         // then built one day and deleted that day's changes: 20-80 changes per 3.3-4.8 s report request, one day per 20 s
         // worker job, and the reports summed every day from the orders until the backlog was gone (hours).
+        // R59 (review round 24, low): the built days' changes are deleted once $deleteAt of them are pending (and at the
+        // end), not after every batch (see CHANGES_DELETE_BULK).
         $end = $builtUntil === '' ? null : self::dayStartUtc($builtUntil);
         $at = null;
+        $pending = '';
+        $pendingDrop = '';
         while (true) {
-            [$days, $starts, $ids, $drop, $at, $complete] = self::changeBatch($db, $storeId, $end, $at, $deadline);
+            [$days, $starts, $ids, $drop, $at, $complete] = self::changeBatch($db, $storeId, $end, $at, $deadline, $deleteAt);
             $built = self::buildDays($db, $storeId, $days, $deadline, null);
             // Built: the days before $days[$built]. R58 (low L1): only their changes are deleted (was: a DELETE for every
             // change read, those of the days left for later too, 0.6-1.8 s past the deadline on MySQL).
-            self::deleteChanges($db, $storeId, substr($ids, 0, $starts[$built] ?? strlen($ids)), $drop);
+            $pending .= substr($ids, 0, $starts[$built] ?? strlen($ids));
+            $pendingDrop .= $drop;
+            $stop = $built < count($days) || $complete || ($deadline !== null && microtime(true) >= $deadline);
+            if ($stop || strlen($pending) + strlen($pendingDrop) >= $deleteAt * 8) {
+                self::deleteChanges($db, $storeId, $pending, $pendingDrop);
+                $pending = $pendingDrop = '';
+            }
             if ($built < count($days)) {
                 self::$staleFrom[$storeId] = $days[$built];
                 return false;
             }
             if ($complete) return true;
-            if ($deadline !== null && microtime(true) >= $deadline) return self::staleAfter($db, $storeId, $end, $at);
+            if ($stop) return self::staleAfter($db, $storeId, $end, $at);
         }
     }
 
@@ -462,13 +479,13 @@ final class SalesDaily {
      *     the offset at which each day's ids start, the ids of their changes and of the changes of days not built (packed
      *     'q*'), the last change read and whether it was the last one
      */
-    private static function changeBatch(PDO $db, string $storeId, ?string $end, ?array $at, ?float $deadline): array {
+    private static function changeBatch(PDO $db, string $storeId, ?string $end, ?array $at, ?float $deadline, int $maxChanges): array {
         $days = [];
         $starts = [];
         $ids = '';
         $drop = '';
         $dayEnd = '';
-        $max = self::CHANGES_MAX * 8;
+        $max = $maxChanges * 8;
         while (true) {
             $rows = self::changesAfter($db, $storeId, $at, null, self::CHANGES_PAGE);
             foreach ($rows as [$id, $createdAt]) {
@@ -539,14 +556,14 @@ final class SalesDaily {
             // store's every change per statement: 5.8 s for 40 statements at 700 000 changes).
             $delete = Db::isSqlite() ? 'DELETE FROM sales_daily_changes WHERE +' : 'DELETE c FROM sales_daily_changes c FORCE INDEX (PRIMARY) WHERE ';
             $run = static function (string $packed, string $only, array $params) use ($db, $delete): void {
-                // R58: in id order (CHANGES_MAX at a time): a day's changes are spread over the table, and deleted in the
-                // order read they touched its pages at random (SQLite: 2.3 ms per statement instead of 0.4).
-                for ($segment = 0, $length = strlen($packed); $segment < $length; $segment += self::CHANGES_MAX * 8) {
-                    $sorted = array_map('intval', unpack('q*', substr($packed, $segment, self::CHANGES_MAX * 8)) ?: []);
-                    sort($sorted);
-                    foreach (array_chunk($sorted, 500) as $chunk) {
-                        $db->prepare("{$delete}store_id = ? AND id IN (" . implode(',', $chunk) . "){$only}")->execute($params);
-                    }
+                // R58: in id order: a day's changes are spread over the table, and deleted in the order read they touched
+                // its pages at random (SQLite: 2.3 ms per statement instead of 0.4). R59: all of them sorted at once (at
+                // most CHANGES_DELETE_BULK and a batch), not CHANGES_MAX at a time.
+                if ($packed === '') return;
+                $sorted = array_map('intval', unpack('q*', $packed) ?: []);
+                sort($sorted);
+                foreach (array_chunk($sorted, 500) as $chunk) {
+                    $db->prepare("{$delete}store_id = ? AND id IN (" . implode(',', $chunk) . "){$only}")->execute($params);
                 }
             };
             $run($ids, '', [$storeId]);

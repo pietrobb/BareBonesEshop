@@ -23,8 +23,10 @@ final class SalesReport {
     private const REFUNDED = "('partially_refunded', 'refunded', 'refund_succeeded')";
     /** @var array<string, true> R55: stores whose SalesDaily::refresh() failed in this request */
     public static array $refreshFailed = [];
-    /** @var ?array<string, true> R58: while a page's refreshOnce() is held, the stores its reports refreshed */
-    private static ?array $pageRefreshed = null;
+    /** @var array<string, true> R58: while a page's refreshOnce() is held, the stores its reports refreshed */
+    private static array $pageRefreshed = [];
+    /** R59: how many refreshOnce() objects are held (nested pages, a page rendering another's part). */
+    private static int $pageDepth = 0;
     /** revenueBy() bucket: UTC hour and its quarter ('Y-m-d H:i'). */
     private const QUARTER = -1;
 
@@ -33,11 +35,18 @@ final class SalesReport {
      * store's daily totals at most once, the later ones read what that refresh left (the days it did not get to are
      * summed from the orders). It ends when the object is released (the page function returns). Was: the dashboard
      * refreshed for today's revenue and again for the trend, 9.7 s under a backlog of 1.59 million changes on MySQL.
+     * R59 (review round 24, low): held objects are counted and the refreshed stores forgotten when the last one is
+     * released. Was: each object restored the copy it took when opened, so a nested one released forgot what the outer
+     * page had refreshed meanwhile (refreshed again), and one released out of order brought back a finished page's set.
      */
     public static function refreshOnce(): object {
-        $previous = self::$pageRefreshed;
-        self::$pageRefreshed ??= [];
-        $end = static function () use ($previous): void { self::$pageRefreshed = $previous; };
+        self::$pageDepth++;
+        $end = static function (): void {
+            if (--self::$pageDepth <= 0) {
+                self::$pageDepth = 0;
+                self::$pageRefreshed = [];
+            }
+        };
         return new class($end) {
             public function __construct(private readonly Closure $end) {}
             public function __destruct() { ($this->end)(); }
@@ -189,7 +198,7 @@ final class SalesReport {
                 if ($afterRefresh || isset(self::$pageRefreshed[$storeId])) {
                     $refreshed = SalesDaily::available();
                 } else {
-                    if (self::$pageRefreshed !== null) self::$pageRefreshed[$storeId] = true;
+                    if (self::$pageDepth > 0) self::$pageRefreshed[$storeId] = true;
                     $refreshed = SalesDaily::refresh($storeId, SalesDaily::$requestSeconds);
                 }
             } catch (PDOException $e) {

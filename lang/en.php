@@ -1443,6 +1443,7 @@ return [
     'admin.import.err.price_max' => 'The price must not exceed {max}.',
     'admin.import.err.price_min' => 'The price must be at least {min} (a variant discount would make its price negative).',
     'admin.import.err.status' => 'Invalid status "{value}" (use {allowed}).',
+    'admin.import.err.control_chars' => 'Field {field} contains an invisible control character; remove it and import the row again.',
     'admin.common.errors_count_one' => '1 error',
     'admin.common.errors_count_few' => '{count} errors',
     'admin.common.errors_count_many' => '{count} errors',

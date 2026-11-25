@@ -1469,6 +1469,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.err.price_max' => 'Cena nie może przekraczać {max}.',
     'admin.import.err.price_min' => 'Cena musi wynosić co najmniej {min} (rabat wariantu uczyniłby ją ujemną).',
     'admin.import.err.status' => 'Nieprawidłowy status „{value}” (użyj {allowed}).',
+    'admin.import.err.control_chars' => 'Pole {field} zawiera niewidoczny znak sterujący; usuń go i zaimportuj wiersz ponownie.',
     'admin.common.errors_count_one' => '1 błąd',
     'admin.common.errors_count_few' => '{count} błędy',
     'admin.common.errors_count_many' => '{count} błędów',

@@ -41,6 +41,7 @@ AuditRound59CloseRaceRegression.php
 AuditRound59CreditDocsRegression.php
 AuditRound59HreflangRegression.php
 AuditRound59LegacySpillRegression.php
+AuditRound59LowsRegression.php
 AuditRound59SellerRegression.php
 AuditRound59ShippingRegression.php
 

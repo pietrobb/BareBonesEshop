@@ -1469,6 +1469,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.err.price_max' => 'Az ár nem haladhatja meg ezt: {max}.',
     'admin.import.err.price_min' => 'Az árnak legalább {min} értékűnek kell lennie (a változat kedvezménye negatívvá tenné).',
     'admin.import.err.status' => 'Érvénytelen állapot: „{value}” (használható: {allowed}).',
+    'admin.import.err.control_chars' => 'A(z) {field} mező láthatatlan vezérlőkaraktert tartalmaz; törölje, és importálja újra a sort.',
     'admin.common.errors_count_one' => '1 hiba',
     'admin.common.errors_count_few' => '{count} hiba',
     'admin.common.errors_count_many' => '{count} hiba',
