@@ -18,9 +18,16 @@ $r59hLocale = I18n::locale();
 $r59hFail = static function (string $what, Throwable $e): void {
     assert_true(false, "R59 hreflang {$what} (" . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 };
-$r59hLinks = static function (string $head): array {
+// With APP_URL configured (CI) hrefs are APP_URL + shop-relative path; without it they carry the base path (/cli).
+$r59hHref = static function (string $href): string {
+    $href = html_entity_decode($href, ENT_QUOTES | ENT_HTML5);
+    $appUrl = Security::configuredAppUrl();
+    if ($appUrl !== null && str_starts_with($href, $appUrl)) return substr($href, strlen($appUrl));
+    return substr($href, strlen(Template::baseUrl()));
+};
+$r59hLinks = static function (string $head) use ($r59hHref): array {
     preg_match_all('#<link rel="alternate" hreflang="([^"]+)" href="([^"]*)"#', $head, $m);
-    return array_combine($m[1], array_map(static fn(string $h): string => substr(html_entity_decode($h, ENT_QUOTES | ENT_HTML5), strlen(Template::baseUrl())), $m[2]));
+    return array_combine($m[1], array_map($r59hHref, $m[2]));
 };
 try {
     // A German web install (its store "de" on the empty prefix) adds the Austrian store /at in German, both with English.
@@ -59,7 +66,7 @@ try {
     $r59hHead = Seo::head('T', 'D', '/at/');
     preg_match('#<link rel="canonical" href="([^"]*)"#', $r59hHead, $r59hCanonical);
     $r59hHeadLinks = $r59hLinks($r59hHead);
-    assert_equals(['/at/', '/at/', '/'], [substr(html_entity_decode($r59hCanonical[1] ?? '', ENT_QUOTES | ENT_HTML5), strlen(Template::baseUrl())), $r59hHeadLinks['de-AT'] ?? null, $r59hHeadLinks['de-DE'] ?? null],
+    assert_equals(['/at/', '/at/', '/'], [$r59hHref($r59hCanonical[1] ?? ''), $r59hHeadLinks['de-AT'] ?? null, $r59hHeadLinks['de-DE'] ?? null],
         'R59 finding 6: the /at page\'s canonical URL is its own de-AT alternate, the German store\'s is de-DE (was: "de" pointed at one of them only)');
 
     $r59hXml = Sitemap::xml('https://shop.r59.example');
