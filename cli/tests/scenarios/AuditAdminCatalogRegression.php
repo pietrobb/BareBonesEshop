@@ -594,8 +594,8 @@ try {
         $r = $aac('invoice_sellers');
         assert_equals(['AAC-O1' => "{$aacYear}0001", 'AAC-O2' => "{$aacYear}0002", 'AAC-O3' => "CZ-{$aacYear}0001", 'AAC-O4' => 'refused'], $r['extra']['issued'],
             "AAC {$aacDriver}: a store without legal block and a store with legal.seller=default number in the default series; a store with its own legal block reusing the default prefixes is refused");
-        assert_equals(["{$aacYear}0001" => ['default', 'Woodle s.r.o.', '12345678'], "{$aacYear}0002" => ['default', 'AAC Brand', '12345678'], "CZ-{$aacYear}0001" => ['cz', 'Woodle CZ s.r.o.', '01234567']], $r['extra']['sellers'],
-            "AAC {$aacDriver}: invoices record their seller; a store without legal block prints the default seller, a legal.seller store its own name over the seller's details");
+        assert_equals(["{$aacYear}0001" => ['default', 'Woodle s.r.o.', '12345678'], "{$aacYear}0002" => ['default', 'Woodle s.r.o.', '12345678'], "CZ-{$aacYear}0001" => ['cz', 'Woodle CZ s.r.o.', '01234567']], $r['extra']['sellers'],
+            "AAC {$aacDriver}: invoices record their seller; a store without legal block prints the default seller, a legal.seller store the seller's name too (R59: its own name is ignored, one VAT payer per series)");
         assert_equals([['clash/invoice', 'clash/credit_note'], [['cz', 'invoice', 'CZ-', 1], ['default', 'invoice', '', 2]], 1],
             [$r['extra']['conflicts'], array_map(static fn(array $c): array => [$c['store_id'], $c['type'], $c['prefix'], (int)$c['last_number']], $r['extra']['counters']), $r['extra']['incidents']],
             "AAC {$aacDriver}: only the conflicting seller's series are refused (not the default store's), one shared counter per seller, the refusal is an operational incident");

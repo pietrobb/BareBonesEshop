@@ -509,6 +509,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   explanation (blank means never free), a wrong "Days" value names the expected format (`2-3`), and an unreadable
   `shipping-methods.json` keeps Standard and Express off (was: on, at sample prices) with a doctor warning
   (`shipping.methods_file`). A zone with no price in any method no longer adds its countries to the address form.
+- **The credit note of a return closed without payout names what it corrects (review round 24, finding 5).** Its lines
+  that give a rate back read "Correction of credit note No. CN-… (5%)", one row per rate (was: the returned goods'
+  name at a rate they were never sold at, "Product A, 5 %, +6.67"). Credit notes issued before keep their text.
+- **Credit notes, smaller fixes (review round 24, lows).** That credit note's PDF is written after the closing commits
+  (was: inside it, so a rollback left a PDF of a number the next credit note took). A credit that leaves a rate nothing
+  of gross uncredited takes its net rest too (was: ±1 cent of net kept at a rate fully credited). A refund or
+  cancellation credit note re-rendered (a lost file, a restore) prints its rows (was: only the totals). A Comgate refund
+  answered HTTP 4xx with error code 1100, 1200 or 1500 is an outcome to confirm, as on HTTP 200 (was: declined, the
+  payment back to paid).
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as
