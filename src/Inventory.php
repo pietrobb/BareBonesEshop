@@ -100,13 +100,48 @@ class Inventory {
         self::lockSkus(array_keys($skus));
     }
 
-    /** @param list<string> $skus */
+    /**
+     * R59 (review round 24): after the stock rows, the product and variant rows of these SKUs are locked too, each table
+     * in id order. Warehouse::syncProductStock() writes products.stock_updated_at and variants.stock line by line in cart
+     * order, so two carts holding variants of the same products in reverse order (A-red, B-red / B-blue, A-blue) share
+     * no stock row but deadlocked on the product rows (1213, the checkout answered 503).
+     * @param list<string> $skus
+     */
     private static function lockSkus(array $skus): void {
+        if ($skus === []) return;
         sort($skus, SORT_STRING);
-        $stmt = Db::get()->prepare('SELECT id FROM warehouse_stock WHERE store_id = :store AND sku = :sku ORDER BY warehouse_id FOR UPDATE');
+        $db = Db::get();
+        $catalog = StoreContext::current()->catalogId();
+        $stmt = $db->prepare('SELECT id FROM warehouse_stock WHERE store_id = :store AND sku = :sku ORDER BY warehouse_id FOR UPDATE');
         foreach ($skus as $sku) {
-            $stmt->execute([':store' => StoreContext::current()->catalogId(), ':sku' => $sku]);
+            $stmt->execute([':store' => $catalog, ':sku' => $sku]);
             $stmt->fetchAll();
+        }
+        $in = implode(', ', array_map(static fn(int $i): string => ":s{$i}", array_keys($skus)));
+        $variantIn = implode(', ', array_map(static fn(int $i): string => ":v{$i}", array_keys($skus)));
+        $params = [':catalog' => $catalog, ':catalog2' => $catalog];
+        foreach ($skus as $i => $sku) $params[":s{$i}"] = $params[":v{$i}"] = $sku;
+        $find = $db->prepare("SELECT 'p' AS kind, id, id AS product_id FROM products WHERE store_id = :catalog AND sku IN ({$in})
+            UNION ALL SELECT 'v', v.id, v.product_id FROM variants v JOIN products p ON p.id = v.product_id
+            WHERE p.store_id = :catalog2 AND v.sku IN ({$variantIn})");
+        $find->execute($params);
+        $products = [];
+        $variants = [];
+        foreach ($find->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $products[(int)$row['product_id']] = (int)$row['product_id'];
+            if ($row['kind'] === 'v') $variants[(int)$row['id']] = (int)$row['id'];
+        }
+        sort($products);
+        sort($variants);
+        $lockProduct = $db->prepare('SELECT id FROM products WHERE id = :id FOR UPDATE');
+        foreach ($products as $id) {
+            $lockProduct->execute([':id' => $id]);
+            $lockProduct->fetchAll();
+        }
+        $lockVariant = $db->prepare('SELECT id FROM variants WHERE id = :id FOR UPDATE');
+        foreach ($variants as $id) {
+            $lockVariant->execute([':id' => $id]);
+            $lockVariant->fetchAll();
         }
     }
 

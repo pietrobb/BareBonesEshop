@@ -463,6 +463,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
+  finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
+  up-front lock covered only the stock rows: two carts with variants of products A and B in reverse order (A red + B
+  red, B blue + A blue) share no stock row and deadlocked on the products, failing 5–10 of 120 such checkouts with a
+  503. A checkout, a cancellation and a return now lock the product and variant rows of their SKUs too, in id order.
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as
