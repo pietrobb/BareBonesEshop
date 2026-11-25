@@ -137,7 +137,9 @@ class Bootstrap {
     /**
      * Build hreflang alternates for the current request from stores.json.
      * Returns:
-     *   'alternates'     => [locale => url_prefix, ...] (one per store)
+     *   'alternates'     => [code => url_prefix, ...] (one per store): the code is its default locale, language-region
+     *                       qualified by the store's country when stores share that locale (de-DE, de-AT; R59)
+     *   'locales'        => [code => locale] of 'alternates'
      *   'pathNoPrefix'   => request path with the matched store prefix stripped
      *   'xDefaultPrefix' => url_prefix of the default_store (for hreflang=x-default)
      *   'secondary'      => [locale => url_prefix, ...] the further `languages` of a store, served as
@@ -152,18 +154,35 @@ class Bootstrap {
     public static function hreflangAlternates(?string $uri = null): array {
         $storesCfg = self::stores();
         $public = array_filter(is_array($storesCfg['stores'] ?? null) ? $storesCfg['stores'] : [], static fn($store): bool => is_array($store) && StoreContext::isPublicConfig($store));
+        // R58 (review round 23, high V1): the country the store sells to (StoreContext::marketCountryOf()), its seller's
+        // through legal.seller: a store added in the admin has no legal.country, and a Slovak store of a Czech seller is SK.
+        $countryOf = static fn(string $id, array $store): string => StoreContext::marketCountryOf($store, (string)(SellerLegal::forStore($storesCfg, $id)['country'] ?? ''));
+        $byLocale = [];
+        foreach ($public as $id => $store) $byLocale[(string)($store['default_locale'] ?? 'en')][] = (string)$id;
         $alternates = [];
+        $localeOf = [];
         $storeOf = [];
         foreach ($public as $id => $store) {
-            $locale = $store['default_locale'] ?? 'en';
-            $alternates[$locale] = $store['url_prefix'] ?? '';
-            $storeOf[$locale] = (string)$id;
+            $locale = (string)($store['default_locale'] ?? 'en');
+            // R59 (review round 24, finding 6): stores sharing a language (de and /at de) are each announced by their
+            // country (de-DE, de-AT). Was: the later store's "de" replaced the earlier one's.
+            $code = $locale;
+            if (count($byLocale[$locale]) > 1) {
+                $country = $countryOf((string)$id, $store);
+                $code = preg_match('/^[A-Z]{2}$/', $country) ? $locale . '-' . $country : $locale;
+            }
+            // Two stores of one language and country: the first keeps the code (each code has one URL).
+            if (isset($alternates[$code])) continue;
+            $alternates[$code] = $store['url_prefix'] ?? '';
+            $localeOf[$code] = $locale;
+            $storeOf[$code] = (string)$id;
         }
+        $defaultLocales = array_values(array_unique($localeOf));
         $secondary = [];
         foreach ($public as $id => $store) {
             foreach ((array)($store['languages'] ?? []) as $locale) {
                 $locale = strtolower((string)$locale);
-                if (!isset($alternates[$locale]) && !isset($secondary[$locale])) {
+                if (!in_array($locale, $defaultLocales, true) && !isset($secondary[$locale])) {
                     $secondary[$locale] = $store['url_prefix'] ?? '';
                     $storeOf[$locale] = (string)$id;
                 }
@@ -173,17 +192,15 @@ class Bootstrap {
         // announced language-region qualified by the store's seller country (en-HU), so each code still has one URL.
         $regional = [];
         foreach ($public as $id => $store) {
-            // R58 (review round 23, high V1): the country the store sells to (StoreContext::marketCountryOf()), its seller's through
-            // legal.seller: a store added in the admin has no legal.country, and a Slovak store of a Czech seller is en-SK.
-            $country = StoreContext::marketCountryOf($store, (string)(SellerLegal::forStore($storesCfg, (string)$id)['country'] ?? ''));
+            $country = $countryOf((string)$id, $store);
             if (!preg_match('/^[A-Z]{2}$/', $country)) continue;
             $prefix = $store['url_prefix'] ?? '';
             foreach ((array)($store['languages'] ?? []) as $locale) {
                 $locale = strtolower((string)$locale);
                 // The language is already announced on this store's own URL (R23: by store, two stores on their own
                 // domains may share the empty prefix).
-                if (($storeOf[$locale] ?? null) === (string)$id) continue;
-                if (!isset($regional[$locale . '-' . $country])) {
+                if ($locale === strtolower((string)($store['default_locale'] ?? 'en')) || ($storeOf[$locale] ?? null) === (string)$id) continue;
+                if (!isset($regional[$locale . '-' . $country]) && !isset($alternates[$locale . '-' . $country])) {
                     $regional[$locale . '-' . $country] = ['prefix' => $prefix, 'locale' => $locale];
                     $storeOf[$locale . '-' . $country] = (string)$id;
                 }
@@ -207,6 +224,7 @@ class Bootstrap {
 
         return [
             'alternates'     => $alternates,
+            'locales'        => $localeOf,
             'pathNoPrefix'   => $pathNoPrefix,
             'xDefaultPrefix' => $xDefaultPrefix,
             'secondary'      => $secondary,
@@ -263,7 +281,7 @@ class Bootstrap {
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
         if ($locale === $context->defaultLocale() || !in_array($locale, $languages, true)) return null;
         // Another store's own language counts only as this request chose it (initLocale): ?lang=en in the HU store.
-        $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
+        $storeDefaults = array_map('strtolower', array_map('strval', array_values(self::hreflangAlternates('/')['locales'])));
         return !in_array($locale, $storeDefaults, true) || strtolower(Security::str($_GET['lang'] ?? '')) === $locale ? $locale : null;
     }
 }

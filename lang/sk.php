@@ -2470,6 +2470,8 @@ return [
     'checkout.error.field_invalid_named' => 'Pole „{field}“ obsahuje neplatné znaky. Prepíšte ho prosím.',
     'admin.stores.field.timezone' => 'Časové pásmo',
     'admin.stores.timezone_hint' => 'Podľa tohto pásma sa určujú dátumy faktúr, splatnosti a denný prehľad tržieb.',
+    'admin.stores.field.market_country' => 'Krajina zákazníkov',
+    'admin.stores.market_country_hint' => 'Dvojpísmenový kód (AT) krajiny, do ktorej obchod predáva: predvolí sa v pokladni, zobrazí sa v prepínači obchodov a v jeho odkazoch hreflang (de-AT). Prázdne: krajina jeho jazyka, inak predajcu.',
     'admin.stores.field.languages' => 'Jazyky obchodu',
     'admin.stores.languages_hint' => 'Obchod, jeho právne stránky a e-maily môžu byť v týchto jazykoch (prepínač jazykov a odkazy hreflang); predvolený jazyk obchodu zostáva vždy. Administráciu prepnete do ľubovoľného jazyka pod menu.',
     'admin.stores.field.domains' => 'Domény obchodu',

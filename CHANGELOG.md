@@ -518,6 +518,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   cancellation credit note re-rendered (a lost file, a restore) prints its rows (was: only the totals). A Comgate refund
   answered HTTP 4xx with error code 1100, 1200 or 1500 is an outcome to confirm, as on HTTP 200 (was: declined, the
   payment back to paid).
+- **Stores of one language are announced by their country (review round 24, finding 6).** A German shop and its `/at`
+  store in German are hreflang `de-DE` and `de-AT`, on the pages and in the sitemap (was: one `de`, the later store's
+  URL, so the German home page was announced as the Austrian one). A new field in Admin → Stores, "Country of
+  customers", sets the country a store sells to (checkout, store switcher, hreflang); empty, it is its language's
+  country, else its seller's. **Set it for a store that sells to another country than its seller**: an `/at` store of a
+  German seller without it is still `DE`, and its hreflang and English page fall back to the German store's.
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as

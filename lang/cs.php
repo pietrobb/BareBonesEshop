@@ -2440,6 +2440,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.field_invalid_named' => 'Pole „{field}“ obsahuje neplatné znaky. Přepište ho prosím.',
     'admin.stores.field.timezone' => 'Časové pásmo',
     'admin.stores.timezone_hint' => 'Podle tohoto pásma se určují data faktur, splatnosti a denní přehled tržeb.',
+    'admin.stores.field.market_country' => 'Země zákazníků',
+    'admin.stores.market_country_hint' => 'Dvoupísmenný kód (AT) země, do které obchod prodává: předvolí se v pokladně, zobrazí se v přepínači obchodů a v jeho odkazech hreflang (de-AT). Prázdné: země jeho jazyka, jinak prodejce.',
     'admin.stores.field.languages' => 'Jazyky obchodu',
     'admin.stores.languages_hint' => 'Obchod, jeho právní stránky a e-maily mohou být v těchto jazycích (přepínač jazyků a odkazy hreflang); výchozí jazyk obchodu zůstává vždy. Administraci přepnete do libovolného jazyka pod menu.',
     'admin.stores.field.domains' => 'Domény obchodu',

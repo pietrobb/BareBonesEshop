@@ -2440,6 +2440,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.field_invalid_named' => 'Das Feld „{field}“ enthält ungültige Zeichen. Bitte geben Sie es neu ein.',
     'admin.stores.field.timezone' => 'Zeitzone',
     'admin.stores.timezone_hint' => 'Rechnungsdaten, Zahlungsfristen und der tägliche Umsatzbericht richten sich nach dieser Zeitzone.',
+    'admin.stores.field.market_country' => 'Land der Kunden',
+    'admin.stores.market_country_hint' => 'Zweibuchstabiger Code (AT) des Landes, in das dieser Shop verkauft: an der Kasse vorausgewählt, im Shop-Umschalter und in seinen hreflang-Links (de-AT) angezeigt. Leer: das Land seiner Sprache, sonst das des Verkäufers.',
     'admin.stores.field.languages' => 'Sprachen des Shops',
     'admin.stores.languages_hint' => 'Der Shop, seine Rechtstexte und E-Mails können in diesen Sprachen erscheinen (Sprachumschalter und hreflang-Links); die Standardsprache des Shops bleibt immer. Die Verwaltung lässt sich unter dem Menü in jede Sprache umschalten.',
     'admin.stores.field.domains' => 'Domains des Shops',

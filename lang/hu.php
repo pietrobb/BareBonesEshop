@@ -2440,6 +2440,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.field_invalid_named' => 'A(z) „{field}” mező érvénytelen karaktereket tartalmaz. Kérjük, írja be újra.',
     'admin.stores.field.timezone' => 'Időzóna',
     'admin.stores.timezone_hint' => 'A számlák dátuma, a fizetési határidők és a napi forgalmi jelentés ehhez az időzónához igazodik.',
+    'admin.stores.field.market_country' => 'Vásárlók országa',
+    'admin.stores.market_country_hint' => 'Annak az országnak a kétbetűs kódja (AT), ahová az üzlet értékesít: a pénztárban előre kiválasztva, az üzletváltóban és a hreflang hivatkozásaiban (de-AT) jelenik meg. Üres: a nyelvének országa, különben az eladóé.',
     'admin.stores.field.languages' => 'A bolt nyelvei',
     'admin.stores.languages_hint' => 'A bolt, a jogi oldalai és az e-mailek ezeken a nyelveken jelenhetnek meg (nyelvváltó és hreflang hivatkozások); a bolt alapnyelve mindig megmarad. Az adminisztráció a menü alatt bármely nyelvre átváltható.',
     'admin.stores.field.domains' => 'Az üzlet domainjei',

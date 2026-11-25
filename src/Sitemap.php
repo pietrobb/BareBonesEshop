@@ -54,10 +54,14 @@ class Sitemap {
     /**
      * Storefront stores in config order: store id => locale, url_prefix, catalog and page owner.
      * hreflang alternates are emitted only between stores that serve the path.
-     * @return array<string, array{locale: string, prefix: string, catalog: string, id: string}>
+     * @return array<string, array{locale: string, code: string, prefix: string, catalog: string, id: string}>
      */
     private static function stores(): array {
         $config = Bootstrap::stores();
+        // R59 (review round 24, finding 6): the hreflang code of each store's own language (de-AT next to de-DE).
+        $hreflang = Bootstrap::hreflangAlternates('/');
+        $codes = [];
+        foreach (array_keys($hreflang['alternates']) as $code) $codes[(string)$hreflang['stores'][(string)$code]] = (string)$code;
         $stores = [];
         foreach (array_keys($config['stores'] ?? []) as $storeId) {
             try {
@@ -68,6 +72,7 @@ class Sitemap {
             if (!$store->isPublic()) continue;
             $stores[(string)$storeId] = [
                 'locale' => (string)($store->config()['default_locale'] ?? 'en'),
+                'code' => $codes[(string)$storeId] ?? (string)($store->config()['default_locale'] ?? 'en'),
                 'prefix' => (string)($store->config()['url_prefix'] ?? ''),
                 'catalog' => $store->catalogId(),
                 'id' => $store->id(),
@@ -185,7 +190,7 @@ class Sitemap {
             $alternates = [];
             foreach ($storeIds as $storeId) {
                 $urls[$storeId] = $bases[$storeId] . $stores[$storeId]['prefix'] . $pathIn($stores[$storeId]['locale']);
-                $alternates[$stores[$storeId]['locale']] ??= $urls[$storeId];
+                $alternates[$stores[$storeId]['code']] ??= $urls[$storeId];
             }
             // R22: a store's further languages are pages of their own (?lang=), announced by the page's hreflang
             // (Seo::head()); the sitemap listed only each store's default language.

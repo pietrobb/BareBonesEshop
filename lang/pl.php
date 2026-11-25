@@ -2440,6 +2440,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.field_invalid_named' => 'Pole „{field}” zawiera nieprawidłowe znaki. Wpisz je ponownie.',
     'admin.stores.field.timezone' => 'Strefa czasowa',
     'admin.stores.timezone_hint' => 'Daty faktur, terminy płatności i dzienny raport sprzedaży są liczone w tej strefie czasowej.',
+    'admin.stores.field.market_country' => 'Kraj klientów',
+    'admin.stores.market_country_hint' => 'Dwuliterowy kod (AT) kraju, do którego sklep sprzedaje: wybrany domyślnie w kasie, widoczny w przełączniku sklepów i w jego linkach hreflang (de-AT). Puste: kraj jego języka, w przeciwnym razie sprzedawcy.',
     'admin.stores.field.languages' => 'Języki sklepu',
     'admin.stores.languages_hint' => 'Sklep, jego strony prawne i e-maile mogą być w tych językach (przełącznik języków i linki hreflang); domyślny język sklepu pozostaje zawsze. Panel administracyjny można przełączyć na dowolny język pod menu.',
     'admin.stores.field.domains' => 'Domeny sklepu',

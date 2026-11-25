@@ -2401,6 +2401,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout.error.field_invalid_named' => 'El campo «{field}» contiene caracteres no válidos. Vuelva a escribirlo.',
     'admin.stores.field.timezone' => 'Zona horaria',
     'admin.stores.timezone_hint' => 'Las fechas de factura, los plazos de pago y el informe diario de ventas siguen esta zona horaria.',
+    'admin.stores.field.market_country' => 'País de los clientes',
+    'admin.stores.market_country_hint' => 'Código de dos letras (AT) del país al que vende esta tienda: preseleccionado en el pago, mostrado en el selector de tiendas y en sus enlaces hreflang (de-AT). Vacío: el país de su idioma, si no el del vendedor.',
     'admin.stores.field.languages' => 'Idiomas de la tienda',
     'admin.stores.languages_hint' => 'La tienda, sus páginas legales y los correos pueden mostrarse en estos idiomas (selector de idioma y enlaces hreflang); el idioma predeterminado de la tienda se mantiene siempre. La administración puede cambiarse a cualquier idioma debajo del menú.',
     'admin.stores.field.domains' => 'Dominios de la tienda',

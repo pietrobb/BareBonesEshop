@@ -2461,6 +2461,8 @@ return [
     'checkout.error.field_invalid_named' => '{field} contains invalid characters. Please retype it.',
     'admin.stores.field.timezone' => 'Time zone',
     'admin.stores.timezone_hint' => 'Invoice dates, payment deadlines and the daily sales report follow this time zone.',
+    'admin.stores.field.market_country' => 'Country of customers',
+    'admin.stores.market_country_hint' => 'Two-letter code (AT) of the country this store sells to: preselected in checkout, shown in the store switcher and in its hreflang links (de-AT). Empty: the country of its language, else the seller\'s.',
     'admin.stores.field.languages' => 'Storefront languages',
     'admin.stores.languages_hint' => 'The storefront, its legal pages and e-mails can be shown in these languages (a language switcher and hreflang links); the store\'s default language always stays. The admin can be switched to any language below the menu.',
     'admin.stores.field.domains' => 'Store domains',
