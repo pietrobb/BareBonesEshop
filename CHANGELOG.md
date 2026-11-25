@@ -460,9 +460,82 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Slovak and Czech postcodes are stored as five digits (review round 23, low N2).** Checkout, the address book and
   manual orders accept `811 01` and `81101` and store `81101`; a Slovak or Czech postcode of another form is refused.
   Postcodes stored before are not changed.
+- **Returns that counted money refunded outside them before this release keep their credit notes (review round 24,
+  finding 2).** Such a return (closed without payout, or credited less that money) left the money credited at the rates
+  of the goods the customer kept, because the balancing credit note of round 23 did not exist yet. No document is
+  issued for them on update: the next return of that order credits what its own rate lacks at the rates whose goods
+  were already returned, so the customer still gets the goods' full value. Until every return of such an order is in,
+  the VAT report can show part of that money at the rates of the goods kept, as it did before the update.
 
 ### Changes
 
+- **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
+  finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
+  up-front lock covered only the stock rows: two carts with variants of products A and B in reverse order (A red + B
+  red, B blue + A blue) share no stock row and deadlocked on the products, failing 5–10 of 120 such checkouts with a
+  503. A checkout, a cancellation and a return now lock the product and variant rows of their SKUs too, in id order.
+- **Returns closed without payout at the same time use the money refunded outside them once (review round 24,
+  finding 1).** On MySQL/MariaDB a return read before its order lock kept that read's view of the order, so a return
+  waiting while another one of the order closed still counted the money refunded outside (a goodwill or dashboard
+  refund) as unused and closed as well: three returns marked "Refunded" at once credited the customer 33.89 € for
+  50.66 € of goods. The return is now looked up before its transaction opens, so after the lock each one sees what the
+  others used.
+- **A return after one closed before round 23 pays its goods in full (review round 24, finding 2).** Round 23 dropped
+  the step that credited what a rate lacked at another rate, relying on the balancing credit note a closing issues now.
+  Returns closed before it have none, so the later return was cut to what its rate had left: A 20 € at 23 % and B 10 €
+  at 5 %, 20 € refunded in the gateway's dashboard, A closed without payout before the update, then B paid 3.33 €
+  instead of 10 €. What a return's rate lacks is now credited at rates that have more uncredited than the goods not yet
+  returned are worth there (the rates of goods already returned), never at the rate of goods the customer keeps. After
+  round 23 no rate has such an excess, so returns of newer orders are credited as before.
+- **A store sharing a seller cannot change the seller's tax identity (review round 24, finding 4).** `name`, `country`,
+  `vat_registered`, `ico`, `dic` and `ic_dph` in the legal block of a store with `legal.seller` are ignored: one VAT
+  payer charged and invoiced another VAT in one number series (a store with `"vat_registered": false` printed 0 % "not
+  a VAT payer" invoices under the seller's Czech VAT ID). The doctor (`stores.legal_identity.<store>`) and Admin →
+  Stores name such fields; a store of another company or VAT registration needs a legal block of its own. Its other
+  fields (e-mail, phone, address) still print.
+- **Seller details, smaller fixes (review round 24, lows).** A store whose `legal.seller` names no seller (a missing
+  store, a loop) refuses checkout with an incident instead of taking an order it cannot invoice. `cli/vat-backfill.php`
+  reads OSS of the seller, as checkout does. A store without a legal block keeps the clock of the seller it sells as
+  (was: Europe/Bratislava). The WebSite schema carries the storefront's name (the company stays the Organization's).
+  Two stores of one country and currency show the country and currency in the store switcher, their names after it
+  (was: the names alone). Cached sitemaps and feeds are rebuilt when stores.json changes (a language added in
+  Admin → Stores appeared after 15 minutes).
+- **`php cli/setup.php install` switches Standard and Express off, as the web installer does (review round 24,
+  finding 7).** A fresh CLI install whose default store has carriers of its own (GLS, Packeta, pickup) also offered
+  Standard 3.99 and Express 7.99 €, prices the merchant never set; they now start off, ready to switch on in
+  Admin → Shipping.
+- **Admin → Shipping, smaller fixes (review round 24, lows).** A price for a zone the form does not show (`rates[local]`)
+  is not saved, and a stored one is ignored (was: Standard free in the pickup zone). "Free above" 0 is refused with an
+  explanation (blank means never free), a wrong "Days" value names the expected format (`2-3`), and an unreadable
+  `shipping-methods.json` keeps Standard and Express off (was: on, at sample prices) with a doctor warning
+  (`shipping.methods_file`). A zone with no price in any method no longer adds its countries to the address form.
+- **The credit note of a return closed without payout names what it corrects (review round 24, finding 5).** Its lines
+  that give a rate back read "Correction of credit note No. CN-… (5%)", one row per rate (was: the returned goods'
+  name at a rate they were never sold at, "Product A, 5 %, +6.67"). Credit notes issued before keep their text.
+- **Credit notes, smaller fixes (review round 24, lows).** That credit note's PDF is written after the closing commits
+  (was: inside it, so a rollback left a PDF of a number the next credit note took). A credit that leaves a rate nothing
+  of gross uncredited takes its net rest too (was: ±1 cent of net kept at a rate fully credited). A refund or
+  cancellation credit note re-rendered (a lost file, a restore) prints its rows (was: only the totals). A Comgate refund
+  answered HTTP 4xx with error code 1100, 1200 or 1500 is an outcome to confirm, as on HTTP 200 (was: declined, the
+  payment back to paid).
+- **Stores of one language are announced by their country (review round 24, finding 6).** A German shop and its `/at`
+  store in German are hreflang `de-DE` and `de-AT`, on the pages and in the sitemap (was: one `de`, the later store's
+  URL, so the German home page was announced as the Austrian one). A new field in Admin → Stores, "Country of
+  customers", sets the country a store sells to (checkout, store switcher, hreflang); empty, it is its language's
+  country, else its seller's. **Set it for a store that sells to another country than its seller**: an `/at` store of a
+  German seller without it is still `DE`, and its hreflang and English page fall back to the German store's.
+- **Addresses, CSV import and texts, smaller fixes (review round 24, lows).** A Slovak or Czech postcode is five ASCII
+  digits (was: full-width or Arabic-Indic digits passed). The checkout refuses a line or paragraph separator (U+2028,
+  U+2029) in a name or address field, as the address book does (was: kept inside the street, printed on labels). A CSV
+  whose cell holds a control byte (0x01, DEL, NUL) is no longer refused whole as "not a CSV": only its rows with one
+  are, and every refused row names its line and SKU in the admin's language (was: in English). A Vietnamese name gets a
+  readable slug ("Nguyễn" is `nguyen`, was `nguy-n`); existing slugs are not changed. Czech and Slovak required-field
+  messages read "Název: povinné pole" (was "Název je povinné").
+- **The daily-sales worker is fast again on SQLite (review round 24, low).** Since round 23 it deleted each batch's
+  changes before reading the next, rewriting most of the table every time: 1.6 million changes took 10.1 s (3.5 s
+  before). The worker and `cli/sales-daily.php` now delete 400 000 at a time in id order: 5.5 s; the rest is upkeep of
+  the index the oldest-day-first reading needs. Report requests delete as before. A page's reports refresh once also
+  when a page holds another's part (`SalesReport::refreshOnce()` counts its holders instead of restoring a copy).
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as
@@ -489,7 +562,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   its 2 s ran out: at 700 000 changes a request took 3.3–4.8 s and removed a few hundred of them, the worker built one
   day per 20 s job (about 4 hours), and every report summed from the orders meanwhile. Changes are now read oldest day
   first, a month of days at a time, built and removed before the next: 700 000 changes are gone after 14 report requests
-  of at most 2.4 s, the worker clears 1.6 million in three jobs, and a request does little after its 2 s.
+  of up to 2.8 s on MariaDB, the worker clears 1.6 million in three jobs, and a request does little after its 2 s.
 - **The dashboard and the order list no longer wait for the daily totals (review round 23, low L2).** Today's revenue
   is always summed from the orders, yet it refreshed the daily totals first, and the dashboard refreshed again for its
   trend (10 s for the dashboard and 5 s for the order list under a large backlog). Today's revenue no longer refreshes,

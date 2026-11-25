@@ -10,6 +10,19 @@ class Import {
     public const MAX_ROWS = 100000;
 
     /**
+     * R59 (review round 24, low): an uploaded CSV whose cell holds a control byte (0x01, DEL, NUL) is sniffed as binary,
+     * so the upload check refused the whole file with no row and an English reason. Those bytes become ESC (still a
+     * control character, but text to the sniffer): the file is accepted and importRow() refuses just the rows holding
+     * one, by their line, in the admin's language. Tab, line breaks and the bytes of UTF-8/Windows-1250 text stay.
+     */
+    public static function neutralizeControlBytes(string $path): void {
+        $content = @file_get_contents($path, false, null, 0, self::MAX_FILE_BYTES + 1);
+        if (!is_string($content) || strlen($content) > self::MAX_FILE_BYTES) return;
+        if (preg_match('/[\x00-\x08\x0E-\x1A\x1C-\x1F\x7F]/', $content) !== 1) return;
+        file_put_contents($path, (string)preg_replace('/[\x00-\x08\x0E-\x1A\x1C-\x1F\x7F]/', "\x1B", $content));
+    }
+
+    /**
      * Import products from CSV file
      * CSV format: sku,name,category,price,stock,summary,image,attr:color,attr:size,...
      * Translations: name_en, name_de, summary_en, slug_en, etc.

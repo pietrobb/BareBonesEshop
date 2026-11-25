@@ -146,7 +146,8 @@ final class StorefrontSeo
         }
         // R58: two stores of one country and currency (a German shop's /en store) are told apart by their names.
         $labels = array_count_values(array_column($links, 'label'));
-        foreach ($links as $i => $link) if ($labels[$link['label']] > 1) $links[$i]['label'] = $link['title'];
+        // R59 (review round 24, low): the name after the country and currency, which stay (was: the name alone).
+        foreach ($links as $i => $link) if ($labels[$link['label']] > 1 && $link['label'] !== $link['title']) $links[$i]['label'] = $link['label'] . ' · ' . $link['title'];
         return count($links) > 1 ? $links : [];
     }
 

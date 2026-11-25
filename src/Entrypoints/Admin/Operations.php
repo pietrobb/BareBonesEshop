@@ -118,6 +118,8 @@ function handleImportTemplate(): void {
 }
 function handleImportUpload(): void {
     // BBF checks that a file came, its .csv extension, size and content type.
+    $upload = $_FILES['csv_file']['tmp_name'] ?? null;
+    if (is_string($upload) && is_uploaded_file($upload)) Import::neutralizeControlBytes($upload);
     $form = AdminForm::validate('admin-import', [], ['allowed_extensions' => ['csv'], 'max_file_size' => Import::MAX_FILE_BYTES]);
     if ($form === null) {
         setFlash('err', I18n::t('admin.import.rejected') . ' ' . AdminForm::firstError());

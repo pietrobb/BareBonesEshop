@@ -63,7 +63,8 @@ class JsonLd {
         return [
             '@context' => 'https://schema.org',
             '@type'    => 'WebSite',
-            'name'     => $store['legal']['name'] ?? ($store['name'] ?? 'BareBones Shop'),
+            // R59 (review round 24, low): the site is the storefront (its name), the company is the Organization's.
+            'name'     => trim((string)($store['name'] ?? '')) !== '' ? (string)$store['name'] : ($store['legal']['name'] ?? 'BareBones Shop'),
             'url'      => $url,
             'potentialAction' => [
                 '@type'  => 'SearchAction',

@@ -26,6 +26,9 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
     /** Result codes of a refund Comgate refused (apidoc.comgate.cz, result codes): the request, not its outcome. */
     private const REFUND_REFUSED = [1400, 1401, 1402];
 
+    /** The result code in the body of the last request() Comgate answered with an error status, or null. */
+    private ?int $errorCode = null;
+
     private string $merchant;
     private string $secret;
     private bool $test;
@@ -144,6 +147,10 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
             // refund, so the shop checks the payment's state (PaymentService::refund()). Credentials, timeouts and
             // throttling stay errors to retry.
             if (in_array($e->getCode(), [401, 403, 408, 429], true) || $e->getCode() < 400 || $e->getCode() >= 500) throw $e;
+            // R59 (review round 24, low): a 4xx whose body names an error code other than a refusal (1100 unknown, 1200
+            // database, 1500 unexpected error) says nothing about the outcome either: an error, as with HTTP 200 below.
+            // Was: failed, released as declined with the payment back to paid.
+            if ($this->errorCode !== null && !in_array($this->errorCode, self::REFUND_REFUSED, true)) throw $e;
             return ['refund_id' => '', 'status' => 'failed', 'message' => $e->getMessage()];
         }
         $code = $response['code'] ?? null;
@@ -193,7 +200,9 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
         $response = ($this->transport)($method, self::ORIGIN . $path, $headers, $body === null ? null : json_encode($body, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
         $status = (int)($response['status'] ?? 0);
         $data = json_decode((string)($response['body'] ?? ''), true);
+        $this->errorCode = null;
         if ($status < 200 || $status >= 300 || !is_array($data)) {
+            if (is_array($data) && is_int($data['code'] ?? null)) $this->errorCode = $data['code'];
             // The HTTP status is the exception code: 4xx = Comgate refused the request, others = retryable.
             throw new \RuntimeException("Comgate API error: {$method} " . preg_replace('#/transId/[^/]+#', '/transId/…', $path) . " HTTP {$status}", $status);
         }

@@ -634,10 +634,15 @@ class Rma {
      */
     public static function closeWithoutPayout(int $rmaId): bool {
         $db = Db::get();
+        // R59 (review round 24, finding 1): the return's order is looked up before the transaction opens. Read inside it,
+        // that plain read fixed MySQL/MariaDB's snapshot before the order lock, so after waiting for a return of the same
+        // order closed meanwhile, this one still saw the outside money that return used up and used it again (three
+        // returns closed at once credited 33.89 € of 50.66 € of goods).
+        $rma = self::byId($rmaId);
+        $balance = null;
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
-            $rma = self::byId($rmaId);
             if ($rma) Orders::lockWithin((int)$rma['order_id']);
             $rma = $rma ? self::lockedRma($rmaId) : null;
             $outside = $rma ? self::refundedOutsideReturns((int)$rma['order_id']) : 0;
@@ -654,7 +659,7 @@ class Rma {
             if ($closable) {
                 // R58 (review round 23, medium S1): the goods credited at their own rates, the money's credit at the
                 // other rates reversed (a credit note of nothing in all), before the units count as refunded.
-                InvoiceService::balanceClosedReturn((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $keys);
+                $balance = InvoiceService::balanceClosedReturn((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $keys);
                 $db->prepare('UPDATE rma_items SET refunded_quantity = received_quantity WHERE rma_id = ?')->execute([$rmaId]);
                 $db->prepare("UPDATE rma_requests SET status = 'refunded', outside_refund_applied = outside_refund_applied + ?, outside_refund_keys = ?, updated_at = " . Db::now() . ' WHERE id = ? AND store_id = ?')
                     ->execute([$value, json_encode($keys, JSON_THROW_ON_ERROR | JSON_FORCE_OBJECT), $rmaId, StoreContext::current()->id()]);
@@ -662,12 +667,14 @@ class Rma {
                 AuditLog::log('rma_status', $rmaId, 'received', 'refunded', 'Closed without payout: ' . I18n::price($value, $currency) . ' of ' . I18n::price($outside, $currency) . ' refunded outside the return counted');
             }
             if ($own) $db->commit();
-            return $closable;
         } catch (Throwable $e) {
             // Db::get(), not $db: PHPStan keeps $db->inTransaction() false from $own across the calls above.
             if ($own && Db::get()->inTransaction()) Db::get()->rollBack();
             throw $e;
         }
+        // R59 (review round 24, low): the credit note's PDF once it is committed; in a caller's transaction, on first download.
+        if ($own && isset($balance['id'])) InvoiceService::writeBalancePdf((int)$balance['id']);
+        return $closable;
     }
 
     /** Complete a pending item refund; true when this call completed it (false: it was done already). */

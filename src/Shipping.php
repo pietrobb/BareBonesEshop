@@ -41,7 +41,9 @@ class Shipping {
      * Settings of other methods or zones are ignored.
      */
     public static function withSettings(array $cfg, array $settings): array {
-        $zones = is_array($cfg['zones'] ?? null) ? $cfg['zones'] : [];
+        // R59 (review round 24, low): only zones the form shows (editableZones()); a posted rates[local] priced Standard
+        // in the pickup zone, which comes before "domestic", so domestic delivery cost 0 €.
+        $zones = array_flip(self::editableZones($cfg));
         foreach (self::CHECKOUT_METHODS as $key) {
             $own = $settings['methods'][$key] ?? null;
             if (!is_array($own) || !is_array($cfg['methods'][$key] ?? null)) continue;
@@ -66,6 +68,19 @@ class Shipping {
             $cfg['methods'][$key] = $method;
         }
         return $cfg;
+    }
+
+    /**
+     * Zones of $file (shipping.json) its checkout methods are priced for: the zones Admin → Shipping lists and prices.
+     * @return list<string>
+     */
+    public static function editableZones(array $file): array {
+        $zones = is_array($file['zones'] ?? null) ? $file['zones'] : [];
+        $editable = [];
+        foreach (self::CHECKOUT_METHODS as $key) {
+            foreach ((array)($file['methods'][$key]['rates'] ?? []) as $zone => $rate) if (isset($zones[$zone])) $editable[(string)$zone] = true;
+        }
+        return array_keys($editable);
     }
 
     /** A method is offered unless the merchant turned it off. */
@@ -113,6 +128,9 @@ class Shipping {
                 $served = $served === true || (in_array((string)$key, self::CHECKOUT_METHODS, true) && self::isActive($method));
             }
             if ($served === false) continue; // a zone no method names stays a destination, as before
+            // R59 (review round 24, low): not one whose every price the merchant removed in Admin → Shipping either (was:
+            // its countries stayed in the checkout's list, and no method delivered there).
+            if ($served === null && in_array((string)$name, self::editableZones(self::fileConfig()), true)) continue;
             foreach (self::countriesOf($zone) as $code) {
                 if (preg_match('/^[A-Za-z]{2}$/', $code)) $codes[] = strtoupper($code);
             }
@@ -255,10 +273,7 @@ class Shipping {
         $cfg = self::config();
         $file = self::fileConfig();
         $zones = is_array($cfg['zones'] ?? null) ? $cfg['zones'] : [];
-        $editableZones = [];
-        foreach (self::CHECKOUT_METHODS as $key) {
-            foreach ((array)($file['methods'][$key]['rates'] ?? []) as $zone => $rate) if (isset($zones[$zone])) $editableZones[$zone] = true;
-        }
+        $editableZones = array_flip(self::editableZones($file));
         $rows = [];
         foreach (self::CHECKOUT_METHODS as $key) {
             $method = $cfg['methods'][$key] ?? null;

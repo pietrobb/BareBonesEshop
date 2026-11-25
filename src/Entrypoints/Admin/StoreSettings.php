@@ -18,6 +18,18 @@ function adminStoreIdentityIssue(array $issue): string {
     return I18n::format($issue['field'] === 'iban' ? 'admin.stores.problem.iban' : 'admin.stores.problem.example', ['field' => $field, 'value' => $issue['value']]);
 }
 
+/**
+ * R59 (review round 24, finding 6): the country the store sells to (checkout, store switcher, hreflang de-AT next to the
+ * German store's de-DE); its placeholder is the country used while it is empty.
+ */
+function adminStoreCountryField(array $settings, string $storeId, string $value): void {
+    $id = 'store-' . $storeId . '-market_country';
+    echo '<div class="form-row"><label for="' . esc($id) . '">' . esc(I18n::t('admin.stores.field.market_country')) . '</label>'
+        . '<input id="' . esc($id) . '" name="market_country" value="' . esc($value) . '" maxlength="2" size="3" pattern="[A-Za-z]{2}" placeholder="'
+        . esc(StoreSettings::defaultMarketCountry($settings, $storeId)) . '" autocomplete="off" data-store-market-country aria-describedby="' . esc($id) . '-hint">'
+        . '<small class="muted" id="' . esc($id) . '-hint">' . esc(I18n::t('admin.stores.market_country_hint')) . '</small></div>';
+}
+
 function pageStoreSettings(): void {
     $settings = StoreSettings::load();
     $stores = $settings['stores'] ?? [];
@@ -55,12 +67,12 @@ function pageStoreSettings(): void {
                     <?php foreach (DateTimeZone::listIdentifiers() as $identifier): ?><option<?= $identifier === $zone ? ' selected' : '' ?>><?= esc($identifier) ?></option><?php endforeach; ?>
                 </select>
                 <small class="muted" id="store-<?= esc($storeId) ?>-timezone-hint"><?= esc(I18n::t('admin.stores.timezone_hint')) ?></small></div>
-            <?php /* R58 (review round 23, medium S3): the storefront languages; the default one is always offered */ $storeLocale = (string)($store['default_locale'] ?? 'en'); $storeLanguages = array_map('strval', (array)($draft['languages'] ?? ($store['languages'] ?? []))); ?>
+            <?php adminStoreCountryField($settings, $storeId, (string)($draft['market_country'] ?? ($store['country'] ?? ''))); /* R58 (review round 23, medium S3): the storefront languages; the default one is always offered */ $storeLocale = (string)($store['default_locale'] ?? 'en'); $storeLanguages = array_map('strval', (array)($draft['languages'] ?? ($store['languages'] ?? []))); ?>
             <fieldset class="form-row" data-store-languages aria-describedby="store-<?= esc($storeId) ?>-languages-hint"><legend><?= esc(I18n::t('admin.stores.field.languages')) ?></legend><input type="hidden" name="languages[]" value="<?= esc($storeLocale) ?>">
                 <?php foreach (I18n::shippedLocales() as $lc): ?><label style="display:inline-block;margin-right:.75rem" lang="<?= esc($lc) ?>"><input type="checkbox" name="languages[]" value="<?= esc($lc) ?>"<?= $lc === $storeLocale || in_array($lc, $storeLanguages, true) ? ' checked' : '' ?><?= $lc === $storeLocale ? ' disabled' : '' ?>> <?= esc(I18n::localeName($lc)) ?></label><?php endforeach; ?>
                 <small class="muted" id="store-<?= esc($storeId) ?>-languages-hint" style="display:block"><?= esc(I18n::t('admin.stores.languages_hint')) ?></small></fieldset>
             <?php if ($seller !== null): ?>
-            <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p>
+            <p data-store-shared-seller><?= esc(I18n::format('admin.stores.shared_seller', ['seller' => $seller])) ?></p><?php $ignored = StoreSettings::identityIgnored($settings, $storeId); if ($ignored !== []): /* R59 */ ?><div class="flash flash-err" role="alert" data-store-identity-ignored><?= esc(I18n::format('admin.stores.identity_ignored', ['fields' => implode(', ', $ignored)])) ?></div><?php endif; ?>
             <?php else: ?>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(16rem,1fr));gap:.25rem 1rem">
                 <?php foreach (StoreSettings::LEGAL_TEXT as $field): ?>

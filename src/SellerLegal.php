@@ -32,14 +32,48 @@ final class SellerLegal {
         return self::ownsSeries($stores, $target) ? $target : null;
     }
 
-    /** Legal details a store's documents print: its seller's, with the store's own fields over them (never the prefixes). */
+    /**
+     * R59 (review round 24, finding 4): the seller's tax identity. A store sharing a seller cannot set these: the same VAT
+     * payer would charge and invoice another VAT in one number series (a store with "vat_registered": false printed 0 %
+     * "not a VAT payer" invoices under the seller's Czech VAT ID). identityOverrides() lists such fields for the doctor.
+     */
+    public const IDENTITY_FIELDS = ['name', 'country', 'vat_registered', 'ico', 'dic', 'ic_dph'];
+
+    /**
+     * Legal details a store's documents print: its seller's, with the store's own fields over them (never the prefixes
+     * and, R59, never the seller's tax identity, IDENTITY_FIELDS).
+     */
     public static function effective(array $root, string $storeCode, string $sellerCode): array {
         $stores = self::storeMap($root);
         $sellerLegal = isset($stores[$sellerCode]) ? (self::legalBlock($stores[$sellerCode]) ?? []) : [];
         $own = isset($stores[$storeCode]) ? self::legalBlock($stores[$storeCode]) : null;
         if ($own === null || $storeCode === $sellerCode) return $sellerLegal;
         unset($own['seller'], $own['invoice_prefix'], $own['credit_note_prefix']);
+        foreach (self::IDENTITY_FIELDS as $field) unset($own[$field]);
         return array_replace($sellerLegal, $own);
+    }
+
+    /**
+     * R59: the tax identity fields (IDENTITY_FIELDS) a store sharing another store's seller sets to another value than
+     * that seller; effective() ignores them. [] for a seller store or a store without legal.seller.
+     * @return array<string, array{0: mixed, 1: mixed}> field => [the store's value, the seller's value]
+     */
+    public static function identityOverrides(array $root, string $storeCode): array {
+        $stores = self::storeMap($root);
+        $own = isset($stores[$storeCode]) ? self::legalBlock($stores[$storeCode]) : null;
+        $target = trim((string)($own['seller'] ?? ''));
+        if ($own === null || $target === '' || $target === $storeCode || !self::ownsSeries($stores, $target)) return [];
+        $seller = self::legalBlock($stores[$target]) ?? [];
+        $overrides = [];
+        foreach (self::IDENTITY_FIELDS as $field) {
+            if (!array_key_exists($field, $own)) continue;
+            $mine = is_string($own[$field]) ? trim($own[$field]) : $own[$field];
+            $theirs = is_string($seller[$field] ?? null) ? trim((string)$seller[$field]) : ($seller[$field] ?? null);
+            if ($field === 'country' && is_string($mine) && is_string($theirs)) [$mine, $theirs] = [strtoupper($mine), strtoupper($theirs)];
+            if ($field === 'vat_registered') [$mine, $theirs] = [(bool)$mine, (bool)$theirs];
+            if ($mine !== $theirs) $overrides[$field] = [$own[$field], $seller[$field] ?? null];
+        }
+        return $overrides;
     }
 
     /**

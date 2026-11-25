@@ -28,7 +28,10 @@ final class PublicFeedCache
         if (!preg_match('/^[a-z0-9][a-z0-9._-]{0,120}$/', $name)) throw new InvalidArgumentException('Invalid feed cache name');
         $key = 'public/' . $name;
         $state = self::catalogState();
-        $fingerprint = hash('sha256', $variant . "\n" . $state['fingerprint'] . "\n" . Cache::catalogVersion());
+        // R59 (review round 24, low): with the stores configuration, whose languages, prefixes and domains the sitemap
+        // lists (was: a language added in Admin → Stores reached the sitemap only after the TTL, 15 minutes).
+        $fingerprint = hash('sha256', $variant . "\n" . $state['fingerprint'] . "\n" . Cache::catalogVersion() . "\n"
+            . hash('sha256', (string)json_encode(Bootstrap::stores())));
         // R20: an entry built in the second of the latest change is marked: a change later in that second (a rename,
         // a product taken off sale) leaves MAX(updated_at) as it was, so the marked entry is rebuilt once that second
         // is over (it was served until the TTL ran out).

@@ -79,7 +79,7 @@ function handleShippingFileMethodSave(): void {
  * The settings of every shipping.json method ($all, DataOverrides::shippingMethods()) with $key's taken from the posted
  * form: only what differs from shipping.json, so a release that changes shipping.json still reaches what the merchant
  * left alone; "reset" drops the method's settings. Amounts are typed in shipping.json's currency; an empty price
- * means the method does not serve that zone.
+ * means the method does not serve that zone. R59: only the zones the form shows (a posted rates[local] was saved too).
  * @return array{settings: array<string, mixed>, error: ?string}
  */
 function shippingFileMethodSettings(string $key, array $post, array $all): array {
@@ -100,13 +100,14 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
     $own = [];
     if (empty($post['active'])) $own['active'] = false;
     $freeAbove = $amount($post['free_above'] ?? '', null);
+    // R59 (review round 24, lows): 0 was saved and did nothing; bad delivery days said "amount format".
+    if ($freeAbove === 0) return ['settings' => $all, 'error' => I18n::t('admin.shipping.free_above_zero')];
     if ($freeAbove !== (isset($method['free_above']) ? (int)$method['free_above'] : null)) $own['free_above'] = $freeAbove;
     $days = trim(Security::str($post['delivery_days'] ?? ''));
-    if ($days !== '' && preg_match('/^[0-9][0-9 –-]{0,19}$/u', $days) !== 1) $invalid = true;
+    if ($days !== '' && preg_match('/^[0-9][0-9 –-]{0,19}$/u', $days) !== 1) return ['settings' => $all, 'error' => I18n::t('admin.shipping.days_format')];
     if ($days !== (string)($method['delivery_days'] ?? '')) $own['delivery_days'] = $days;
     $posted = is_array($post['rates'] ?? null) ? $post['rates'] : [];
-    foreach (array_keys(is_array($file['zones'] ?? null) ? $file['zones'] : []) as $zone) {
-        $zone = (string)$zone;
+    foreach (Shipping::editableZones($file) as $zone) {
         if (!is_array($posted[$zone] ?? null)) continue;
         $base = $amount($posted[$zone]['base'] ?? '', null);
         $rate = $base === null ? null : ['base' => $base, 'per_kg' => (int)$amount($posted[$zone]['per_kg'] ?? '', 0)];

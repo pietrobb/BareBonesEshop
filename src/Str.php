@@ -75,6 +75,9 @@ class Str {
         // names, some keyboards) is "jan", not "ja-n"; without intl a combining mark left over is dropped, not a word break.
         if (class_exists('Normalizer') && is_string($nfc = Normalizer::normalize($s, Normalizer::FORM_C))) $s = $nfc;
         $s = strtr(self::removeDiacritics($s), self::$slugLetters);
+        // R59 (review round 24, low): a letter neither table knows sheds its marks (NFD): Vietnamese "Nguyễn" is "nguyen",
+        // not "nguy-n". The tables go first, so their own spellings (and the stored slugs made with them) stay.
+        if (class_exists('Normalizer') && is_string($nfd = Normalizer::normalize($s, Normalizer::FORM_D))) $s = $nfd;
         $s = preg_replace('/\p{Mn}+/u', '', $s) ?? $s;
         return trim((string)preg_replace('/[^a-z0-9]+/', '-', $s), '-');
     }

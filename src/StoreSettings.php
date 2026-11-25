@@ -30,6 +30,11 @@ final class StoreSettings {
         return !array_key_exists('vat_registered', $legal) || (bool)$legal['vat_registered'];
     }
 
+    /** R59 (review round 24, finding 4): the tax identity fields stores.json sets for a store sharing a seller, which are ignored. */
+    public static function identityIgnored(array $settings, string $storeId): array {
+        return array_keys(SellerLegal::identityOverrides($settings, $storeId));
+    }
+
     public static function path(): string {
         return self::$path ?? DataOverrides::storesPath();
     }
@@ -203,6 +208,11 @@ final class StoreSettings {
         // R58 (review round 23, medium S3): the storefront's languages (was: stores.json only, while the installer and its
         // hint said Admin → Stores adds them). A form without the field keeps them; the default language always stays.
         $languages = array_key_exists('languages', $input) ? self::parseLanguages($input['languages'], (string)($store['default_locale'] ?? 'en'), $errors) : null;
+        // R59 (review round 24, finding 6): the country the store sells to (StoreContext::marketCountryOf(): checkout, store
+        // switcher, hreflang de-AT next to the German store's de-DE); empty: its language's, else the seller's. A form
+        // without the field keeps it (was: stores.json only).
+        $marketCountry = array_key_exists('market_country', $input) ? strtoupper($text('market_country')) : null;
+        if ($marketCountry !== null && $marketCountry !== '' && !preg_match('/^[A-Z]{2}$/', $marketCountry)) $errors[] = I18n::t('admin.stores.err.country');
         // The default store is always public. A hidden store goes public only once its own seller identity is entered.
         $isDefault = $storeId === (string)($data['default_store'] ?? '');
         $public = $isDefault || (isset($input['public']) ? $input['public'] === '1' : StoreContext::isPublicConfig($store));
@@ -225,6 +235,7 @@ final class StoreSettings {
         if ($timezone !== '') $store['timezone'] = $timezone;
         if ($domains !== null) $store['domains'] = $domains;
         if ($languages !== null) $store['languages'] = $languages;
+        if ($marketCountry === '') unset($store['country']); elseif ($marketCountry !== null) $store['country'] = $marketCountry;
         $store['legal'] = $legal;
         if ($public) unset($store['public']); else $store['public'] = false;
         $data['stores'][$storeId] = $store;
@@ -232,8 +243,15 @@ final class StoreSettings {
         AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'timezone' => $before['timezone'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'cross_border_pricing' => $before['cross_border_pricing'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
             ['store' => $storeId, 'name' => $store['name'], 'timezone' => $store['timezone'] ?? null, 'oss_enabled' => $store['oss_enabled'], 'cross_border_pricing' => $store['cross_border_pricing'] ?? null, 'public' => $public, 'legal' => $store['legal']]
             + ($domains !== null ? ['domains' => $domains, 'domains_before' => $before['domains'] ?? []] : [])
-            + ($languages !== null ? ['languages' => $languages, 'languages_before' => $before['languages'] ?? []] : []));
+            + ($languages !== null ? ['languages' => $languages, 'languages_before' => $before['languages'] ?? []] : [])
+            + ($marketCountry !== null ? ['country' => $store['country'] ?? null, 'country_before' => $before['country'] ?? null] : []));
         return ['ok' => true, 'errors' => []];
+    }
+
+    /** R59: the country a store sells to without a "country" of its own: its language's, else its seller's. */
+    public static function defaultMarketCountry(array $root, string $storeId): string {
+        $store = is_array($root['stores'][$storeId] ?? null) ? $root['stores'][$storeId] : [];
+        return StoreContext::marketCountryOf(['country' => ''] + $store, (string)(SellerLegal::forStore($root, $storeId)['country'] ?? ''));
     }
 
     /**

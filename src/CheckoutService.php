@@ -504,6 +504,14 @@ class CheckoutService {
                 return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.invalid_input'];
             }
         }
+        // R59 (review round 24, low): a store whose legal.seller names no seller (a missing store, a loop) cannot invoice
+        // its orders (InvoiceService refuses its series). Was: it took the order and its payment, and the invoice failed.
+        $store = StoreContext::current();
+        if (trim((string)($store->legal()['seller'] ?? '')) !== '' && SellerLegal::sellerCode(Bootstrap::stores(), $store->id()) === null) {
+            IncidentMonitor::report('checkout.seller_missing', 'checkout', 'critical', ['store' => $store->id(), 'seller' => (string)$store->legal()['seller']]);
+            http_response_code(503);
+            return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.seller_missing'];
+        }
         try {
             return checkoutExecute($input, $runtimeConfig);
         } catch (Throwable $e) {

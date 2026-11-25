@@ -546,9 +546,11 @@ final class StorefrontViewModel
         $translations = json_decode((string)($row['translations'] ?? '{}'), true);
         $hreflang = Bootstrap::hreflangAlternates('/');
         $paths = [];
-        foreach (array_keys($hreflang['alternates'] + $hreflang['secondary']) as $locale) {
+        // R59 (review round 24, finding 6): by hreflang code (de-AT) and by locale (de, which the regional alternates use).
+        foreach (array_keys($hreflang['alternates'] + $hreflang['secondary']) as $code) {
+            $locale = (string)($hreflang['locales'][(string)$code] ?? $code);
             $slug = is_array($translations) ? (string)($translations[$locale]['slug'] ?? '') : '';
-            $paths[(string)$locale] = UrlAliases::outbound('/product/' . rawurlencode($slug !== '' ? $slug : (string)$row['slug']));
+            $paths[(string)$code] = $paths[$locale] = UrlAliases::outbound('/product/' . rawurlencode($slug !== '' ? $slug : (string)$row['slug']));
         }
         return $paths;
     }

@@ -268,7 +268,7 @@ final class DataOverrides
      * from Admin → Shipping — on or off, prices per zone, free shipping and delivery days — kept in the data directory
      * so shipping.json stays as shipped (a hand edit stopped every update at "installed file was locally modified").
      * Shipping::config() lays them over shipping.json. [] when nothing was saved (or no data directory).
-     * @return array{methods?: array<string, array<string, mixed>>}
+     * @return array{methods?: array<string, array<string, mixed>>, invalid?: true}
      */
     public static function shippingMethods(?array $config = null): array
     {
@@ -276,7 +276,10 @@ final class DataOverrides
         if ($dir === null || !file_exists($dir . '/' . self::SHIPPING_METHODS)) return [];
         $path = $dir . '/' . self::SHIPPING_METHODS;
         $data = json_decode((string)PrivateOwner::run(static fn(): ?string => self::readRegularFile($path)), true);
-        return is_array($data) && is_array($data['methods'] ?? null) ? ['methods' => $data['methods']] : [];
+        if (is_array($data) && is_array($data['methods'] ?? null)) return ['methods' => $data['methods']];
+        // R59 (review round 24, low): a file that cannot be read keeps Standard and Express off (was: [], so methods the
+        // merchant had turned off were offered again at shipping.json's prices). The doctor names the file.
+        return ['methods' => array_fill_keys(Shipping::CHECKOUT_METHODS, ['active' => false]), 'invalid' => true];
     }
 
     /** Save the shipping.json method settings (shippingMethods()); false without a writable data directory. */

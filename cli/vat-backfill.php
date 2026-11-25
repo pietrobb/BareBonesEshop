@@ -31,7 +31,9 @@ function vatBackfillSeller(array $stores, string $storeId): array
     $all = is_array($stores['stores'] ?? null) ? $stores['stores'] : [];
     $code = isset($all[$storeId]) ? $storeId : (string)($stores['default_store'] ?? array_key_first($all));
     // R58 (review round 23, high V1): the store's seller (legal.seller, SellerLegal), as checkout and the invoices read it.
-    return ['country' => SellerLegal::country(SellerLegal::forStore($stores, $code)), 'oss' => (bool)($all[$code]['oss_enabled'] ?? false)];
+    // R59 (review round 24, low): OSS of the seller (OssThreshold::sellerOssEnabled(), as checkout reads it), not of the store.
+    return ['country' => SellerLegal::country(SellerLegal::forStore($stores, $code)),
+        'oss' => OssThreshold::sellerOssEnabled($code, (array)($all[$code] ?? []), $all)];
 }
 
 /**

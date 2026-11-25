@@ -21,6 +21,7 @@ AuditRound58StoresRegression.php
 AuditRound58ShippingUxRegression.php
 AuditRound58TextRegression.php
 AuditRound58StockDeadlockRegression.php
+AuditRound59CartLockRegression.php
 
 # Payments, webhooks and refunds
 AuditPaymentsRegression.php
@@ -36,6 +37,13 @@ AuditComgateRegression.php
 AuditThepayRegression.php
 AuditRound58CreditVatRegression.php
 AuditRound58RefundLowsRegression.php
+AuditRound59CloseRaceRegression.php
+AuditRound59CreditDocsRegression.php
+AuditRound59HreflangRegression.php
+AuditRound59LegacySpillRegression.php
+AuditRound59LowsRegression.php
+AuditRound59SellerRegression.php
+AuditRound59ShippingRegression.php
 
 # Orders, stock and invoices
 AuditOrderAdminRegression.php
