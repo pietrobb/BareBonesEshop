@@ -772,6 +772,11 @@ class Setup
         $shipping = (array)($config['integrations']['http_shipping'] ?? []);
         $shippingReady = self::integrationReady($shipping);
         $add($shippingReady ? 'pass' : 'info', 'provider.shipping_lifecycle', $shippingReady ? 'HTTP carrier lifecycle configured.' : 'HTTP carrier lifecycle not configured (optional).', 'Configure integrations.http_shipping and run fixture/live sandbox smoke.');
+        // R59 (review round 24, low): an unreadable Admin → Shipping settings file keeps Standard and Express off.
+        if (!empty(DataOverrides::shippingMethods($config)['invalid'])) {
+            $add('warn', 'shipping.methods_file', DataOverrides::SHIPPING_METHODS . ' in the data directory is not valid JSON: Standard and Express delivery are not offered until it is.',
+                'Fix the file, or delete it and set Standard and Express again in Admin → Shipping.');
+        }
         // Carrier labels: a carrier whose API is not connected never invents a tracking number; say so before launch.
         try {
             $unavailable = array_filter(ShippingService::labelCarriers(), static fn(?string $reason): bool => $reason !== null);

@@ -104,6 +104,10 @@ if ($command === 'install') {
         if ($freshDatabase) {
             $steps['payments_off'] = json_decode($run(['cli/setup.php', 'install-payments'], 'install payments'), true) ?: [];
             if ($steps['payments_off'] !== []) $log('  online payment switched off until its keys are set (Admin → Payments): ' . implode(', ', $steps['payments_off']));
+            // R59 (review round 24, finding 7): as the web installer, Standard 3.99 and Express 7.99 € start switched off
+            // when the store has shipping methods of its own (was: only the web installer did).
+            $steps['shipping_off'] = json_decode($run(['cli/setup.php', 'install-shipping'], 'install shipping'), true)['file'] ?? null;
+            if ($steps['shipping_off'] !== null) $log('  Standard and Express delivery switched off until you set their prices (Admin → Shipping)');
         } elseif ($steps['config']['action'] === 'created') {
             $log('  existing database: payment methods left as they are (set the gateway keys in config.php)');
         }
@@ -159,6 +163,12 @@ if ($command === 'database-fresh') {
 // Internal step of a fresh install: online methods whose gateway has no keys (the sample card method) start switched off.
 if ($command === 'install-payments') {
     echo json_encode(PaymentReadiness::deactivateKeyless(Db::get(), require $root . '/config.php')) . "\n";
+    exit(0);
+}
+
+// Internal step of a fresh install: the shipping.json methods start switched off beside the store's own (WebInstaller).
+if ($command === 'install-shipping') {
+    echo json_encode(['file' => WebInstaller::fileShippingMethodsOff(Db::get(), Bootstrap::stores(), require $root . '/config.php')]) . "\n";
     exit(0);
 }
 

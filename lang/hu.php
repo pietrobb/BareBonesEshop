@@ -1545,6 +1545,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.weight' => 'Súly g',
     'admin.shipping.volume' => 'Térfogat cm3',
     'admin.shipping.days' => 'Napok',
+    'admin.shipping.free_above_zero' => 'Az ingyenes szállítás összeghatárának 0-nál nagyobbnak kell lennie; hagyja üresen, ha nincs ingyenes szállítás, vagy adjon meg 0 zónaárat a mindig ingyenes szállításhoz.',
+    'admin.shipping.days_format' => 'Napok: egy szám vagy napok tartománya, például 2 vagy 2-3.',
     'admin.shipping.rate_delete_confirm' => 'Törli a díjat?',
     'admin.shipping.method_required' => 'A kód, a fuvarozó és a mód neve kötelező.',
     'admin.shipping.method_exists' => 'Már létezik mód ezzel a kóddal.',

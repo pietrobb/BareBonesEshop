@@ -1524,6 +1524,8 @@ return [
     'admin.shipping.weight' => 'Hmotnosť g',
     'admin.shipping.volume' => 'Objem cm3',
     'admin.shipping.days' => 'Dni',
+    'admin.shipping.free_above_zero' => 'Suma pre dopravu zdarma musí byť väčšia ako 0; nechajte ju prázdnu, ak doprava zdarma nemá byť, alebo zadajte ceny zón 0 pre dopravu vždy zdarma.',
+    'admin.shipping.days_format' => 'Dni: číslo alebo rozsah dní, napríklad 2 alebo 2-3.',
     'admin.shipping.rate_delete_confirm' => 'Zmazať sadzbu?',
     'admin.shipping.method_required' => 'Kód, prepravca a názov metódy sú povinné.',
     'admin.shipping.method_exists' => 'Metóda s týmto kódom už existuje.',

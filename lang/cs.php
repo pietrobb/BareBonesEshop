@@ -1545,6 +1545,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.weight' => 'Hmotnost g',
     'admin.shipping.volume' => 'Objem cm3',
     'admin.shipping.days' => 'Dny',
+    'admin.shipping.free_above_zero' => 'Částka pro dopravu zdarma musí být větší než 0; nechte ji prázdnou, pokud doprava zdarma nemá být, nebo zadejte ceny zón 0 pro dopravu vždy zdarma.',
+    'admin.shipping.days_format' => 'Dny: číslo nebo rozsah dnů, například 2 nebo 2-3.',
     'admin.shipping.rate_delete_confirm' => 'Smazat sazbu?',
     'admin.shipping.method_required' => 'Kód, dopravce a název způsobu jsou povinné.',
     'admin.shipping.method_exists' => 'Způsob s tímto kódem už existuje.',

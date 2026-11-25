@@ -500,6 +500,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   Two stores of one country and currency show the country and currency in the store switcher, their names after it
   (was: the names alone). Cached sitemaps and feeds are rebuilt when stores.json changes (a language added in
   Admin → Stores appeared after 15 minutes).
+- **`php cli/setup.php install` switches Standard and Express off, as the web installer does (review round 24,
+  finding 7).** A fresh CLI install whose default store has carriers of its own (GLS, Packeta, pickup) also offered
+  Standard 3.99 and Express 7.99 €, prices the merchant never set; they now start off, ready to switch on in
+  Admin → Shipping.
+- **Admin → Shipping, smaller fixes (review round 24, lows).** A price for a zone the form does not show (`rates[local]`)
+  is not saved, and a stored one is ignored (was: Standard free in the pickup zone). "Free above" 0 is refused with an
+  explanation (blank means never free), a wrong "Days" value names the expected format (`2-3`), and an unreadable
+  `shipping-methods.json` keeps Standard and Express off (was: on, at sample prices) with a doctor warning
+  (`shipping.methods_file`). A zone with no price in any method no longer adds its countries to the address form.
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as

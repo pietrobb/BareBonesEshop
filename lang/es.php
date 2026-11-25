@@ -1675,6 +1675,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.weight' => 'Peso g',
     'admin.shipping.volume' => 'Volumen cm3',
     'admin.shipping.days' => 'Días',
+    'admin.shipping.free_above_zero' => 'El importe para envío gratis debe ser mayor que 0; déjelo vacío si no hay envío gratis, o ponga 0 en los precios de las zonas para un envío siempre gratis.',
+    'admin.shipping.days_format' => 'Días: un número o un intervalo de días, p. ej. 2 o 2-3.',
     'admin.shipping.rate_delete_confirm' => '¿Eliminar la tarifa?',
     'admin.shipping.method_required' => 'El código, el transportista y el nombre del método son obligatorios.',
     'admin.shipping.method_exists' => 'Ya existe un método con este código.',

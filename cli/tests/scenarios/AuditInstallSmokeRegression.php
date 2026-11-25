@@ -100,6 +100,12 @@ try {
     assert_true(is_file($a111Private . '/db/shop.sqlite') && is_dir($a111Private . '/jobs') && is_file($a111Private . '/setup-state.json'), 'A11.1 install creates the private runtime paths of config.example.php outside the web root');
     assert_true(is_file($a111Private . '/stores.json') && !is_file($a111Shop . '/stores.json') && is_file($a111Shop . '/stores.example.json'),
         'R11 stores.json: install gives the shop its own stores.json in the private directory, copied from the tracked stores.example.json');
+    // R59 (review round 24, finding 7): as the web installer, the CLI install switches Standard 3.99 / Express 7.99 € off
+    // next to the store's own shipping methods (was: offered at prices the merchant never set).
+    $a111Shipping = $a111Private . '/' . DataOverrides::SHIPPING_METHODS;
+    assert_equals([true, ['standard' => ['active' => false], 'express' => ['active' => false]]],
+        [is_file($a111Shipping) && realpath($a111Shipping) === realpath((string)($a111Result['steps']['shipping_off'] ?? '')), DataOverrides::shippingMethods(['private_runtime_dir' => $a111Private])['methods'] ?? null],
+        'R59 finding 7: setup.php install starts Standard and Express switched off (was: only the web installer did)');
     if ($a111Install['code'] !== 0) {
         // Without a working install, continue with the manual steps so the HTTP probe still runs.
         if (!is_file($a111Shop . '/config.php')) {

@@ -1545,6 +1545,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.weight' => 'Gewicht g',
     'admin.shipping.volume' => 'Volumen cm3',
     'admin.shipping.days' => 'Tage',
+    'admin.shipping.free_above_zero' => 'Der Betrag für kostenlosen Versand muss größer als 0 sein; leer lassen für keinen kostenlosen Versand oder die Zonenpreise auf 0 setzen für immer kostenlosen Versand.',
+    'admin.shipping.days_format' => 'Tage: eine Zahl oder ein Bereich von Tagen, z. B. 2 oder 2-3.',
     'admin.shipping.rate_delete_confirm' => 'Tarif löschen?',
     'admin.shipping.method_required' => 'Code, Versanddienst und Name der Methode sind erforderlich.',
     'admin.shipping.method_exists' => 'Eine Methode mit diesem Code existiert bereits.',

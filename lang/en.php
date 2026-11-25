@@ -1519,6 +1519,8 @@ return [
     'admin.shipping.weight' => 'Weight g',
     'admin.shipping.volume' => 'Volume cm3',
     'admin.shipping.days' => 'Days',
+    'admin.shipping.free_above_zero' => 'Free above must be more than 0; leave it empty for no free shipping, or set the zone prices to 0 for free delivery.',
+    'admin.shipping.days_format' => 'Days: a number or a range of days, e.g. 2 or 2-3.',
     'admin.shipping.rate_delete_confirm' => 'Delete rate?',
     'admin.shipping.method_required' => 'Code, carrier and method name are required.',
     'admin.shipping.method_exists' => 'A method with this code already exists.',

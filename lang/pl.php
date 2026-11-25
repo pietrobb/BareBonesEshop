@@ -1545,6 +1545,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.weight' => 'Waga g',
     'admin.shipping.volume' => 'Objętość cm3',
     'admin.shipping.days' => 'Dni',
+    'admin.shipping.free_above_zero' => 'Kwota darmowej dostawy musi być większa niż 0; zostaw puste, jeśli nie ma darmowej dostawy, albo ustaw ceny stref na 0, aby dostawa była zawsze darmowa.',
+    'admin.shipping.days_format' => 'Dni: liczba lub zakres dni, np. 2 albo 2-3.',
     'admin.shipping.rate_delete_confirm' => 'Usunąć stawkę?',
     'admin.shipping.method_required' => 'Kod, przewoźnik i nazwa metody są wymagane.',
     'admin.shipping.method_exists' => 'Metoda z tym kodem już istnieje.',
