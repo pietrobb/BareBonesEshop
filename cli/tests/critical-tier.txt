@@ -37,6 +37,7 @@ AuditComgateRegression.php
 AuditThepayRegression.php
 AuditRound58CreditVatRegression.php
 AuditRound58RefundLowsRegression.php
+AuditRound59CloseRaceRegression.php
 
 # Orders, stock and invoices
 AuditOrderAdminRegression.php

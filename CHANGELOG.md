@@ -468,6 +468,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   up-front lock covered only the stock rows: two carts with variants of products A and B in reverse order (A red + B
   red, B blue + A blue) share no stock row and deadlocked on the products, failing 5–10 of 120 such checkouts with a
   503. A checkout, a cancellation and a return now lock the product and variant rows of their SKUs too, in id order.
+- **Returns closed without payout at the same time use the money refunded outside them once (review round 24,
+  finding 1).** On MySQL/MariaDB a return read before its order lock kept that read's view of the order, so a return
+  waiting while another one of the order closed still counted the money refunded outside (a goodwill or dashboard
+  refund) as unused and closed as well: three returns marked "Refunded" at once credited the customer 33.89 € for
+  50.66 € of goods. The return is now looked up before its transaction opens, so after the lock each one sees what the
+  others used.
 - **A store added in Admin → Stores sells as its seller (review round 23, high V1).** Checkout VAT, the `shipping.json`
   home zone, bank transfer (IBAN), the OSS threshold, the legal pages, e-mails, delivery notes, the Organization schema
   and GDPR retention read the seller the store shares (`legal.seller`) through one resolver, which the invoices use as

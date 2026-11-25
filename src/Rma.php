@@ -634,10 +634,14 @@ class Rma {
      */
     public static function closeWithoutPayout(int $rmaId): bool {
         $db = Db::get();
+        // R59 (review round 24, finding 1): the return's order is looked up before the transaction opens. Read inside it,
+        // that plain read fixed MySQL/MariaDB's snapshot before the order lock, so after waiting for a return of the same
+        // order closed meanwhile, this one still saw the outside money that return used up and used it again (three
+        // returns closed at once credited 33.89 € of 50.66 € of goods).
+        $rma = self::byId($rmaId);
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
-            $rma = self::byId($rmaId);
             if ($rma) Orders::lockWithin((int)$rma['order_id']);
             $rma = $rma ? self::lockedRma($rmaId) : null;
             $outside = $rma ? self::refundedOutsideReturns((int)$rma['order_id']) : 0;
