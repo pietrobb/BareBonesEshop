@@ -65,7 +65,9 @@ class Shipping {
             foreach (is_array($own['rates'] ?? null) ? $own['rates'] : [] as $zone => $rate) {
                 if (!isset($zones[$zone])) continue;
                 if ($rate === null) {
-                    unset($method['rates'][$zone]);
+                    // R60 (review round 25, low): kept as null, "not served": unset, a country of the zone took the rate
+                    // of the next zone listing it (international, every country).
+                    $method['rates'][$zone] = null;
                 } elseif (is_array($rate) && is_int($rate['base'] ?? null) && $rate['base'] >= 0) {
                     $method['rates'][$zone] = ['base' => $rate['base'], 'per_kg' => max(0, (int)($rate['per_kg'] ?? 0))];
                 }
@@ -257,8 +259,8 @@ class Shipping {
             if (isset($methodCfg['available_zones']) && !in_array($zone, $methodCfg['available_zones'])) {
                 continue;
             }
-            // Check if this zone has rates
-            if (isset($methodCfg['rates'][$zone])) {
+            // Check if this zone has rates; a zone priced empty in Admin → Shipping (null) is not served.
+            if (array_key_exists($zone, (array)($methodCfg['rates'] ?? []))) {
                 $rates = $methodCfg['rates'][$zone];
                 break;
             }
@@ -292,8 +294,9 @@ class Shipping {
             $hasZone = false;
             foreach ($zones as $zone) {
                 if (isset($method['available_zones']) && !in_array($zone, $method['available_zones'])) continue;
-                if (isset($method['rates']) && !isset($method['rates'][$zone])) continue;
-                $hasZone = true;
+                if (isset($method['rates']) && !array_key_exists($zone, (array)$method['rates'])) continue;
+                // R60: the first zone of the country priced empty in Admin → Shipping: not served (was: the next zone).
+                $hasZone = !isset($method['rates']) || $method['rates'][$zone] !== null;
                 break;
             }
             if (!$hasZone && !empty($zones)) continue;

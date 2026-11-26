@@ -97,5 +97,41 @@ try {
     assert_true(false, 'R60 admin names (' . get_class($e) . ': ' . $e->getMessage() . ')');
 }
 
+// Admin → Shipping: a zone whose Standard price was removed dropped out of the method's rates, so its countries took the
+// rate of the next zone listing them (international, every country): Czechia paid 15.99 € instead of not being served.
+$r60lFile = json_decode((string)file_get_contents($r60lRepo . '/shipping.json'), true);
+$r60lLocale = I18n::locale();
+try {
+    DataOverrides::setDirForTesting($r60lRoot);
+    Shipping::setConfig((array)$r60lFile);
+    StoreContext::activate(StoreContext::resolve(['default_store' => 'r60l', 'stores' => ['r60l' => ['name' => 'R60 lows', 'default_locale' => 'en',
+        'currency' => 'eur', 'url_prefix' => '', 'domains' => [], 'permissions' => ['*'], 'legal' => ['country' => 'DE']]]], '/', '', 'r60l'));
+    I18n::setLocale('en');
+    file_put_contents($r60lRoot . '/' . DataOverrides::SHIPPING_METHODS, json_encode(['methods' => ['standard' => ['rates' => ['eu' => null]]]]));
+    Shipping::forget();
+    $r60lKeys = static fn(string $country): array => array_column(Shipping::availableMethods($country, 1000), 'key');
+    assert_equals([-1, ['express'], 1599 + 200, ['standard']], [Shipping::calculate('standard', 'CZ', 1000, 1000), $r60lKeys('CZ'),
+        Shipping::calculate('standard', 'US', 1000, 1000), $r60lKeys('US')],
+        'R60 shipping: Standard priced empty for the EU zone is not offered in Czechia, international still is (was: Czechia at the international 17.99 €)');
+    // "Restore the shipped settings" dropped the method's settings, which switched a method turned off back on.
+    if (!function_exists('shippingFileMethodSettings')) {
+        if (!function_exists('adminFieldErrors')) require_once $r60lRepo . '/src/Entrypoints/Admin/Shared.php';
+        require_once $r60lRepo . '/src/Entrypoints/Admin/Operations.php';
+    }
+    $r60lReset = shippingFileMethodSettings('express', ['method' => 'express', 'reset' => '1'],
+        ['express' => ['active' => false, 'free_above' => null, 'delivery_days' => '3', 'rates' => ['domestic' => ['base' => 100, 'per_kg' => 0], 'eu' => null]]]);
+    $r60lExpress = $r60lReset['settings']['express'] ?? [];
+    assert_equals([null, false, '1-2', 799, 1499], [$r60lReset['error'], $r60lExpress['active'] ?? null, $r60lExpress['delivery_days'] ?? null,
+        $r60lExpress['rates']['domestic']['base'] ?? null, $r60lExpress['rates']['eu']['base'] ?? null],
+        'R60 shipping: restoring the shipped prices keeps Express off and restores 7.99/14.99 and 1-2 days (was: Express switched back on)');
+} catch (Throwable $e) {
+    assert_true(false, 'R60 shipping zone without a price (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+} finally {
+    I18n::setLocale($r60lLocale);
+    DataOverrides::setDirForTesting(null);
+    Shipping::setConfig(is_array($r60lFile) ? $r60lFile : []);
+    Bootstrap::initStoreContext('/', '', 'default');
+}
+
 foreach (glob($r60lRoot . '/*') ?: [] as $r60lFile) @unlink($r60lFile);
 @rmdir($r60lRoot);

@@ -89,8 +89,13 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
     $file = Shipping::fileConfig();
     $method = in_array($key, Shipping::CHECKOUT_METHODS, true) && is_array($file['methods'][$key] ?? null) ? $file['methods'][$key] : null;
     if ($method === null) return ['settings' => $all, 'error' => I18n::t('admin.common.record_missing')];
+    $zones = Shipping::editableZones($file);
+    // R60 (review round 25, medium 3): the whole method is saved, as it stands after this form (Shipping::methodSettings()).
+    $own = Shipping::methodSettings((array)(Shipping::withSettings($file, ['methods' => $all])['methods'][$key] ?? $method), $zones);
     if (!empty($post['reset'])) {
-        unset($all[$key]);
+        // R60 (review round 25, low): the shipped prices, free shipping and delivery days; the method stays on or off as it
+        // was (was: the settings were dropped, which switched a method the merchant had turned off back on).
+        $all[$key] = ['active' => $own['active']] + Shipping::methodSettings($method, $zones);
         return ['settings' => $all, 'error' => null];
     }
     $currency = Shipping::currency();
@@ -100,9 +105,6 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
         if ($cents === null && !($empty === null && is_scalar($raw) && trim((string)$raw) === '')) $invalid = true;
         return $cents;
     };
-    // R60 (review round 25, medium 3): the whole method is saved, as it stands after this form (Shipping::methodSettings()).
-    $zones = Shipping::editableZones($file);
-    $own = Shipping::methodSettings((array)(Shipping::withSettings($file, ['methods' => $all])['methods'][$key] ?? $method), $zones);
     $own['active'] = !empty($post['active']);
     $freeAbove = $amount($post['free_above'] ?? '', null);
     // R59 (review round 24, lows): 0 was saved and did nothing; bad delivery days said "amount format".
