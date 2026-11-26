@@ -314,7 +314,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   confirmation link at the next sign-in attempt (at most 3 an hour) and signs in with the link and the password, or
   resets the password. Expect questions from such customers in the first days.
 - **Checkout:** "Standard Delivery" and "Express Delivery" from `shipping.json` are now offered next to the store's
-  `shipping_rates`; remove them from `shipping.json` if the shop does not ship that way.
+  `shipping_rates`; if the shop does not ship that way, switch them off in Admin → Shipping after the update (do not
+  edit `shipping.json`: the updater then refuses packages that change it, see "Standard and Express delivery move to
+  Admin → Shipping" below).
   Checkout refuses over-long fields with `checkout.error.field_too_long`, and `cart_restore` takes at most 200 entries
   (100 lines, 64 KiB body).
 - **E-mail:** the From line names the store, and without `MAIL_REPLY_TO` customers' replies go to the store's
@@ -453,10 +455,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   loop) is priced like a store without a legal block and still refused for invoicing (`php cli/setup.php doctor`
   reports it).
 - **Standard and Express delivery move to Admin → Shipping (review round 23, medium S4).** Shops installed before keep
-  them exactly as `shipping.json` prices them until the merchant changes them in Admin → Shipping. A shop that edited
-  `shipping.json` by hand: enter the same prices or switches in Admin → Shipping, then restore the shipped file (for
-  example `git checkout shipping.json`, or take it from the release) so the updater accepts the next package. While the
-  file is modified, the updater refuses packages that change it.
+  them exactly as `shipping.json` prices them until the merchant changes them in Admin → Shipping. **A shop that edited
+  `shipping.json` by hand** (`php cli/update.php check` lists it as "installed file was locally modified"; 2.1.2 has no
+  Admin → Shipping for these methods yet): (1) before `apply`, copy the edited file out of the shop, for example
+  `cp shipping.json ../shipping.json.edited`; (2) restore the 2.1.2 file (`git checkout shipping.json`, or take it
+  from the 2.1.2 release) and run `check` again; (3) `apply` with the shop closed as described above; (4) before opening
+  the shop, run `php cli/setup.php shipping-import --from=../shipping.json.edited`, which sets Standard and Express in
+  Admin → Shipping as the edit had them (a method the edit removed is switched off; prices for zones of its own or
+  changed zone countries cannot be set there and are listed as warnings), and check Admin → Shipping. Without step 4
+  the shop offers Standard 3.99 € and Express 7.99 € again. `php cli/setup.php doctor` and Admin → Shipping warn
+  while `shipping.json` is edited.
 - **Slovak and Czech postcodes are stored as five digits (review round 23, low N2).** Checkout, the address book and
   manual orders accept `811 01` and `81101` and store `81101`; a Slovak or Czech postcode of another form is refused.
   Postcodes stored before are not changed.
@@ -489,6 +497,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   6.67 € at 23 % (a regression of rounds 19/20). The goods' rate is now credited all it has left (8.33 €) and only the
   rest (1.67 €) at the other rates, so the books are credited in full at 5 % and the goodwill refund ends up on the
   goods the customer kept.
+- **Moving Standard and Express from a hand-edited `shipping.json` to Admin → Shipping works (review round 25,
+  finding 3).** The upgrade notes told such a shop to enter its prices in Admin → Shipping before restoring the file,
+  which 2.1.2 does not have, and the 2.1.3 notes even said to remove the methods from `shipping.json`; restoring the file
+  then brought back 3.99 € / 7.99 € and the edited prices were gone, and nothing warned. `php cli/setup.php
+  shipping-import --from=FILE` now sets both methods from a copy of the edited file (see the upgrade notes), Admin →
+  Shipping saves a method whole instead of its differences from `shipping.json`, and the doctor (`shipping.file_edited`)
+  and Admin → Shipping warn while `shipping.json` differs from every shipped version.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
@@ -591,7 +606,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Standard and Express delivery are set in Admin → Shipping, not in `shipping.json` (review round 23, medium S4).**
   Admin → Shipping switches the two `shipping.json` methods on or off and sets their price and per-kg rate per zone,
   the free-shipping amount and the delivery days; a zone left without a price is not served. The settings are kept in
-  `shipping-methods.json` in the data directory (included in backups), only where they differ from `shipping.json`, so
+  `shipping-methods.json` in the data directory (included in backups), the whole method once saved (round 25: was
+  only what differed from `shipping.json`, so a later release's prices replaced the ones the merchant had left), so
   the core file stays as shipped (editing it stopped every update at "installed file was locally modified"). The list
   names zones by name, no longer shows the in-store pickup (checkout never offered it from that file), and a store
   charging another currency says the methods are not offered there instead of listing EUR prices. The order list and

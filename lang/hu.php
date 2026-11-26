@@ -1566,6 +1566,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.file_methods' => 'Normál és expressz szállítás',
     'admin.shipping.all_countries' => 'Minden más ország',
     'admin.shipping.file_help' => 'Árak {currency} pénznemben, az alábbi módok mellett kínálva azokban a boltokban, amelyek {currency} pénznemben számláznak. Ár nélküli zónát a mód nem szolgál ki. A beállítások minden ilyen boltra érvényesek, és a bolt adatkönyvtárában vannak, így a frissítések nem változtatják meg őket.',
+    'admin.shipping.file_edited' => 'A shipping.json kézzel lett módosítva: a frissítés elutasítja az azt módosító csomagokat, és a módosítás elvész, ha a szállított fájlt visszaállítják. Másolja félre (cp shipping.json ../shipping.json.edited), állítsa vissza a szállított fájlt, majd futtassa a php cli/setup.php shipping-import --from=../shipping.json.edited parancsot, amely itt a módosítás szerint állítja be a Standard és Express módot.',
     'admin.shipping.file_other_currency' => 'A Normál és az Expressz ára {currency} pénznemben van, ezért ebben a boltban, amely {store_currency} pénznemben számláz, nem kínáljuk őket.',
     'admin.shipping.file_offered' => 'Felkínálás a pénztárban',
     'admin.shipping.per_kg' => 'Kg-onként',

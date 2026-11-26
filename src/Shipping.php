@@ -11,10 +11,15 @@ class Shipping {
     /** shipping.json with the merchant's Admin → Shipping settings over it (DataOverrides::shippingMethods()). */
     private static ?array $merged = null;
 
+    /** The installation's shipping.json. */
+    public static function filePath(): string {
+        return __DIR__ . '/../shipping.json';
+    }
+
     /** shipping.json as shipped (or as setConfig() gave it). */
     public static function fileConfig(): array {
         if (!self::$config) {
-            $file = __DIR__ . '/../shipping.json';
+            $file = self::filePath();
             $decoded = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
             self::$config = is_array($decoded) ? $decoded : [];
         }
@@ -81,6 +86,80 @@ class Shipping {
             foreach ((array)($file['methods'][$key]['rates'] ?? []) as $zone => $rate) if (isset($zones[$zone])) $editable[(string)$zone] = true;
         }
         return array_keys($editable);
+    }
+
+    /**
+     * R60 (review round 25, medium 3): SHA-256 of shipping.json as each release shipped it (1.8.0–2.0.0, 2.1.0–2.1.2,
+     * this release). Another content is a hand edit, which the updater refuses to replace. A release that changes the
+     * file adds its hash here.
+     */
+    public const SHIPPED_SHA256 = [
+        'a770887afd5943e1c70011a568b5b77fd8f5ba56bfab0b77654a823f3195d4fa',
+        'd15f263e1c322e7b0fd1b4d839d89d973fcc4134df4c13803c814f7a9bbe2384',
+        'ed5ed200e8666efb2ed08c0b95ae49122a81c39a24ca4820633288bfe725994c',
+    ];
+
+    /** R60: whether $path (the installation's shipping.json by default) is no shipped version of it, i.e. edited by hand. */
+    public static function fileEdited(?string $path = null): bool {
+        $path ??= self::filePath();
+        if (!is_file($path)) return false;
+        $hash = hash_file('sha256', $path);
+        return !is_string($hash) || !in_array($hash, self::SHIPPED_SHA256, true);
+    }
+
+    /**
+     * R60 (review round 25, medium 3): the whole setting of a checkout method as Admin → Shipping saves it (withSettings()),
+     * from $method as it stands: on or off, free shipping, delivery days and the price of every zone in $zones (null =
+     * not served). Was: only what differed from shipping.json, so a release changing its prices changed the merchant's.
+     * @param list<string> $zones
+     * @return array{active: bool, free_above: ?int, delivery_days: string, rates: array<string, ?array{base: int, per_kg: int}>}
+     */
+    public static function methodSettings(array $method, array $zones): array {
+        $settings = ['active' => self::isActive($method), 'free_above' => isset($method['free_above']) && is_numeric($method['free_above']) ? (int)$method['free_above'] : null,
+            'delivery_days' => is_scalar($method['delivery_days'] ?? null) ? trim((string)$method['delivery_days']) : '', 'rates' => []];
+        foreach ($zones as $zone) {
+            $rate = $method['rates'][$zone] ?? null;
+            $settings['rates'][$zone] = is_array($rate) && is_numeric($rate['base'] ?? null)
+                ? ['base' => max(0, (int)$rate['base']), 'per_kg' => max(0, (int)($rate['per_kg'] ?? 0))] : null;
+        }
+        return $settings;
+    }
+
+    /**
+     * R60 (review round 25, medium 3): Admin → Shipping settings that make Standard and Express what a hand-edited
+     * shipping.json ($edited, decoded) made them, over $file (shipping.json as shipped): a method the edit removed is off.
+     * Zones the edit priced that $file lacks cannot be set in Admin → Shipping and are reported in 'warnings', as is a
+     * changed currency or zone (countries are not set in Admin → Shipping either).
+     * @return array{methods: array<string, array<string, mixed>>, warnings: list<string>}
+     */
+    public static function importSettings(array $edited, array $file): array {
+        $zones = self::editableZones($file);
+        $methods = [];
+        $warnings = [];
+        if (strtoupper((string)($edited['currency'] ?? 'EUR')) !== strtoupper((string)($file['currency'] ?? 'EUR'))) {
+            $warnings[] = 'currency ' . strtoupper((string)($edited['currency'] ?? 'EUR')) . ' differs from shipping.json\'s ' . strtoupper((string)($file['currency'] ?? 'EUR')) . ': the amounts were imported as they are';
+        }
+        // Up to 2.1.2 the home zones named SK where shipping.json now says "@store" (the store's country).
+        $countries = static fn(mixed $zone): array => array_map(static fn($c): string => $c === '@store' ? 'SK' : strtoupper((string)$c), (array)(is_array($zone) ? ($zone['countries'] ?? []) : []));
+        foreach ((array)($edited['zones'] ?? []) as $zone => $definition) {
+            if (in_array((string)$zone, $zones, true) && $countries($definition) !== $countries($file['zones'][$zone] ?? null)) {
+                $warnings[] = "zone {$zone}: its countries differ from shipping.json and are not imported (Admin → Shipping → zones)";
+            }
+        }
+        foreach (self::CHECKOUT_METHODS as $key) {
+            $shipped = is_array($file['methods'][$key] ?? null) ? $file['methods'][$key] : null;
+            if ($shipped === null) continue;
+            $own = $edited['methods'][$key] ?? null;
+            if (!is_array($own)) {
+                $methods[$key] = ['active' => false] + self::methodSettings($shipped, $zones);
+                continue;
+            }
+            $methods[$key] = self::methodSettings($own, $zones);
+            foreach (array_keys((array)($own['rates'] ?? [])) as $zone) {
+                if (!in_array((string)$zone, $zones, true)) $warnings[] = "{$key}: the price for zone {$zone} is not imported (shipping.json has no such zone for these methods)";
+            }
+        }
+        return ['methods' => $methods, 'warnings' => $warnings];
     }
 
     /** A method is offered unless the merchant turned it off. */

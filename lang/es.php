@@ -1696,6 +1696,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.file_methods' => 'Envío estándar y urgente',
     'admin.shipping.all_countries' => 'Todos los demás países',
     'admin.shipping.file_help' => 'Precios en {currency}, ofrecidos junto a los métodos de abajo en las tiendas que cobran en {currency}. Una zona sin precio no la sirve el método. Los ajustes valen para cada una de esas tiendas y se guardan en el directorio de datos de la tienda, así que las actualizaciones no los cambian.',
+    'admin.shipping.file_edited' => 'shipping.json se editó a mano: la actualización rechaza los paquetes que lo cambian, y la edición se pierde al restaurar el archivo original. Cópielo aparte (cp shipping.json ../shipping.json.edited), restaure el archivo original y ejecute php cli/setup.php shipping-import --from=../shipping.json.edited para ajustar aquí Standard y Express como en la edición.',
     'admin.shipping.file_other_currency' => 'Estándar y Urgente tienen precios en {currency} y no se ofrecen en esta tienda, que cobra en {store_currency}.',
     'admin.shipping.file_offered' => 'Ofrecer en la caja',
     'admin.shipping.per_kg' => 'Por kg',

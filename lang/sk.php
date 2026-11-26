@@ -1545,6 +1545,7 @@ return [
     'admin.shipping.file_methods' => 'Doručenie Štandard a Expres',
     'admin.shipping.all_countries' => 'Všetky ostatné krajiny',
     'admin.shipping.file_help' => 'Ceny v {currency}, ponúkané popri metódach nižšie v obchodoch, ktoré účtujú v {currency}. Zónu bez ceny metóda neobsluhuje. Nastavenia platia pre každý taký obchod a ukladajú sa v dátovom adresári obchodu, takže ich aktualizácie nemenia.',
+    'admin.shipping.file_edited' => 'Súbor shipping.json bol upravený ručne: aktualizácia odmietne balíky, ktoré ho menia, a úprava sa stratí, keď sa obnoví pôvodný súbor. Skopírujte ho bokom (cp shipping.json ../shipping.json.edited), obnovte pôvodný súbor a spustite php cli/setup.php shipping-import --from=../shipping.json.edited, ktorý tu nastaví Standard a Express ako v úprave.',
     'admin.shipping.file_other_currency' => 'Štandard a Expres majú ceny v {currency} a v tomto obchode, ktorý účtuje v {store_currency}, sa neponúkajú.',
     'admin.shipping.file_offered' => 'Ponúkať v pokladni',
     'admin.shipping.per_kg' => 'Za kg',

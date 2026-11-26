@@ -1566,6 +1566,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.file_methods' => 'Dostawa Standard i Ekspres',
     'admin.shipping.all_countries' => 'Wszystkie pozostałe kraje',
     'admin.shipping.file_help' => 'Ceny w {currency}, oferowane obok metod poniżej w sklepach rozliczających w {currency}. Strefy bez ceny metoda nie obsługuje. Ustawienia obowiązują w każdym takim sklepie i są przechowywane w katalogu danych sklepu, więc aktualizacje ich nie zmieniają.',
+    'admin.shipping.file_edited' => 'Plik shipping.json został zmieniony ręcznie: aktualizacja odrzuca pakiety, które go zmieniają, a zmiana przepada po przywróceniu dostarczonego pliku. Skopiuj go na bok (cp shipping.json ../shipping.json.edited), przywróć dostarczony plik i uruchom php cli/setup.php shipping-import --from=../shipping.json.edited, który ustawi tu Standard i Express jak w zmianie.',
     'admin.shipping.file_other_currency' => 'Standard i Ekspres mają ceny w {currency} i nie są oferowane w tym sklepie, który rozlicza w {store_currency}.',
     'admin.shipping.file_offered' => 'Oferuj przy kasie',
     'admin.shipping.per_kg' => 'Za kg',

@@ -1566,6 +1566,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.shipping.file_methods' => 'Standard- und Expressversand',
     'admin.shipping.all_countries' => 'Alle anderen Länder',
     'admin.shipping.file_help' => 'Preise in {currency}, angeboten neben den Methoden unten in den Shops, die in {currency} abrechnen. Eine Zone ohne Preis bedient die Methode nicht. Die Einstellungen gelten für jeden solchen Shop und liegen im Datenverzeichnis des Shops, Updates ändern sie nicht.',
+    'admin.shipping.file_edited' => 'shipping.json wurde von Hand bearbeitet: Das Update lehnt Pakete ab, die sie ändern, und die Änderung geht verloren, wenn die ausgelieferte Datei wiederhergestellt wird. Kopieren Sie sie beiseite (cp shipping.json ../shipping.json.edited), stellen Sie die ausgelieferte Datei wieder her und führen Sie php cli/setup.php shipping-import --from=../shipping.json.edited aus, das Standard und Express hier wie in der Änderung einstellt.',
     'admin.shipping.file_other_currency' => 'Standard und Express sind in {currency} bepreist und werden in diesem Shop, der in {store_currency} abrechnet, nicht angeboten.',
     'admin.shipping.file_offered' => 'An der Kasse anbieten',
     'admin.shipping.per_kg' => 'Pro kg',

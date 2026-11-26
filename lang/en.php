@@ -1540,6 +1540,7 @@ return [
     'admin.shipping.file_methods' => 'Standard and Express delivery',
     'admin.shipping.all_countries' => 'All other countries',
     'admin.shipping.file_help' => 'Prices in {currency}, offered next to the methods below in the stores that charge in {currency}. A zone left without a price is not served by the method. The settings apply to every such store and are kept in the shop\'s data directory, so updates leave them alone.',
+    'admin.shipping.file_edited' => 'shipping.json was edited by hand: the updater refuses packages that change it, and the edit is lost when the shipped file is restored. Copy it aside (cp shipping.json ../shipping.json.edited), restore the shipped file, then run php cli/setup.php shipping-import --from=../shipping.json.edited to set Standard and Express here as the edit had them.',
     'admin.shipping.file_other_currency' => 'Standard and Express are priced in {currency} and are not offered in this store, which charges in {store_currency}.',
     'admin.shipping.file_offered' => 'Offered at checkout',
     'admin.shipping.per_kg' => 'Per kg',

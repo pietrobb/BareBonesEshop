@@ -923,6 +923,12 @@ class Setup
 
     private static function operationsChecks(array $config, string $root, callable $add): void
     {
+        // R60 (review round 25, medium 3): a hand-edited shipping.json stops every update that changes it, and restoring
+        // the shipped file to get past that brought back Standard 3.99 € / Express 7.99 € without a word.
+        if (Shipping::fileEdited($root . '/shipping.json')) {
+            $add('warn', 'shipping.file_edited', 'shipping.json was edited by hand: the updater refuses packages that change it, and restoring the shipped file drops the edit.',
+                'Copy it aside (cp shipping.json ../shipping.json.edited), restore the shipped file (git checkout shipping.json, or take it from the release), then run php cli/setup.php shipping-import --from=../shipping.json.edited: Admin → Shipping then holds its Standard and Express settings.');
+        }
         $add(is_file($root . '/cli/worker.php') ? 'pass' : 'fail', 'operations.worker', 'Worker entry point ' . (is_file($root . '/cli/worker.php') ? 'present' : 'missing'), 'Restore cli/worker.php.');
         $cron = trim((string)($config['operations']['worker_cron'] ?? ''));
         $webWorker = WebWorker::enabled($config);
