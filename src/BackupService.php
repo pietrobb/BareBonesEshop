@@ -1444,7 +1444,6 @@ class BackupService
             $unchanged = 0;
             $setAside = [];
             $quarantined = [];
-            $jobsRan = null;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
                 $root = (string)(self::$fileSources[$name] ?? '');
@@ -1473,10 +1472,12 @@ class BackupService
                     $isAside = $isQuarantined = true;
                 } elseif (in_array($name, self::ASIDE_SOURCES, true) && !is_link($target)) {
                     $differs = is_file($target) && !hash_equals((string)hash_file('sha256', $source), (string)hash_file('sha256', $target));
-                    if ($name === 'jobs' && !is_file($target)) $jobsRan ??= self::holdsAnyFile($root);
                     // R54 (review round 19, low): a theme file the live themes lack is set aside too: a forged backup's child
                     // theme checkout.html with its own script became the checkout page (a card skimmer).
-                    if ($differs || ($name === 'jobs' && !is_file($target) && $jobsRan) || ($name === 'themes' && !is_file($target))) {
+                    // R60 (review round 25, medium): so are a missing mail.json and every job, also into an empty queue: a
+                    // forged mail.json sent the SMTP login of config.php to its server, a forged payment_refund refunded a
+                    // delivered order and an email_send mailed a store-branded link anywhere on a new server.
+                    if ($differs || (in_array($name, ['jobs', 'mail', 'themes'], true) && !is_file($target))) {
                         // R51: in the private recovery directory, never next to the live source: config.php.from-backup
                         // and themes.from-backup/ in the web root were served (database password, gateway keys).
                         $asideDir = $asideRun ??= self::createAsideRun();
@@ -1835,9 +1836,10 @@ class BackupService
     /**
      * R50: sources restored next to the live ones (<source>.from-backup) instead of over them: an older config.php
      * would point the shop at another database, a theme file the release changed would go back to the old version,
-     * and a queue that has already run would send its mails again. Only missing files are restored in place.
+     * and a queue that has already run would send its mails again. Only a missing config.php is restored in place
+     * (R60: a missing mail.json, theme file or job is set aside too).
      */
-    private const ASIDE_SOURCES = ['config', 'themes', 'jobs'];
+    private const ASIDE_SOURCES = ['config', 'themes', 'jobs', 'mail'];
 
     /** The default sources that are one file (defaultFileSources()); the others are directories. */
     private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'shipping', 'config'];
@@ -1989,21 +1991,6 @@ class BackupService
             throw new RuntimeException("Restore: {$dir} is not private (it must belong to this user with mode 0700); "
                 . 'move it away and run the restore again');
         }
-    }
-
-    /** Whether directory $dir holds any file (a job queue that has already run). */
-    private static function holdsAnyFile(string $dir): bool
-    {
-        if (is_link($dir) || !is_dir($dir)) return false;
-        $entries = @scandir($dir);
-        // An unreadable queue counts as one that has run: its jobs are set aside, never sent twice.
-        if ($entries === false) return true;
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') continue;
-            $path = $dir . '/' . $entry;
-            if (is_file($path) || self::holdsAnyFile($path)) return true;
-        }
-        return false;
     }
 
     /**

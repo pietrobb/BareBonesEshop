@@ -466,8 +466,22 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   issued for them on update: the next return of that order credits what its own rate lacks at the rates whose goods
   were already returned, so the customer still gets the goods' full value. Until every return of such an order is in,
   the VAT report can show part of that money at the rates of the goods kept, as it did before the update.
+- **A files restore no longer puts `mail.json` or any job in place (review round 25, findings 1 and 2).** Both go to
+  the restore's private directory `<backup_recovery_dir>/from-backup/<time>-<random>/` (`mail.json`, `jobs/…`), also
+  on a new server whose queue is empty, and the restore warns. After restoring onto a new server, check where the backup
+  came from, then move `mail.json` into the data directory and the pending jobs you recognise into `jobs/pending/` by
+  hand; until then the shop sends mail as `config.php` configures it. The `import_process` job type is gone (nothing
+  created it); such a job fails as an unknown job type.
 
 ### Changes
+
+- **A forged backup can no longer redirect the shop's mail or run jobs on restore (review round 25, findings 1 and
+  2).** `mail.json` was restored in place when the live shop had none: a shop whose SMTP server is in `config.php` then
+  logged in with that username and password at the backup's server and sent every mail, password-reset links included,
+  through it. The jobs of a backup went into an empty queue: a forged `payment_refund` in the old format refunded a paid
+  and delivered order in full, `email_send` mailed a store-branded message with any link to any address and
+  `import_process` (registered, but created by nothing) imported any CSV. Both are now always set aside, and the unused
+  `import_process` handler is removed.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's

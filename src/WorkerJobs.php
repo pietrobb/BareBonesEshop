@@ -604,20 +604,4 @@ final class WorkerJobs
         $result = $fellBack ? ['fell_back' => true] : PaymentLink::send($order);
         if (!empty($result['fell_back'])) self::requeueLoggedMail('payment_link_send', $payload);
     }
-
-    public static function handleImportProcess(array $payload, array $job): void {
-        $file = $payload['file'] ?? '';
-        if (!$file || !file_exists($file)) {
-            throw new \RuntimeException("Import file not found: {$file}");
-        }
-
-        $result = Import::csv($file);
-
-        Logger::info('import.processed', ['imported' => $result['imported'], 'error_count' => count($result['errors'] ?? []), 'file' => basename($file), 'encoding' => $result['encoding'] ?? 'utf-8']);
-
-        // Clean up temp file only on success
-        if (empty($result['errors'])) {
-            @unlink($file);
-        }
-    }
 }

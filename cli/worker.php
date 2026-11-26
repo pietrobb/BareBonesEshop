@@ -65,7 +65,6 @@ $handlers = [
     'cart_abandonment'  => [WorkerJobs::class, 'handleCartAbandonment'],
     'cleanup'           => [WorkerJobs::class, 'handleCleanup'],
     'image_resize'      => [WorkerJobs::class, 'handleImageResize'],
-    'import_process'    => [WorkerJobs::class, 'handleImportProcess'],
     'invoice_issue'     => [WorkerJobs::class, 'handleInvoiceIssue'],
     'digital_fulfill'   => [WorkerJobs::class, 'handleDigitalFulfill'],
     'digital_revoke'    => [WorkerJobs::class, 'handleDigitalRevoke'],
