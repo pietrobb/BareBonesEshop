@@ -1264,15 +1264,9 @@ function onPaymentCompleted(array $session): ?string {
 }
 
 function applyStripePaymentCompleted(array $session, string $sessionId, int $orderId): void {
-    $order = Orders::byId($orderId);
-    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
     // Like the generic path in PaymentService: a capture without amount or currency is unverified, never paid.
-    if (!isset($session['amount_total']) || (int)$session['amount_total'] !== (int)$order['total']) {
-        throw new RuntimeException("Stripe amount missing or mismatched for order #{$orderId}");
-    }
-    if (!isset($session['currency']) || strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
-        throw new RuntimeException("Stripe currency missing or mismatched for order #{$orderId}");
-    }
+    if (!isset($session['amount_total'])) throw new RuntimeException("Stripe amount missing or mismatched for order #{$orderId}");
+    if (!isset($session['currency'])) throw new RuntimeException("Stripe currency missing or mismatched for order #{$orderId}");
 
     $paymentRef = (string)($session['payment_intent'] ?? $sessionId);
     // R14 T18: decided under the order lock. Two sessions completing at once both read "pending": the later one
@@ -1282,6 +1276,16 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
     try {
         Orders::lockWithin($orderId);
         $order = Orders::byId($orderId) ?: throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
+        // R60 (review round 25, medium 5): compared with the order read under its lock. Compared before it, an admin edit
+        // of the pending order (20 € → 35 €) committing in between marked it paid at 35 € for the 20 € session.
+        if ((int)$session['amount_total'] !== (int)$order['total']
+            || strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
+            $db->rollBack();
+            if (!IncidentMonitor::reportedForOrder('payment.amount_mismatch', $orderId)) {
+                IncidentMonitor::report('payment.amount_mismatch', 'payment', 'critical', ['order_id' => $orderId]);
+            }
+            throw new RuntimeException("Stripe amount or currency mismatched for order #{$orderId}");
+        }
         // A second session paid for an already settled order: alert, and keep the recorded payment_id refunds use.
         if (in_array((string)($order['payment_status'] ?? 'pending'), ['paid', 'refund_pending', 'partially_refunded', 'refunded', 'disputed'], true)
             && PaymentService::reportForeignCapture($order, [$paymentRef, $sessionId])) {

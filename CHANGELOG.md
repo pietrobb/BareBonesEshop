@@ -511,7 +511,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   amount a payment notification reports was compared with the total read before the order was locked, so an admin edit
   of the pending order committing in between (20 € → 35 €) marked it paid at 35 € for the 20 € the customer paid (14 of
   80 tries on MySQL). Such a capture is now refused and raises `payment.amount_mismatch`, as any capture of another
-  amount does; the merchant refunds or settles it by hand.
+  amount does; the merchant refunds or settles it by hand. This holds for every Stripe event that confirms a payment:
+  Stripe Checkout's own `checkout.session.completed` / `checkout.session.async_payment_succeeded` handler compared
+  the session's amount and currency before locking the order too.
 - **The first build of the daily sales after the update no longer slows every report request (review round 25,
   finding 6).** Each call read the hours of every order not built yet before building until its deadline: on MySQL at
   150 000 orders the dashboard took 2-3 s and the Reports page 7-9 s, for about 100 requests without a worker. A build

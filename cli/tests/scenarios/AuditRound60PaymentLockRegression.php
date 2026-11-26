@@ -46,6 +46,22 @@ switch ($phase) {
             $out = ['refused' => str_contains($e->getMessage(), 'does not match')];
         }
         break;
+    case 'order':
+        $db->exec("INSERT INTO orders (order_number, customer_name, customer_email, shipping_addr, subtotal, total, currency, status, payment_status, payment_method, payment_id, shipping_method, vat_scenario, store_id)
+            VALUES ('R60P-2', 'R60P', 'r60p@example.test', '{\"country\":\"SK\"}', 2000, 2000, 'eur', 'pending', 'pending', 'card', 'cs_r60c', 'pickup', 'domestic', 'default')");
+        $out = ['order' => (int)$db->lastInsertId()];
+        break;
+    case 'paycheckout':
+        // The same capture through Stripe Checkout's own handler (checkout.session.completed / async_payment_succeeded).
+        require_once $root . '/src/Http/ApiHandlers.php';
+        try {
+            applyStripePaymentCompleted(['id' => 'cs_r60c', 'payment_status' => 'paid', 'amount_total' => 2000, 'currency' => 'eur',
+                'payment_intent' => 'pi_r60c', 'metadata' => ['order_id' => (int)$args[0]]], 'cs_r60c', (int)$args[0]);
+            $out = ['refused' => false];
+        } catch (RuntimeException $e) {
+            $out = ['refused' => str_contains($e->getMessage(), 'mismatched')];
+        }
+        break;
     case 'state':
         $order = Orders::byId((int)$args[0]);
         $out = ['payment' => (string)($order['payment_status'] ?? ''), 'total' => (int)($order['total'] ?? 0),
@@ -86,6 +102,18 @@ try {
     assert_equals(['refused' => true], $r60pWait($r60pPay), 'R60 payment lock: the 20 € capture is refused for the order edited to 35 € meanwhile');
     assert_equals(['payment' => 'pending', 'total' => 3500, 'incident' => true], $r60pWait($r60pRun(['state', (string)$r60pOrder])),
         'R60 payment lock: the order stays pending at 35 € and the mismatch is an incident (was: paid at 35 € for 20 €)');
+
+    // The same race through Stripe Checkout's handler, which compared before taking the order lock.
+    $r60pCheckout = (int)($r60pWait($r60pRun(['order']))['order'] ?? 0);
+    $r60pAdmin->beginTransaction();
+    $r60pAdmin->query("SELECT id FROM orders WHERE id = {$r60pCheckout} FOR UPDATE")->fetchAll();
+    $r60pPay = $r60pRun(['paycheckout', (string)$r60pCheckout]);
+    usleep(1500000);
+    $r60pAdmin->exec("UPDATE orders SET subtotal = 3500, total = 3500 WHERE id = {$r60pCheckout}");
+    $r60pAdmin->commit();
+    assert_equals(['refused' => true], $r60pWait($r60pPay), 'R60 payment lock: Stripe Checkout refuses the 20 € session for the order edited to 35 € meanwhile');
+    assert_equals(['payment' => 'pending', 'total' => 3500, 'incident' => true], $r60pWait($r60pRun(['state', (string)$r60pCheckout])),
+        'R60 payment lock: through Stripe Checkout too the order stays pending at 35 € with an incident (was: paid at 35 € for 20 €)');
 } catch (Throwable $e) {
     assert_true(false, 'R60 payment lock (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {
