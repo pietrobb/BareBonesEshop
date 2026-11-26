@@ -1312,6 +1312,7 @@ final class InvoiceService
                 if ($part['gross'] < 0) $back[$key] = $part;
                 if (!isset($rates[$key]) || $part['gross'] <= 0) continue;
                 $gross = min($part['gross'], $rates[$key]['gross']);
+                if ($gross <= 0) continue;
                 $own[$key] = ['gross' => $gross, 'net' => (int)round($part['net'] * $gross / $part['gross'])];
             }
             // R58 (review round 23, medium S1): the reversed credit note gave rates back (outsideLines()): its money,
@@ -1321,9 +1322,29 @@ final class InvoiceService
                 && self::creditedAtLeast($source, $rates, $back)) {
                 return $own + $back;
             }
-            if ($own !== [] && $amount <= array_sum(array_column($own, 'gross'))) {
-                $rates = $own;
+            $ownGross = array_sum(array_column($own, 'gross'));
+            if ($own !== [] && $amount <= $ownGross) {
                 $split['unshipped'] = $ofUnshipped;
+                return self::proportionalShares($amount, $own);
+            }
+            if ($own !== [] && $amount <= $uncredited) {
+                // R60 (review round 25, medium 4): an earlier partial refund split over the invoice left these rates less
+                // than the goods: they are credited what they have left in full, only the rest goes to the other rates.
+                // Was: the whole refund split over the invoice, so cancelled 5 % books after a 5 € goodwill refund were
+                // credited largely at 23 %.
+                $rest = [];
+                foreach ($rates as $key => $rate) {
+                    $left = $rate['gross'] - (int)($own[(string)$key]['gross'] ?? 0);
+                    if ($left > 0) $rest[(string)$key] = ['gross' => $left, 'net' => max(0, min($left, $rate['net'] - (int)($own[(string)$key]['net'] ?? 0)))];
+                }
+                $parts = $own;
+                foreach (self::proportionalShares($amount - $ownGross, $rest) as $key => $part) {
+                    $parts[$key] ??= ['gross' => 0, 'net' => 0];
+                    $parts[$key]['gross'] += $part['gross'];
+                    $parts[$key]['net'] += $part['net'];
+                }
+                $split['unshipped'] = $ofUnshipped;
+                return $parts;
             }
             if ($amount > $uncredited) {
                 // R16: money that came in after a cancellation credit note (a cancelled purchase on invoice paid all the same) goes
@@ -1333,34 +1354,46 @@ final class InvoiceService
                 $amount = $uncredited;
                 if ($amount <= 0) return [];
             }
-            // Shares of the uncredited VAT rates: gross in proportion, net likewise. R23: the cents the rounding down leaves go
-            // to the largest remainders, never past a rate's uncredited gross; the last rate took them all and, with three
-            // or more rates, could credit a cent more than that rate had left.
-            $sourceGross = array_sum(array_column($rates, 'gross'));
-            $shares = [];
-            $remainders = [];
-            foreach ($rates as $key => $rate) {
-                $shares[(string)$key] = intdiv($amount * $rate['gross'], $sourceGross);
-                $remainders[(string)$key] = ($amount * $rate['gross']) % $sourceGross;
-            }
-            arsort($remainders);
-            for ($left = $amount - array_sum($shares); $left > 0;) {
-                foreach (array_keys($remainders) as $key) {
-                    if ($left <= 0) break;
-                    if ($shares[$key] >= $rates[$key]['gross']) continue;
-                    $shares[$key]++;
-                    $left--;
-                }
-            }
-            $parts = [];
-            foreach ($shares as $key => $gross) {
-                $parts[$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
-            }
-            return $parts;
+            return self::proportionalShares($amount, $rates);
         }, static function () use ($split, $itemRates): array {
             // R56: every refund credit note names its split; one without (issued before R56) is read by unshippedUncredited().
             return ['split' => $split['unshipped'] ? 'unshipped' : ($itemRates !== [] ? 'items' : 'invoice')];
         });
+    }
+
+    /**
+     * $amount split over $rates (gross and net per breakdown key): gross in proportion, net likewise. R23: the cents the
+     * rounding down leaves go to the largest remainders, never past a rate's gross; the last rate took them all and, with
+     * three or more rates, could credit a cent more than that rate had left.
+     * @param array<string, array{gross: int, net: int}> $rates
+     * @return array<string, array{gross: int, net: int}>
+     */
+    private static function proportionalShares(int $amount, array $rates): array
+    {
+        $sourceGross = array_sum(array_column($rates, 'gross'));
+        if ($amount <= 0 || $sourceGross <= 0) return [];
+        $shares = [];
+        $remainders = [];
+        foreach ($rates as $key => $rate) {
+            $shares[(string)$key] = intdiv($amount * $rate['gross'], $sourceGross);
+            $remainders[(string)$key] = ($amount * $rate['gross']) % $sourceGross;
+        }
+        arsort($remainders);
+        for ($left = $amount - array_sum($shares); $left > 0;) {
+            $before = $left;
+            foreach (array_keys($remainders) as $key) {
+                if ($left <= 0) break;
+                if ($shares[$key] >= $rates[$key]['gross']) continue;
+                $shares[$key]++;
+                $left--;
+            }
+            if ($left === $before) break;
+        }
+        $parts = [];
+        foreach ($shares as $key => $gross) {
+            $parts[$key] = ['gross' => $gross, 'net' => (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross'])];
+        }
+        return $parts;
     }
 
     /**

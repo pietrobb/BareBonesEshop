@@ -482,6 +482,13 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   and delivered order in full, `email_send` mailed a store-branded message with any link to any address and
   `import_process` (registered, but created by nothing) imported any CSV. Both are now always set aside, and the unused
   `import_process` handler is removed.
+- **The cancelled unshipped rest is credited at its own rates after an earlier partial refund (review round 25,
+  finding 4).** A partial refund split over the invoice (a 5 € goodwill refund) leaves the rate of the goods that later
+  never ship less than their price; the refund of that cancelled rest was then split over the whole invoice again, so
+  10 € of cancelled 5 % books after a 5 € goodwill refund on a 20 € + 10 € order were credited 3.33 € at 5 % and
+  6.67 € at 23 % (a regression of rounds 19/20). The goods' rate is now credited all it has left (8.33 €) and only the
+  rest (1.67 €) at the other rates, so the books are credited in full at 5 % and the goodwill refund ends up on the
+  goods the customer kept.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
