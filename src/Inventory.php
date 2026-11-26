@@ -101,6 +101,27 @@ class Inventory {
     }
 
     /**
+     * R60 (review round 25, low): an admin edit of an order's lines (Orders::replaceItems()) locks the SKUs of the lines
+     * it releases and of the lines it reserves in one pass, in SKU order like checkout. Was: the old lines were released
+     * one by one and the new ones locked after, so an edit holding X and waiting for A deadlocked with a checkout holding
+     * A and waiting for X (19 of 236 checkouts failed after three tries).
+     */
+    public static function lockEditSkus(array $orderItems, array $cartItems): void {
+        if (!Db::isMysql()) return;
+        $skus = [];
+        foreach ($orderItems as $item) {
+            if (self::isDigitalLine($item)) continue;
+            foreach (self::reservationLines($item) as $line) $skus[(string)$line['sku']] = true;
+        }
+        foreach ($cartItems as $item) {
+            if (VariantAvailability::isDigitalItem($item)) continue;
+            $components = self::bundleComponents((int)($item['product_id'] ?? 0));
+            foreach ($components ?: [['sku' => (string)($item['sku'] ?? '')]] as $component) $skus[(string)$component['sku']] = true;
+        }
+        self::lockSkus(array_keys($skus));
+    }
+
+    /**
      * R59 (review round 24): after the stock rows, the product and variant rows of these SKUs are locked too, each table
      * in id order. Warehouse::syncProductStock() writes products.stock_updated_at and variants.stock line by line in cart
      * order, so two carts holding variants of the same products in reverse order (A-red, B-red / B-blue, A-blue) share

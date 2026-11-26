@@ -314,7 +314,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   confirmation link at the next sign-in attempt (at most 3 an hour) and signs in with the link and the password, or
   resets the password. Expect questions from such customers in the first days.
 - **Checkout:** "Standard Delivery" and "Express Delivery" from `shipping.json` are now offered next to the store's
-  `shipping_rates`; remove them from `shipping.json` if the shop does not ship that way.
+  `shipping_rates`; if the shop does not ship that way, switch them off in Admin → Shipping after the update (do not
+  edit `shipping.json`: the updater then refuses packages that change it, see "Standard and Express delivery move to
+  Admin → Shipping" below).
   Checkout refuses over-long fields with `checkout.error.field_too_long`, and `cart_restore` takes at most 200 entries
   (100 lines, 64 KiB body).
 - **E-mail:** the From line names the store, and without `MAIL_REPLY_TO` customers' replies go to the store's
@@ -391,8 +393,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261121090100_drop_unused_product_fulltext` (review round 51, MySQL/MariaDB only): drops
   `idx_ft_products`; the search reads `idx_ft_products_names`.
 - **Migration** `20261121120000_sales_daily` (round 52): adds the daily sales totals of the reports (`sales_daily`,
-  `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`) and builds them from the existing orders:
-  about 30 s at 500 000 orders over two years on MySQL (a large shop runs `apply` in its maintenance window, as above).
+  `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`). It builds the days of the existing orders for
+  3 s and queues the worker job `sales_daily_build` for the rest; a signed update from 2.1.2 (run by 2.1.2's classes)
+  builds none of them here and only queues the job. Until the worker has built them, the Reports page and the dashboard
+  build for 2 s per request and sum the days not built from the orders (review round 25: on MySQL at 150 000 orders the
+  job takes about 30 s). Without a running worker, run `php cli/sales-daily.php` once after the update.
 - **Migration** `20261122090000_sales_monthly_products` (review round 53): adds `sales_monthly_products`, the monthly
   product sums of the built days, and fills it from `sales_daily_products` (seconds).
 - **Migration** `20261113175958_analyze_order_tables` (review round 53): MySQL only, `ANALYZE TABLE` of `orders`,
@@ -453,10 +458,16 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   loop) is priced like a store without a legal block and still refused for invoicing (`php cli/setup.php doctor`
   reports it).
 - **Standard and Express delivery move to Admin → Shipping (review round 23, medium S4).** Shops installed before keep
-  them exactly as `shipping.json` prices them until the merchant changes them in Admin → Shipping. A shop that edited
-  `shipping.json` by hand: enter the same prices or switches in Admin → Shipping, then restore the shipped file (for
-  example `git checkout shipping.json`, or take it from the release) so the updater accepts the next package. While the
-  file is modified, the updater refuses packages that change it.
+  them exactly as `shipping.json` prices them until the merchant changes them in Admin → Shipping. **A shop that edited
+  `shipping.json` by hand** (`php cli/update.php check` lists it as "installed file was locally modified"; 2.1.2 has no
+  Admin → Shipping for these methods yet): (1) before `apply`, copy the edited file out of the shop, for example
+  `cp shipping.json ../shipping.json.edited`; (2) restore the 2.1.2 file (`git checkout shipping.json`, or take it
+  from the 2.1.2 release) and run `check` again; (3) `apply` with the shop closed as described above; (4) before opening
+  the shop, run `php cli/setup.php shipping-import --from=../shipping.json.edited`, which sets Standard and Express in
+  Admin → Shipping as the edit had them (a method the edit removed is switched off; prices for zones of its own or
+  changed zone countries cannot be set there and are listed as warnings), and check Admin → Shipping. Without step 4
+  the shop offers Standard 3.99 € and Express 7.99 € again. `php cli/setup.php doctor` and Admin → Shipping warn
+  while `shipping.json` is edited.
 - **Slovak and Czech postcodes are stored as five digits (review round 23, low N2).** Checkout, the address book and
   manual orders accept `811 01` and `81101` and store `81101`; a Slovak or Czech postcode of another form is refused.
   Postcodes stored before are not changed.
@@ -466,8 +477,78 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   issued for them on update: the next return of that order credits what its own rate lacks at the rates whose goods
   were already returned, so the customer still gets the goods' full value. Until every return of such an order is in,
   the VAT report can show part of that money at the rates of the goods kept, as it did before the update.
+- **A files restore no longer puts `mail.json` or any job in place (review round 25, findings 1 and 2).** Both go to
+  the restore's private directory `<backup_recovery_dir>/from-backup/<time>-<random>/` (`mail.json`, `jobs/…`), also
+  on a new server whose queue is empty, and the restore warns. After restoring onto a new server, check where the backup
+  came from, then move `mail.json` into the data directory and the pending jobs you recognise into `jobs/pending/` by
+  hand; until then the shop sends mail as `config.php` configures it. The `import_process` job type is gone (nothing
+  created it); such a job fails as an unknown job type.
 
 ### Changes
+
+- **A forged backup can no longer redirect the shop's mail or run jobs on restore (review round 25, findings 1 and
+  2).** `mail.json` was restored in place when the live shop had none: a shop whose SMTP server is in `config.php` then
+  logged in with that username and password at the backup's server and sent every mail, password-reset links included,
+  through it. The jobs of a backup went into an empty queue: a forged `payment_refund` in the old format refunded a paid
+  and delivered order in full, `email_send` mailed a store-branded message with any link to any address and
+  `import_process` (registered, but created by nothing) imported any CSV. Both are now always set aside, and the unused
+  `import_process` handler is removed.
+- **The cancelled unshipped rest is credited at its own rates after an earlier partial refund (review round 25,
+  finding 4).** A partial refund split over the invoice (a 5 € goodwill refund) leaves the rate of the goods that later
+  never ship less than their price; the refund of that cancelled rest was then split over the whole invoice again, so
+  10 € of cancelled 5 % books after a 5 € goodwill refund on a 20 € + 10 € order were credited 3.33 € at 5 % and
+  6.67 € at 23 % (a regression of rounds 19/20). The goods' rate is now credited all it has left (8.33 €) and only the
+  rest (1.67 €) at the other rates, so the books are credited in full at 5 % and the goodwill refund ends up on the
+  goods the customer kept.
+- **Moving Standard and Express from a hand-edited `shipping.json` to Admin → Shipping works (review round 25,
+  finding 3).** The upgrade notes told such a shop to enter its prices in Admin → Shipping before restoring the file,
+  which 2.1.2 does not have, and the 2.1.3 notes even said to remove the methods from `shipping.json`; restoring the file
+  then brought back 3.99 € / 7.99 € and the edited prices were gone, and nothing warned. `php cli/setup.php
+  shipping-import --from=FILE` now sets both methods from a copy of the edited file (see the upgrade notes), Admin →
+  Shipping saves a method whole instead of its differences from `shipping.json`, and the doctor (`shipping.file_edited`)
+  and Admin → Shipping warn while `shipping.json` differs from every shipped version.
+- **A capture is checked against the order total read under the order lock (review round 25, finding 5).** The
+  amount a payment notification reports was compared with the total read before the order was locked, so an admin edit
+  of the pending order committing in between (20 € → 35 €) marked it paid at 35 € for the 20 € the customer paid (14 of
+  80 tries on MySQL). Such a capture is now refused and raises `payment.amount_mismatch`, as any capture of another
+  amount does; the merchant refunds or settles it by hand. This holds for every Stripe event that confirms a payment:
+  Stripe Checkout's own `checkout.session.completed` / `checkout.session.async_payment_succeeded` handler compared
+  the session's amount and currency before locking the order too.
+- **The first build of the daily sales after the update no longer slows every report request (review round 25,
+  finding 6).** Each call read the hours of every order not built yet before building until its deadline: on MySQL at
+  150 000 orders the dashboard took 2-3 s and the Reports page 7-9 s, for about 100 requests without a worker. A build
+  now reads 31 days from the next order on at a time. The migration run by a signed update from 2.1.2 queues the worker
+  job `sales_daily_build` (it queued nothing), and the upgrade notes say what it does.
+- **Smaller fixes (review round 25, lows).** The names of shipping zones and of shipping and payment methods are refused
+  when they show nothing (U+200B, Private Use characters alone, which no other typed name accepts now either) or hold a
+  control character or line separator (U+2028); the delivery days of a rate take a number or a range ("2-3") as for
+  Standard/Express. `stores.json` is read up to 2 MB (`Bootstrap::STORES_MAX_BYTES`); a larger file is refused like
+  invalid JSON instead of being read whole at every request. A Slovak installation names the B2B payment method
+  "Nákup na faktúru" (it read "Invoice purchase"), with its other languages as translations. A zone whose Standard or
+  Express price was emptied in Admin → Shipping is not served by that method (its countries took the price of the next
+  zone listing them, e.g. Czechia the international 15.99 €). "Restore the shipped prices" keeps the method on or off
+  (it switched a method turned off back on), and a store charging in another currency than shipping.json is pointed to
+  the shipping methods below, whose rates are in its currency. An item refund paid back by hand sends its credit note
+  with the e-mail (the mail went without it). The customer account lists every document of an order, the invoice and
+  each credit note (it showed only the newest). A return of an order with money refunded outside the returns (e.g. a
+  discount for a late delivery) can be refunded in full, the money staying with the customer as a reduction of the
+  goods kept ("Refunded in full"); it always came off the return before. VAT by a cent: a return less money refunded
+  outside the returns credits its goods the net that money's credit notes did not (each line kept its own proportion, a
+  cent more VAT), the line giving the other rates back what that money credited there takes the net those notes
+  credited (the invoice's proportion left the rate a cent off until its last return), and a refund credit note that
+  leaves a rate nothing uncredited takes its net rest, as item credits do since round 24. An admin edit of an order's
+  items locks the stock of the old and the new SKUs in one sorted pass on MySQL/MariaDB (it locked the old ones first,
+  so an edit from X to A deadlocked with a checkout holding A and waiting for X). A store domain that did not answer as
+  this shop (DNS not set up yet, a probe timing out) is tested again by every save of the domains until it does; it was
+  tested once and never again. A backup or restore killed meanwhile no longer leaves its staging directory (the whole
+  dump and the extracted files) in the system temp directory for good: the next one removes it. A MySQL/MariaDB
+  scratch database a killed restore left is dropped by the next restore (every later restore was refused until it was
+  dropped by hand); one this code did not create is still refused. The PHP log line of a failed checkout masks what the
+  shopper typed (name, street, city, note, company, tax ids, any case) wherever the message quotes it, and payment
+  session ids and long keys or hashes (it masked e-mails, phones and keyed values only). The German, Polish and
+  Hungarian privacy policy templates are complete like the others (data, legal bases, recipients, retention, rights
+  with the complaint to the authority, invoices); they were a paragraph each. A shop that already saved its own text
+  keeps it.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
@@ -570,7 +651,8 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Standard and Express delivery are set in Admin → Shipping, not in `shipping.json` (review round 23, medium S4).**
   Admin → Shipping switches the two `shipping.json` methods on or off and sets their price and per-kg rate per zone,
   the free-shipping amount and the delivery days; a zone left without a price is not served. The settings are kept in
-  `shipping-methods.json` in the data directory (included in backups), only where they differ from `shipping.json`, so
+  `shipping-methods.json` in the data directory (included in backups), the whole method once saved (round 25: was
+  only what differed from `shipping.json`, so a later release's prices replaced the ones the merchant had left), so
   the core file stays as shipped (editing it stopped every update at "installed file was locally modified"). The list
   names zones by name, no longer shows the in-store pickup (checkout never offered it from that file), and a store
   charging another currency says the methods are not offered there instead of listing EUR prices. The order list and

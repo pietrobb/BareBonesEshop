@@ -582,7 +582,8 @@ class Security {
         if (!mb_check_encoding($text, 'UTF-8')) return '';
         $blank = '[\s\p{Z}\p{Cf}\p{Cc}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]+';
         $text = (string)preg_replace("/^{$blank}|{$blank}$/u", '', self::plainText($text));
-        return preg_match('/^[\p{M}\s\p{Z}\p{Cf}\p{Cc}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]*$/u', $text) === 1 ? '' : $text;
+        // R60 (review round 25, low): Private Use characters alone (U+E000…, planes 15-16) show nothing either.
+        return preg_match('/^[\p{M}\s\p{Z}\p{Cf}\p{Cc}\p{Co}\x{115F}\x{1160}\x{3164}\x{FFA0}\x{2800}]*$/u', $text) === 1 ? '' : $text;
     }
 
     /**

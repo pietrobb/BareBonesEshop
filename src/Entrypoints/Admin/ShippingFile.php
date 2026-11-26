@@ -32,6 +32,9 @@ function shippingFileMethods(): void {
     </div>
         <?php return; endif; ?>
         <p class="muted"><?= esc(I18n::format('admin.shipping.file_help', ['currency' => $fileCurrency])) ?></p>
+        <?php if (Shipping::fileEdited()): ?>
+        <p class="flash flash-warn" role="alert" data-shipping-file-edited><?= esc(I18n::t('admin.shipping.file_edited')) ?></p>
+        <?php endif; ?>
         <?php foreach ($methods as $key => $zones): $first = $zones[0]; ?>
         <form method="post" action="admin.php?p=shipping&amp;action=file_method_save" data-shipping-file-method="<?= esc($key) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -77,8 +80,8 @@ function handleShippingFileMethodSave(): void {
 
 /**
  * The settings of every shipping.json method ($all, DataOverrides::shippingMethods()) with $key's taken from the posted
- * form: only what differs from shipping.json, so a release that changes shipping.json still reaches what the merchant
- * left alone; "reset" drops the method's settings. Amounts are typed in shipping.json's currency; an empty price
+ * form: the whole method (R60: was only what differed from shipping.json, so a release changing its prices changed the
+ * merchant's, and a restored shipping.json offered 3.99/7.99 again); "reset" drops the method's settings. Amounts are typed in shipping.json's currency; an empty price
  * means the method does not serve that zone. R59: only the zones the form shows (a posted rates[local] was saved too).
  * @return array{settings: array<string, mixed>, error: ?string}
  */
@@ -86,8 +89,13 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
     $file = Shipping::fileConfig();
     $method = in_array($key, Shipping::CHECKOUT_METHODS, true) && is_array($file['methods'][$key] ?? null) ? $file['methods'][$key] : null;
     if ($method === null) return ['settings' => $all, 'error' => I18n::t('admin.common.record_missing')];
+    $zones = Shipping::editableZones($file);
+    // R60 (review round 25, medium 3): the whole method is saved, as it stands after this form (Shipping::methodSettings()).
+    $own = Shipping::methodSettings((array)(Shipping::withSettings($file, ['methods' => $all])['methods'][$key] ?? $method), $zones);
     if (!empty($post['reset'])) {
-        unset($all[$key]);
+        // R60 (review round 25, low): the shipped prices, free shipping and delivery days; the method stays on or off as it
+        // was (was: the settings were dropped, which switched a method the merchant had turned off back on).
+        $all[$key] = ['active' => $own['active']] + Shipping::methodSettings($method, $zones);
         return ['settings' => $all, 'error' => null];
     }
     $currency = Shipping::currency();
@@ -97,24 +105,21 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
         if ($cents === null && !($empty === null && is_scalar($raw) && trim((string)$raw) === '')) $invalid = true;
         return $cents;
     };
-    $own = [];
-    if (empty($post['active'])) $own['active'] = false;
+    $own['active'] = !empty($post['active']);
     $freeAbove = $amount($post['free_above'] ?? '', null);
     // R59 (review round 24, lows): 0 was saved and did nothing; bad delivery days said "amount format".
     if ($freeAbove === 0) return ['settings' => $all, 'error' => I18n::t('admin.shipping.free_above_zero')];
-    if ($freeAbove !== (isset($method['free_above']) ? (int)$method['free_above'] : null)) $own['free_above'] = $freeAbove;
+    $own['free_above'] = $freeAbove;
     $days = trim(Security::str($post['delivery_days'] ?? ''));
     if ($days !== '' && preg_match('/^[0-9][0-9 –-]{0,19}$/u', $days) !== 1) return ['settings' => $all, 'error' => I18n::t('admin.shipping.days_format')];
-    if ($days !== (string)($method['delivery_days'] ?? '')) $own['delivery_days'] = $days;
+    $own['delivery_days'] = $days;
     $posted = is_array($post['rates'] ?? null) ? $post['rates'] : [];
-    foreach (Shipping::editableZones($file) as $zone) {
+    foreach ($zones as $zone) {
         if (!is_array($posted[$zone] ?? null)) continue;
         $base = $amount($posted[$zone]['base'] ?? '', null);
-        $rate = $base === null ? null : ['base' => $base, 'per_kg' => (int)$amount($posted[$zone]['per_kg'] ?? '', 0)];
-        $shipped = is_array($method['rates'][$zone] ?? null) ? ['base' => (int)($method['rates'][$zone]['base'] ?? 0), 'per_kg' => (int)($method['rates'][$zone]['per_kg'] ?? 0)] : null;
-        if ($rate !== $shipped) $own['rates'][$zone] = $rate;
+        $own['rates'][$zone] = $base === null ? null : ['base' => $base, 'per_kg' => (int)$amount($posted[$zone]['per_kg'] ?? '', 0)];
     }
     if ($invalid) return ['settings' => $all, 'error' => I18n::format('admin.msg.amount_format', ['example' => Money::decimal(1290, $currency) . ' ' . $currency])];
-    if ($own === []) unset($all[$key]); else $all[$key] = $own;
+    $all[$key] = $own;
     return ['settings' => $all, 'error' => null];
 }

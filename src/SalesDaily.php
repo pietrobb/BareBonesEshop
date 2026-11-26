@@ -35,6 +35,8 @@ final class SalesDaily {
      * R58). A report request still deletes once CHANGES_MAX have built.
      */
     private const CHANGES_DELETE_BULK = 400000;
+    /** R60 (review round 25, medium 6): days of orders one step of a range build (buildRange()) reads at a time. */
+    private const RANGE_DAYS = 31;
     /** Tables whose new rows change the day of their order: SQL of (store_id, created_at) of the orders of rows id in (:from, :to]. */
     private const WATCHED = [
         'orders' => 'SELECT o.store_id, o.created_at FROM orders o WHERE o.id > :from AND o.id <= :to',
@@ -399,14 +401,38 @@ final class SalesDaily {
      * recording after each batch how far it got (built_until); whether it reached $toDay before $deadline.
      */
     private static function buildRange(PDO $db, string $storeId, string $fromDay, string $toDay, ?float $deadline): bool {
+        // R60 (review round 25, medium 6): a window of RANGE_DAYS from the next order on at a time (idx_orders_store_created).
+        // Was: the hours of every order not built yet read at each call, then built until the deadline: on MySQL a first
+        // build after the update (150 000 orders) took 2-3 s per dashboard and 7-9 s per report request, about 100 of them.
+        $next = $db->prepare('SELECT MIN(created_at) FROM orders WHERE store_id = ? AND created_at >= ? AND created_at < ?');
         $hours = $db->prepare('SELECT DISTINCT SUBSTR(created_at, 1, 13) FROM orders WHERE store_id = ? AND created_at >= ? AND created_at < ?');
-        $hours->execute([$storeId, $fromDay !== '' ? self::dayStartUtc($fromDay) : '0000-00-00 00:00:00', self::dayStartUtc($toDay)]);
-        $days = array_values(array_filter(self::daysOfHours($hours->fetchAll(PDO::FETCH_COLUMN)), static fn(string $day): bool => $day < $toDay && ($fromDay === '' || $day >= $fromDay)));
-        if ($days === []) {
-            self::transaction($db, static fn() => self::setState($db, 'built_until:' . $storeId, $toDay));
-            return true;
+        $toUtc = self::dayStartUtc($toDay);
+        $first = true;
+        while (true) {
+            $next->execute([$storeId, $fromDay !== '' ? self::dayStartUtc($fromDay) : '0000-00-00 00:00:00', $toUtc]);
+            $at = $next->fetchColumn();
+            $next->closeCursor();
+            if ($at === false || $at === null) {
+                self::transaction($db, static fn() => self::setState($db, 'built_until:' . $storeId, $toDay));
+                return true;
+            }
+            if (!$first && $deadline !== null && microtime(true) >= $deadline) return false;
+            $first = false;
+            $start = self::dayOf((string)$at);
+            if ($fromDay !== '' && $start < $fromDay) $start = $fromDay;
+            $end = (new DateTimeImmutable($start . ' 12:00:00', new DateTimeZone('UTC')))->modify('+' . self::RANGE_DAYS . ' days')->format('Y-m-d');
+            if ($end > $toDay) $end = $toDay;
+            $hours->execute([$storeId, self::dayStartUtc($start), self::dayStartUtc($end)]);
+            $days = array_values(array_filter(self::daysOfHours($hours->fetchAll(PDO::FETCH_COLUMN)), static fn(string $day): bool => $day >= $start && $day < $end));
+            $hours->closeCursor();
+            if ($days === []) {
+                self::transaction($db, static fn() => self::setState($db, 'built_until:' . $storeId, $end));
+            } elseif (self::buildDays($db, $storeId, $days, $deadline, $end) < count($days)) {
+                return false;
+            }
+            if ($end >= $toDay) return true;
+            $fromDay = $end;
         }
-        return self::buildDays($db, $storeId, $days, $deadline, $toDay) === count($days);
     }
 
     /**

@@ -216,11 +216,12 @@ try {
         'R50 restore: the jobs of a queue that has already run are set aside (they would be sent again)');
     assert_true(count((array)($r50bFiles['set_aside'] ?? [])) === 4, 'R50 restore: the files set aside are reported (' . json_encode($r50bFiles['set_aside'] ?? null) . ')');
 
-    // A new server: the queue directory is empty, so the pending jobs go back in place.
+    // A new server: the queue directory is empty. R60 (review round 25): its jobs are set aside too, a forged job ran there.
     $r50bRm($r50bData . '/jobs');
-    BackupService::restoreFiles((string)$r50bMeta['remote_path']);
+    $r50bFiles = BackupService::restoreFiles((string)$r50bMeta['remote_path']);
     clearstatcache();
-    assert_true(is_file($r50bData . '/jobs/pending/mail-1.json'), 'R50 restore: on a new server the pending jobs are restored into the queue');
+    assert_true(!is_file($r50bData . '/jobs/pending/mail-1.json') && is_file((string)($r50bFiles['aside_dir'] ?? '') . '/jobs/pending/mail-1.json'),
+        'R50/R60 restore: on a new server the pending jobs are set aside, not put into the empty queue');
 } catch (Throwable $e) {
     $r50bFail('backup coverage', $e);
 } finally {

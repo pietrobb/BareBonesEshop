@@ -359,11 +359,15 @@ final class StoreSettings {
         // R57 (review round 22, low): and those an earlier save had no time left for (they were never tested).
         $pending = array_values(array_intersect($result['domains'], $result['untested_before']));
         $probe = self::probeDomains(array_values(array_unique(array_merge(array_diff($result['domains'], $result['domains_before']), $pending))));
-        if ($probe['untested'] !== $pending) {
-            self::locked(static function () use ($storeId, $probe): array {
+        // R60 (review round 25, low): a domain that did not answer as this shop (DNS not set up yet, a probe timing out at
+        // the deadline) or resolved to a non-public address is kept too and probed again by the next save, until it
+        // answers. Only a domain left untested was; one probed once was never verified again.
+        $failed = array_values(array_unique(array_merge($probe['untested'], $probe['unreachable'], $probe['private'])));
+        if ($failed !== $pending) {
+            self::locked(static function () use ($storeId, $failed): array {
                 $data = self::load();
                 if (!is_array($data['stores'][$storeId] ?? null)) return ['ok' => false];
-                $untested = array_values(array_intersect($probe['untested'], (array)($data['stores'][$storeId]['domains'] ?? [])));
+                $untested = array_values(array_intersect($failed, (array)($data['stores'][$storeId]['domains'] ?? [])));
                 if ($untested === []) unset($data['stores'][$storeId]['domains_untested']); else $data['stores'][$storeId]['domains_untested'] = $untested;
                 return ['ok' => self::write($data)];
             });

@@ -31,7 +31,10 @@ $r58sFail = static function (string $what, Throwable $e): void {
     assert_true(false, "R58 shipping UX {$what} (" . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 };
 // The settings as Admin → Shipping saves them (section 1 checks the form gives exactly these).
-$r58sSettings = ['standard' => ['active' => false], 'express' => ['free_above' => 10000,
+// R60 (review round 25, medium 3): the whole method, not only what differs from shipping.json.
+$r58sSettings = ['standard' => ['active' => false, 'free_above' => 5000, 'delivery_days' => '5-7',
+    'rates' => ['domestic' => ['base' => 399, 'per_kg' => 0], 'eu' => ['base' => 799, 'per_kg' => 100], 'international' => ['base' => 1599, 'per_kg' => 200]]],
+    'express' => ['active' => true, 'free_above' => 10000, 'delivery_days' => '1-2',
     'rates' => ['domestic' => ['base' => 650, 'per_kg' => 0], 'eu' => null, 'international' => ['base' => 2500, 'per_kg' => 0]]]];
 try {
     DataOverrides::setDirForTesting($r58sDir);
@@ -51,7 +54,7 @@ try {
         assert_equals(null, $r58sResult['error'], "R58 S4: the {$r58sKey} form is accepted");
         $r58sAll = $r58sResult['settings'];
     }
-    assert_equals($r58sSettings, $r58sAll, 'R58 S4: only what differs from shipping.json is kept (an unchanged price follows a later shipping.json)');
+    assert_equals($r58sSettings, $r58sAll, 'R58/R60 S4: the whole method is kept (R60: a later shipping.json no longer changes a price the merchant saved)');
 } catch (Throwable $e) { $r58sFail('form', $e); }
 try {
     DataOverrides::setDirForTesting($r58sDir);
@@ -71,7 +74,9 @@ try {
 } catch (Throwable $e) { $r58sFail('checkout', $e); }
 try {
     $r58sReset = shippingFileMethodSettings('standard', ['method' => 'standard', 'reset' => '1'], $r58sSettings);
-    assert_equals([null, ['express']], [$r58sReset['error'], array_keys($r58sReset['settings'])], 'R58 S4: "restore" drops a method\'s settings');
+    // R60 (review round 25, low): "restore" sets the shipped prices and keeps the method on or off (was: dropped its settings).
+    assert_equals([null, ['standard', 'express'], 399], [$r58sReset['error'], array_keys($r58sReset['settings']), $r58sReset['settings']['standard']['rates']['domestic']['base'] ?? null],
+        'R58 S4: "restore" sets a method\'s shipped prices');
     assert_true(shippingFileMethodSettings('pickup', ['method' => 'pickup'], [])['error'] !== null
         && shippingFileMethodSettings('express', ['method' => 'express', 'rates' => ['domestic' => ['base' => 'abc']]], [])['error'] !== null,
         'R58 S4: pickup (never offered from shipping.json) and an amount that is not one are refused');

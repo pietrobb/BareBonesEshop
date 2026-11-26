@@ -200,7 +200,7 @@ final class ManualOrder {
                 if (($storedScenario === '' || $priced['vat_scenario'] === $storedScenario) && self::keepsLineSupplies($stored, $priced)) return $priced;
             }
             return ['error' => 'admin.order.edit.vat_changed'];
-        });
+        }, $lines);
         if ($error !== null) return self::refusal($error, $detail);
         self::resendTransferDetails($order);
         $limited = self::limitedDownloads($orderId, $lines);

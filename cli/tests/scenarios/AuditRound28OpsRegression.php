@@ -27,11 +27,12 @@ try {
         'retention' => ['daily' => 0, 'weekly' => 0, 'monthly' => 0, 'minimum_kept' => 1], 'storage_dir' => $r28oRoot . '/backups', 'files' => $r28oSources], $r28oShop);
     $r28oMeta = BackupService::create(['label' => 'manual']);
     unlink($r28oData . '/' . MailSettings::FILE);
-    BackupService::restoreFiles((string)$r28oMeta['remote_path']);
+    // R60 (review round 25): it comes back set aside, not in place (a forged mail.json sent the SMTP login to its server).
+    $r28oAside = (string)(BackupService::restoreFiles((string)$r28oMeta['remote_path'])['aside_dir'] ?? '');
     clearstatcache();
-    $r28oMode = DIRECTORY_SEPARATOR === '/' ? substr(sprintf('%o', (int)@fileperms($r28oData . '/mail.json')), -3) : '600';
-    assert_equals([$r28oMail, '600'], [@file_get_contents($r28oData . '/mail.json'), $r28oMode],
-        'R28 ops: a files restore brings mail.json back, readable by the owner only (its directory is 0770)');
+    $r28oMode = DIRECTORY_SEPARATOR === '/' ? substr(sprintf('%o', (int)@fileperms($r28oAside . '/mail.json')), -3) : '600';
+    assert_equals([$r28oMail, '600', false], [@file_get_contents($r28oAside . '/mail.json'), $r28oMode, file_exists($r28oData . '/mail.json')],
+        'R28/R60 ops: a files restore brings mail.json back set aside, readable by the owner only');
 } catch (Throwable $e) {
     assert_true(false, 'R28 ops: backup and restore of mail.json (' . get_class($e) . ': ' . $e->getMessage() . ')');
 } finally {

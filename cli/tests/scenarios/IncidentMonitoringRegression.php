@@ -98,20 +98,24 @@ try {
     $_SESSION = ['cart' => [], 'csrf_token' => 'incident-test'];
     Cart::add($imProduct, null, 1);
     $imInput = ['name' => 'PrivateName', 'email' => 'fault-buyer@example.test', 'country' => 'SK', 'payment_method' => 'incidentpay', 'consents' => ['digital_delivery' => true]];
-    $imDb->exec("CREATE TRIGGER im_checkout_fault BEFORE INSERT ON orders BEGIN SELECT RAISE(ABORT, 'PrivateName private@example.test token=secret-value'); END");
+    $imDb->exec("CREATE TRIGGER im_checkout_fault BEFORE INSERT ON orders BEGIN SELECT RAISE(ABORT, 'PrivateName private@example.test token=secret-value, deliver to hlavná 5 (Call Ján Novák), session cs_test_a1B2c3D4e5F6g7H8, key 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'); END");
     $imOrderCount = (int)$imDb->query('SELECT COUNT(*) FROM orders')->fetchColumn();
     $imPhpLogFile = $imRoot . '/php-error.log';
     $imPhpLogBefore = ini_set('error_log', $imPhpLogFile);
     try {
-        $imResult = CheckoutService::execute($imInput);
+        $imResult = CheckoutService::execute($imInput + ['street' => 'Hlavná 5', 'notes' => "Call Ján Novák\nat the gate"]);
     } finally {
         ini_set('error_log', (string)$imPhpLogBefore);
     }
     assert_equals('checkout.failed', $imResult['error_code'], 'Incident: actual checkout database fault returns stable failure');
     // R52 (idea 40): the PHP error log names the cause under the shopper's correlation ID, e-mail and secret masked.
     $imPhpLog = (string)@file_get_contents($imPhpLogFile);
-    assert_true(str_contains($imPhpLog, 'Checkout failed [' . ($imResult['correlation_id'] ?? '?') . '] PDOException @') && str_contains($imPhpLog, 'PrivateName'),
+    assert_true(str_contains($imPhpLog, 'Checkout failed [' . ($imResult['correlation_id'] ?? '?') . '] PDOException @') && str_contains($imPhpLog, '[input] [email]'),
         'Incident: a failed checkout logs its exception, where it was thrown and its message (' . trim($imPhpLog) . ')');
+    // R60 (review round 25, low): what the shopper typed (name, street, note, any case) and tokens are masked in the free text too.
+    assert_true(!str_contains($imPhpLog, 'PrivateName') && !preg_match('/hlavn|Novák/iu', $imPhpLog) && !str_contains($imPhpLog, 'cs_test_a1B2')
+        && !str_contains($imPhpLog, '9f86d0818') && str_contains($imPhpLog, 'session [token], key [token]'),
+        'R60 incident: the shopper\'s name, street and note quoted in the message and a session id or key are masked (was: logged as written): ' . trim($imPhpLog));
     assert_true(!str_contains($imPhpLog, 'private@example.test') && !str_contains($imPhpLog, 'secret-value'), 'Incident: the logged message masks e-mail and secrets');
     assert_equals(503, http_response_code(), 'Incident: technical checkout fault returns 503');
     assert_equals($imOrderCount, (int)$imDb->query('SELECT COUNT(*) FROM orders')->fetchColumn(), 'Incident: failed create rolls back order');

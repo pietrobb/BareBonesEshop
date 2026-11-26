@@ -6,7 +6,7 @@ $command = (string)($argv[1] ?? 'doctor');
 $json = in_array('--json', $argv, true);
 $strict = in_array('--strict', $argv, true);
 $root = dirname(__DIR__);
-$usage = 'Usage: php cli/setup.php install|doctor|apply|repair-oss-cache [--json] [--strict]; doctor --oss-cache is an explicit deep audit; repair-oss-cache --writers-stopped requires all writers stopped and drained plus a database backup. Install: --app-url=URL --admin-email=ADDRESS --admin-username=NAME --db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER (password in BBE_DB_PASSWORD).';
+$usage = 'Usage: php cli/setup.php install|doctor|apply|repair-oss-cache|shipping-import [--json] [--strict]; shipping-import --from=FILE [--force] copies the Standard/Express settings of a hand-edited shipping.json (copied aside, the shipped file restored) to Admin → Shipping; doctor --oss-cache is an explicit deep audit; repair-oss-cache --writers-stopped requires all writers stopped and drained plus a database backup. Install: --app-url=URL --admin-email=ADDRESS --admin-username=NAME --db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER (password in BBE_DB_PASSWORD).';
 
 // R38 (low): "install --help" ran a real installation (config.php, migrations) in the checkout it was asked about. Help
 // prints the usage; an install switch it does not know (a typo, --dry-run) refuses instead of installing anyway.
@@ -169,6 +169,32 @@ if ($command === 'install-payments') {
 // Internal step of a fresh install: the shipping.json methods start switched off beside the store's own (WebInstaller).
 if ($command === 'install-shipping') {
     echo json_encode(['file' => WebInstaller::fileShippingMethodsOff(Db::get(), Bootstrap::stores(), require $root . '/config.php')]) . "\n";
+    exit(0);
+}
+
+// R60 (review round 25, medium 3): the Standard/Express settings of a hand-edited shipping.json, copied aside before the
+// shipped file was restored (for an update), into Admin → Shipping, so the shop does not go back to 3.99 € / 7.99 €.
+if ($command === 'shipping-import') {
+    $from = '';
+    foreach (array_slice($argv, 2) as $arg) if (str_starts_with($arg, '--from=')) $from = substr($arg, 7);
+    // The settings are laid over the shipped file: imported over an edited one, a zone the edit dropped would come back.
+    if ($from === '' || Shipping::fileEdited()) {
+        fwrite(STDERR, "shipping-import: copy the edited shipping.json aside (cp shipping.json ../shipping.json.edited), restore the shipped file"
+            . " (git checkout shipping.json, or take it from the release), then run php cli/setup.php shipping-import --from=../shipping.json.edited\n");
+        exit(1);
+    }
+    $config = require $root . '/config.php';
+    $edited = is_file($from) ? json_decode((string)file_get_contents($from), true) : null;
+    if (!is_array($edited)) { fwrite(STDERR, "shipping-import: {$from} is not a readable shipping.json\n"); exit(1); }
+    $existing = DataOverrides::shippingMethods($config);
+    if (($existing['methods'] ?? []) !== [] && !in_array('--force', $argv, true)) {
+        fwrite(STDERR, 'shipping-import: Admin → Shipping already has settings (' . DataOverrides::SHIPPING_METHODS . "); add --force to replace them\n");
+        exit(1);
+    }
+    $import = Shipping::importSettings($edited, Shipping::fileConfig());
+    if (!DataOverrides::saveShippingMethods($import['methods'], $config)) { fwrite(STDERR, "shipping-import: the data directory is not writable\n"); exit(1); }
+    foreach ($import['warnings'] as $warning) fwrite(STDERR, "WARNING: {$warning}\n");
+    echo json_encode(['status' => 'imported', 'from' => $from, 'methods' => $import['methods'], 'warnings' => $import['warnings']], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
     exit(0);
 }
 

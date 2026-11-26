@@ -492,6 +492,26 @@ class CheckoutService {
         return ['version' => (string)$definition['version'], 'text' => (string)$definition['text']];
     }
 
+    /**
+     * R60 (review round 25, low): the message of a failed checkout without what the shopper typed and without tokens. The
+     * log masked e-mails, phones and keyed values only: a name, street or note quoted in free text ("Ján Novák, Hlavná 5")
+     * and a token (a 32+ character key or hash, a provider's session id) went to the PHP log as written.
+     */
+    private static function logSafeMessage(string $message, array $input): string {
+        $typed = [];
+        foreach ($input as $key => $value) {
+            if (!is_string($value) || !preg_match('/name|street|city|zip|address|phone|company|notes?$|vat_id|tax_id|(?:^|_)(?:ico|dic|ic_dph)$|token|key|nonce|secret|password/i', (string)$key)) continue;
+            foreach (preg_split('/\R/u', trim($value)) ?: [] as $part) {
+                if (mb_strlen(trim($part)) >= 3) $typed[trim($part)] = true;
+            }
+        }
+        $typed = array_keys($typed);
+        usort($typed, static fn(string $a, string $b): int => strlen($b) <=> strlen($a));
+        foreach ($typed as $value) $message = str_ireplace($value, '[input]', $message);
+        // Provider ids (cs_test_…, pi_…) and long random keys or hashes.
+        return (string)preg_replace('/\b(?:(?:cs|pi|ch|re|seti|pm|tok|src)_(?:(?:live|test)_)?[A-Za-z0-9]{10,}|(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,})\b/', '[token]', $message);
+    }
+
     public static function execute(array $input, ?array $runtimeConfig = null): array {
         if (!function_exists('checkoutExecute')) {
             require_once __DIR__ . '/Http/ApiHandlers.php';
@@ -519,7 +539,8 @@ class CheckoutService {
             // R52 (idea 40): the cause, under the correlation ID the shopper's error carries, with e-mails and secrets
             // masked, as the other unexpected faults log it. Was: the incident's exception type only, so a checkout that
             // failed once in CI (PHP 8.1) could not be traced to what threw.
-            Logger::phpLog('Checkout failed [' . Logger::correlationId() . '] ' . get_debug_type($e) . ' @' . basename($e->getFile()) . ':' . $e->getLine() . ': ' . $e->getMessage());
+            Logger::phpLog('Checkout failed [' . Logger::correlationId() . '] ' . get_debug_type($e) . ' @' . basename($e->getFile()) . ':' . $e->getLine() . ': '
+                . self::logSafeMessage($e->getMessage(), $input));
             http_response_code(503);
             return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.failed', 'correlation_id' => Logger::correlationId()];
         }

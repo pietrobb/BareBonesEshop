@@ -1275,7 +1275,6 @@ class JobWorker {
         'cache_rebuild'  => 'JobHandlers::cacheRebuild',
         'email_send'     => 'JobHandlers::emailSend',
         'image_resize'   => 'JobHandlers::imageResize',
-        'import_process' => 'JobHandlers::importProcess',
         'search_reindex' => 'JobHandlers::searchReindex',
         'stock_alert'    => 'JobHandlers::stockAlert',
         'order_process'  => 'JobHandlers::orderProcess',
@@ -1337,8 +1336,8 @@ An order is created      → job: email_send (confirmation)
                          → job: email_send (admin notify)
                          → job: stock_alert (if low stock)
 
-Bulk import              → job: import_process (the whole CSV)
-                         → after completion: cache_rebuild (full)
+Bulk import              → runs in the admin request or cli/import.php (no job: R60 removed
+                           the unused import_process handler, a forged job imported any CSV)
 
 Cron (daily)             → job: cart_abandonment (carts > 24h with an e-mail → reminder)
                          → job: cleanup (completed jobs, expired sessions)

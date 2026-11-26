@@ -1522,9 +1522,10 @@ class PaymentService {
 
     /**
      * R34 (low): tell the customer about an item refund paid back by hand (an order without a payment id, completed as
-     * 'manual-admin'): it books no ledger row, so queueRefundMail() never ran for it. Its credit note exists already.
+     * 'manual-admin'): it books no ledger row, so queueRefundMail() never ran for it. Its credit note ($creditNoteId)
+     * exists already; R60 (review round 25, low): it travels with the e-mail (was: the mail went without it).
      */
-    public static function mailManualItemRefund(int $orderId, int $amount): void {
+    public static function mailManualItemRefund(int $orderId, int $amount, int $creditNoteId = 0): void {
         $order = Orders::byId($orderId);
         if (!$order || $amount <= 0 || trim((string)($order['customer_email'] ?? '')) === '') return;
         JobQueue::push('email_send', [
@@ -1533,7 +1534,7 @@ class PaymentService {
             'locale' => (string)($order['locale'] ?? ''),
             'order_id' => $orderId,
             'refund_amount' => $amount,
-        ], 5);
+        ] + ($creditNoteId > 0 ? ['credit_note_id' => $creditNoteId] : []), 5);
     }
 
     /** Whether the ledger holds the refund row a refund mail announces (it was committed). */
@@ -1623,19 +1624,18 @@ class PaymentService {
     private static function applyWebhookEvent(int $orderId, string $provider, string $eventType, string $eventKey, array $data): void {
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} vanished during payment webhook");
-        $total = (int)$order['total'];
         $orderCurrency = strtolower((string)($order['currency'] ?? 'eur'));
         $amount = (int)($data['amount'] ?? 0);
         $currency = strtolower((string)($data['currency'] ?? ''));
-        if (in_array($eventType, ['payment.paid', 'refund.succeeded'], true)
-            && ($currency !== $orderCurrency || $amount <= 0 || ($eventType === 'payment.paid' && $amount !== $total))) {
-            // Money taken for another amount (e.g. a session opened before an edit of the total) is never booked: the
-            // merchant must refund or settle it by hand.
+        // Money taken for another amount (e.g. a session opened before an edit of the total) is never booked: the
+        // merchant must refund or settle it by hand.
+        $mismatch = static function () use ($eventType, $orderId): never {
             if ($eventType === 'payment.paid' && !IncidentMonitor::reportedForOrder('payment.amount_mismatch', $orderId)) {
                 IncidentMonitor::report('payment.amount_mismatch', 'payment', 'critical', ['order_id' => $orderId]);
             }
             throw new RuntimeException("Payment webhook {$eventType} amount/currency does not match order #{$orderId}");
-        }
+        };
+        if (in_array($eventType, ['payment.paid', 'refund.succeeded'], true) && ($currency !== $orderCurrency || $amount <= 0)) $mismatch();
         if ($eventType === 'refund.succeeded' || $eventType === 'refund.reported') {
             self::applyRefundEvent($orderId, $provider, $eventType, $eventKey, $data);
             return;
@@ -1645,7 +1645,14 @@ class PaymentService {
         // charge.succeeded) otherwise each held the shared lock the payment_transactions foreign key takes on the
         // order and then both waited to update it — a MySQL deadlock, and the loser was never applied.
         $late = false;
-        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency, &$late): bool {
+        $wrongTotal = false;
+        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency, &$late, &$wrongTotal): bool {
+            // R60 (review round 25, medium 5): the total compared under the order lock. Read before it, an admin edit of
+            // the pending order (20 € → 35 €) committing in between marked it paid at 35 € for the 20 € taken.
+            if ($eventType === 'payment.paid' && $amount !== (int)$order['total']) {
+                $wrongTotal = true;
+                return false;
+            }
             $from = (string)($order['payment_status'] ?? 'pending');
             $to = match ($eventType) {
                 'payment.paid' => 'paid',
@@ -1671,6 +1678,7 @@ class PaymentService {
             $late = $to === 'paid' && in_array($from, ['partially_refunded', 'refunded'], true);
             return $to === 'paid' && $from === 'paid';
         });
+        if ($wrongTotal) $mismatch();
 
         if ($settle) self::settleCapture($orderId, 'Payment confirmed via webhook');
         if ($late) self::settleLateCapture($orderId, 'Payment confirmed via webhook');

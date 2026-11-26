@@ -96,16 +96,8 @@ final class AccountViewModel
     private static function orders(int $customerId): array
     {
         $orders = Customers::orders($customerId, 100);
-        $invoices = [];
-        $ids = array_map(static fn(array $order): int => (int)$order['id'], $orders);
-        if ($ids) {
-            $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $statement = Db::get()->prepare("SELECT id, order_id, number FROM invoices WHERE order_id IN ({$placeholders}) AND status != 'cancelled' ORDER BY id DESC");
-            $statement->execute($ids);
-            foreach ($statement->fetchAll() as $invoice) $invoices[(int)$invoice['order_id']] = $invoice;
-        }
+        $invoices = self::documents(array_map(static fn(array $order): int => (int)$order['id'], $orders));
         return array_map(static function(array $order) use ($invoices): array {
-            $invoice = $invoices[(int)$order['id']] ?? null;
             return [
                 'number' => (string)$order['order_number'],
                 'url' => Template::storeUrl('/account.php?p=order&id=' . (int)$order['id']),
@@ -121,12 +113,28 @@ final class AccountViewModel
                 ], PaymentService::transactionsForOrder((int)$order['id'])),
                 'total' => I18n::price((int)$order['total'], (string)$order['currency']),
                 'date' => I18n::dateTime((string)$order['created_at']),
-                'invoice' => $invoice ? [
-                    'number' => (string)$invoice['number'],
-                    'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),
-                ] : null,
+                'invoices' => $invoices[(int)$order['id']] ?? [],
             ];
         }, $orders);
+    }
+
+    /**
+     * R60 (review round 25, low): every document of the orders $orderIds, the invoice first and then its credit notes
+     * (was: one per order, the oldest in the list and the newest on the order page, so a credit note hid the invoice).
+     * @param list<int> $orderIds
+     * @return array<int, list<array{number: string, url: string}>>
+     */
+    private static function documents(array $orderIds): array
+    {
+        if ($orderIds === []) return [];
+        $statement = Db::get()->prepare('SELECT id, order_id, number FROM invoices WHERE order_id IN (' . implode(',', array_fill(0, count($orderIds), '?'))
+            . ") AND status != 'cancelled' ORDER BY id");
+        $statement->execute($orderIds);
+        $documents = [];
+        foreach ($statement->fetchAll() as $invoice) {
+            $documents[(int)$invoice['order_id']][] = ['number' => (string)$invoice['number'], 'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id'])];
+        }
+        return $documents;
     }
 
     /**
@@ -205,9 +213,6 @@ final class AccountViewModel
     private static function orderDetail(int $customerId, array $order): array
     {
         $id = (int)$order['id'];
-        $invoice = Db::get()->prepare("SELECT id, number FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
-        $invoice->execute([$id]);
-        $invoice = $invoice->fetch() ?: null;
         return self::orderSummary($order, Customers::orderItems($customerId, $id)) + [
             'id' => $id,
             'number' => (string)$order['order_number'],
@@ -217,10 +222,7 @@ final class AccountViewModel
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
             'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
             'tracking' => implode(', ', array_column(Fulfillment::customerTracking($order), 'label')), // R50: parcels shipped from Admin → Shipments too
-            'invoice' => $invoice ? [
-                'number' => (string)$invoice['number'],
-                'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),
-            ] : null,
+            'invoices' => self::documents([$id])[$id] ?? [],
             'bank_transfer_html' => BankTransferInstructions::html($order),
             'payable' => PaymentLink::payable($order),
             'orders_url' => Template::storeUrl('/account.php?p=orders'),

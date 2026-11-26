@@ -276,9 +276,10 @@ class Orders {
      * first, so $price() (called inside the transaction) sees the units this order held; the new lines are then reserved
      * the way checkout reserves them and the totals come from the new financial snapshot. $price() returns
      * ['error' => key] or ['items', 'financial_snapshot', 'shipping_cost', 'payment_fee', 'shipping_weight_g',
-     * 'shipping_rate_snapshot', 'payment_method_snapshot']. Returns null on success, else the refusal key.
+     * 'shipping_rate_snapshot', 'payment_method_snapshot']. Returns null on success, else the refusal key. $newItems: the
+     * lines (product_id, sku) $price() will reserve, locked with the old ones up front (Inventory::lockEditSkus()).
      */
-    public static function replaceItems(int $orderId, callable $price): ?string {
+    public static function replaceItems(int $orderId, callable $price, array $newItems = []): ?string {
         $db = Db::get();
         $sqliteLock = self::acquireCheckoutLock();
         $ossLock = null;
@@ -296,6 +297,7 @@ class Orders {
                 return $refusal;
             }
             $oldItems = self::items($orderId);
+            Inventory::lockEditSkus($oldItems, $newItems);
             $touchedSkus = [];
             foreach ($oldItems as $item) {
                 if (Inventory::isDigitalLine($item)) continue;

@@ -33,7 +33,8 @@ try {
     // 1. A zone the form does not show is not saved, and a stored one is not applied.
     $r59hLocal = shippingFileMethodSettings('standard', ['method' => 'standard', 'active' => '1', 'free_above' => '50.00', 'delivery_days' => '5-7',
         'rates' => ['local' => ['base' => '0', 'per_kg' => '0']]], []);
-    assert_equals([null, []], [$r59hLocal['error'], $r59hLocal['settings']], 'R59 low: rates[local] (a zone the form does not show) is not saved (was: Standard 0 € in the pickup zone)');
+    assert_equals([null, false, 399], [$r59hLocal['error'], array_key_exists('local', (array)($r59hLocal['settings']['standard']['rates'] ?? [])), $r59hLocal['settings']['standard']['rates']['domestic']['base'] ?? null],
+        'R59 low: rates[local] (a zone the form does not show) is not saved (was: Standard 0 € in the pickup zone)');
     file_put_contents($r59hDir . '/' . DataOverrides::SHIPPING_METHODS, json_encode(['methods' => ['standard' => ['rates' => ['local' => ['base' => 0, 'per_kg' => 0]]]]]));
     Shipping::forget();
     assert_equals(399, Shipping::calculate('standard', 'DE', 1000, 1000), 'R59 low: a stored rates[local] is ignored, domestic delivery keeps its 3.99 € (was: 0 €)');

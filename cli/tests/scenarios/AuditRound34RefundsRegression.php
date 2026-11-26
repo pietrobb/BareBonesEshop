@@ -78,7 +78,7 @@ $r34rItemRefund = static function (int $orderId, string $key) use ($pdo, $r34rDr
     $invoiceId = (int)$pdo->query("SELECT id FROM invoices WHERE order_id = {$orderId} AND type = 'invoice'")->fetchColumn();
     $credit = InvoiceService::credit($invoiceId, (int)$rma, [$rmaItem => 1], $key);
     $r34rDropQueue(); // its payment_refund job died
-    return ['id' => (int)$credit['refund_id'], 'amount' => -(int)$credit['total_gross'], 'key' => $key, 'rma' => (int)$rma];
+    return ['id' => (int)$credit['refund_id'], 'amount' => -(int)$credit['total_gross'], 'key' => $key, 'rma' => (int)$rma, 'credit_note' => (int)$credit['id'], 'number' => (string)$credit['number']];
 };
 $r34rCredits = static fn(int $orderId): array => array_map('intval',
     $pdo->query("SELECT total_gross FROM invoices WHERE order_id = {$orderId} AND type = 'credit_note' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
@@ -174,12 +174,26 @@ try {
     $o5 = $r34rOrder('R34R-5', '');
     $i5 = $r34rItemRefund($o5, 'r34r-5-item');
     $first = Rma::completeRefund($i5['id'], 'manual-admin');
-    if ($first) PaymentService::mailManualItemRefund($o5, $i5['amount']);
+    if ($first) PaymentService::mailManualItemRefund($o5, $i5['amount'], $i5['credit_note']);
     $second = Rma::completeRefund($i5['id'], 'manual-admin');
     $mails = array_values(array_filter($r34rQueued('email_send'), static fn(array $p): bool => ($p['template'] ?? '') === 'refund_issued' && (int)($p['order_id'] ?? 0) === $o5));
     assert_equals([true, false, 1, $i5['amount'], 'r34r@example.test'],
         [$first, $second, count($mails), (int)($mails[0]['refund_amount'] ?? 0), (string)($mails[0]['to'] ?? '')],
         'R34 refunds: an item refund paid back by hand mails the customer once (was: no mail)');
+    // R60 (review round 25, low): its credit note travels with that mail (was: the mail went without it).
+    $r34rMailer = new class implements MailAdapter {
+        public array $sent = [];
+        public function send(array $msg): array { $this->sent[] = $msg; return ['status' => 'sent', 'message' => '', 'raw' => null]; }
+        public function adapterId(): string { return 'r34r-capture'; }
+    };
+    MailService::useAdapter($r34rMailer);
+    try {
+        if ($mails) WorkerJobs::handleEmailSend($mails[0], []);
+    } finally {
+        MailService::useAdapter(null);
+    }
+    assert_equals([1, [$i5['number'] . '.pdf']], [count($r34rMailer->sent), array_map(static fn(array $a): string => (string)($a['filename'] ?? ''), (array)($r34rMailer->sent[0]['attachments'] ?? []))],
+        'R60 refunds: the mail of an item refund paid back by hand carries its credit note');
     assert_true(str_contains($r34rHandler, "Rma::completeRefund((int)\$credit['refund_id'], 'manual-admin')) {")
         && str_contains($r34rHandler, 'PaymentService::mailManualItemRefund('),
         'R34 refunds: the admin "refunded" of a return without a payment id sends that mail');

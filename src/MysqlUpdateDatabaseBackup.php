@@ -210,7 +210,8 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
      * are refused, except the caller's own $ignoredSessionIds (without the PROCESS privilege only
      * this user's own sessions are visible).
      */
-    public function restoreBackupDump(string $dumpPath, string $scratchDatabase, string $rollbackDumpPath, ?array $schema = null, array $ignoredSessionIds = []): array
+    public function restoreBackupDump(string $dumpPath, string $scratchDatabase, string $rollbackDumpPath, ?array $schema = null, array $ignoredSessionIds = [],
+        string $scratchMarkerPath = ''): array
     {
         if (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $scratchDatabase) || $scratchDatabase === $this->database
             || $scratchDatabase === $this->probeDatabase || !str_ends_with(strtolower($scratchDatabase), '_restore_scratch')) {
@@ -227,9 +228,20 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         $this->validateSchemaSettings($schema);
         $dumpRows = self::countDumpRows($dumpPath);
         $rollbackRows = self::countDumpRows($rollbackDumpPath);
+        // R60 (review round 25, low): a restore killed before it dropped its scratch database left it, and every later
+        // restore refused to run. $scratchMarkerPath is written before the scratch is created and removed once it is
+        // dropped: a scratch with its marker is one this code left behind and is dropped; any other still refuses.
         if ($this->schemaExists($server, $scratchDatabase)) {
-            throw new RuntimeException("Refusing to overwrite existing MySQL scratch database {$scratchDatabase}; drop it once you have checked it holds nothing you need");
+            if ($scratchMarkerPath === '' || !is_file($scratchMarkerPath) || is_link($scratchMarkerPath)
+                || trim((string)@file_get_contents($scratchMarkerPath)) !== $scratchDatabase) {
+                throw new RuntimeException("Refusing to overwrite existing MySQL scratch database {$scratchDatabase}; drop it once you have checked it holds nothing you need");
+            }
+            $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($scratchDatabase));
         }
+        if ($scratchMarkerPath !== '' && (is_link($scratchMarkerPath) || @file_put_contents($scratchMarkerPath, $scratchDatabase . "\n", LOCK_EX) === false)) {
+            throw new RuntimeException("Cannot write the MySQL scratch marker {$scratchMarkerPath}");
+        }
+        if ($scratchMarkerPath !== '') @chmod($scratchMarkerPath, 0600);
 
         $created = false;
         try {
@@ -264,6 +276,8 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             if ($created) {
                 $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($scratchDatabase));
             }
+            // Kept when the scratch may be there (its creation failed, or the drop threw): the next restore drops it.
+            if ($scratchMarkerPath !== '' && $created) @unlink($scratchMarkerPath);
         }
     }
 

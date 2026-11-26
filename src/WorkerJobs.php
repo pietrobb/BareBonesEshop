@@ -96,6 +96,12 @@ final class WorkerJobs
                     // R38 (usability): the credit note travels with the e-mail. Its job was queued with this one; while it
                     // is still open the mail waits for it (5 minutes, three times), then goes without it.
                     $refundCreditNote = $refundKey !== '' ? InvoiceService::refundCreditNote((int)$orderId, $refundKey) : null;
+                    // R60 (review round 25, low): an item refund paid back by hand names its credit note (it books no ledger row).
+                    if ($refundKey === '' && (int)($payload['credit_note_id'] ?? 0) > 0) {
+                        $named = InvoiceService::byId((int)$payload['credit_note_id']);
+                        $refundCreditNote = $named !== null && (int)$named['order_id'] === (int)$orderId && ($named['type'] ?? '') === 'credit_note'
+                            && ($named['status'] ?? '') !== InvoiceService::STATUS_CANCELLED ? $named : null;
+                    }
                     $creditWaits = (int)($payload['credit_note_waits'] ?? 0);
                     if ($refundKey !== '' && $refundCreditNote === null && $creditWaits < 3) {
                         $open = JobQueue::openJobs('refund_credit_note');
@@ -603,21 +609,5 @@ final class WorkerJobs
         MailService::providerCode($order, $fellBack);
         $result = $fellBack ? ['fell_back' => true] : PaymentLink::send($order);
         if (!empty($result['fell_back'])) self::requeueLoggedMail('payment_link_send', $payload);
-    }
-
-    public static function handleImportProcess(array $payload, array $job): void {
-        $file = $payload['file'] ?? '';
-        if (!$file || !file_exists($file)) {
-            throw new \RuntimeException("Import file not found: {$file}");
-        }
-
-        $result = Import::csv($file);
-
-        Logger::info('import.processed', ['imported' => $result['imported'], 'error_count' => count($result['errors'] ?? []), 'file' => basename($file), 'encoding' => $result['encoding'] ?? 'utf-8']);
-
-        // Clean up temp file only on success
-        if (empty($result['errors'])) {
-            @unlink($file);
-        }
     }
 }

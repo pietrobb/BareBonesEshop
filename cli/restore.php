@@ -281,8 +281,9 @@ if ($withFiles) {
     $emit('  unchanged:    ' . $files['unchanged']);
     $emit('  overwritten:  ' . count($files['overwritten']));
     if ($files['set_aside'] !== []) {
-        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) from config.php, themes or the job queue differ from the live ones (or the queue"
-            . " has already run) and were written to the private directory " . $files['aside_dir'] . ", not over them. Compare and move them in by hand.\n");
+        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) of config.php, the e-mail settings (mail.json), themes or the job queue differ from"
+            . " the live ones or are missing there, and were written to the private directory " . $files['aside_dir'] . ", not into the shop."
+            . " Check where the backup came from, compare them and move in by hand only what you recognise (a job runs as soon as it is in the queue).\n");
     }
     if ($files['quarantined'] !== []) {
         fwrite(STDERR, 'WARNING: ' . count($files['quarantined']) . ' script(s) or server config file(s) in themes/ or uploads/ (' . implode(', ', array_slice($files['quarantined'], 0, 5))
