@@ -620,7 +620,16 @@ if (!$opsMysqlEnabled) {
         $opsServer->exec('CREATE DATABASE ' . $opsQ($opsScratch));
         assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true])), 'existing MySQL scratch database'),
             'Ops MySQL live: an existing scratch database is never overwritten');
-        $opsServer->exec('DROP DATABASE ' . $opsQ($opsScratch));
+        // R60 (review round 25, low): one a killed restore left, with its marker, is dropped and the restore runs (was: refused
+        // every later restore until dropped by hand).
+        $opsServer->exec('CREATE TABLE ' . $opsQ($opsScratch) . '.leftover (id INT PRIMARY KEY) ENGINE=InnoDB');
+        $opsScratchMarker = $opsRecoveryDir . '/scratch-' . $opsScratch . '.marker';
+        file_put_contents($opsScratchMarker, $opsScratch . "\n");
+        $opsLivePdo->exec("INSERT INTO orders (note) VALUES ('written after the backup')");
+        $opsAfterKill = BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true]);
+        assert_true(($opsAfterKill['restored'] ?? null) === $opsMysqlMeta['remote_path'] && !$opsSchemaExists($opsScratch) && !is_file($opsScratchMarker)
+            && (int)$opsLivePdo->query('SELECT COUNT(*) FROM orders')->fetchColumn() === 3,
+            'Ops MySQL live: a scratch database a killed restore left (its marker in the recovery directory) is dropped and the restore runs');
 
         file_put_contents($opsMysqlCfg['storage_dir'] . '/' . $opsMysqlMeta['remote_path'], "-- tampered\n", FILE_APPEND);
         assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true])), 'mismatch'),

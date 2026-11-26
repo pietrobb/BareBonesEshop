@@ -540,7 +540,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   items locks the stock of the old and the new SKUs in one sorted pass on MySQL/MariaDB (it locked the old ones first,
   so an edit from X to A deadlocked with a checkout holding A and waiting for X). A store domain that did not answer as
   this shop (DNS not set up yet, a probe timing out) is tested again by every save of the domains until it does; it was
-  tested once and never again.
+  tested once and never again. A backup or restore killed meanwhile no longer leaves its staging directory (the whole
+  dump and the extracted files) in the system temp directory for good: the next one removes it. A MySQL/MariaDB
+  scratch database a killed restore left is dropped by the next restore (every later restore was refused until it was
+  dropped by hand); one this code did not create is still refused.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's

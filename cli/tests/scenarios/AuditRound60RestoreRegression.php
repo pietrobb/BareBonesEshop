@@ -66,6 +66,31 @@ try {
         && @file_get_contents((string)($r60rForced['aside_dir'] ?? '') . '/' . MailSettings::FILE) === $r60rMail
         && !in_array('mail/' . MailSettings::FILE, (array)($r60rForced['overwritten'] ?? []), true),
         'R60 restore: a differing mail.json is set aside even with --force, never written over the live one');
+
+    // Low: a restore killed meanwhile left its staging directory (the whole dump, the extracted files) in the temp directory.
+    $r60rStaging = static fn(string $name): string => sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'bbe-backup-' . $name;
+    $r60rDead = $r60rStaging(str_repeat('d', 32));
+    $r60rBusy = $r60rStaging(str_repeat('b', 32));
+    $r60rFresh = $r60rStaging(str_repeat('f', 32));
+    foreach ([$r60rDead, $r60rBusy, $r60rFresh] as $r60rDir) {
+        @mkdir($r60rDir . '/files', 0700, true);
+        file_put_contents($r60rDir . '/snapshot.restore.sql', '-- dump');
+        touch($r60rDir . '/.owner');
+    }
+    touch($r60rDead, time() - 3600);
+    touch($r60rBusy, time() - 3600);
+    $r60rBusyLock = fopen($r60rBusy . '/.owner', 'rb');
+    flock($r60rBusyLock, LOCK_EX);
+    $r60rBefore = glob($r60rStaging('*'), GLOB_ONLYDIR) ?: [];
+    BackupService::restoreFiles($r60rPath, ['force' => true]);
+    clearstatcache();
+    $r60rAfter = glob($r60rStaging('*'), GLOB_ONLYDIR) ?: [];
+    assert_equals([false, true, true, []], [is_dir($r60rDead), is_dir($r60rBusy), is_dir($r60rFresh), array_values(array_diff($r60rAfter, $r60rBefore))],
+        'R60 restore: the staging directory of a killed run (its .owner unlocked) is removed by the next one; one in use or just made stays, and the restore leaves none of its own');
+    flock($r60rBusyLock, LOCK_UN);
+    fclose($r60rBusyLock);
+    $r60rRm($r60rBusy);
+    $r60rRm($r60rFresh);
 } catch (Throwable $e) {
     assert_true(false, 'R60 restore (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {

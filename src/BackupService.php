@@ -48,6 +48,8 @@ class BackupService
     private static string $mysqlScratchDatabase = '';
     /** Durable private directory that keeps a MySQL rollback dump when a restore fails after dropping live. */
     private static string $recoveryDir = '';
+    /** @var array<string, resource> staging directory => its held .owner lock */
+    private static array $stagingLocks = [];
     /** Non-database state archived next to every backup: name => file or directory. */
     private static array $fileSources = [];
 
@@ -541,20 +543,60 @@ class BackupService
         return null;
     }
 
+    /**
+     * R60 (review round 25, low): a private staging directory holds an exclusive lock on its .owner file while this process
+     * uses it. A backup or restore killed meanwhile (the whole dump and the extracted files stayed in the system temp
+     * directory) releases the lock, and the next staging removes such a directory.
+     */
     private static function stagingPath(string $suffix): string
     {
         for ($attempt = 0; $attempt < 5; $attempt++) {
             $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'bbe-backup-' . bin2hex(random_bytes(16));
-            if (@mkdir($dir, 0700)) return $dir . DIRECTORY_SEPARATOR . 'snapshot' . $suffix;
+            if (@mkdir($dir, 0700)) {
+                $owner = @fopen($dir . DIRECTORY_SEPARATOR . '.owner', 'xb');
+                if ($owner !== false && flock($owner, LOCK_EX | LOCK_NB)) self::$stagingLocks[$dir] = $owner;
+                self::sweepStaging();
+                return $dir . DIRECTORY_SEPARATOR . 'snapshot' . $suffix;
+            }
         }
         throw new RuntimeException('BackupService: cannot create a private staging directory');
+    }
+
+    /** Removes the staging directories whose process is gone (their .owner lock is free). */
+    private static function sweepStaging(): void
+    {
+        foreach (glob(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'bbe-backup-*', GLOB_ONLYDIR) ?: [] as $dir) {
+            // A minute old at least: a directory just made may not hold its lock yet.
+            if (isset(self::$stagingLocks[$dir]) || is_link($dir) || !preg_match('/^bbe-backup-[0-9a-f]{32}$/', basename($dir))
+                || (int)@filemtime($dir) > time() - 60) continue;
+            $owner = @fopen($dir . DIRECTORY_SEPARATOR . '.owner', 'rb');
+            if ($owner === false || is_link($dir . DIRECTORY_SEPARATOR . '.owner')) {
+                if ($owner !== false) fclose($owner);
+                continue;
+            }
+            $free = flock($owner, LOCK_EX | LOCK_NB);
+            if ($free) {
+                self::removeTree($dir);
+                if (!file_exists($dir)) self::log("Staging: removed {$dir} left by a backup or restore that did not finish");
+                flock($owner, LOCK_UN);
+            }
+            fclose($owner);
+        }
     }
 
     private static function removeStagedFile(?string $path): void
     {
         if ($path === null) return;
         if (is_file($path)) @unlink($path);
-        @rmdir(dirname($path));
+        $dir = dirname($path);
+        if (array_diff(scandir($dir) ?: [], ['.', '..', '.owner']) !== []) return;
+        if (isset(self::$stagingLocks[$dir])) {
+            flock(self::$stagingLocks[$dir], LOCK_UN);
+            fclose(self::$stagingLocks[$dir]);
+            unset(self::$stagingLocks[$dir]);
+        }
+        @unlink($dir . DIRECTORY_SEPARATOR . '.owner');
+        @rmdir($dir);
     }
 
     // ---------- Schema info ----------
@@ -1320,7 +1362,8 @@ class BackupService
             try {
                 $liveWarnings = [];
                 $liveSeries = self::liveNumberSeries(self::$db, $liveWarnings);
-                $result = $mysql->restoreBackupDump($source, self::$mysqlScratchDatabase, $rollback, $schema, $ownSessions);
+                $result = $mysql->restoreBackupDump($source, self::$mysqlScratchDatabase, $rollback, $schema, $ownSessions,
+                    dirname($rollback) . DIRECTORY_SEPARATOR . 'scratch-' . self::$mysqlScratchDatabase . '.marker');
             } catch (\Throwable $e) {
                 if ($e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP) {
                     // Live was dropped: whatever happened next, the pre-restore dump stays where the operator can use it.
