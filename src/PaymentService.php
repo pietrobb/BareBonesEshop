@@ -1522,9 +1522,10 @@ class PaymentService {
 
     /**
      * R34 (low): tell the customer about an item refund paid back by hand (an order without a payment id, completed as
-     * 'manual-admin'): it books no ledger row, so queueRefundMail() never ran for it. Its credit note exists already.
+     * 'manual-admin'): it books no ledger row, so queueRefundMail() never ran for it. Its credit note ($creditNoteId)
+     * exists already; R60 (review round 25, low): it travels with the e-mail (was: the mail went without it).
      */
-    public static function mailManualItemRefund(int $orderId, int $amount): void {
+    public static function mailManualItemRefund(int $orderId, int $amount, int $creditNoteId = 0): void {
         $order = Orders::byId($orderId);
         if (!$order || $amount <= 0 || trim((string)($order['customer_email'] ?? '')) === '') return;
         JobQueue::push('email_send', [
@@ -1533,7 +1534,7 @@ class PaymentService {
             'locale' => (string)($order['locale'] ?? ''),
             'order_id' => $orderId,
             'refund_amount' => $amount,
-        ], 5);
+        ] + ($creditNoteId > 0 ? ['credit_note_id' => $creditNoteId] : []), 5);
     }
 
     /** Whether the ledger holds the refund row a refund mail announces (it was committed). */

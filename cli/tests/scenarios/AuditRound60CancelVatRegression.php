@@ -58,6 +58,21 @@ try {
     // A later refund of the order goes to what the invoice has left (the standard rate), not to the book again.
     assert_equals([$r60vStdKey => 500], $r60vRates(InvoiceService::creditRefund($r60vOrder, 500, 'r60v-later')),
         'R60 cancel VAT: a later refund credits the standard rate only');
+    // R60 low: the customer's account listed one document per order (the oldest in the list, the newest on the order).
+    [$r60vRegistered, $r60vCustomer] = Customers::register('r60v-account@example.test', 'R60v-account-pass-1', 'R60V Buyer');
+    assert_true($r60vRegistered && $r60vCustomer > 0, 'R60 account documents: a customer account');
+    $pdo->prepare('UPDATE orders SET customer_id = ? WHERE id = ?')->execute([$r60vCustomer, $r60vOrder]);
+    $r60vNumbers = $pdo->query('SELECT number FROM invoices WHERE order_id = ' . (int)$r60vOrder . " AND status != 'cancelled' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+    $r60vCustomerRow = ['id' => (int)$r60vCustomer, 'email' => 'r60v-account@example.test', 'name' => 'R60V Buyer', 'phone' => '', 'locale' => 'en'];
+    $r60vList = AccountViewModel::build('orders', $r60vCustomerRow, ['en'], [], null, null)['account']['orders'] ?? [];
+    $r60vListed = array_values(array_filter($r60vList, static fn(array $row): bool => $row['url'] === Template::storeUrl('/account.php?p=order&id=' . $r60vOrder)));
+    $r60vDetail = AccountViewModel::build('order', $r60vCustomerRow, ['en'], [], null, null, Orders::byId($r60vOrder))['account']['order'] ?? [];
+    assert_equals([4, $r60vNumbers, $r60vNumbers], [count($r60vNumbers), array_column($r60vListed[0]['invoices'] ?? [], 'number'), array_column($r60vDetail['invoices'] ?? [], 'number')],
+        'R60 account documents: the order list and the order page link the invoice and its three credit notes (was: one of them)');
+    $r60vPages = Template::page('account', AccountViewModel::build('orders', $r60vCustomerRow, ['en'], [], null, null))
+        . Template::page('account', AccountViewModel::build('order', $r60vCustomerRow, ['en'], [], null, null, Orders::byId($r60vOrder)));
+    assert_equals(array_fill_keys($r60vNumbers, 2), array_map(static fn(string $number): int => substr_count($r60vPages, '>' . $number . '<'), array_combine($r60vNumbers, $r60vNumbers)),
+        'R60 account documents: both pages show every document number as a link');
 } catch (Throwable $e) {
     assert_true(false, 'R60 cancel VAT (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 }

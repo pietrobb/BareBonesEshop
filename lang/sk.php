@@ -910,6 +910,7 @@ return [
     'admin.rma.refund_in_flight' => 'Refundácia tejto objednávky ešte prebieha. Vrátenie označte ako vrátené, keď bude zaúčtovaná (ak zlyhá, vrátenie sa vyplatí celé).',
     'admin.rma.refunded_outside_hint' => 'Už vrátené mimo tohto vrátenia: {amount}. „Vrátené“ ich započíta a vyplatí {due}.',
     'admin.rma.refund_less_outside' => 'Vrátené (započítať vrátené peniaze)',
+    'admin.rma.refund_keep_outside' => 'Vrátené v plnej výške (vrátené peniaze zostávajú zákazníkovi)',
     'admin.rma.closed_without_payout' => 'Vrátenie #{id} uzavreté bez výplaty.',
     'admin.rma.transition_refused' => 'Nepovolená zmena stavu.',
     'admin.rma.status_changed' => 'Vrátenie #{id} → {status}',

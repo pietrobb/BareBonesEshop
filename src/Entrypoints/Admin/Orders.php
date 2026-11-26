@@ -613,6 +613,14 @@ function pageRma(): void {
                         <input type="hidden" name="outside_refund" value="deduct">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.rma.refund_less_outside')) ?></button>
                     </form>
+                    <?php /* R60 (review round 25, low): that money (a discount for a late delivery) can stay with the customer. */ ?>
+                    <form method="post" action="admin.php?p=rma&action=status" style="display:inline" data-rma-refund-keep-outside>
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
+                        <input type="hidden" name="status" value="refunded">
+                        <input type="hidden" name="outside_refund" value="keep">
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.rma.refund_keep_outside')) ?></button>
+                    </form>
                     <?php endif; ?>
                     <?php foreach ($outside > 0 ? [] : ($next[$r['status']] ?? []) as $to => $label): ?>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
@@ -663,23 +671,27 @@ function handleRmaStatus(): void {
             // when it covers it, else the credit and refund are less it. R51: a refund still in flight waits until booked.
             if (Rma::refundInFlight((int)$rma['order_id'])) throw new RuntimeException(I18n::t('admin.rma.refund_in_flight'));
             $outside = Rma::refundedOutsideReturns((int)$rma['order_id']);
-            if ($outside > 0 && Security::clean($_POST['outside_refund'] ?? '') !== 'deduct') {
+            // R60 (review round 25, low): or "keep": that money (a discount for a late delivery) stays with the customer and
+            // the goods are refunded in full (was: it always came off the return).
+            $outsideChoice = Security::clean($_POST['outside_refund'] ?? '');
+            $keepOutside = $outside > 0 && $outsideChoice === 'keep';
+            if ($outside > 0 && !in_array($outsideChoice, ['deduct', 'keep'], true)) {
                 throw new RuntimeException(I18n::format('admin.rma.refunded_outside', ['amount' => I18n::price($outside, (string)(Orders::byId((int)$rma['order_id'])['currency'] ?? 'eur'))]));
             }
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
             if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
             $quantities = InvoiceService::creditableQuantities($id);
             if (!$quantities) throw new LogicException(I18n::t('admin.rma.nothing_to_credit'));
-            if ($outside > 0 && InvoiceService::rmaCreditOwed((int)$source['id'], $id, $quantities, $outside)[1] === 0) {
+            if ($outside > 0 && !$keepOutside && InvoiceService::rmaCreditOwed((int)$source['id'], $id, $quantities, $outside)[1] === 0) {
                 if (!Rma::closeWithoutPayout($id)) throw new LogicException(I18n::t('admin.rma.transition_refused'));
                 setFlash('ok', I18n::format('admin.rma.closed_without_payout', ['id' => $id]));
                 header('Location: admin.php?p=rma');
                 exit;
             }
             // One key per attempt: a concurrent double submit shares it, a retry after a failed refund gets a new credit note.
-            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id), $outside > 0);
+            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id), $outside > 0 && !$keepOutside, $keepOutside);
             if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
-                PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0));
+                PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0), (int)$credit['id']);
             }
         } elseif ($status !== 'refunded' && !Rma::setStatus($id, $status)) {
             throw new LogicException(I18n::t('admin.rma.transition_refused'));

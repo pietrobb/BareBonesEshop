@@ -905,6 +905,7 @@ return [
     'admin.rma.refund_in_flight' => 'A refund of this order is still in progress. Mark the return refunded once it is booked (if it fails, the return pays in full).',
     'admin.rma.refunded_outside_hint' => 'Already refunded outside this return: {amount}. "Refunded" counts it and pays {due}.',
     'admin.rma.refund_less_outside' => 'Refunded (count the refunded money)',
+    'admin.rma.refund_keep_outside' => 'Refunded in full (the refunded money stays with the customer)',
     'admin.rma.closed_without_payout' => 'Return #{id} closed without payout.',
     'admin.rma.transition_refused' => 'Status change not allowed.',
     'admin.rma.status_changed' => 'Return #{id} → {status}',

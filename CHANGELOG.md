@@ -528,7 +528,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   Express price was emptied in Admin → Shipping is not served by that method (its countries took the price of the next
   zone listing them, e.g. Czechia the international 15.99 €). "Restore the shipped prices" keeps the method on or off
   (it switched a method turned off back on), and a store charging in another currency than shipping.json is pointed to
-  the shipping methods below, whose rates are in its currency.
+  the shipping methods below, whose rates are in its currency. An item refund paid back by hand sends its credit note
+  with the e-mail (the mail went without it). The customer account lists every document of an order, the invoice and
+  each credit note (it showed only the newest). A return of an order with money refunded outside the returns (e.g. a
+  discount for a late delivery) can be refunded in full, the money staying with the customer as a reduction of the
+  goods kept ("Refunded in full"); it always came off the return before. VAT by a cent: a return less money refunded
+  outside the returns credits its goods the net that money's credit notes did not (each line kept its own proportion, a
+  cent more VAT), the line giving the other rates back what that money credited there takes the net those notes
+  credited (the invoice's proportion left the rate a cent off until its last return), and a refund credit note that
+  leaves a rate nothing uncredited takes its net rest, as item credits do since round 24. An admin edit of an order's
+  items locks the stock of the old and the new SKUs in one sorted pass on MySQL/MariaDB (it locked the old ones first,
+  so an edit from X to A deadlocked with a checkout holding A and waiting for X).
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's

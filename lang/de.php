@@ -903,6 +903,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.refund_in_flight' => 'Eine Erstattung dieser Bestellung läuft noch. Markieren Sie die Rücksendung als erstattet, sobald sie gebucht ist (schlägt sie fehl, wird die Rücksendung voll erstattet).',
     'admin.rma.refunded_outside_hint' => 'Bereits außerhalb dieser Rücksendung erstattet: {amount}. „Erstattet“ rechnet es an und zahlt {due} aus.',
     'admin.rma.refund_less_outside' => 'Erstattet (erstattetes Geld anrechnen)',
+    'admin.rma.refund_keep_outside' => 'Voll erstattet (das erstattete Geld bleibt beim Kunden)',
     'admin.rma.closed_without_payout' => 'Rücksendung #{id} ohne Auszahlung geschlossen.',
     'admin.rma.transition_refused' => 'Statusänderung nicht erlaubt.',
     'admin.rma.status_changed' => 'Rücksendung #{id} → {status}',

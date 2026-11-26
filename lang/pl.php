@@ -903,6 +903,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.refund_in_flight' => 'Zwrot płatności za to zamówienie wciąż trwa. Oznacz zwrot towaru jako rozliczony, gdy zostanie zaksięgowany (jeśli się nie powiedzie, zwrot zostanie wypłacony w całości).',
     'admin.rma.refunded_outside_hint' => 'Już zwrócono poza tym zwrotem: {amount}. „Zwrócono” uwzględni to i wypłaci {due}.',
     'admin.rma.refund_less_outside' => 'Zwrócono (uwzględnij zwrócone pieniądze)',
+    'admin.rma.refund_keep_outside' => 'Zwrócono w całości (zwrócone pieniądze zostają u klienta)',
     'admin.rma.closed_without_payout' => 'Zwrot #{id} zamknięty bez wypłaty.',
     'admin.rma.transition_refused' => 'Niedozwolona zmiana statusu.',
     'admin.rma.status_changed' => 'Zwrot #{id} → {status}',

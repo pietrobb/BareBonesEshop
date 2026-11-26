@@ -903,6 +903,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.refund_in_flight' => 'Refundace této objednávky ještě probíhá. Vratku označte jako vrácenou, až bude zaúčtována (pokud selže, vratka se vyplatí celá).',
     'admin.rma.refunded_outside_hint' => 'Již vráceno mimo toto vrácení: {amount}. „Vráceno“ je započítá a vyplatí {due}.',
     'admin.rma.refund_less_outside' => 'Vráceno (započítat vrácené peníze)',
+    'admin.rma.refund_keep_outside' => 'Vráceno v plné výši (vrácené peníze zůstávají zákazníkovi)',
     'admin.rma.closed_without_payout' => 'Vrácení #{id} uzavřeno bez výplaty.',
     'admin.rma.transition_refused' => 'Nepovolená změna stavu.',
     'admin.rma.status_changed' => 'Vrácení #{id} → {status}',

@@ -422,10 +422,10 @@ final class InvoiceService
      * capToUncredited() at what $source has uncredited now, plus legacySpill().
      * @return array{0: list<array>, 1: array{gross: int, net: int, vat: int}, 2: array<string, array>}
      */
-    private static function capCredit(PDO $db, array $lines, array $source, array $order): array {
+    private static function capCredit(PDO $db, array $lines, array $source, array $order, bool $keepOutside = false): array {
         $rates = self::uncredited($db, $source)['rates'];
         $capped = self::capToUncredited($lines, $rates, $source);
-        $spill = self::legacySpill($db, $source, $order, $lines, $capped[0], $rates);
+        $spill = self::legacySpill($db, $source, $order, $lines, $capped[0], $rates, $keepOutside);
         return $spill === [] ? $capped : self::creditTotals([...$capped[0], ...$spill]);
     }
 
@@ -437,14 +437,17 @@ final class InvoiceService
      * at the rates that have more uncredited than the goods not returned yet are worth there (invoiced less the full
      * value of the goods returned so far, returnedValue()), the largest excess first. After R58 no rate has such an
      * excess, so nothing moves; unlike R57's spill, a rate whose goods the customer keeps is never credited for them.
+     * R60 (review round 25, low): with $keepOutside (the merchant keeps money refunded outside the returns, e.g. a
+     * discount for a late delivery, off this return) it is: that money becomes a reduction of the goods kept, so what it
+     * credited at the returned goods' rates moves to the rates with room. Was: such money always came off the return.
      * @return list<array>
      */
-    private static function legacySpill(PDO $db, array $source, array $order, array $draft, array $capped, array $rates): array {
+    private static function legacySpill(PDO $db, array $source, array $order, array $draft, array $capped, array $rates, bool $keepOutside = false): array {
         $positive = static fn(array $lines): int => array_sum(array_map(static fn(array $line): int => max(0, (int)$line['gross']), $lines));
         $short = $positive($draft) - $positive($capped);
         if ($short <= 0 || $capped === []) return [];
-        $returned = self::returnedValue($db, $source, $order);
-        if ($returned === []) return [];
+        $returned = $keepOutside ? [] : self::returnedValue($db, $source, $order);
+        if ($returned === [] && !$keepOutside) return [];
         $breakdown = json_decode((string)$source['vat_breakdown'], true) ?: [];
         $used = [];
         foreach ($capped as $line) {
@@ -457,7 +460,7 @@ final class InvoiceService
             $key = (string)$key;
             $info = $breakdown[$key] ?? null;
             if (!is_array($info)) continue;
-            $kept = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0) - (int)($returned[$key] ?? 0);
+            $kept = $keepOutside ? 0 : (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0) - (int)($returned[$key] ?? 0);
             $left = min((int)$rate['gross'] - $kept, (int)$rate['gross'] - (int)($used[$key]['gross'] ?? 0));
             if ($left > 0) $room[$key] = $left;
         }
@@ -889,7 +892,7 @@ final class InvoiceService
      * the money without a key in proportion to what is left per key; the lines of a key are scaled down together (gross
      * in proportion, the last line takes the remainder; net in proportion). [] when nothing is left.
      */
-    private static function linesLess(array $lines, array $deduction): array {
+    private static function linesLess(array $lines, array $deduction, array $credited = []): array {
         if ($deduction === []) return $lines;
         $byKey = [];
         foreach ($lines as $i => $line) $byKey[self::lineKey($line)][] = $i;
@@ -912,16 +915,59 @@ final class InvoiceService
         foreach ($byKey as $key => $indexes) {
             $target = $left[$key];
             $remaining = $target;
+            // R60 (review round 25, low): the share taken at this key leaves the goods the net that money's credit notes did
+            // not credit there (outsideCredited()), so both documents together credit the goods' own net and VAT. Was: each
+            // line in its own proportion, so the return credited a cent more VAT than the goods had left.
+            $taken = min($value[$key], (int)($deduction[(string)$key] ?? 0));
+            $netTarget = null;
+            if ($taken > 0 && isset($credited[(string)$key]) && $credited[(string)$key]['gross'] > 0) {
+                $own = array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['net'], $indexes));
+                $kept = max(0, min($value[$key] - $taken, $own - self::netOf($taken, $credited[(string)$key])));
+                $netTarget = $value[$key] - $taken > 0 ? (int)round($kept * $target / ($value[$key] - $taken)) : 0;
+            }
+            $netLeft = $netTarget;
             foreach ($indexes as $position => $i) {
                 $lineGross = (int)$lines[$i]['gross'];
-                $scaled = $position === count($indexes) - 1 ? $remaining : intdiv($lineGross * $target, max(1, $value[$key]));
+                $last = $position === count($indexes) - 1;
+                $scaled = $last ? $remaining : intdiv($lineGross * $target, max(1, $value[$key]));
                 $remaining -= $scaled;
-                $lines[$i]['net'] = $lineGross > 0 ? (int)round((int)$lines[$i]['net'] * $scaled / $lineGross) : 0;
+                $net = $lineGross > 0 ? (int)round((int)$lines[$i]['net'] * $scaled / $lineGross) : 0;
+                if ($netLeft !== null) {
+                    $net = $last ? $netLeft : min($net, $netLeft);
+                    $net = max(0, min($net, $scaled));
+                    $netLeft -= $net;
+                }
+                $lines[$i]['net'] = $net;
                 $lines[$i]['gross'] = $scaled;
-                $lines[$i]['vat'] = $scaled - (int)$lines[$i]['net'];
+                $lines[$i]['vat'] = $scaled - $net;
             }
         }
         return $lines;
+    }
+
+    /**
+     * R60 (review round 25, low): per VAT breakdown key the gross and net the credit notes of the money refunded outside
+     * the order's returns credited (positive).
+     * @return array<string, array{gross: int, net: int}>
+     */
+    private static function outsideCredited(int $orderId): array {
+        $credited = [];
+        foreach (Rma::outsideRefunds($orderId) as [$ledgerKey]) {
+            $note = $ledgerKey !== '' ? self::refundCreditByKey(Db::get(), $orderId, $ledgerKey) : null;
+            if (!$note || (string)($note['status'] ?? '') === self::STATUS_CANCELLED) continue;
+            foreach (json_decode((string)$note['vat_breakdown'], true) ?: [] as $key => $info) {
+                if (!is_array($info)) continue;
+                $credited[(string)$key]['gross'] = ($credited[(string)$key]['gross'] ?? 0) - (int)($info['net'] ?? 0) - (int)($info['vat'] ?? 0);
+                $credited[(string)$key]['net'] = ($credited[(string)$key]['net'] ?? 0) - (int)($info['net'] ?? 0);
+            }
+        }
+        return array_filter($credited, static fn(array $part): bool => $part['gross'] > 0);
+    }
+
+    /** The net of $gross out of $part (gross, net): all of it for the whole, else in proportion. */
+    private static function netOf(int $gross, array $part): int {
+        if ($gross >= (int)$part['gross']) return max(0, (int)$part['net']);
+        return max(0, (int)round((int)$part['net'] * $gross / max(1, (int)$part['gross'])));
     }
 
     /**
@@ -940,6 +986,7 @@ final class InvoiceService
     private static function outsideLines(array $lines, array $deduction, array $source): array {
         if ($deduction === []) return $lines;
         $breakdown = json_decode((string)$source['vat_breakdown'], true) ?: [];
+        $credited = self::outsideCredited((int)$source['order_id']);
         $own = [];
         foreach ($lines as $line) $own[self::lineKey($line)] = ($own[self::lineKey($line)] ?? 0) + (int)$line['gross'];
         $reversing = [];
@@ -956,10 +1003,15 @@ final class InvoiceService
                 $deduction[''] = (int)($deduction[''] ?? 0) + $excess;
                 continue;
             }
-            $net = min($excess, (int)round($excess * max(0, (int)($info['net'] ?? 0)) / $gross));
+            // R60 (review round 25, low): the net that money's credit notes credited there (the whole of it when all is
+            // reversed). Was: in the invoice's proportion, so the rate kept a cent of VAT credited until its last return.
+            $net = min($excess, isset($credited[$key]) ? self::netOf($excess, $credited[$key])
+                : (int)round($excess * max(0, (int)($info['net'] ?? 0)) / $gross));
             $reversing[$key] = ['gross' => $excess, 'net' => $net, 'supply' => self::supplyOf($info)];
+            // What of it the goods' own lines lose below is the rest of that credit.
+            if (isset($credited[$key])) $credited[$key] = ['gross' => $credited[$key]['gross'] - $excess, 'net' => $credited[$key]['net'] - $net];
         }
-        $less = self::linesLess($lines, $deduction);
+        $less = self::linesLess($lines, $deduction, $credited);
         if ($less === [] || $reversing === []) return $less;
         // Spread over the goods lines in proportion to what each credits (the cents rounding leaves to any with room).
         $room = array_map(static fn(array $line): int => (int)$line['gross'], $less);
@@ -1021,14 +1073,16 @@ final class InvoiceService
 
     /**
      * Issue an immutable item-level credit note from received RMA quantities.
-     * Amounts are deterministic slices of the original financial snapshot.
+     * Amounts are deterministic slices of the original financial snapshot. $deductOutside: less the money refunded outside
+     * the returns (lessOutside()); $keepOutside (R60): that money stays with the customer, the goods are credited in full.
      */
     public static function credit(
         int $sourceInvoiceId,
         int $rmaId,
         array $quantities,
         string $idempotencyKey,
-        bool $deductOutside = false
+        bool $deductOutside = false,
+        bool $keepOutside = false
     ): array {
         if ($idempotencyKey === '' || !$quantities) throw new InvalidArgumentException('Credit quantities and idempotency key are required');
         $requestedQuantities = [];
@@ -1053,7 +1107,7 @@ final class InvoiceService
         [$source, $order, $snapshot, $fullLines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
         // R51 (R49 open): the outside money comes off the goods' full value, then the uncredited rest caps it (rmaCreditOwed()).
         $draftLines = $deductOutside ? self::lessOutside($fullLines, (int)$order['id'], $source)[0] : $fullLines;
-        [$lines, $totals, $breakdown] = self::capCredit($db, $draftLines, $source, $order);
+        [$lines, $totals, $breakdown] = self::capCredit($db, $draftLines, $source, $order, $keepOutside && !$deductOutside);
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
         if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
@@ -1079,7 +1133,7 @@ final class InvoiceService
             $draftLines = $fullLines;
             $lessKeys = [];
             if ($deductOutside) [$draftLines, , , $less, $lessKeys] = self::lessOutside($fullLines, (int)$order['id'], $source);
-            [$lines, $totals, $breakdown] = self::capCredit($db, $draftLines, $source, $order);
+            [$lines, $totals, $breakdown] = self::capCredit($db, $draftLines, $source, $order, $keepOutside && !$deductOutside);
             if ($totals['gross'] <= 0) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             $creditData = [
@@ -1572,6 +1626,10 @@ final class InvoiceService
                 $supply = $gross < 0 && is_array($sourceBreakdown[$key] ?? null) ? self::supplyOf($sourceBreakdown[$key]) : ($rates[$key]['supply'] ?? null);
                 if ($gross === 0 || $supply === null || ($gross > 0 && !isset($rates[$key]))) continue;
                 $net = $gross > 0 ? max(0, min((int)$part['net'], $gross)) : min(0, max((int)$part['net'], $gross));
+                // R60 (review round 25, low): as for item credits (capToUncredited()), the credit that leaves a rate nothing
+                // uncredited takes its net rest too. Was: rounded alone, a fully credited rate could keep a cent of net.
+                $restNet = (int)($rates[$key]['net'] ?? -1);
+                if ($gross > 0 && $gross === (int)($rates[$key]['gross'] ?? 0) && $restNet >= 0 && $restNet <= $gross) $net = $restNet;
                 $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $supply;
                 foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $name => $value) $totals[$name] += $value;
                 $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $supply;
