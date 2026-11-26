@@ -545,7 +545,10 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   scratch database a killed restore left is dropped by the next restore (every later restore was refused until it was
   dropped by hand); one this code did not create is still refused. The PHP log line of a failed checkout masks what the
   shopper typed (name, street, city, note, company, tax ids, any case) wherever the message quotes it, and payment
-  session ids and long keys or hashes (it masked e-mails, phones and keyed values only).
+  session ids and long keys or hashes (it masked e-mails, phones and keyed values only). The German, Polish and
+  Hungarian privacy policy templates are complete like the others (data, legal bases, recipients, retention, rights
+  with the complaint to the authority, invoices); they were a paragraph each. A shop that already saved its own text
+  keeps it.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's

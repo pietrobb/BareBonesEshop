@@ -133,6 +133,15 @@ try {
     Bootstrap::initStoreContext('/', '', 'default');
 }
 
+// The PL, HU and DE privacy templates were a paragraph each (no recipients, no complaint right, no invoice section).
+$r60lPrivacy = [];
+foreach (['sk', 'cs', 'en', 'es', 'de', 'pl', 'hu'] as $r60lLang) {
+    $r60lHtml = (string)file_get_contents($r60lRepo . "/templates/legal/{$r60lLang}/privacy.html");
+    $r60lPrivacy[$r60lLang] = [substr_count($r60lHtml, '<h2>'), substr_count($r60lHtml, '<li>') >= 13, str_contains($r60lHtml, '{{updated_at}}'), str_contains($r60lHtml, "\r")];
+}
+assert_equals(array_fill_keys(['sk', 'cs', 'en', 'es', 'de', 'pl', 'hu'], [6, true, true, false]), $r60lPrivacy,
+    'R60 legal: every shipped privacy policy has the six sections (data, bases, recipients, retention, rights, invoices) and its date (was: PL/HU/DE a paragraph)');
+
 // Store domains: one that did not answer as this shop (DNS not set up yet) was probed once and never again; the next save
 // probed only domains it added or had no time left for.
 $r60lCfg = new ReflectionProperty(Security::class, 'cfg');
