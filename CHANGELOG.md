@@ -504,6 +504,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   shipping-import --from=FILE` now sets both methods from a copy of the edited file (see the upgrade notes), Admin →
   Shipping saves a method whole instead of its differences from `shipping.json`, and the doctor (`shipping.file_edited`)
   and Admin → Shipping warn while `shipping.json` differs from every shipped version.
+- **A capture is checked against the order total read under the order lock (review round 25, finding 5).** The
+  amount a payment notification reports was compared with the total read before the order was locked, so an admin edit
+  of the pending order committing in between (20 € → 35 €) marked it paid at 35 € for the 20 € the customer paid (14 of
+  80 tries on MySQL). Such a capture is now refused and raises `payment.amount_mismatch`, as any capture of another
+  amount does; the merchant refunds or settles it by hand.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
