@@ -33,8 +33,23 @@ return new class {
         // The row SalesDaily's writers lock on MySQL.
         $db->exec(($isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE') . " INTO sales_daily_state (state_key, value) VALUES ('lock', '')");
         if (method_exists('Db', 'forgetSchema')) Db::forgetSchema($db);
-        if (!method_exists('SalesDaily', 'refreshAll') || !method_exists('SalesReport', 'revenueRows') || Db::get() !== $db) return;
-        foreach (['tableExists', 'forceIndex', 'rollBackOpen', 'transactionOpen'] as $method) if (!method_exists('Db', $method)) return;
+        // R60 (review round 25, medium 6): run by an older release's classes (a signed update), the days are not built here
+        // but the worker job that builds them is queued (by its name: SalesDaily is not loaded). Was: neither, and until a
+        // report queued it every dashboard and report request built for its 2 s and summed the rest from the orders.
+        $queue = static function (): void {
+            if (!class_exists('JobQueue') || !method_exists('JobQueue', 'push')) return;
+            try {
+                JobQueue::push('sales_daily_build', []);
+            } catch (Throwable $e) {
+                // The first report builds further and queues the job itself.
+            }
+        };
+        $current = method_exists('SalesDaily', 'refreshAll') && method_exists('SalesReport', 'revenueRows') && Db::get() === $db;
+        foreach (['tableExists', 'forceIndex', 'rollBackOpen', 'transactionOpen'] as $method) $current = $current && method_exists('Db', $method);
+        if (!$current) {
+            $queue();
+            return;
+        }
         // R54 (low): for a few seconds; the worker job builds the rest and the reports sum the days not built from the
         // orders. Was: every day at once (10 s on MariaDB at 200 000 orders, inside the update's maintenance window).
         if (!defined('SalesDaily::JOB') || !class_exists('JobQueue')) {
@@ -42,12 +57,6 @@ return new class {
             return;
         }
         SalesDaily::refreshAll(false, 3.0, $finished);
-        if (!$finished) {
-            try {
-                JobQueue::push(SalesDaily::JOB, []);
-            } catch (Throwable $e) {
-                // The first report builds further and queues the job itself.
-            }
-        }
+        if (!$finished) $queue();
     }
 };

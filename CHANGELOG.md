@@ -393,8 +393,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Migration** `20261121090100_drop_unused_product_fulltext` (review round 51, MySQL/MariaDB only): drops
   `idx_ft_products`; the search reads `idx_ft_products_names`.
 - **Migration** `20261121120000_sales_daily` (round 52): adds the daily sales totals of the reports (`sales_daily`,
-  `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`) and builds them from the existing orders:
-  about 30 s at 500 000 orders over two years on MySQL (a large shop runs `apply` in its maintenance window, as above).
+  `sales_daily_products`, `sales_daily_changes`, `sales_daily_state`). It builds the days of the existing orders for
+  3 s and queues the worker job `sales_daily_build` for the rest; a signed update from 2.1.2 (run by 2.1.2's classes)
+  builds none of them here and only queues the job. Until the worker has built them, the Reports page and the dashboard
+  build for 2 s per request and sum the days not built from the orders (review round 25: on MySQL at 150 000 orders the
+  job takes about 30 s). Without a running worker, run `php cli/sales-daily.php` once after the update.
 - **Migration** `20261122090000_sales_monthly_products` (review round 53): adds `sales_monthly_products`, the monthly
   product sums of the built days, and fills it from `sales_daily_products` (seconds).
 - **Migration** `20261113175958_analyze_order_tables` (review round 53): MySQL only, `ANALYZE TABLE` of `orders`,
@@ -509,6 +512,11 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   of the pending order committing in between (20 € → 35 €) marked it paid at 35 € for the 20 € the customer paid (14 of
   80 tries on MySQL). Such a capture is now refused and raises `payment.amount_mismatch`, as any capture of another
   amount does; the merchant refunds or settles it by hand.
+- **The first build of the daily sales after the update no longer slows every report request (review round 25,
+  finding 6).** Each call read the hours of every order not built yet before building until its deadline: on MySQL at
+  150 000 orders the dashboard took 2-3 s and the Reports page 7-9 s, for about 100 requests without a worker. A build
+  now reads 31 days from the next order on at a time. The migration run by a signed update from 2.1.2 queues the worker
+  job `sales_daily_build` (it queued nothing), and the upgrade notes say what it does.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's
