@@ -107,6 +107,8 @@ $zone = $col("SELECT zone_code FROM shipping_zone_countries WHERE store_id = 'de
 $out = [
     'pickup' => $col("SELECT name FROM shipping_methods WHERE store_id = 'default' AND code = 'pickup'")[0] ?? null,
     'cod' => $col("SELECT name FROM payment_methods WHERE store_id = 'default' AND code = 'cod'")[0] ?? null,
+    'invoice' => $col("SELECT name FROM payment_methods WHERE store_id = 'default' AND code = 'invoice'")[0] ?? null,
+    'invoice_en' => json_decode((string)($col("SELECT translations FROM payment_methods WHERE store_id = 'default' AND code = 'invoice'")[0] ?? ''), true)['en']['name'] ?? null,
     'cod_translations' => json_decode((string)($col("SELECT translations FROM payment_methods WHERE store_id = 'default' AND code = 'cod'")[0] ?? ''), true),
     'domestic' => $col("SELECT country FROM shipping_zone_countries WHERE store_id = 'default' AND zone_code = 'domestic'"),
     'domestic_name' => $col("SELECT name FROM shipping_zones WHERE store_id = 'default' AND code = 'domestic'")[0] ?? null,
@@ -146,6 +148,8 @@ assert_equals(['In-store pickup', 'Cash on delivery', ['US'], 'Dobierka'],
 $r56lSk = $r56lInstall('sk', 'SK', 'eur');
 assert_equals(['Osobný odber', ['SK'], 'Tuzemsko SK'], [$r56lSk['pickup'] ?? null, $r56lSk['domestic'] ?? null, $r56lSk['domestic_name'] ?? null],
     'R56 install sk/EUR: the Slovak sample methods stay as seeded (the domestic zone named in Slovak since R57)');
+assert_equals(['Nákup na faktúru', 'Purchase on invoice', 'Kauf auf Rechnung'], [$r56lSk['invoice'] ?? null, $r56lSk['invoice_en'] ?? null, $r56lDe['invoice'] ?? null],
+    'R60 install sk/EUR: the B2B payment method, seeded in English, is named in Slovak, English as its translation (was: "Invoice purchase")');
 assert_true(str_contains((string)file_get_contents($r56lRepo . '/src/WebInstaller.php'), 'if ($starter === null) self::localizeSampleMethods(Db::get(), $stores);'),
     'R56 install: a plain web install localizes the sample methods (a demo starter keeps its own)');
 

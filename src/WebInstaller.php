@@ -782,37 +782,38 @@ final class WebInstaller
         $country = strtoupper((string)($store['legal']['country'] ?? ''));
         $db->beginTransaction();
         try {
-            if ($locale !== 'sk') {
-                foreach (MethodLabels::SEEDED as $kind => $methods) {
-                    $table = $kind === 'payment' ? 'payment_methods' : 'shipping_methods';
-                    $translated = Db::hasColumn($table, 'translations', $db);
-                    $find = $db->prepare('SELECT * FROM ' . $table . ' WHERE store_id = ? AND code = ?');
-                    foreach ($methods as $code => [$seededName, $seededDescription]) {
-                        $find->execute([$scope, $code]);
-                        $row = $find->fetch(PDO::FETCH_ASSOC);
-                        if (!is_array($row) || (string)$row['name'] !== $seededName) continue;
-                        $text = static function (string $suffix, string $in) use ($kind, $code): ?string {
-                            $key = "methods.{$kind}.{$code}{$suffix}";
-                            $value = I18n::tIn($key, $in);
-                            return $value === $key || $value === '' ? null : $value;
-                        };
-                        $set = ['name' => $text('', $locale) ?? $seededName];
-                        $describe = $seededDescription !== null && array_key_exists('description', $row) && (string)$row['description'] === $seededDescription;
-                        if ($describe) $set['description'] = $text('_desc', $locale) ?? $seededDescription;
-                        if ($translated) {
-                            $translations = json_decode((string)($row['translations'] ?? ''), true);
-                            $translations = is_array($translations) ? $translations : [];
-                            foreach (array_keys(self::LOCALES) as $other) {
-                                if ($other === $locale || isset($translations[$other])) continue;
-                                $texts = array_filter(['name' => $text('', $other), 'description' => $describe ? $text('_desc', $other) : null], 'is_string');
-                                if ($texts !== []) $translations[$other] = $texts;
-                            }
-                            ksort($translations);
-                            $set['translations'] = $translations === [] ? null : json_encode($translations, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            foreach (MethodLabels::SEEDED as $kind => $methods) {
+                $table = $kind === 'payment' ? 'payment_methods' : 'shipping_methods';
+                $translated = Db::hasColumn($table, 'translations', $db);
+                $find = $db->prepare('SELECT * FROM ' . $table . ' WHERE store_id = ? AND code = ?');
+                foreach ($methods as $code => [$seededName, $seededDescription]) {
+                    // The seeds are Slovak, but for the B2B method (R60, review round 25, low: an SK shop read
+                    // "Invoice purchase").
+                    if ($locale === 'sk' && !($kind === 'payment' && $code === 'invoice')) continue;
+                    $find->execute([$scope, $code]);
+                    $row = $find->fetch(PDO::FETCH_ASSOC);
+                    if (!is_array($row) || (string)$row['name'] !== $seededName) continue;
+                    $text = static function (string $suffix, string $in) use ($kind, $code): ?string {
+                        $key = "methods.{$kind}.{$code}{$suffix}";
+                        $value = I18n::tIn($key, $in);
+                        return $value === $key || $value === '' ? null : $value;
+                    };
+                    $set = ['name' => $text('', $locale) ?? $seededName];
+                    $describe = $seededDescription !== null && array_key_exists('description', $row) && (string)$row['description'] === $seededDescription;
+                    if ($describe) $set['description'] = $text('_desc', $locale) ?? $seededDescription;
+                    if ($translated) {
+                        $translations = json_decode((string)($row['translations'] ?? ''), true);
+                        $translations = is_array($translations) ? $translations : [];
+                        foreach (array_keys(self::LOCALES) as $other) {
+                            if ($other === $locale || isset($translations[$other])) continue;
+                            $texts = array_filter(['name' => $text('', $other), 'description' => $describe ? $text('_desc', $other) : null], 'is_string');
+                            if ($texts !== []) $translations[$other] = $texts;
                         }
-                        $db->prepare('UPDATE ' . $table . ' SET ' . implode(', ', array_map(static fn(string $c): string => "{$c} = ?", array_keys($set))) . ' WHERE store_id = ? AND code = ?')
-                            ->execute([...array_values($set), $scope, $code]);
+                        ksort($translations);
+                        $set['translations'] = $translations === [] ? null : json_encode($translations, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
                     }
+                    $db->prepare('UPDATE ' . $table . ' SET ' . implode(', ', array_map(static fn(string $c): string => "{$c} = ?", array_keys($set))) . ' WHERE store_id = ? AND code = ?')
+                        ->execute([...array_values($set), $scope, $code]);
                 }
             }
             $domestic = $db->prepare("SELECT country FROM shipping_zone_countries WHERE store_id = ? AND zone_code = 'domestic'");

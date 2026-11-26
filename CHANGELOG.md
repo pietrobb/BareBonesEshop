@@ -517,6 +517,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   150 000 orders the dashboard took 2-3 s and the Reports page 7-9 s, for about 100 requests without a worker. A build
   now reads 31 days from the next order on at a time. The migration run by a signed update from 2.1.2 queues the worker
   job `sales_daily_build` (it queued nothing), and the upgrade notes say what it does.
+- **Smaller fixes (review round 25, lows).** The names of shipping zones and of shipping and payment methods are refused
+  when they show nothing (U+200B, Private Use characters alone, which no other typed name accepts now either) or hold a
+  control character or line separator (U+2028); the delivery days of a rate take a number or a range ("2-3") as for
+  Standard/Express. `stores.json` is read up to 2 MB (`Bootstrap::STORES_MAX_BYTES`); a larger file is refused like
+  invalid JSON instead of being read whole at every request. A Slovak installation names the B2B payment method
+  "Nákup na faktúru" (it read "Invoice purchase"), with its other languages as translations.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's

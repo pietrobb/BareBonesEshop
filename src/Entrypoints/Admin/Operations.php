@@ -535,7 +535,7 @@ function handleShippingMethodSave(): void {
     $id = Security::int($_POST['id'] ?? 0);
     $code = Security::code($_POST['code'] ?? '');
     $carrier = Security::code($_POST['carrier'] ?? '');
-    $name = trim(Security::str($_POST['name'] ?? ''));
+    $name = postedMethodName();
     $serviceType = in_array($_POST['service_type'] ?? '', ['parcel', 'pickup', 'store_pickup'], true) ? $_POST['service_type'] : 'parcel';
     if (!$code || !$carrier || !$name) { setFlash('err', I18n::t('admin.shipping.method_required')); header('Location: admin.php?p=shipping'); exit; }
     $data = [':code'=>$code, ':carrier'=>$carrier, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':adapter_class'=>trim(Security::str($_POST['adapter_class'] ?? '')), ':service_type'=>$serviceType, ':supports_cod'=>(int)!empty($_POST['supports_cod']), ':supports_pickup'=>(int)!empty($_POST['supports_pickup']), ':free_above'=>postedMoney('free_above', null, 'admin.php?p=shipping'), ':free_from_qty'=>shippingNullableInt('free_from_qty'), ':max_weight_g'=>shippingNullableInt('max_weight_g'), ':max_volume_cm3'=>shippingNullableInt('max_volume_cm3'), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
@@ -554,7 +554,7 @@ function handleShippingMethodSave(): void {
 function handleShippingMethodDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_methods', I18n::t('admin.shipping.method_deleted')); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingZoneSave(): void {
     Security::adminRequire('shipping.manage');
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::code($_POST['code'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::code($_POST['code'] ?? ''); $name = postedMethodName();
     if (!$code || !$name) { setFlash('err', I18n::t('admin.common.code_name_required')); header('Location: admin.php?p=shipping'); exit; }
     $data = [':code'=>$code, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
@@ -583,7 +583,10 @@ function handleShippingRateSave(): void {
     $from = max(0, Security::int($_POST['weight_from_g'] ?? 0)); $to = max(0, Security::int($_POST['weight_to_g'] ?? 0));
     $carrier = $methodCode ? StoreConfig::value('shipping_methods', 'code', $methodCode, 'carrier') : null;
     if ($carrier === null || !$zoneCode || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null || ($country !== '' && !preg_match('/^[A-Z]{2}$/', $country)) || $to < $from) { setFlash('err', I18n::t('admin.shipping.rate_invalid')); header('Location: admin.php?p=shipping'); exit; }
-    $data = [':method_code'=>$methodCode, ':carrier'=>$carrier, ':country'=>$country, ':zone_code'=>$zoneCode, ':weight_from_g'=>$from, ':weight_to_g'=>$to, ':volume_to_cm3'=>shippingNullableInt('volume_to_cm3'), ':price'=>postedMoney('price', 0, 'admin.php?p=shipping'), ':cod_surcharge'=>postedMoney('cod_surcharge', 0, 'admin.php?p=shipping'), ':delivery_days'=>trim(Security::str($_POST['delivery_days'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    // R60 (review round 25, low): delivery days as Admin → Shipping takes them for Standard/Express ("2", "2-3"); was any text.
+    $days = trim(Security::str($_POST['delivery_days'] ?? ''));
+    if ($days !== '' && preg_match('/^[0-9][0-9 –-]{0,19}$/u', $days) !== 1) { setFlash('err', I18n::t('admin.shipping.days_format')); header('Location: admin.php?p=shipping'); exit; }
+    $data = [':method_code'=>$methodCode, ':carrier'=>$carrier, ':country'=>$country, ':zone_code'=>$zoneCode, ':weight_from_g'=>$from, ':weight_to_g'=>$to, ':volume_to_cm3'=>shippingNullableInt('volume_to_cm3'), ':price'=>postedMoney('price', 0, 'admin.php?p=shipping'), ':cod_surcharge'=>postedMoney('cod_surcharge', 0, 'admin.php?p=shipping'), ':delivery_days'=>$days, ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
     $old = $id ? StoreConfig::row('shipping_rates', $id) : null;
     if ($id && $old === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
@@ -601,6 +604,15 @@ function postedMoney(string $key, ?int $empty, string $back): ?int {
     setFlash('err', I18n::format('admin.msg.amount_format', ['example' => Money::decimal(1290, $currency) . ' ' . $currency]));
     header('Location: ' . $back);
     exit;
+}
+/**
+ * R60 (review round 25, low): the name of a zone or of a shipping or payment method, '' (refused as missing) when it shows
+ * nothing (U+200B, Private Use characters alone) or holds a control character or line separator (U+2028). Was: trim()
+ * only, both were saved and reached the checkout, e-mails and invoices.
+ */
+function postedMethodName(): string {
+    $name = Security::typedText(Security::str($_POST['name'] ?? ''));
+    return Security::hasControlCharacters($name) ? '' : $name;
 }
 function shippingNullableInt(string $key): ?int { $v = trim((string)($_POST[$key] ?? '')); return $v === '' ? null : max(0, Security::int($v)); }
 function pagePayments(): void {
@@ -645,7 +657,7 @@ function pagePayments(): void {
 }
 function handlePaymentMethodSave(): void {
     Security::adminRequire('payments.manage');
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::code($_POST['code'] ?? ''); $provider = Security::code($_POST['provider'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::code($_POST['code'] ?? ''); $provider = Security::code($_POST['provider'] ?? ''); $name = postedMethodName();
     $postedType = (string)($_POST['service_type'] ?? ''); $serviceType = isset(PaymentService::SERVICE_TYPE_LABELS[$postedType]) ? $postedType : 'offline';
     $min = postedMoney('min_amount', 0, 'admin.php?p=payments'); $max = postedMoney('max_amount', null, 'admin.php?p=payments');
     if (!$code || !$provider || !$name || ($max !== null && $max < $min)) { setFlash('err', I18n::t('admin.payments.required')); header('Location: admin.php?p=payments'); exit; }
