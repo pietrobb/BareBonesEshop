@@ -219,7 +219,8 @@ $architectureBudgets = [
     // +1 function R57: shippingFileMethods() lists the shipping.json methods on the shipping page (R58: moved to ShippingFile.php).
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 38, 'max_function_lines' => 74, 'coupling' => 23],
     // R58: Standard/Express of shipping.json switched and priced on the shipping page (settings in the data directory).
-    'src/Entrypoints/Admin/ShippingFile.php' => ['lines' => 120, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 7],
+    // +5 lines R60: the page saves full Standard/Express settings and "Restore defaults" names the shipping.json values.
+    'src/Entrypoints/Admin/ShippingFile.php' => ['lines' => 125, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 7],
     // Admin UI refresh: the dashboard moved out of Operations.php (tiles, 14-day revenue, health, checklist, incidents, monitoring).
     'src/Entrypoints/Admin/Dashboard.php' => ['lines' => 240, 'functions' => 11, 'max_function_lines' => 50, 'coupling' => 14],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
@@ -241,7 +242,8 @@ $architectureBudgets = [
     // +4 lines R39: "Paid" is not offered for a refund the provider has, and on refund_pending it needs orders.refund.
     // +5 lines, +2 function lines R40: "Confirm executed" / "Not executed" post the refund the page showed (request key, amount).
     // +2 lines, +1 function line, +1 coupling R57: the detail and the list name the shipping method (ConsumerNotice::shippingMethod).
-    /* R49: a received return names the money refunded outside it and what "Refunded" still pays after counting it */ 'src/Entrypoints/Admin/Orders.php' => ['lines' => 1020, 'functions' => 17, 'max_function_lines' => 332, 'coupling' => 26],
+    // +12 lines R60: a fully refunded order keeps the money refunded outside it, and the credit note e-mail is offered for it.
+    /* R49: a received return names the money refunded outside it and what "Refunded" still pays after counting it */ 'src/Entrypoints/Admin/Orders.php' => ['lines' => 1032, 'functions' => 17, 'max_function_lines' => 332, 'coupling' => 26],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     // +4 lines, +3 function lines R31: the manual order form has the billing address fields.
     // +23 lines, +1 function R38: fields that are not UTF-8 are refused with 400 naming the field (was HTTP 500).

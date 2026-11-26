@@ -276,9 +276,8 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             if ($created) {
                 $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($scratchDatabase));
             }
-            try {
-                if ($scratchMarkerPath !== '' && !$this->schemaExists($server, $scratchDatabase)) @unlink($scratchMarkerPath);
-            } catch (\Throwable $e) { /* the marker stays: the next restore drops the scratch */ }
+            // Kept when the scratch may be there (its creation failed, or the drop threw): the next restore drops it.
+            if ($scratchMarkerPath !== '' && $created) @unlink($scratchMarkerPath);
         }
     }
 

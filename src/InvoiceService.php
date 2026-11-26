@@ -1628,8 +1628,7 @@ final class InvoiceService
                 $net = $gross > 0 ? max(0, min((int)$part['net'], $gross)) : min(0, max((int)$part['net'], $gross));
                 // R60 (review round 25, low): as for item credits (capToUncredited()), the credit that leaves a rate nothing
                 // uncredited takes its net rest too. Was: rounded alone, a fully credited rate could keep a cent of net.
-                $restNet = (int)($rates[$key]['net'] ?? -1);
-                if ($gross > 0 && $gross === (int)($rates[$key]['gross'] ?? 0) && $restNet >= 0 && $restNet <= $gross) $net = $restNet;
+                if ($gross > 0 && $gross === (int)$rates[$key]['gross'] && (int)$rates[$key]['net'] >= 0 && (int)$rates[$key]['net'] <= $gross) $net = (int)$rates[$key]['net'];
                 $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $supply;
                 foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $name => $value) $totals[$name] += $value;
                 $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $supply;
