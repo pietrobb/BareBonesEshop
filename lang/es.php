@@ -2415,7 +2415,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.err.domains' => 'Dominios no válidos o ya usados (como máximo 10, cada uno con un punto, ninguno de otra tienda): {domains}',
     'admin.stores.err.domains_app_url' => 'El dominio {domain} es la dirección de la tienda principal (app_url); otra tienda no puede tenerlo.',
     'admin.stores.err.domains_idn' => 'Introduzca un dominio con caracteres no ASCII ({domains}) en su forma punycode: {punycode}',
-    'admin.stores.domains_unreachable' => 'Estos dominios aún no responden como esta tienda (/healthz): {domains}. Compruebe el DNS y la configuración del servidor web.',
+    'admin.stores.domains_unreachable' => 'Estos dominios aún no responden como esta tienda (/healthz): {domains}. Compruebe el DNS y la configuración del servidor web. Después guarde los dominios de nuevo para volver a probarlos.',
     'admin.stores.domains_private' => 'Estos dominios apuntan a una dirección local o privada, por eso no se han probado: {domains}. El dominio de una tienda necesita una dirección pública.',
     'admin.stores.domains_untested' => 'No quedó tiempo para probar estos dominios: {domains}. Guarde los dominios de nuevo para probarlos.',
     'admin.stores.err.timezone' => 'Elija una zona horaria de la lista.',

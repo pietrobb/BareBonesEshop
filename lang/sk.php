@@ -2485,7 +2485,7 @@ return [
     'admin.stores.err.domains' => 'Neplatné alebo už použité domény (najviac 10, každá s bodkou, žiadna iného obchodu): {domains}',
     'admin.stores.err.domains_app_url' => 'Doména {domain} je adresa hlavného obchodu (app_url); iný obchod ju mať nemôže.',
     'admin.stores.err.domains_idn' => 'Doménu s diakritikou ({domains}) zadajte v tvare punycode: {punycode}',
-    'admin.stores.domains_unreachable' => 'Tieto domény zatiaľ neodpovedajú ako tento obchod (/healthz): {domains}. Skontrolujte DNS a nastavenie webového servera.',
+    'admin.stores.domains_unreachable' => 'Tieto domény zatiaľ neodpovedajú ako tento obchod (/healthz): {domains}. Skontrolujte DNS a nastavenie webového servera. Po oprave uložte domény znova a otestujú sa znova.',
     'admin.stores.domains_private' => 'Tieto domény smerujú na lokálnu alebo privátnu adresu, preto sa neotestovali: {domains}. Doména obchodu potrebuje verejnú adresu.',
     'admin.stores.domains_untested' => 'Na otestovanie týchto domén už nezostal čas: {domains}. Uložte domény znova a otestujú sa.',
     'admin.stores.err.timezone' => 'Vyberte časové pásmo zo zoznamu.',

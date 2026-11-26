@@ -2455,7 +2455,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.err.domains' => 'Ungültige oder bereits verwendete Domains (höchstens 10, jede mit Punkt, keine eines anderen Shops): {domains}',
     'admin.stores.err.domains_app_url' => 'Die Domain {domain} ist die Adresse des Hauptshops (app_url); ein anderer Shop kann sie nicht haben.',
     'admin.stores.err.domains_idn' => 'Geben Sie eine Domain mit Umlauten ({domains}) in Punycode-Form ein: {punycode}',
-    'admin.stores.domains_unreachable' => 'Diese Domains antworten noch nicht als dieser Shop (/healthz): {domains}. Prüfen Sie DNS und die Webserver-Konfiguration.',
+    'admin.stores.domains_unreachable' => 'Diese Domains antworten noch nicht als dieser Shop (/healthz): {domains}. Prüfen Sie DNS und die Webserver-Konfiguration. Speichern Sie die Domains danach erneut, um sie erneut zu testen.',
     'admin.stores.domains_private' => 'Diese Domains zeigen auf eine lokale oder private Adresse und wurden daher nicht getestet: {domains}. Eine Shop-Domain braucht eine öffentliche Adresse.',
     'admin.stores.domains_untested' => 'Für diese Domains blieb keine Zeit zum Testen: {domains}. Speichern Sie die Domains erneut, um sie zu testen.',
     'admin.stores.err.timezone' => 'Wählen Sie eine Zeitzone aus der Liste.',

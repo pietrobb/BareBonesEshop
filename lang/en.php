@@ -2476,7 +2476,7 @@ return [
     'admin.stores.err.domains' => 'Invalid or already used domains (at most 10, each with a dot, none of another store): {domains}',
     'admin.stores.err.domains_app_url' => 'The domain {domain} is the main store\'s address (app_url); another store cannot have it.',
     'admin.stores.err.domains_idn' => 'Enter a domain with non-ASCII letters ({domains}) in its punycode form: {punycode}',
-    'admin.stores.domains_unreachable' => 'These domains do not answer as this shop yet (/healthz): {domains}. Check the DNS and the web server\'s configuration.',
+    'admin.stores.domains_unreachable' => 'These domains do not answer as this shop yet (/healthz): {domains}. Check the DNS and the web server\'s configuration. Save the domains again to test them again.',
     'admin.stores.domains_private' => 'These domains point to a local or private network address, so they were not tested: {domains}. A storefront domain needs a public address.',
     'admin.stores.domains_untested' => 'There was no time left to test these domains: {domains}. Save the domains again to test them.',
     'admin.stores.err.timezone' => 'Choose a time zone from the list.',

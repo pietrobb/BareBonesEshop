@@ -133,5 +133,51 @@ try {
     Bootstrap::initStoreContext('/', '', 'default');
 }
 
+// Store domains: one that did not answer as this shop (DNS not set up yet) was probed once and never again; the next save
+// probed only domains it added or had no time left for.
+$r60lCfg = new ReflectionProperty(Security::class, 'cfg');
+$r60lCfgBefore = $r60lCfg->getValue();
+$r60lHost = $_SERVER['HTTP_HOST'] ?? null;
+try {
+    $r60lStoresFile = json_decode((string)file_get_contents($r60lRepo . '/stores.example.json'), true);
+    $r60lStoresFile['stores']['us']['domains'] = ['us.shop.example'];
+    file_put_contents($r60lRoot . '/stores.json', json_encode($r60lStoresFile, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    StoreSettings::setPathForTesting($r60lRoot . '/stores.json');
+    $r60lCfg->setValue(null, ['app_url' => 'https://shop.example'] + (array)$r60lCfgBefore);
+    $_SERVER['HTTP_HOST'] = 'shop.example';
+    StoreSettings::setResolverForTesting(static fn(string $host): array => ['93.184.216.34']);
+    $r60lCalls = [];
+    $r60lUp = false;
+    JsonHttpClient::setFixtureTransport(static function (string $method, string $url) use (&$r60lCalls, &$r60lUp): array {
+        $host = (string)parse_url($url, PHP_URL_HOST);
+        $r60lCalls[] = $host;
+        return $host === 'new.shop.example' && !$r60lUp ? ['status' => 404, 'body' => 'parked']
+            : ['status' => 200, 'body' => json_encode(['status' => 'ok', 'service' => 'bareboneseshop'])];
+    });
+    $r60lDomains = "us.shop.example\nnew.shop.example";
+    $r60lFirst = StoreSettings::saveDomains('us', $r60lDomains);
+    $r60lCalls = [];
+    $r60lStill = StoreSettings::saveDomains('us', $r60lDomains);
+    $r60lStillCalls = $r60lCalls;
+    $r60lUp = true;
+    $r60lCalls = [];
+    $r60lFixed = StoreSettings::saveDomains('us', $r60lDomains);
+    $r60lFixedCalls = $r60lCalls;
+    $r60lCalls = [];
+    $r60lAgain = StoreSettings::saveDomains('us', $r60lDomains);
+    assert_equals([true, true, ['new.shop.example'], true, ['new.shop.example'], '', [], ''],
+        [str_contains((string)($r60lFirst['warning'] ?? ''), 'new.shop.example'), str_contains((string)($r60lStill['warning'] ?? ''), 'new.shop.example'),
+            $r60lStillCalls, $r60lFixed['ok'], $r60lFixedCalls, (string)($r60lFixed['warning'] ?? ''), $r60lCalls, (string)($r60lAgain['warning'] ?? '')],
+        'R60 domains: a domain not answering as this shop is probed again by every save until it does, then no more (was: never again)');
+} catch (Throwable $e) {
+    assert_true(false, 'R60 domains (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+} finally {
+    JsonHttpClient::setFixtureTransport(null);
+    StoreSettings::setResolverForTesting(null);
+    $r60lCfg->setValue(null, $r60lCfgBefore);
+    StoreSettings::setPathForTesting(null);
+    if ($r60lHost === null) unset($_SERVER['HTTP_HOST']); else $_SERVER['HTTP_HOST'] = $r60lHost;
+}
+
 foreach (glob($r60lRoot . '/*') ?: [] as $r60lFile) @unlink($r60lFile);
 @rmdir($r60lRoot);

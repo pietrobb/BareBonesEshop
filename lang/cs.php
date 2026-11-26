@@ -2455,7 +2455,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.err.domains' => 'Neplatné nebo již použité domény (nejvýše 10, každá s tečkou, žádná jiného obchodu): {domains}',
     'admin.stores.err.domains_app_url' => 'Doména {domain} je adresa hlavního obchodu (app_url); jiný obchod ji mít nemůže.',
     'admin.stores.err.domains_idn' => 'Doménu s diakritikou ({domains}) zadejte ve tvaru punycode: {punycode}',
-    'admin.stores.domains_unreachable' => 'Tyto domény zatím neodpovídají jako tento obchod (/healthz): {domains}. Zkontrolujte DNS a nastavení webového serveru.',
+    'admin.stores.domains_unreachable' => 'Tyto domény zatím neodpovídají jako tento obchod (/healthz): {domains}. Zkontrolujte DNS a nastavení webového serveru. Po opravě uložte domény znovu a otestují se znovu.',
     'admin.stores.domains_private' => 'Tyto domény směřují na lokální nebo privátní adresu, proto se neotestovaly: {domains}. Doména obchodu potřebuje veřejnou adresu.',
     'admin.stores.domains_untested' => 'Na otestování těchto domén už nezbyl čas: {domains}. Uložte domény znovu a otestují se.',
     'admin.stores.err.timezone' => 'Vyberte časové pásmo ze seznamu.',

@@ -2455,7 +2455,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.err.domains' => 'Nieprawidłowe lub już używane domeny (najwyżej 10, każda z kropką, żadna innego sklepu): {domains}',
     'admin.stores.err.domains_app_url' => 'Domena {domain} to adres sklepu głównego (app_url); inny sklep nie może jej mieć.',
     'admin.stores.err.domains_idn' => 'Domenę ze znakami narodowymi ({domains}) wpisz w postaci punycode: {punycode}',
-    'admin.stores.domains_unreachable' => 'Te domeny jeszcze nie odpowiadają jako ten sklep (/healthz): {domains}. Sprawdź DNS i konfigurację serwera WWW.',
+    'admin.stores.domains_unreachable' => 'Te domeny jeszcze nie odpowiadają jako ten sklep (/healthz): {domains}. Sprawdź DNS i konfigurację serwera WWW. Następnie zapisz domeny ponownie, aby sprawdzić je jeszcze raz.',
     'admin.stores.domains_private' => 'Te domeny wskazują na adres lokalny lub prywatny, dlatego nie zostały sprawdzone: {domains}. Domena sklepu wymaga adresu publicznego.',
     'admin.stores.domains_untested' => 'Nie starczyło czasu na sprawdzenie tych domen: {domains}. Zapisz domeny ponownie, aby je sprawdzić.',
     'admin.stores.err.timezone' => 'Wybierz strefę czasową z listy.',

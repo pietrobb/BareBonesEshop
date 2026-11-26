@@ -538,7 +538,9 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   credited (the invoice's proportion left the rate a cent off until its last return), and a refund credit note that
   leaves a rate nothing uncredited takes its net rest, as item credits do since round 24. An admin edit of an order's
   items locks the stock of the old and the new SKUs in one sorted pass on MySQL/MariaDB (it locked the old ones first,
-  so an edit from X to A deadlocked with a checkout holding A and waiting for X).
+  so an edit from X to A deadlocked with a checkout holding A and waiting for X). A store domain that did not answer as
+  this shop (DNS not set up yet, a probe timing out) is tested again by every save of the domains until it does; it was
+  tested once and never again.
 
 - **Concurrent checkouts of variants of the same products no longer deadlock on MySQL/MariaDB (review round 24,
   finding 3).** Round 23's stock sync locks the product and variant rows of a line in cart order, while a checkout's

@@ -2455,7 +2455,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.stores.err.domains' => 'Érvénytelen vagy már használt domainek (legfeljebb 10, mindegyik ponttal, egyik sem más üzleté): {domains}',
     'admin.stores.err.domains_app_url' => 'A(z) {domain} domain a fő üzlet címe (app_url); más üzlet nem kaphatja meg.',
     'admin.stores.err.domains_idn' => 'Az ékezetes domaint ({domains}) punycode formában adja meg: {punycode}',
-    'admin.stores.domains_unreachable' => 'Ezek a domainek még nem ezként az üzletként válaszolnak (/healthz): {domains}. Ellenőrizze a DNS-t és a webszerver beállításait.',
+    'admin.stores.domains_unreachable' => 'Ezek a domainek még nem ezként az üzletként válaszolnak (/healthz): {domains}. Ellenőrizze a DNS-t és a webszerver beállításait. Ezután mentse újra a domaineket az újabb teszteléshez.',
     'admin.stores.domains_private' => 'Ezek a domainek helyi vagy privát címre mutatnak, ezért nem lettek tesztelve: {domains}. Az üzlet domainjének nyilvános cím kell.',
     'admin.stores.domains_untested' => 'Ezeknek a domaineknek a tesztelésére nem maradt idő: {domains}. Mentse újra a domaineket a teszteléshez.',
     'admin.stores.err.timezone' => 'Válasszon időzónát a listából.',
