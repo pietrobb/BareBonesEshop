@@ -649,7 +649,7 @@ final class WebInstaller
     private static function configureStore(string $root, array $config, array $v): array
     {
         $path = DataOverrides::storesPath($root, $config);
-        $stores = json_decode((string)file_get_contents($path), true);
+        $stores = DataOverrides::readStoresFile($path);
         if (!is_array($stores)) throw new RuntimeException("Cannot read {$path}");
         $stores = self::withIdentity($stores, $v);
         $json = json_encode($stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";

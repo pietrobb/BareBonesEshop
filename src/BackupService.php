@@ -562,6 +562,54 @@ class BackupService
         throw new RuntimeException('BackupService: cannot create a private staging directory');
     }
 
+    /**
+     * R61 (review round 26, low): a SQLite restore killed after it staged the replacement next to live left that full copy
+     * of the backup (shop.sqlite.restore-<hex>.tmp) for good. Run under the backup lock: another restore's copy is either
+     * renamed into place or removed before it releases the lock, or waits at most the lock timeout for it, so a copy older
+     * than RESTORE_TEMP_STALE belongs to a dead run.
+     */
+    private static function sweepRestoreTemps(string $livePath, ?string $own): void
+    {
+        foreach (self::restoreTemps($livePath) as $temp) {
+            if ($temp === $own || (int)@filemtime($temp) > time() - self::RESTORE_TEMP_STALE) continue;
+            if (@unlink($temp)) self::log("Restore: removed {$temp} left by a restore that did not finish");
+        }
+    }
+
+    private const RESTORE_TEMP_STALE = 600;
+
+    /** @return list<string> the replacement copies of SQLite restores next to $livePath (regular files, never links). */
+    private static function restoreTemps(string $livePath): array
+    {
+        $found = [];
+        foreach (glob($livePath . '.restore-*.tmp') ?: [] as $temp) {
+            if (preg_match('/\.restore-[0-9a-f]{12}\.tmp$/D', $temp) === 1 && !is_link($temp) && is_file($temp)) $found[] = $temp;
+        }
+        return $found;
+    }
+
+    /**
+     * R61 (review round 26, low): what killed or failed restores left that nobody reported — MySQL rollback dumps
+     * (pre-restore-*.sql in backup_recovery_dir: the whole database, personal data included) and SQLite replacement
+     * copies (<db>.restore-<hex>.tmp) older than a running restore's. For the doctor; paths it cannot read are not listed.
+     * @return list<string>
+     */
+    public static function restoreLeftovers(string $recoveryDir, string $sqlitePath): array
+    {
+        $found = [];
+        if ($recoveryDir !== '' && is_dir($recoveryDir) && !is_link($recoveryDir)) {
+            foreach (glob(rtrim($recoveryDir, '/\\') . DIRECTORY_SEPARATOR . 'pre-restore-*.sql') ?: [] as $dump) {
+                if (!is_link($dump) && is_file($dump)) $found[] = $dump;
+            }
+        }
+        if ($sqlitePath !== '') {
+            foreach (self::restoreTemps($sqlitePath) as $temp) {
+                if ((int)@filemtime($temp) <= time() - self::RESTORE_TEMP_STALE) $found[] = $temp;
+            }
+        }
+        return $found;
+    }
+
     /** Removes the staging directories whose process is gone (their .owner lock is free). */
     private static function sweepStaging(): void
     {
@@ -569,6 +617,10 @@ class BackupService
             // A minute old at least: a directory just made may not hold its lock yet.
             if (isset(self::$stagingLocks[$dir]) || is_link($dir) || !preg_match('/^bbe-backup-[0-9a-f]{32}$/', basename($dir))
                 || (int)@filemtime($dir) > time() - 60) continue;
+            // R61 (review round 26, low 13): only a directory as stagingPath() makes it: this user's, private (0700). Was:
+            // any match in a shared temp directory, so a shop run as root removed what another user's process staged there.
+            $stat = @stat($dir);
+            if (!is_array($stat) || (function_exists('posix_geteuid') && (($stat['mode'] & 0077) !== 0 || (int)$stat['uid'] !== posix_geteuid()))) continue;
             $owner = @fopen($dir . DIRECTORY_SEPARATOR . '.owner', 'rb');
             if ($owner === false || is_link($dir . DIRECTORY_SEPARATOR . '.owner')) {
                 if ($owner !== false) fclose($owner);
@@ -998,6 +1050,7 @@ class BackupService
 
         $lockHandle = self::acquireLock();
         try {
+            self::sweepRestoreTemps($livePath, $restoreTemp);
             $liveWarnings = [];
             $liveSeries = self::liveNumberSeries(self::$db, $liveWarnings);
             // 3. close this process's connections to the live file; the gate proves no other process holds it
@@ -1443,7 +1496,8 @@ class BackupService
      * themes/ and uploads/ go to the private recovery directory, never into the web root.
      *
      * Returns ['archive', 'written', 'unchanged', 'overwritten', 'set_aside', 'quarantined' => entries, 'skipped_sources' => names,
-     * 'aside_dir' => this restore's directory of the copies set aside or quarantined (null: none)].
+     * 'aside_dir' => this restore's directory of the copies set aside or quarantined (null: none),
+     * 'destinations' => entry => ['aside' => the copy, 'live' => where the shop reads it] of each file set aside or quarantined].
      */
     public static function restoreFiles(string $remotePath, array $opts = []): array
     {
@@ -1487,6 +1541,7 @@ class BackupService
             $unchanged = 0;
             $setAside = [];
             $quarantined = [];
+            $destinations = [];
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
                 $root = (string)(self::$fileSources[$name] ?? '');
@@ -1503,6 +1558,7 @@ class BackupService
                     throw new RuntimeException("Restore: files archive entry {$entry} does not fit source {$name} ({$kind})");
                 }
                 $source = $stagingDir . '/' . $entry;
+                $liveTarget = $target;
                 $isAside = $isQuarantined = false;
                 // R53: a script or a per-directory server config (.htaccess, .user.ini) never goes into a directory the web
                 // server serves, not even a missing one: a forged backup's themes/default/assets/shell.php ran after --files-only.
@@ -1520,7 +1576,9 @@ class BackupService
                     // R60 (review round 25, medium): so are a missing mail.json and every job, also into an empty queue: a
                     // forged mail.json sent the SMTP login of config.php to its server, a forged payment_refund refunded a
                     // delivered order and an email_send mailed a store-branded link anywhere on a new server.
-                    if ($differs || (in_array($name, ['jobs', 'mail', 'themes'], true) && !is_file($target))) {
+                    // R61 (review round 26, medium 1): so are stores.json (a forged one put its IBAN into every bank-transfer
+                    // instruction), shipping.json and the GDPR salt, also where the live shop lacks them (a new server).
+                    if ($differs || ($name !== 'config' && !is_file($target))) {
                         // R51: in the private recovery directory, never next to the live source: config.php.from-backup
                         // and themes.from-backup/ in the web root were served (database password, gateway keys).
                         $asideDir = $asideRun ??= self::createAsideRun();
@@ -1579,6 +1637,7 @@ class BackupService
                     continue;
                 }
                 $plan[] = [$entry, $source, $target, $base, $ownership, $overwrite];
+                if ($isAside) $destinations[$entry] = ['aside' => $target, 'live' => $liveTarget];
                 if ($isQuarantined) $quarantined[] = $entry;
                 elseif ($isAside) $setAside[] = $entry;
             }
@@ -1611,19 +1670,21 @@ class BackupService
                 if ($overwrite) $overwritten[] = $entry;
             }
             if ($asideRun !== null) self::pruneAsideRuns($asideRun);
-            self::log("RESTORE FILES OK src={$archivePath} written=" . count($plan) . " unchanged={$unchanged} overwritten=" . count($overwritten)
+            // R61 (review round 26, low): "written" counts the files written into the shop only (was: also those set aside).
+            self::log("RESTORE FILES OK src={$archivePath} written=" . count($written) . " unchanged={$unchanged} overwritten=" . count($overwritten)
                 . ($skippedSources !== [] ? ' skipped_sources=' . implode(',', array_keys($skippedSources)) : '')
                 . ($setAside !== [] ? ' set_aside=' . count($setAside) : '')
                 . ($quarantined !== [] ? ' quarantined=' . count($quarantined) : ''));
             return [
                 'archive'         => $archivePath,
-                'written'         => count($plan),
+                'written'         => count($written),
                 'unchanged'       => $unchanged,
                 'overwritten'     => $overwritten,
                 'set_aside'       => $setAside,
                 'quarantined'     => $quarantined,
                 'skipped_sources' => array_keys($skippedSources),
                 'aside_dir'       => $setAside !== [] || $quarantined !== [] ? $asideRun : null,
+                'destinations'    => $destinations,
             ];
         } finally {
             // A refused restore leaves no empty directory of its own behind.
@@ -1880,9 +1941,10 @@ class BackupService
      * R50: sources restored next to the live ones (<source>.from-backup) instead of over them: an older config.php
      * would point the shop at another database, a theme file the release changed would go back to the old version,
      * and a queue that has already run would send its mails again. Only a missing config.php is restored in place
-     * (R60: a missing mail.json, theme file or job is set aside too).
+     * (R60: a missing mail.json, theme file or job is set aside too; R61: stores.json, shipping.json and the GDPR salt,
+     * differing or missing).
      */
-    private const ASIDE_SOURCES = ['config', 'themes', 'jobs', 'mail'];
+    private const ASIDE_SOURCES = ['config', 'themes', 'jobs', 'mail', 'stores', 'shipping', 'gdpr_salt'];
 
     /** The default sources that are one file (defaultFileSources()); the others are directories. */
     private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'shipping', 'config'];
@@ -1982,10 +2044,15 @@ class BackupService
     /** R55: copies set aside by the newest restores are kept; older runs (each with a config.php) are removed. */
     private const ASIDE_RUNS_KEPT = 5;
 
+    /** R61: and every run younger than this, however many restores followed it. */
+    private const ASIDE_RUNS_MIN_AGE = 30 * 86400;
+
     /**
      * R55 (review round 20, low): every restore left another copy of config.php (database password, gateway keys) in
      * from-backup and nothing removed them. The newest ASIDE_RUNS_KEPT runs stay (always $current); older run directories
      * (by their time-stamped name; only real directories, never through a link) are removed.
+     * R61 (review round 26, low): only once they are ASIDE_RUNS_MIN_AGE old: five test restores after a disaster recovery
+     * removed the jobs and stores.json it had set aside before anyone moved them in.
      */
     private static function pruneAsideRuns(string $current): void
     {
@@ -1998,6 +2065,8 @@ class BackupService
         }
         rsort($runs, SORT_STRING);
         foreach (array_slice(array_values(array_diff($runs, [basename($current)])), self::ASIDE_RUNS_KEPT - 1) as $old) {
+            $made = DateTimeImmutable::createFromFormat('!Ymd-His', substr($old, 0, 15), new DateTimeZone('UTC'));
+            if ($made !== false && $made->getTimestamp() > time() - self::ASIDE_RUNS_MIN_AGE) continue;
             self::removeTree($root . '/' . $old);
             self::log("Restore: removed the copies set aside by an older restore, {$root}/{$old}");
         }

@@ -131,7 +131,7 @@ class Orders {
         $orderNumber = null;
         $orderId = null;
         // Resolve locale: explicit customer arg wins; else current I18n locale; else system default.
-        $stores = json_decode(@file_get_contents(DataOverrides::storesPath()) ?: '{}', true) ?: [];
+        $stores = DataOverrides::readStores() ?? [];
         $sysDefaultLocale = $stores['default_locale'] ?? 'en';
         $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
         $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
@@ -286,98 +286,17 @@ class Orders {
         try {
             // R38 (low): the edit decides the OSS threshold as exactly as a new order (Orders::create(), guardOrder()).
             $ossLock = OssThreshold::lockSeller($db);
-            $creditCompany = Customers::invoiceCreditCompany((int)(self::byId($orderId)['customer_id'] ?? 0));
-            $db->beginTransaction();
-            self::lockWithin($orderId);
-            Customers::lockInvoiceCredit($creditCompany);
-            $order = self::byId($orderId);
-            $refusal = $order === null ? 'admin.order.edit.not_found' : self::editRefusal($order);
-            if ($refusal !== null) {
-                $db->rollBack();
-                return $refusal;
+            // R61 (review round 26, low 3): MySQL may pick the edit as the victim of a deadlock with a stock write (it rolled
+            // back everything; 13 % of edits against Warehouse::setAvailable): try again, as Orders::create() does.
+            for ($attempt = 1; ; $attempt++) {
+                try {
+                    return self::replaceItemsWithin($db, $orderId, $price, $newItems);
+                } catch (\PDOException $e) {
+                    if ($db->inTransaction()) $db->rollBack();
+                    if ($attempt >= 3 || !Db::deadlocked($e)) throw $e;
+                    usleep(random_int(5_000, 40_000) * $attempt);
+                }
             }
-            $oldItems = self::items($orderId);
-            Inventory::lockEditSkus($oldItems, $newItems);
-            $touchedSkus = [];
-            foreach ($oldItems as $item) {
-                if (Inventory::isDigitalLine($item)) continue;
-                Inventory::releaseOrderItem($item, $orderId);
-                foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
-            }
-            if ($touchedSkus !== []) Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
-            $db->prepare("DELETE FROM order_items WHERE order_id = :id")->execute([':id' => $orderId]);
-            OssThreshold::withoutOpenOrder($db, $orderId);
-            $pricing = $price();
-            if (isset($pricing['error'])) {
-                $db->rollBack();
-                return (string)$pricing['error'];
-            }
-            ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($pricing['items']);
-
-            $snapshot = $pricing['financial_snapshot'];
-            Adapters::tax((string)($snapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')))::validateSnapshot($snapshot);
-            self::assertSnapshotItems($snapshot, $orderItems);
-            $totals = $snapshot['totals'];
-            if ((int)$totals['subtotal'] !== $subtotal || (int)$totals['shipping'] !== (int)$pricing['shipping_cost']
-                || (int)$totals['payment_fee'] !== (int)$pricing['payment_fee']
-                || strtolower((string)$snapshot['currency']) !== strtolower((string)$order['currency'])) {
-                throw new \InvalidArgumentException('Financial snapshot does not match the edited order');
-            }
-            $params = [
-                ':subtotal' => $subtotal, ':discount' => (int)$totals['discount'], ':shipping' => (int)$totals['shipping'],
-                ':tax' => (int)$totals['vat'], ':total' => (int)$totals['gross'], ':vattotal' => (int)$totals['vat'],
-                ':nettotal' => (int)$totals['net'], ':vatscen' => (string)$snapshot['scenario'],
-                ':id' => $orderId, ':store' => StoreContext::current()->id(),
-            ];
-            $extra = '';
-            if (self::hasColumn('orders', 'shipping_rate_snapshot')) {
-                $extra .= ', shipping_weight_g = :shipweight, shipping_rate_snapshot = :shipsnapshot';
-                $params += [':shipweight' => (int)$pricing['shipping_weight_g'], ':shipsnapshot' => (string)$pricing['shipping_rate_snapshot']];
-            }
-            if (self::hasColumn('orders', 'payment_method_snapshot')) {
-                $extra .= ', payment_fee = :paymentfee, payment_method_snapshot = :paymentsnapshot';
-                $params += [':paymentfee' => (int)$pricing['payment_fee'], ':paymentsnapshot' => (string)$pricing['payment_method_snapshot']];
-            }
-            if (self::hasColumn('orders', 'financial_snapshot')) {
-                $extra .= ', financial_snapshot = :financialsnapshot';
-                $params[':financialsnapshot'] = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-            }
-            $db->prepare("UPDATE orders SET subtotal = :subtotal, discount_amount = :discount, shipping_cost = :shipping,
-                    tax_amount = :tax, total = :total, vat_total = :vattotal, net_total = :nettotal, vat_scenario = :vatscen{$extra},
-                    updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store")->execute($params);
-            SalesDaily::touchOrders([$orderId], $db);
-            // R51 (review round 51, low): an edit that raises an order on invoice checks the company's credit limit like
-            // checkout (under the company's row lock). The open total read there holds this order at its new total
-            // while its payment is open; a failed payment is not counted there, so its new total is added.
-            $customerId = (int)($order['customer_id'] ?? 0);
-            if ($customerId > 0 && (int)$totals['gross'] > (int)$order['total']
-                && self::paysOnInvoice((string)$order['payment_method'], ['payment_method_snapshot' => (string)($pricing['payment_method_snapshot'] ?? $order['payment_method_snapshot'] ?? '')])) {
-                $counted = in_array((string)($order['payment_status'] ?? 'pending'), ['pending', 'authorized'], true);
-                Customers::assertInvoiceCredit($customerId, $counted ? 0 : (int)$totals['gross'], $creditCompany);
-            }
-            self::insertItems($orderId, $orderItems);
-            OssThreshold::recordOrder($db, $orderId);
-            foreach ($orderItems as $item) {
-                foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
-            }
-            Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
-            // Units the edit gave back go to orders waiting for them.
-            BackorderAllocation::allocate(array_values(array_unique($touchedSkus)));
-
-            $summary = static fn(array $items): array => array_map(static fn(array $i): string => $i['sku'] . ' ×' . $i['quantity'], $items);
-            AuditLog::log('order', $orderId, ['total' => (int)$order['total'], 'items' => $summary($oldItems)],
-                ['total' => (int)$totals['gross'], 'items' => $summary($orderItems)], 'Order items edited by admin');
-            Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
-                'order_id' => $orderId,
-                'items' => array_map(static fn(array $item): array => [
-                    'product_id' => (int)$item['product_id'],
-                    'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
-                    'sku' => (string)$item['sku'],
-                    'quantity' => (int)$item['quantity'],
-                ], $orderItems),
-            ]);
-            $db->commit();
-            return null;
         } catch (CreditLimitExceededException $e) {
             if ($db->inTransaction()) $db->rollBack();
             return 'checkout.error.credit_limit';
@@ -391,6 +310,102 @@ class Orders {
             OssThreshold::releaseOrderLock($db, $ossLock);
             self::releaseCheckoutLock($sqliteLock);
         }
+    }
+
+    /** The edit transaction of replaceItems(), run again when MySQL picked it as a deadlock victim. */
+    private static function replaceItemsWithin(PDO $db, int $orderId, callable $price, array $newItems): ?string {
+        $creditCompany = Customers::invoiceCreditCompany((int)(self::byId($orderId)['customer_id'] ?? 0));
+        $db->beginTransaction();
+        self::lockWithin($orderId);
+        Customers::lockInvoiceCredit($creditCompany);
+        $order = self::byId($orderId);
+        $refusal = $order === null ? 'admin.order.edit.not_found' : self::editRefusal($order);
+        if ($refusal !== null) {
+            $db->rollBack();
+            return $refusal;
+        }
+        $oldItems = self::items($orderId);
+        Inventory::lockEditSkus($oldItems, $newItems);
+        $touchedSkus = [];
+        foreach ($oldItems as $item) {
+            if (Inventory::isDigitalLine($item)) continue;
+            Inventory::releaseOrderItem($item, $orderId);
+            foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
+        }
+        if ($touchedSkus !== []) Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
+        $db->prepare("DELETE FROM order_items WHERE order_id = :id")->execute([':id' => $orderId]);
+        OssThreshold::withoutOpenOrder($db, $orderId);
+        $pricing = $price();
+        if (isset($pricing['error'])) {
+            $db->rollBack();
+            return (string)$pricing['error'];
+        }
+        ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($pricing['items']);
+
+        $snapshot = $pricing['financial_snapshot'];
+        Adapters::tax((string)($snapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')))::validateSnapshot($snapshot);
+        self::assertSnapshotItems($snapshot, $orderItems);
+        $totals = $snapshot['totals'];
+        if ((int)$totals['subtotal'] !== $subtotal || (int)$totals['shipping'] !== (int)$pricing['shipping_cost']
+            || (int)$totals['payment_fee'] !== (int)$pricing['payment_fee']
+            || strtolower((string)$snapshot['currency']) !== strtolower((string)$order['currency'])) {
+            throw new \InvalidArgumentException('Financial snapshot does not match the edited order');
+        }
+        $params = [
+            ':subtotal' => $subtotal, ':discount' => (int)$totals['discount'], ':shipping' => (int)$totals['shipping'],
+            ':tax' => (int)$totals['vat'], ':total' => (int)$totals['gross'], ':vattotal' => (int)$totals['vat'],
+            ':nettotal' => (int)$totals['net'], ':vatscen' => (string)$snapshot['scenario'],
+            ':id' => $orderId, ':store' => StoreContext::current()->id(),
+        ];
+        $extra = '';
+        if (self::hasColumn('orders', 'shipping_rate_snapshot')) {
+            $extra .= ', shipping_weight_g = :shipweight, shipping_rate_snapshot = :shipsnapshot';
+            $params += [':shipweight' => (int)$pricing['shipping_weight_g'], ':shipsnapshot' => (string)$pricing['shipping_rate_snapshot']];
+        }
+        if (self::hasColumn('orders', 'payment_method_snapshot')) {
+            $extra .= ', payment_fee = :paymentfee, payment_method_snapshot = :paymentsnapshot';
+            $params += [':paymentfee' => (int)$pricing['payment_fee'], ':paymentsnapshot' => (string)$pricing['payment_method_snapshot']];
+        }
+        if (self::hasColumn('orders', 'financial_snapshot')) {
+            $extra .= ', financial_snapshot = :financialsnapshot';
+            $params[':financialsnapshot'] = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        }
+        $db->prepare("UPDATE orders SET subtotal = :subtotal, discount_amount = :discount, shipping_cost = :shipping,
+                tax_amount = :tax, total = :total, vat_total = :vattotal, net_total = :nettotal, vat_scenario = :vatscen{$extra},
+                updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store")->execute($params);
+        SalesDaily::touchOrders([$orderId], $db);
+        // R51 (review round 51, low): an edit that raises an order on invoice checks the company's credit limit like
+        // checkout (under the company's row lock). The open total read there holds this order at its new total
+        // while its payment is open; a failed payment is not counted there, so its new total is added.
+        $customerId = (int)($order['customer_id'] ?? 0);
+        if ($customerId > 0 && (int)$totals['gross'] > (int)$order['total']
+            && self::paysOnInvoice((string)$order['payment_method'], ['payment_method_snapshot' => (string)($pricing['payment_method_snapshot'] ?? $order['payment_method_snapshot'] ?? '')])) {
+            $counted = in_array((string)($order['payment_status'] ?? 'pending'), ['pending', 'authorized'], true);
+            Customers::assertInvoiceCredit($customerId, $counted ? 0 : (int)$totals['gross'], $creditCompany);
+        }
+        self::insertItems($orderId, $orderItems);
+        OssThreshold::recordOrder($db, $orderId);
+        foreach ($orderItems as $item) {
+            foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
+        }
+        Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
+        // Units the edit gave back go to orders waiting for them.
+        BackorderAllocation::allocate(array_values(array_unique($touchedSkus)));
+
+        $summary = static fn(array $items): array => array_map(static fn(array $i): string => $i['sku'] . ' ×' . $i['quantity'], $items);
+        AuditLog::log('order', $orderId, ['total' => (int)$order['total'], 'items' => $summary($oldItems)],
+            ['total' => (int)$totals['gross'], 'items' => $summary($orderItems)], 'Order items edited by admin');
+        Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
+            'order_id' => $orderId,
+            'items' => array_map(static fn(array $item): array => [
+                'product_id' => (int)$item['product_id'],
+                'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
+                'sku' => (string)$item['sku'],
+                'quantity' => (int)$item['quantity'],
+            ], $orderItems),
+        ]);
+        $db->commit();
+        return null;
     }
 
     /**

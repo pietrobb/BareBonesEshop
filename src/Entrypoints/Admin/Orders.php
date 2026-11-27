@@ -619,7 +619,8 @@ function pageRma(): void {
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
                         <input type="hidden" name="status" value="refunded">
                         <input type="hidden" name="outside_refund" value="keep">
-                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.rma.refund_keep_outside')) ?></button>
+                        <?php $keep = Rma::owedKeepingOutside((int)$r['id'], (int)$r['order_id']); /* R61: the amount it pays */ ?>
+                        <button class="btn btn-sm" type="submit" data-rma-keep-amount="<?= (int)$keep ?>"><?= esc(I18n::format('admin.rma.refund_keep_outside', ['amount' => I18n::price($keep, $currency)])) ?></button>
                     </form>
                     <?php endif; ?>
                     <?php foreach ($outside > 0 ? [] : ($next[$r['status']] ?? []) as $to => $label): ?>
@@ -692,6 +693,7 @@ function handleRmaStatus(): void {
             $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id), $outside > 0 && !$keepOutside, $keepOutside);
             if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
                 PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0), (int)$credit['id']);
+                PaymentService::settleManualItemRefund((int)$rma['order_id']);
             }
         } elseif ($status !== 'refunded' && !Rma::setStatus($id, $status)) {
             throw new LogicException(I18n::t('admin.rma.transition_refused'));

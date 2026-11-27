@@ -14,6 +14,7 @@ final class SetupChecklist
         'payment.' => 'payments',
         'admin.' => 'admin_users',
         'provider.shipping' => 'shipping',
+        'shipping.' => 'shipping', // R61 (review round 26, low 9): shipping.file_edited, shipping.methods_file
         'provider.mail' => 'mail', // R29: the SMTP server and the sender are set in Admin → E-mail delivery (provider.mail, provider.mail_from)
         'catalog.digital_files' => 'digital_assets',
         'pricing.cart_rules' => 'promotions',

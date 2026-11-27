@@ -73,7 +73,9 @@ try {
     $r53gRestored = null;
     try { $r53gRestored = BackupService::restoreFiles($r53gPath); } catch (Throwable $e) { $r53gRestored = $e->getMessage(); }
     clearstatcache();
-    assert_true(is_file($r53gSalt) && (string)@file_get_contents($r53gSalt) === 'r53g-salt',
+    // R61: a salt the live shop lacks is set aside (as that file), not written in place.
+    $r53gSaltCopy = (is_array($r53gRestored) ? (string)($r53gRestored['aside_dir'] ?? '') : '') . '/' . basename($r53gSalt);
+    assert_true(!file_exists($r53gSalt) && is_file($r53gSaltCopy) && (string)@file_get_contents($r53gSaltCopy) === 'r53g-salt',
         'R53 backup kinds: the GDPR salt is restored as the file this shop configures, whatever the metadata says (was: a directory at its path; '
         . (is_array($r53gRestored) ? 'restored' : (string)$r53gRestored) . ')');
     if (PHP_OS_FAMILY !== 'Windows') {

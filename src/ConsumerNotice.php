@@ -82,6 +82,9 @@ final class ConsumerNotice {
         $storeDate = (string)($legal['updated_at'] ?? '');
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $storeDate) && $storeDate > $updated) $updated = $storeDate;
         $vars['{{updated_at}}'] = esc(I18n::date($updated, $locale));
+        // R61 (review round 26, low 13): a date format ending in a dot (hu "Y. m. d.") takes the sentence's full stop.
+        // Was: "Utolsó frissítés: 2026. 11. 26.."
+        if (str_ends_with($vars['{{updated_at}}'], '.')) $html = str_replace('{{updated_at}}.', '{{updated_at}}', $html);
         // <!-- if:key -->…<!-- /if --> keeps its text (a label with the value) only when the store sets that key.
         $html = (string)preg_replace_callback('/<!--\s*if:([a-z_]+)\s*-->(.*?)<!--\s*\/if\s*-->/s',
             static fn(array $m): string => ($vars['{{' . $m[1] . '}}'] ?? '') !== '' ? $m[2] : '', $html);

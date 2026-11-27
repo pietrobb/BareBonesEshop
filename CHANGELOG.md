@@ -483,8 +483,61 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   came from, then move `mail.json` into the data directory and the pending jobs you recognise into `jobs/pending/` by
   hand; until then the shop sends mail as `config.php` configures it. The `import_process` job type is gone (nothing
   created it); such a job fails as an unknown job type.
+- **A files restore no longer puts `stores.json`, `shipping.json` or the GDPR salt in place (review round 26, finding
+  1).** They are set aside like `mail.json`, also where the live shop has none, and the restore lists each copy with
+  the path the shop reads it from. After restoring onto a new server, check the copies (the stores' sellers and bank
+  accounts, the shipping prices) and move them there by hand. `written:` now counts only the files written into the
+  shop; `set aside:` counts the rest. Copies set aside stay at least 30 days (were: only those of the last 5 restores).
+- **Customer account templates: an order's documents are `invoices` (review round 26, finding 4).** The orders list and
+  the order page of `account-page.html` list every document of an order (the invoice, then its credit notes) as
+  `{{#each invoices}}` / `{{#each account.order.invoices}}` with `number` and `url`. A copy of that block made before
+  2.1.3 (`blocks/stores/<store>/storefront/account-page.html`, or a theme's own) still reads `invoice` /
+  `account.order.invoice`, which holds the invoice only; copy the `{{#each invoices}}` cells of
+  `themes/default/blocks/storefront/account-page.html` into it to show the credit notes too. `cli/theme-check.php` warns
+  about such a copy.
 
 ### Changes
+
+- **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
+  restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
+  backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt
+  were restored the same way. All three are now always set aside. The restore prints each copy with its destination,
+  keeps them 30 days, and a SQLite restore removes the replacement copy a killed restore left next to the database
+  (`shop.sqlite.restore-<hex>.tmp`); the doctor reports such copies and MySQL rollback dumps (`pre-restore-*.sql`) left
+  in `backup_recovery_dir` (review round 26, findings 11 and 12).
+
+- **A return credit note no longer credits a cent more VAT than the invoice has left at a rate (review round 26, low
+  2).** A credit capped to what is left uncredited at a rate capped the net only; its VAT, rounded from the gross,
+  could pass the rate's rest by one cent (2381 against 2380 at 23 % after two returns settled in the other order). The
+  VAT is now capped too and the net takes the remainder of the gross.
+- **An admin edit of a pending order MySQL picks as a deadlock victim runs again (review round 26, low 3).** Since the
+  edit locks its old and new SKUs together it can deadlock with a concurrent stock write; the edit then failed with an
+  error (13 % under `Warehouse::setAvailable` load). It now runs again, up to three times, like a checkout.
+- **Every reader of `stores.json` refuses one over 2 MB (review round 26, low 5).** Only the store resolution did: with a
+  3 MB file it found no store while the locale, Admin → Stores, orders and mail read all six. All of them now read it
+  through `DataOverrides::readStores()` (`DataOverrides::STORES_MAX_BYTES`), and the doctor says the file is too large.
+- **`setup.php shipping-import` of a real 2.1.x file (review round 26, lows 6 and 7).** Its eu zone has no SK, so every
+  import reported "zone eu: its countries differ" and sent the merchant to the zones page, which does not set these
+  countries; SK is no longer compared (the home zones name it as `@store`). Delivery days of free text ("2-3 working
+  days") are imported as the number or range they start with, else the shipped days, and reported (were: imported, then
+  refused by every save in Admin → Shipping).
+- **Records saved before 2.1.3 can be edited again (review round 26, low 8).** A zone or method name with a tab or a line
+  separator inside is saved with a space instead (was: refused as "Code and name are required", so the record could not
+  even be turned off); a name that shows nothing says so. Delivery days saved as text stay as they are until changed.
+- **The doctor's shipping checks are translated (review round 26, low 9).** `shipping.file_edited` and
+  `shipping.methods_file` have a title in every language and link to Admin → Shipping; the hand-edit warning names the
+  delivery methods in the admin's language (was: "Standard and Express" in English everywhere).
+- **The store domain probe keeps to its 8 seconds, DNS included (review round 26, low 10).** The lookup asks the name
+  servers of `/etc/resolv.conf` itself and gives up at the deadline (`BoundedDns`); a domain without an answer by then is
+  tested on the next save. Was: the system resolver waited as long as it liked, 12 s per save with a silent name server.
+- **Returns and refunds by hand (review round 26, low 13).** "Refunded in full" on Admin → Returns names the amount it
+  pays. A bank-transfer order whose money all went back by hand through its returns is `refunded` (was: stayed
+  `partially_refunded`). After the cancelled rest's refund had to credit part of an outside refund at other rates, a
+  later return no longer reverses that money at the cancelled goods' rate: the returned goods' rate is credited in full
+  and the customer gets their whole value less that money (was: up to a few euros short, the cancelled rate left
+  uncredited).
+- **Small fixes (review round 26, low 13).** A legal page's date in a format ending with a dot (Hungarian) no longer
+  ends its sentence with two; the backup staging sweep removes only this user's private (0700) directories.
 
 - **A forged backup can no longer redirect the shop's mail or run jobs on restore (review round 25, findings 1 and
   2).** `mail.json` was restored in place when the live shop had none: a shop whose SMTP server is in `config.php` then
@@ -522,7 +575,7 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **Smaller fixes (review round 25, lows).** The names of shipping zones and of shipping and payment methods are refused
   when they show nothing (U+200B, Private Use characters alone, which no other typed name accepts now either) or hold a
   control character or line separator (U+2028); the delivery days of a rate take a number or a range ("2-3") as for
-  Standard/Express. `stores.json` is read up to 2 MB (`Bootstrap::STORES_MAX_BYTES`); a larger file is refused like
+  Standard/Express. `stores.json` is read up to 2 MB (`DataOverrides::STORES_MAX_BYTES`); a larger file is refused like
   invalid JSON instead of being read whole at every request. A Slovak installation names the B2B payment method
   "Nákup na faktúru" (it read "Invoice purchase"), with its other languages as translations. A zone whose Standard or
   Express price was emptied in Admin → Shipping is not served by that method (its countries took the price of the next

@@ -54,8 +54,7 @@ final class StoreSettings {
 
     /** Decoded stores.json, read fresh (not the per-request Bootstrap cache). */
     public static function load(): array {
-        $data = json_decode((string)@file_get_contents(self::path()), true);
-        return is_array($data) ? $data : [];
+        return DataOverrides::readStoresFile(self::path()) ?? [];
     }
 
     /**
@@ -401,7 +400,14 @@ final class StoreSettings {
                 $probe['untested'][] = $domain;
                 continue;
             }
-            $addresses = self::resolve($domain);
+            // R61 (review round 26, low 10): the lookup too ends at the deadline (was: unbounded, 12 s per save with a name
+            // server that did not answer); a domain without an answer by then is tested by the next save.
+            $addresses = self::resolve($domain, $deadline);
+            $left = (int)floor($deadline - microtime(true));
+            if ($addresses === null || ($addresses !== [] && $left < 1)) {
+                $probe['untested'][] = $domain;
+                continue;
+            }
             // R58 (review round 23, low N1): a name without an address is not asked. The request went out unpinned and
             // libcurl answers *.localhost itself with 127.0.0.1: the probe reached the server's own loopback.
             if ($addresses === []) {
@@ -424,15 +430,10 @@ final class StoreSettings {
         return $probe;
     }
 
-    /** @return list<string> the A and AAAA addresses of $host ([] when it does not resolve) */
-    private static function resolve(string $host): array {
+    /** @return list<string>|null the A and AAAA addresses of $host ([] when it does not resolve, null: no answer by $deadline) */
+    private static function resolve(string $host, float $deadline): ?array {
         if (self::$resolver !== null) return (self::$resolver)($host);
-        $ips = [];
-        foreach (@dns_get_record($host, DNS_A | DNS_AAAA) ?: [] as $record) {
-            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
-            if (is_string($ip)) $ips[] = $ip;
-        }
-        return array_values(array_unique($ips ?: (@gethostbynamel($host) ?: [])));
+        return BoundedDns::resolve($host, $deadline);
     }
 
     /** Atomic replace: readers see the old or the new file, never a half-written one. */

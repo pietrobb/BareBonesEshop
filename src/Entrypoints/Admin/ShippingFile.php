@@ -33,7 +33,7 @@ function shippingFileMethods(): void {
         <?php return; endif; ?>
         <p class="muted"><?= esc(I18n::format('admin.shipping.file_help', ['currency' => $fileCurrency])) ?></p>
         <?php if (Shipping::fileEdited()): ?>
-        <p class="flash flash-warn" role="alert" data-shipping-file-edited><?= esc(I18n::t('admin.shipping.file_edited')) ?></p>
+        <p class="flash flash-warn" role="alert" data-shipping-file-edited><?= esc(I18n::format('admin.shipping.file_edited', ['methods' => implode(', ', array_map(static fn(string $k): string => Shipping::methodName($k, I18n::locale()) ?? $k, Shipping::CHECKOUT_METHODS))])) ?></p>
         <?php endif; ?>
         <?php foreach ($methods as $key => $zones): $first = $zones[0]; ?>
         <form method="post" action="admin.php?p=shipping&amp;action=file_method_save" data-shipping-file-method="<?= esc($key) ?>">
@@ -111,7 +111,7 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
     if ($freeAbove === 0) return ['settings' => $all, 'error' => I18n::t('admin.shipping.free_above_zero')];
     $own['free_above'] = $freeAbove;
     $days = trim(Security::str($post['delivery_days'] ?? ''));
-    if ($days !== '' && preg_match('/^[0-9][0-9 –-]{0,19}$/u', $days) !== 1) return ['settings' => $all, 'error' => I18n::t('admin.shipping.days_format')];
+    if (!Shipping::deliveryDaysAccepted($days, $own['delivery_days'])) return ['settings' => $all, 'error' => I18n::t('admin.shipping.days_format')];
     $own['delivery_days'] = $days;
     $posted = is_array($post['rates'] ?? null) ? $post['rates'] : [];
     foreach ($zones as $zone) {

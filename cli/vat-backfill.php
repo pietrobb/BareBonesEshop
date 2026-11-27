@@ -108,7 +108,7 @@ if ($apply) {
     fwrite(STDOUT, "[backup] {$meta['filename']} sha256=" . substr($meta['sha256'], 0, 12) . "\n");
 }
 
-$stores = json_decode(@file_get_contents(DataOverrides::storesPath()) ?: '{}', true) ?: [];
+$stores = DataOverrides::readStores() ?? [];
 
 $where = "(o.vat_scenario IS NULL OR o.vat_total IS NULL OR o.net_total IS NULL)";
 if ($orderOne > 0) $where = "o.id = " . (int)$orderOne;

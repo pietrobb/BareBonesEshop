@@ -114,6 +114,8 @@ final class AccountViewModel
                 'total' => I18n::price((int)$order['total'], (string)$order['currency']),
                 'date' => I18n::dateTime((string)$order['created_at']),
                 'invoices' => $invoices[(int)$order['id']] ?? [],
+                // R61 (review round 26, low 4): a shop's copy of account-page.html made before 2.1.3 reads `invoice`.
+                'invoice' => ($invoices[(int)$order['id']] ?? [])[0] ?? null,
             ];
         }, $orders);
     }
@@ -213,6 +215,7 @@ final class AccountViewModel
     private static function orderDetail(int $customerId, array $order): array
     {
         $id = (int)$order['id'];
+        $documents = self::documents([$id])[$id] ?? [];
         return self::orderSummary($order, Customers::orderItems($customerId, $id)) + [
             'id' => $id,
             'number' => (string)$order['order_number'],
@@ -222,7 +225,8 @@ final class AccountViewModel
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
             'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
             'tracking' => implode(', ', array_column(Fulfillment::customerTracking($order), 'label')), // R50: parcels shipped from Admin → Shipments too
-            'invoices' => self::documents([$id])[$id] ?? [],
+            'invoices' => $documents,
+            'invoice' => $documents[0] ?? null, // R61: the key of account-page.html copies made before 2.1.3
             'bank_transfer_html' => BankTransferInstructions::html($order),
             'payable' => PaymentLink::payable($order),
             'orders_url' => Template::storeUrl('/account.php?p=orders'),

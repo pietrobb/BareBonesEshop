@@ -101,6 +101,24 @@ class Shipping {
         'ed5ed200e8666efb2ed08c0b95ae49122a81c39a24ca4820633288bfe725994c',
     ];
 
+    /** Delivery days as Admin → Shipping takes them: a number or a range ("2", "2-3"). */
+    public const DELIVERY_DAYS_PATTERN = '/^[0-9][0-9 –-]{0,19}$/u';
+
+    /**
+     * R61 (review round 26, lows 7 and 8): delivery days the admin can save — '' or DELIVERY_DAYS_PATTERN, or $saved
+     * unchanged (a text from before R60, "2-3 working days", kept as it was so the record can still be edited or turned off).
+     */
+    public static function deliveryDaysAccepted(string $days, ?string $saved = null): bool {
+        return $days === '' || preg_match(self::DELIVERY_DAYS_PATTERN, $days) === 1 || ($saved !== null && $days === trim($saved));
+    }
+
+    /** R61 (low 7): the number or range a free text starts with ("2-3 working days" → "2-3"), null when it starts with none. */
+    public static function normalizeDeliveryDays(string $text): ?string {
+        $text = trim($text);
+        if ($text === '' || preg_match(self::DELIVERY_DAYS_PATTERN, $text) === 1) return $text;
+        return preg_match('/^([0-9]{1,3}(?:\s*[–-]\s*[0-9]{1,3})?)(?![0-9])/u', $text, $m) === 1 ? (string)preg_replace('/\s+/u', '', $m[1]) : null;
+    }
+
     /** R60: whether $path (the installation's shipping.json by default) is no shipped version of it, i.e. edited by hand. */
     public static function fileEdited(?string $path = null): bool {
         $path ??= self::filePath();
@@ -141,11 +159,17 @@ class Shipping {
         if (strtoupper((string)($edited['currency'] ?? 'EUR')) !== strtoupper((string)($file['currency'] ?? 'EUR'))) {
             $warnings[] = 'currency ' . strtoupper((string)($edited['currency'] ?? 'EUR')) . ' differs from shipping.json\'s ' . strtoupper((string)($file['currency'] ?? 'EUR')) . ': the amounts were imported as they are';
         }
-        // Up to 2.1.2 the home zones named SK where shipping.json now says "@store" (the store's country).
-        $countries = static fn(mixed $zone): array => array_map(static fn($c): string => $c === '@store' ? 'SK' : strtoupper((string)$c), (array)(is_array($zone) ? ($zone['countries'] ?? []) : []));
+        // Up to 2.1.2 the home zones named SK where shipping.json now says "@store" (the store's country), and the eu zone
+        // had no SK (R61, review round 26, low 6: every real 2.1.x file was reported). SK is therefore not compared.
+        $countries = static function (mixed $zone): array {
+            $codes = array_map(static fn($c): string => strtoupper((string)$c), (array)(is_array($zone) ? ($zone['countries'] ?? []) : []));
+            $codes = array_values(array_unique(array_diff($codes, ['@STORE', 'SK'])));
+            sort($codes);
+            return $codes;
+        };
         foreach ((array)($edited['zones'] ?? []) as $zone => $definition) {
             if (in_array((string)$zone, $zones, true) && $countries($definition) !== $countries($file['zones'][$zone] ?? null)) {
-                $warnings[] = "zone {$zone}: its countries differ from shipping.json and are not imported (Admin → Shipping → zones)";
+                $warnings[] = "zone {$zone}: its countries differ from shipping.json and are not imported; Standard and Express deliver to shipping.json's countries of the zone (the admin does not set them)";
             }
         }
         foreach (self::CHECKOUT_METHODS as $key) {
@@ -157,6 +181,12 @@ class Shipping {
                 continue;
             }
             $methods[$key] = self::methodSettings($own, $zones);
+            $days = self::normalizeDeliveryDays($methods[$key]['delivery_days']);
+            if ($days !== $methods[$key]['delivery_days']) {
+                $kept = self::methodSettings($shipped, $zones)['delivery_days'];
+                $warnings[] = "{$key}: delivery days \"{$methods[$key]['delivery_days']}\" imported as \"" . ($days ?? $kept) . '" (Admin → Shipping takes a number or a range, e.g. 2-3)';
+                $methods[$key]['delivery_days'] = $days ?? $kept;
+            }
             foreach (array_keys((array)($own['rates'] ?? [])) as $zone) {
                 if (!in_array((string)$zone, $zones, true)) $warnings[] = "{$key}: the price for zone {$zone} is not imported (shipping.json has no such zone for these methods)";
             }

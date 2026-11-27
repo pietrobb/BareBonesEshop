@@ -412,6 +412,17 @@ final class InvoiceService
             if ($allowedGross > 0 && array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['gross'], $indexes)) === $allowedGross
                 && $net !== $allowedNet && ($fixed = (int)$lines[$last]['net'] + $allowedNet - $net) >= 0 && $fixed <= (int)$lines[$last]['gross']) {
                 $lines[$last]['net'] = $fixed;
+                $net = $allowedNet;
+            }
+            // R61 (review round 26, low 2): nor more VAT than the rate has uncredited. Only the net was bounded, so a credit
+            // capped below the rate's rest (money refunded outside the return) rounded its net down and credited 1 cent of
+            // VAT more than the invoice had left (2381 against 2380 at 23 %); its net takes that cent.
+            $over = array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['gross'], $indexes)) - $net - ($allowedGross - $allowedNet);
+            for ($p = count($indexes) - 1; $allowedGross > 0 && $over > 0 && $p >= 0; $p--) {
+                $raise = min($over, (int)$lines[$indexes[$p]]['gross'] - (int)$lines[$indexes[$p]]['net']);
+                if ($raise <= 0) continue;
+                $lines[$indexes[$p]]['net'] += $raise;
+                $over -= $raise;
             }
             foreach ($indexes as $i) $lines[$i]['vat'] = (int)$lines[$i]['gross'] - (int)$lines[$i]['net'];
         }
@@ -808,6 +819,17 @@ final class InvoiceService
     }
 
     /**
+     * R61 (review round 26, low 13): what the return's credit pays when the money refunded outside the returns stays with
+     * the customer (Admin → Returns "Refunded in full"): the goods' value as capped by the invoice's uncredited rest.
+     */
+    public static function rmaCreditKeepingOutside(int $sourceInvoiceId, int $rmaId, array $quantities): int {
+        if (!$quantities) return 0;
+        $db = Db::get();
+        [$source, $order, , $lines] = self::rmaCreditDraft($db, $sourceInvoiceId, $rmaId, $quantities);
+        return max(0, (int)self::capCredit($db, $lines, $source, $order, true)[1]['gross']);
+    }
+
+    /**
      * R49 (capability review of finding 3): an item credit less the money of the order refunded outside its returns
      * that no other return counted yet (Rma::refundedOutsideReturns()): the customer gets what is still owed, never the
      * same money twice. Refused when that money covers the whole credit: the return is closed without payout instead.
@@ -849,6 +871,7 @@ final class InvoiceService
                 $amount -= $gross;
             }
         }
+        $pools = self::poolsAfterUnshippedSpill($db, $orderId, $pools);
         foreach (Rma::outsideCounted($orderId)['keys'] as $key => $counted) {
             if ($key !== '' && isset($pools[$key])) $pools[$key] = max(0, $pools[$key] - $counted);
         }
@@ -885,6 +908,38 @@ final class InvoiceService
         }
         if ($free > 0) $deduction[''] = $free;
         return $deduction;
+    }
+
+    /**
+     * R61 (review round 26, low 13): the refund of the cancelled unshipped rest credits its goods' rates as far as an
+     * earlier outside refund's credit note left them room, the rest at the other rates (R60). That much of the outside
+     * money's credit at the goods' rates is the goods' now, the money counts at those other rates instead. Was: the
+     * outside money stayed counted at the cancelled goods' rate, a return reversed it there (the rate then had uncredited
+     * what nobody kept) and the returned goods' rate came up short: their credit was capped, the customer paid less.
+     * @param array<string, int> $pools
+     * @return array<string, int>
+     */
+    private static function poolsAfterUnshippedSpill(PDO $db, int $orderId, array $pools): array {
+        if ($pools === []) return $pools;
+        $stmt = $db->prepare("SELECT vat_breakdown, credit_snapshot FROM invoices WHERE order_id = :order AND store_id = :store AND type = 'credit_note' AND status <> :cancelled ORDER BY id");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
+        $notes = array_filter($stmt->fetchAll(PDO::FETCH_ASSOC), static fn(array $note): bool => ((json_decode((string)$note['credit_snapshot'], true) ?: [])['split'] ?? '') === 'unshipped');
+        $order = $notes !== [] ? Orders::byId($orderId) : null;
+        $goods = $order ? self::unshippedParts($order) : null;
+        if (!$goods) return $pools;
+        foreach ($notes as $note) {
+            foreach (json_decode((string)$note['vat_breakdown'], true) ?: [] as $key => $info) {
+                $spill = is_array($info) && !isset($goods[(string)$key]) ? -((int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0)) : 0;
+                foreach (array_keys($goods) as $goodsKey) {
+                    $move = min($spill, (int)($pools[(string)$goodsKey] ?? 0));
+                    if ($move <= 0) continue;
+                    $pools[(string)$goodsKey] -= $move;
+                    $pools[(string)$key] = ($pools[(string)$key] ?? 0) + $move;
+                    $spill -= $move;
+                }
+            }
+        }
+        return array_filter($pools, static fn(int $pool): bool => $pool > 0);
     }
 
     /**
@@ -2678,9 +2733,7 @@ final class InvoiceService
     private static function storesConfig(): array
     {
         if (self::$storesOverride !== null) return self::$storesOverride;
-        $file = DataOverrides::storesPath(self::baseDir());
-        $j = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
-        return $j ?: [];
+        return DataOverrides::readStores(self::baseDir()) ?? [];
     }
 
     private static function storageDir(): string
