@@ -527,6 +527,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 - **The doctor's shipping checks are translated (review round 26, low 9).** `shipping.file_edited` and
   `shipping.methods_file` have a title in every language and link to Admin → Shipping; the hand-edit warning names the
   delivery methods in the admin's language (was: "Standard and Express" in English everywhere).
+- **The store domain probe keeps to its 8 seconds, DNS included (review round 26, low 10).** The lookup asks the name
+  servers of `/etc/resolv.conf` itself and gives up at the deadline (`BoundedDns`); a domain without an answer by then is
+  tested on the next save. Was: the system resolver waited as long as it liked, 12 s per save with a silent name server.
+- **Returns and refunds by hand (review round 26, low 13).** "Refunded in full" on Admin → Returns names the amount it
+  pays. A bank-transfer order whose money all went back by hand through its returns is `refunded` (was: stayed
+  `partially_refunded`). After the cancelled rest's refund had to credit part of an outside refund at other rates, a
+  later return no longer reverses that money at the cancelled goods' rate: the returned goods' rate is credited in full
+  and the customer gets their whole value less that money (was: up to a few euros short, the cancelled rate left
+  uncredited).
+- **Small fixes (review round 26, low 13).** A legal page's date in a format ending with a dot (Hungarian) no longer
+  ends its sentence with two; the backup staging sweep removes only this user's private (0700) directories.
 
 - **A forged backup can no longer redirect the shop's mail or run jobs on restore (review round 25, findings 1 and
   2).** `mail.json` was restored in place when the live shop had none: a shop whose SMTP server is in `config.php` then

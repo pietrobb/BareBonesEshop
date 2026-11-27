@@ -617,6 +617,10 @@ class BackupService
             // A minute old at least: a directory just made may not hold its lock yet.
             if (isset(self::$stagingLocks[$dir]) || is_link($dir) || !preg_match('/^bbe-backup-[0-9a-f]{32}$/', basename($dir))
                 || (int)@filemtime($dir) > time() - 60) continue;
+            // R61 (review round 26, low 13): only a directory as stagingPath() makes it: this user's, private (0700). Was:
+            // any match in a shared temp directory, so a shop run as root removed what another user's process staged there.
+            $stat = @stat($dir);
+            if (!is_array($stat) || (function_exists('posix_geteuid') && (($stat['mode'] & 0077) !== 0 || (int)$stat['uid'] !== posix_geteuid()))) continue;
             $owner = @fopen($dir . DIRECTORY_SEPARATOR . '.owner', 'rb');
             if ($owner === false || is_link($dir . DIRECTORY_SEPARATOR . '.owner')) {
                 if ($owner !== false) fclose($owner);

@@ -903,7 +903,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.refund_in_flight' => 'A rendelés egyik visszatérítése még folyamatban van. A visszaküldést akkor jelölje visszatérítettnek, ha az már könyvelve van (ha meghiúsul, a visszaküldés teljes összege jár).',
     'admin.rma.refunded_outside_hint' => 'A visszaküldésen kívül már visszatérítve: {amount}. A „Visszatérítve” beszámítja, és {due} összeget fizet ki.',
     'admin.rma.refund_less_outside' => 'Visszatérítve (visszatérített összeg beszámítása)',
-    'admin.rma.refund_keep_outside' => 'Teljes visszatérítés (a visszatérített összeg a vásárlónál marad)',
+    'admin.rma.refund_keep_outside' => 'Teljes visszatérítés: {amount} (a visszatérített összeg a vásárlónál marad)',
     'admin.rma.closed_without_payout' => 'A(z) #{id} visszaküldés kifizetés nélkül lezárva.',
     'admin.rma.transition_refused' => 'Nem engedélyezett állapotváltás.',
     'admin.rma.status_changed' => '#{id} visszaküldés → {status}',

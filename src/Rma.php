@@ -627,6 +627,12 @@ class Rma {
         return [$outside, $source ? InvoiceService::rmaCreditOwed((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId), $outside)[1] : 0];
     }
 
+    /** R61 (review round 26, low 13): what "Refunded in full" pays on this received return (the outside money stays with the customer). */
+    public static function owedKeepingOutside(int $rmaId, int $orderId): int {
+        $source = InvoiceService::byOrderId($orderId);
+        return $source ? InvoiceService::rmaCreditKeepingOutside((int)$source['id'], $rmaId, InvoiceService::creditableQuantities($rmaId)) : 0;
+    }
+
     /**
      * R49 (finding 3): close a received return whose money went back outside it without a credit note or payout; the
      * admin decides so after "Refunded" named that money. Its units count as refunded. Only when that money (what no other

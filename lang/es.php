@@ -2454,7 +2454,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.rma.refund_in_flight' => 'Un reembolso de este pedido sigue en curso. Marque la devolución como reembolsada cuando esté registrado (si falla, la devolución se paga entera).',
     'admin.rma.refunded_outside_hint' => 'Ya reembolsado fuera de esta devolución: {amount}. «Reembolsado» lo descuenta y paga {due}.',
     'admin.rma.refund_less_outside' => 'Reembolsado (descontar el dinero reembolsado)',
-    'admin.rma.refund_keep_outside' => 'Reembolsado íntegramente (el dinero reembolsado queda para el cliente)',
+    'admin.rma.refund_keep_outside' => 'Reembolsado íntegramente: {amount} (el dinero reembolsado queda para el cliente)',
     'admin.rma.closed_without_payout' => 'Devolución #{id} cerrada sin pago.',
     'admin.common.no' => 'No',
     'admin.form.admin_attribute.unit.placeholder' => 'p. ej. kW, kg, cm',

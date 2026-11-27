@@ -1537,6 +1537,20 @@ class PaymentService {
         ] + ($creditNoteId > 0 ? ['credit_note_id' => $creditNoteId] : []), 5);
     }
 
+    /**
+     * R61 (review round 26, low 13): an item refund paid back by hand ('manual-admin') that brings what went back to the
+     * order's total moves the payment to refunded and closes the returned order (was: it stayed partially_refunded with
+     * nothing left to refund). No money row: the item refund holds that money (offLedgerCredits()).
+     */
+    public static function settleManualItemRefund(int $orderId): void {
+        $moved = self::withLockedOrder($orderId, static function (array $order) use ($orderId): bool {
+            if (!in_array((string)($order['payment_status'] ?? ''), ['paid', 'partially_refunded'], true)) return false;
+            if (self::refundedAmount($orderId) + self::offLedgerCredits($order) < (int)$order['total']) return false;
+            return self::applyTransition($order, 'refunded', 'refund.manual_item_completed', 0, 'manual_item_refunded_' . $orderId, ['actor' => 'admin']);
+        });
+        if ($moved) self::closeRefundedOrder($orderId, 'Returns refunded by hand');
+    }
+
     /** Whether the ledger holds the refund row a refund mail announces (it was committed). */
     public static function refundBooked(int $orderId, string $ledgerKey): bool {
         $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
