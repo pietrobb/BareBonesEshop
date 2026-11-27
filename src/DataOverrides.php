@@ -11,6 +11,11 @@ final class DataOverrides
     public const STORES_EXAMPLE = 'stores.example.json';
     /** Largest settings file (stores.json, mail settings) readRegularFile() reads: far above any real shop's. */
     public const MAX_SETTINGS_BYTES = 8 * 1048576;
+    /**
+     * R61 (review round 26, low 5): the largest stores.json any reader accepts (readStores()); a larger one reads as no
+     * stores everywhere. Was: only Bootstrap refused it, while the locale, the admin, orders and mail read all of it.
+     */
+    public const STORES_MAX_BYTES = 2 * 1048576;
     /** R58: the merchant's settings of the shipping.json delivery methods (shippingMethods()). */
     public const SHIPPING_METHODS = 'shipping-methods.json';
 
@@ -65,6 +70,33 @@ final class DataOverrides
         if ($dir !== null && is_file($dir . '/stores.json')) return $dir . '/stores.json';
         $root = $appRoot ?? dirname(__DIR__);
         return is_file($root . '/stores.json') ? $root . '/stores.json' : $root . '/' . self::STORES_EXAMPLE;
+    }
+
+    /**
+     * The decoded stores.json in use (storesPath()), or null when it is missing, not a regular file, larger than
+     * STORES_MAX_BYTES or not a JSON object. Every reader of stores.json goes through here (or readStoresFile()).
+     */
+    public static function readStores(?string $appRoot = null, ?array $config = null): ?array
+    {
+        return self::readStoresFile(self::storesPath($appRoot, $config));
+    }
+
+    /** readStores() of one file; a file over STORES_MAX_BYTES is logged (stores.too_large). */
+    public static function readStoresFile(string $path): ?array
+    {
+        $raw = self::readRegularFile($path, self::STORES_MAX_BYTES);
+        if ($raw === null && self::storesTooLarge($path) && class_exists('Logger')) {
+            Logger::warning('stores.too_large', ['file' => $path, 'max_bytes' => self::STORES_MAX_BYTES]);
+        }
+        $data = $raw === null ? null : json_decode($raw, true);
+        return is_array($data) ? $data : null;
+    }
+
+    /** True when $path is a regular file larger than STORES_MAX_BYTES (the doctor names the reason). */
+    public static function storesTooLarge(string $path): bool
+    {
+        clearstatcache(true, $path);
+        return is_file($path) && (int)@filesize($path) > self::STORES_MAX_BYTES;
     }
 
     /** Where the admin saves stores.json: the data directory, else stores.json in the application root; never the example. */
@@ -158,7 +190,7 @@ final class DataOverrides
     /** True when the stores.json in use is still in the v1.x format (see upgradeLegacyStores). */
     public static function storesNeedUpgrade(string $appRoot, array $config): bool
     {
-        $data = json_decode((string)self::readRegularFile(self::storesPath($appRoot, $config)), true);
+        $data = self::readStores($appRoot, $config);
         return is_array($data) && self::upgradeLegacyStores($data) !== null;
     }
 

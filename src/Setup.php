@@ -211,12 +211,15 @@ class Setup
         $add($appUrl !== '' ? 'pass' : 'warn', 'config.app_url', $appUrl !== '' ? 'Public base URL configured.' : 'app_url is empty: sitemap, password reset and e-mail links are unavailable.', $appUrl !== '' ? '' : "Set app_url in config.php (php cli/setup.php install --app-url=URL sets it on a new install).");
 
         $storesPath = DataOverrides::storesPath($root, $config);
-        $stores = is_file($storesPath) ? json_decode((string)file_get_contents($storesPath), true) : null;
+        $stores = DataOverrides::readStoresFile($storesPath);
+        $storesTooLarge = DataOverrides::storesTooLarge($storesPath);
         $defaultStore = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $storeOk = is_array($stores) && isset($stores['stores'][$defaultStore]);
         $legacyStores = is_array($stores) && DataOverrides::upgradeLegacyStores($stores) !== null;
         $add($storeOk ? 'pass' : 'fail', 'stores.default', $storeOk ? "Default store: {$defaultStore}"
-            : ($legacyStores ? 'stores.json is in the v1.x format (no default_store)' : 'stores.json has no valid default store'),
+            : ($legacyStores ? 'stores.json is in the v1.x format (no default_store)'
+                : ($storesTooLarge ? 'stores.json is larger than ' . (DataOverrides::STORES_MAX_BYTES >> 20) . ' MB: the shop reads it as no stores'
+                    : 'stores.json has no valid default store')),
             $legacyStores ? 'Run php cli/setup.php apply: it writes the upgraded copy to private_runtime_dir/stores.json (the main store becomes "default").'
                 : 'Define default_store and its store record.');
         $onExample = basename($storesPath) === DataOverrides::STORES_EXAMPLE;
@@ -726,7 +729,7 @@ class Setup
         }
         $stores = DataOverrides::seedStores($root, $config);
         if ($stores !== null) $changes[] = ['path' => 'stores.json', 'action' => $stores['action'], 'file' => $stores['path']];
-        $storesData = json_decode((string)@file_get_contents(DataOverrides::storesPath($root, $config)), true);
+        $storesData = DataOverrides::readStores($root, $config);
         $legalSplit = DataOverrides::splitLegacyLegal((array)(is_array($storesData) ? ($storesData['stores'] ?? []) : []), $config);
         if ($legalSplit === null) throw new RuntimeException('Cannot copy the legal texts into the stores of the private runtime directory');
         if ($legalSplit !== []) $changes[] = ['path' => 'legal', 'action' => 'split per store (' . count($legalSplit) . ' files): review each store\'s texts'];

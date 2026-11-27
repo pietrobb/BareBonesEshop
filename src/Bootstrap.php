@@ -12,22 +12,9 @@ class Bootstrap {
     private static ?array $stores = null;
     private static ?array $categoryNames = null;
 
-    /** R60 (review round 25, low): stores.json is read up to this size; a larger one is refused like invalid JSON. */
-    public const STORES_MAX_BYTES = 2 * 1024 * 1024;
-
-    /** Per-request cached stores.json decode. Always returns an array. */
+    /** Per-request cached stores.json decode. Always returns an array (R60/R61: [] over DataOverrides::STORES_MAX_BYTES). */
     public static function stores(): array {
-        if (self::$stores === null) {
-            $file = DataOverrides::storesPath();
-            // Was: read whole at every request, whatever its size.
-            $raw = is_file($file) ? @file_get_contents($file, false, null, 0, self::STORES_MAX_BYTES + 1) : '';
-            if (is_string($raw) && strlen($raw) > self::STORES_MAX_BYTES) {
-                if (class_exists('Logger')) Logger::warning('stores.too_large', ['file' => $file, 'max_bytes' => self::STORES_MAX_BYTES]);
-                $raw = '';
-            }
-            $decoded = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
-            self::$stores = is_array($decoded) ? $decoded : [];
-        }
+        self::$stores ??= DataOverrides::readStores() ?? [];
         return self::$stores;
     }
 

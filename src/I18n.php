@@ -254,8 +254,7 @@ class I18n {
 
     private static function stores(): array {
         if (!self::$stores) {
-            $file = DataOverrides::storesPath();
-            self::$stores = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
+            self::$stores = DataOverrides::readStores() ?? []; // R61 (low 5): the same 2 MB limit as Bootstrap
         }
         return self::$stores;
     }

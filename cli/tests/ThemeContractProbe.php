@@ -164,6 +164,17 @@ try {
             $report['failures'][] = $target . ': ' . $e->getMessage();
         }
     }
+    // R61 (review round 26, low 4): a copy of account-page.html made before 2.1.3 reads the single `invoice`; it still
+    // works, but lists no credit notes.
+    foreach ([$blocksDir, $themesDir] as $dir) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
+            if ($file->getFilename() !== 'account-page.html') continue;
+            $html = (string)@file_get_contents($file->getPathname());
+            if (str_contains($html, 'invoice') && !preg_match('/\{\{#each\s+(?:account\.order\.)?invoices\}\}/', $html)) {
+                $report['warnings'][] = $file->getPathname() . ': reads `invoice` (before 2.1.3) and lists no credit notes; copy the `{{#each invoices}}` cells of themes/default/blocks/storefront/account-page.html (CHANGELOG 2.1.3).';
+            }
+        }
+    }
     $report['status'] = $report['failures'] === [] ? 'GO' : 'NO-GO';
 } catch (Throwable $e) {
     $report['failures'][] = 'Probe setup: ' . $e->getMessage();

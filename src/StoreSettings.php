@@ -54,8 +54,7 @@ final class StoreSettings {
 
     /** Decoded stores.json, read fresh (not the per-request Bootstrap cache). */
     public static function load(): array {
-        $data = json_decode((string)@file_get_contents(self::path()), true);
-        return is_array($data) ? $data : [];
+        return DataOverrides::readStoresFile(self::path()) ?? [];
     }
 
     /**

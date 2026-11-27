@@ -21,16 +21,16 @@ try {
 $dir = $args[0];
 DataOverrides::setDirForTesting($dir);
 $json = json_encode(['default_store' => 'default', 'stores' => ['default' => ['name' => 'R60L']]]);
-file_put_contents($dir . '/stores.json', $json . str_repeat(' ', Bootstrap::STORES_MAX_BYTES - strlen($json)));
+file_put_contents($dir . '/stores.json', $json . str_repeat(' ', DataOverrides::STORES_MAX_BYTES - strlen($json)));
 $small = Bootstrap::stores()['default_store'] ?? null;
 $property = new ReflectionProperty(Bootstrap::class, 'stores');
 $property->setValue(null, null);
-file_put_contents($dir . '/stores.json', $json . str_repeat(' ', Bootstrap::STORES_MAX_BYTES + 1 - strlen($json)));
+file_put_contents($dir . '/stores.json', $json . str_repeat(' ', DataOverrides::STORES_MAX_BYTES + 1 - strlen($json)));
 $large = Bootstrap::stores();
 echo 'r60l ' . json_encode(['small' => $small, 'large' => $large]) . "\n";
 PHP, [$r60lRoot]);
     assert_equals(['small' => 'default', 'large' => []], $r60lStores,
-        'R60 stores.json: read up to Bootstrap::STORES_MAX_BYTES (2 MB); a larger file is refused like invalid JSON (was: read whole at every request)');
+        'R60 stores.json: read up to DataOverrides::STORES_MAX_BYTES (2 MB); a larger file is refused like invalid JSON (was: read whole at every request)');
 } catch (Throwable $e) {
     assert_true(false, 'R60 stores.json (' . get_class($e) . ': ' . $e->getMessage() . ')');
 } finally {
@@ -66,13 +66,13 @@ register_shutdown_function(static function () use ($count): void {
     echo 'r60l ' . json_encode(['flash' => $_SESSION['flash']['type'] ?? null,
         'zones' => $count("SELECT COUNT(*) FROM shipping_zones WHERE code LIKE 'r60l%'"),
         'methods' => $count("SELECT COUNT(*) FROM shipping_methods WHERE code LIKE 'r60l%'") + $count("SELECT COUNT(*) FROM payment_methods WHERE code LIKE 'r60l%'"),
-        'rates' => $count("SELECT COUNT(*) FROM shipping_rates WHERE delivery_days IN ('asap!', '2-3') AND weight_from_g = 60")]) . "\n";
+        'rates' => $count("SELECT COUNT(*) FROM shipping_rates WHERE delivery_days IN ('asap!', '2-3') AND weight_from_g = 60"),
+        'names' => Db::get()->query("SELECT name FROM shipping_zones WHERE code LIKE 'r60l%' UNION ALL SELECT name FROM payment_methods WHERE code LIKE 'r60l%'")->fetchAll(PDO::FETCH_COLUMN)]) . "\n";
 });
 $rate = ['method_code' => 'gls', 'zone_code' => 'domestic', 'country' => '', 'weight_from_g' => '60', 'weight_to_g' => '1000', 'price' => '1.00', 'cod_surcharge' => '0', 'active' => '1'];
 match ($action) {
     'zone_zwsp' => [$_POST = ['code' => 'r60lz', 'name' => "\u{200B}\u{200B}", 'active' => '1'], handleShippingZoneSave()],
     'zone_separator' => [$_POST = ['code' => 'r60lz', 'name' => "Zone\u{2028}A", 'active' => '1'], handleShippingZoneSave()],
-    'zone_ok' => [$_POST = ['code' => 'r60lz', 'name' => 'Zone A', 'active' => '1'], handleShippingZoneSave()],
     'ship_pua' => [$_POST = ['code' => 'r60ls', 'carrier' => 'gls', 'name' => "\u{E000}\u{F8FF}", 'service_type' => 'parcel', 'active' => '1'], handleShippingMethodSave()],
     'pay_separator' => [$_POST = ['code' => 'r60lp', 'provider' => 'manual', 'name' => "Pay\u{2028}later", 'service_type' => 'offline', 'min_amount' => '0', 'active' => '1'], handlePaymentMethodSave()],
     'rate_text' => [$_POST = $rate + ['delivery_days' => 'asap!'], handleShippingRateSave()],
@@ -88,11 +88,15 @@ $r60lAdmin = static function (string $action) use ($r60lRoot): array {
 try {
     assert_equals(['ok' => true], $r60lAdmin('setup'), 'R60 admin names: a migrated shop');
     $r60lRuns = [];
-    foreach (['zone_zwsp', 'zone_separator', 'ship_pua', 'pay_separator', 'rate_text'] as $r60lAction) $r60lRuns[$r60lAction] = $r60lAdmin($r60lAction);
-    assert_equals(array_fill_keys(['zone_zwsp', 'zone_separator', 'ship_pua', 'pay_separator', 'rate_text'], ['flash' => 'err', 'zones' => 0, 'methods' => 0, 'rates' => 0]), $r60lRuns,
-        'R60 admin names: a zone or method named U+200B, Private Use characters alone or with U+2028, and delivery days "asap!" are refused (was: saved)');
-    assert_equals(['flash' => 'ok', 'zones' => 1, 'methods' => 0, 'rates' => 0], $r60lAdmin('zone_ok'), 'R60 admin names: a visible zone name is saved');
-    assert_equals(['flash' => 'ok', 'zones' => 1, 'methods' => 0, 'rates' => 1], $r60lAdmin('rate_range'), 'R60 admin names: delivery days "2-3" are saved');
+    foreach (['zone_zwsp', 'ship_pua', 'rate_text'] as $r60lAction) $r60lRuns[$r60lAction] = $r60lAdmin($r60lAction);
+    assert_equals(array_fill_keys(['zone_zwsp', 'ship_pua', 'rate_text'], ['flash' => 'err', 'zones' => 0, 'methods' => 0, 'rates' => 0, 'names' => []]), $r60lRuns,
+        'R60 admin names: a zone or method named U+200B or Private Use characters alone, and delivery days "asap!" are refused (was: saved)');
+    // R61 (review round 26, low 8): a U+2028 inside is saved as a space (was: refused, which locked records saved before R60).
+    assert_equals(['flash' => 'ok', 'zones' => 1, 'methods' => 0, 'rates' => 0, 'names' => ['Zone A']], $r60lAdmin('zone_separator'),
+        'R60/R61 admin names: a zone name with U+2028 inside is saved with a space instead');
+    assert_equals(['flash' => 'ok', 'zones' => 1, 'methods' => 1, 'rates' => 0, 'names' => ['Zone A', 'Pay later']], $r60lAdmin('pay_separator'),
+        'R60/R61 admin names: a payment method name with U+2028 inside is saved with a space instead');
+    assert_equals(['flash' => 'ok', 'zones' => 1, 'methods' => 1, 'rates' => 1, 'names' => ['Zone A', 'Pay later']], $r60lAdmin('rate_range'), 'R60 admin names: delivery days "2-3" are saved');
 } catch (Throwable $e) {
     assert_true(false, 'R60 admin names (' . get_class($e) . ': ' . $e->getMessage() . ')');
 }

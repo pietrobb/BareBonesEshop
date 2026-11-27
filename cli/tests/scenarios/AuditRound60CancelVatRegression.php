@@ -73,6 +73,9 @@ try {
         . Template::page('account', AccountViewModel::build('order', $r60vCustomerRow, ['en'], [], null, null, Orders::byId($r60vOrder)));
     assert_equals(array_fill_keys($r60vNumbers, 2), array_map(static fn(string $number): int => substr_count($r60vPages, '>' . $number . '<'), array_combine($r60vNumbers, $r60vNumbers)),
         'R60 account documents: both pages show every document number as a link');
+    // R61 (review round 26, low 4): a shop's copy of account-page.html made before 2.1.3 reads `invoice`.
+    assert_equals([$r60vNumbers[0], $r60vNumbers[0]], [$r60vListed[0]['invoice']['number'] ?? null, $r60vDetail['invoice']['number'] ?? null],
+        'R61 account documents: `invoice` still holds the order\'s invoice for templates copied before 2.1.3 (was: missing, "—")');
 } catch (Throwable $e) {
     assert_true(false, 'R60 cancel VAT (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 }

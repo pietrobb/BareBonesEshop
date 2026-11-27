@@ -412,6 +412,17 @@ final class InvoiceService
             if ($allowedGross > 0 && array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['gross'], $indexes)) === $allowedGross
                 && $net !== $allowedNet && ($fixed = (int)$lines[$last]['net'] + $allowedNet - $net) >= 0 && $fixed <= (int)$lines[$last]['gross']) {
                 $lines[$last]['net'] = $fixed;
+                $net = $allowedNet;
+            }
+            // R61 (review round 26, low 2): nor more VAT than the rate has uncredited. Only the net was bounded, so a credit
+            // capped below the rate's rest (money refunded outside the return) rounded its net down and credited 1 cent of
+            // VAT more than the invoice had left (2381 against 2380 at 23 %); its net takes that cent.
+            $over = array_sum(array_map(static fn(int $i): int => (int)$lines[$i]['gross'], $indexes)) - $net - ($allowedGross - $allowedNet);
+            for ($p = count($indexes) - 1; $allowedGross > 0 && $over > 0 && $p >= 0; $p--) {
+                $raise = min($over, (int)$lines[$indexes[$p]]['gross'] - (int)$lines[$indexes[$p]]['net']);
+                if ($raise <= 0) continue;
+                $lines[$indexes[$p]]['net'] += $raise;
+                $over -= $raise;
             }
             foreach ($indexes as $i) $lines[$i]['vat'] = (int)$lines[$i]['gross'] - (int)$lines[$i]['net'];
         }
@@ -2678,9 +2689,7 @@ final class InvoiceService
     private static function storesConfig(): array
     {
         if (self::$storesOverride !== null) return self::$storesOverride;
-        $file = DataOverrides::storesPath(self::baseDir());
-        $j = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
-        return $j ?: [];
+        return DataOverrides::readStores(self::baseDir()) ?? [];
     }
 
     private static function storageDir(): string
