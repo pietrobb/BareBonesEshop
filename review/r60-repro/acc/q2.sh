@@ -1,0 +1,3 @@
+#!/bin/bash
+# INST q...
+I=$1; shift; DB=/tmp/claude-0/-home-user-BareBonesEshop/0d748840-4251-5787-841e-a11f82aad9b2/scratchpad/r60/acc/priv-$I/bareboneseshop-private/db/shop.sqlite php /tmp/claude-0/-home-user-BareBonesEshop/0d748840-4251-5787-841e-a11f82aad9b2/scratchpad/r60/acc/scripts/q.php "$@"

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python3 /tmp/claude-0/-home-user-BareBonesEshop/0d748840-4251-5787-841e-a11f82aad9b2/scratchpad/r60/ops/bin/dockwrap.py mysqldump "$@"
