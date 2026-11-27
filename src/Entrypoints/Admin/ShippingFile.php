@@ -111,9 +111,7 @@ function shippingFileMethodSettings(string $key, array $post, array $all): array
     if ($freeAbove === 0) return ['settings' => $all, 'error' => I18n::t('admin.shipping.free_above_zero')];
     $own['free_above'] = $freeAbove;
     $days = trim(Security::str($post['delivery_days'] ?? ''));
-    if (!Shipping::deliveryDaysAccepted($days, is_scalar($own['delivery_days'] ?? null) ? (string)$own['delivery_days'] : null)) {
-        return ['settings' => $all, 'error' => I18n::t('admin.shipping.days_format')];
-    }
+    if (!Shipping::deliveryDaysAccepted($days, $own['delivery_days'])) return ['settings' => $all, 'error' => I18n::t('admin.shipping.days_format')];
     $own['delivery_days'] = $days;
     $posted = is_array($post['rates'] ?? null) ? $post['rates'] : [];
     foreach ($zones as $zone) {
