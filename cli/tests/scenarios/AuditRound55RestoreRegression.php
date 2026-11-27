@@ -67,8 +67,15 @@ try {
         $r55rLast = (string)(BackupService::restoreFiles((string)$r55rMeta['remote_path'])['aside_dir'] ?? '');
     }
     $r55rRuns = array_values(array_filter(scandir(dirname($r55rLast)) ?: [], static fn(string $e): bool => $e !== '.' && $e !== '..'));
-    assert_true(count($r55rRuns) === 5 && in_array(basename($r55rLast), $r55rRuns, true),
-        'R55 restore: the copies set aside by the newest five restores are kept, older ones removed (was: one more config.php copy each time): ' . count($r55rRuns));
+    // R61: runs younger than 30 days all stay (AuditRound61RestoreRegression: an older one beyond the newest five is removed).
+    $r55rFrom = dirname($r55rLast);
+    foreach (array_slice($r55rRuns, 0, 2) as $r55rI => $r55rOld) {
+        rename($r55rFrom . '/' . $r55rOld, $r55rFrom . '/' . gmdate('Ymd-His', time() - 40 * 86400 - $r55rI) . '-' . substr($r55rOld, 16));
+    }
+    $r55rLast = (string)(BackupService::restoreFiles((string)$r55rMeta['remote_path'])['aside_dir'] ?? '');
+    $r55rKept = array_values(array_filter(scandir($r55rFrom) ?: [], static fn(string $e): bool => $e !== '.' && $e !== '..'));
+    assert_true(count($r55rRuns) === 7 && count($r55rKept) === 6 && in_array(basename($r55rLast), $r55rKept, true),
+        'R55 restore: copies set aside are removed once older than the newest five and 30 days (was: one more config.php copy each time): ' . count($r55rRuns) . '/' . count($r55rKept));
 } catch (Throwable $e) {
     assert_true(false, 'R55 restore files (' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 } finally {

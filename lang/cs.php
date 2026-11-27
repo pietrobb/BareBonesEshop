@@ -1698,6 +1698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.payment_provider' => 'Platební brána {item} není připravena',
     'admin.doctor.operations_backup' => 'Zálohy nejsou nastaveny',
     'admin.doctor.operations_cron' => 'Cron pro úlohy na pozadí není zaznamenán',
+    'admin.doctor.backup_restore_leftovers' => 'Nedokončená obnova zálohy zanechala kopii databáze',
     'admin.doctor.operations_gdpr_retention_gc' => 'Stará osobní data se nemažou',
     'admin.doctor.operations_health' => 'Chybí kontrolní bod stavu (health)',
     'admin.doctor.operations_worker' => 'Úlohy na pozadí nejsou nastaveny',

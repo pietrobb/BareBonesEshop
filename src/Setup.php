@@ -949,6 +949,15 @@ class Setup
             $cronValid => 'operations.worker_cron runs the worker less often than every minute: e-mails, refunds and reports wait for it.',
             default => 'Worker cron declaration not recorded.',
         }, 'Set operations.worker_cron to the worker\'s crontab line (or its schedule) and install that entry in the scheduler.');
+        // R61 (review round 26, low): a killed or failed restore's rollback dump (the whole database) or replacement copy
+        // stayed in the private directories and nothing said so.
+        $leftovers = BackupService::restoreLeftovers((string)($config['backup_recovery_dir'] ?? ''),
+            ($config['db_driver'] ?? 'sqlite') === 'mysql' ? '' : (string)($config['db_sqlite_path'] ?? ''));
+        if ($leftovers !== []) {
+            $add('warn', 'backup.restore_leftovers', 'A restore that did not finish left ' . count($leftovers) . ' copy(ies) of a database: '
+                . implode(', ', array_slice($leftovers, 0, 3)) . (count($leftovers) > 3 ? ', ...' : '') . '.',
+                'Once the shop runs on the database you want and no restore is running, delete them (they hold customers\' personal data).');
+        }
         $backupPath = $root . '/config/backup.json';
         $backup = is_file($backupPath) ? json_decode((string)file_get_contents($backupPath), true) : null;
         $add(is_array($backup) && !empty($backup['enabled']) ? 'pass' : 'fail', 'operations.backup', 'Backup configuration ' . (is_array($backup) && !empty($backup['enabled']) ? 'enabled' : 'missing or disabled'), 'Enable config/backup.json and run a restore probe.');

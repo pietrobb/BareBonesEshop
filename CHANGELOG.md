@@ -483,8 +483,21 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   came from, then move `mail.json` into the data directory and the pending jobs you recognise into `jobs/pending/` by
   hand; until then the shop sends mail as `config.php` configures it. The `import_process` job type is gone (nothing
   created it); such a job fails as an unknown job type.
+- **A files restore no longer puts `stores.json`, `shipping.json` or the GDPR salt in place (review round 26, finding
+  1).** They are set aside like `mail.json`, also where the live shop has none, and the restore lists each copy with
+  the path the shop reads it from. After restoring onto a new server, check the copies (the stores' sellers and bank
+  accounts, the shipping prices) and move them there by hand. `written:` now counts only the files written into the
+  shop; `set aside:` counts the rest. Copies set aside stay at least 30 days (were: only those of the last 5 restores).
 
 ### Changes
+
+- **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
+  restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
+  backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt
+  were restored the same way. All three are now always set aside. The restore prints each copy with its destination,
+  keeps them 30 days, and a SQLite restore removes the replacement copy a killed restore left next to the database
+  (`shop.sqlite.restore-<hex>.tmp`); the doctor reports such copies and MySQL rollback dumps (`pre-restore-*.sql`) left
+  in `backup_recovery_dir` (review round 26, findings 11 and 12).
 
 - **A forged backup can no longer redirect the shop's mail or run jobs on restore (review round 25, findings 1 and
   2).** `mail.json` was restored in place when the live shop had none: a shop whose SMTP server is in `config.php` then

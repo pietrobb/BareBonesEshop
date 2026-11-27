@@ -1853,6 +1853,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.payment_provider' => 'El proveedor de pagos {item} no está listo',
     'admin.doctor.operations_backup' => 'Las copias de seguridad no están configuradas',
     'admin.doctor.operations_cron' => 'La entrada cron de las tareas en segundo plano no está registrada',
+    'admin.doctor.backup_restore_leftovers' => 'Una restauración que no terminó dejó una copia de la base de datos',
     'admin.doctor.operations_gdpr_retention_gc' => 'Los datos personales antiguos no se están eliminando',
     'admin.doctor.operations_health' => 'Falta el punto de comprobación de estado (health)',
     'admin.doctor.operations_worker' => 'Las tareas en segundo plano no están configuradas',

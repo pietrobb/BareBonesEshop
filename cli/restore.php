@@ -280,10 +280,17 @@ if ($withFiles) {
     $emit('  written:      ' . $files['written']);
     $emit('  unchanged:    ' . $files['unchanged']);
     $emit('  overwritten:  ' . count($files['overwritten']));
+    $emit('  set aside:    ' . (count($files['set_aside']) + count($files['quarantined'])));
+    // R61 (review round 26, low): each copy with the place the shop reads it from (was: a count and the directory).
     if ($files['set_aside'] !== []) {
-        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) of config.php, the e-mail settings (mail.json), themes or the job queue differ from"
-            . " the live ones or are missing there, and were written to the private directory " . $files['aside_dir'] . ", not into the shop."
-            . " Check where the backup came from, compare them and move in by hand only what you recognise (a job runs as soon as it is in the queue).\n");
+        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) of config.php, stores.json (stores, sellers, IBAN), shipping.json, the e-mail settings"
+            . " (mail.json), the GDPR salt, themes or the job queue differ from the live ones or are missing there, and were written to the private directory "
+            . $files['aside_dir'] . ", not into the shop. Check where the backup came from, compare them and move in by hand only what you recognise"
+            . " (a job runs as soon as it is in the queue; a stores.json sets the bank account of every bank-transfer instruction):\n");
+        foreach ($files['set_aside'] as $entry) {
+            $where = $files['destinations'][$entry] ?? null;
+            fwrite(STDERR, '  ' . ($where === null ? $entry : $where['aside'] . ' -> ' . $where['live']) . "\n");
+        }
     }
     if ($files['quarantined'] !== []) {
         fwrite(STDERR, 'WARNING: ' . count($files['quarantined']) . ' script(s) or server config file(s) in themes/ or uploads/ (' . implode(', ', array_slice($files['quarantined'], 0, 5))

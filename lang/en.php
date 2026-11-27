@@ -1698,6 +1698,7 @@ return [
     'admin.doctor.payment_provider' => 'The payment provider {item} is not ready',
     'admin.doctor.operations_backup' => 'Backups are not set up',
     'admin.doctor.operations_cron' => 'The worker cron entry is not recorded',
+    'admin.doctor.backup_restore_leftovers' => 'A restore that did not finish left a copy of a database',
     'admin.doctor.operations_gdpr_retention_gc' => 'Old personal data is not being deleted',
     'admin.doctor.operations_health' => 'The health check endpoint is missing',
     'admin.doctor.operations_worker' => 'The background worker is not set up',

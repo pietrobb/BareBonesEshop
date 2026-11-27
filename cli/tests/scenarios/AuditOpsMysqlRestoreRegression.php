@@ -130,17 +130,20 @@ try {
     assert_true(!is_file($opsPrivate . '/invoices/2026/10/F1.pdf') && !is_file($opsPrivate . '/secrets/gdpr_salt'), 'Ops files restore: a refused restore writes nothing at all');
 
     $opsRestored = BackupService::restoreFiles($opsMeta['remote_path'], ['force' => true]);
-    assert_equals(3, $opsRestored['written'], 'Ops files restore: missing and differing files are written with --force');
+    assert_equals(2, $opsRestored['written'], 'Ops files restore: missing and differing files are written with --force');
     assert_equals(['uploads/products/shirt.jpg'], $opsRestored['overwritten'], 'Ops files restore: the overwritten live file is reported');
     assert_equals('%PDF invoice F1', (string)@file_get_contents($opsPrivate . '/invoices/2026/10/F1.pdf'), 'Ops files restore: a lost invoice PDF comes back');
     assert_equals('ORIGINAL-JPEG', (string)@file_get_contents($opsPrivate . '/uploads/products/shirt.jpg'), 'Ops files restore: uploads come back to the backed-up content');
-    assert_equals(str_repeat('s', 64), (string)@file_get_contents($opsPrivate . '/secrets/gdpr_salt'), 'Ops files restore: the GDPR salt comes back to its configured path');
+    // R61 (review round 26, medium 1): the GDPR salt is set aside like stores.json, also where the live shop lacks it.
+    $opsSaltCopy = (string)($opsRestored['aside_dir'] ?? '') . '/gdpr_salt';
+    assert_equals([str_repeat('s', 64), false], [(string)@file_get_contents($opsSaltCopy), file_exists($opsPrivate . '/secrets/gdpr_salt')],
+        'Ops files restore: the GDPR salt is set aside for the operator, not written to its configured path');
     if (PHP_OS_FAMILY !== 'Windows') {
-        assert_equals(0600, fileperms($opsPrivate . '/secrets/gdpr_salt') & 0777, 'Ops files restore: the restored GDPR salt is owner-only');
+        assert_equals(0600, fileperms($opsSaltCopy) & 0777, 'Ops files restore: the GDPR salt set aside is owner-only');
     }
     assert_equals('%PDF invoice F2', (string)@file_get_contents($opsPrivate . '/invoices/2026/10/F2.pdf'), 'Ops files restore: live files absent from the backup are kept');
     $opsAgain = BackupService::restoreFiles($opsMeta['remote_path']);
-    assert_equals([0, 3], [$opsAgain['written'], $opsAgain['unchanged']], 'Ops files restore: restoring again is a no-op without --force');
+    assert_equals([0, 2], [$opsAgain['written'], $opsAgain['unchanged']], 'Ops files restore: restoring again is a no-op without --force');
 
     // An archive whose bytes do not match its metadata is refused before extraction.
     $opsOriginalTar = (string)file_get_contents($opsArchive);

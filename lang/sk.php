@@ -1703,6 +1703,7 @@ return [
     'admin.doctor.payment_provider' => 'Platobná brána {item} nie je pripravená',
     'admin.doctor.operations_backup' => 'Zálohy nie sú nastavené',
     'admin.doctor.operations_cron' => 'Cron pre úlohy na pozadí nie je zaznamenaný',
+    'admin.doctor.backup_restore_leftovers' => 'Nedokončená obnova zálohy nechala kópiu databázy',
     'admin.doctor.operations_gdpr_retention_gc' => 'Staré osobné údaje sa nemažú',
     'admin.doctor.operations_health' => 'Chýba kontrolný bod stavu (health)',
     'admin.doctor.operations_worker' => 'Úlohy na pozadí nie sú nastavené',

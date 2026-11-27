@@ -1698,6 +1698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.payment_provider' => 'Der Zahlungsanbieter {item} ist nicht bereit',
     'admin.doctor.operations_backup' => 'Backups sind nicht eingerichtet',
     'admin.doctor.operations_cron' => 'Der Cron-Eintrag für Hintergrundaufgaben ist nicht hinterlegt',
+    'admin.doctor.backup_restore_leftovers' => 'Eine nicht abgeschlossene Wiederherstellung hat eine Datenbankkopie hinterlassen',
     'admin.doctor.operations_gdpr_retention_gc' => 'Alte personenbezogene Daten werden nicht gelöscht',
     'admin.doctor.operations_health' => 'Der Health-Check-Endpunkt fehlt',
     'admin.doctor.operations_worker' => 'Der Hintergrund-Worker ist nicht eingerichtet',

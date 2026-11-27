@@ -1698,6 +1698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.payment_provider' => 'A(z) {item} fizetési szolgáltató nincs kész',
     'admin.doctor.operations_backup' => 'A biztonsági mentés nincs beállítva',
     'admin.doctor.operations_cron' => 'A háttérfeladatok cron-bejegyzése nincs rögzítve',
+    'admin.doctor.backup_restore_leftovers' => 'Egy befejezetlen visszaállítás az adatbázis egy másolatát hagyta hátra',
     'admin.doctor.operations_gdpr_retention_gc' => 'A régi személyes adatok törlése nem fut',
     'admin.doctor.operations_health' => 'Hiányzik az állapot-ellenőrző végpont (health)',
     'admin.doctor.operations_worker' => 'A háttérfeladatok nincsenek beállítva',

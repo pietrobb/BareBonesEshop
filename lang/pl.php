@@ -1698,6 +1698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.payment_provider' => 'Bramka płatności {item} nie jest gotowa',
     'admin.doctor.operations_backup' => 'Kopie zapasowe nie są skonfigurowane',
     'admin.doctor.operations_cron' => 'Wpis cron dla zadań w tle nie jest zapisany',
+    'admin.doctor.backup_restore_leftovers' => 'Nieukończone przywracanie kopii zapasowej pozostawiło kopię bazy danych',
     'admin.doctor.operations_gdpr_retention_gc' => 'Stare dane osobowe nie są usuwane',
     'admin.doctor.operations_health' => 'Brakuje punktu kontroli stanu (health)',
     'admin.doctor.operations_worker' => 'Zadania w tle nie są skonfigurowane',
