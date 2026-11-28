@@ -14,8 +14,28 @@ class Bootstrap {
 
     /** Per-request cached stores.json decode. Always returns an array (R60/R61: [] over DataOverrides::STORES_MAX_BYTES). */
     public static function stores(): array {
-        self::$stores ??= DataOverrides::readStores() ?? [];
+        self::$stores ??= (method_exists('DataOverrides', 'readStores') ? DataOverrides::readStores() : self::storesUnderOlderUpdater()) ?? [];
         return self::$stores;
+    }
+
+    /**
+     * R62 (review round 27, high 1): a signed update from 2.1.x runs this release's migrations inside the 2.1.x updater,
+     * whose DataOverrides is already loaded and has no readStores() (20261114210000_oss_threshold_activations →
+     * OssThreshold::rebuildActivations → ShopTime → StoreContext::current reaches here): every such update rolled back.
+     * The same bounded read with what that older class has (storesPath() is in every 2.x).
+     */
+    private static function storesUnderOlderUpdater(): ?array {
+        $handle = @fopen(DataOverrides::storesPath(), 'rn');
+        if ($handle === false) return null;
+        try {
+            $max = 2 * 1048576; // DataOverrides::STORES_MAX_BYTES, which the older class does not define either
+            $stat = fstat($handle);
+            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0100000 || (int)$stat['size'] > $max) return null;
+            $data = json_decode((string)stream_get_contents($handle, $max + 1), true);
+            return is_array($data) ? $data : null;
+        } finally {
+            fclose($handle);
+        }
     }
 
     /** Resolve and activate the request's explicit StoreContext. */
