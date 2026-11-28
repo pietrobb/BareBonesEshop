@@ -14,6 +14,8 @@ class Bootstrap {
 
     /** Per-request cached stores.json decode. Always returns an array (R60/R61: [] over DataOverrides::STORES_MAX_BYTES). */
     public static function stores(): array {
+        // Always true for this release's DataOverrides; false while a 2.1.x updater has its own older class loaded (R62).
+        /** @phpstan-ignore-next-line */
         self::$stores ??= (method_exists('DataOverrides', 'readStores') ? DataOverrides::readStores() : self::storesUnderOlderUpdater()) ?? [];
         return self::$stores;
     }

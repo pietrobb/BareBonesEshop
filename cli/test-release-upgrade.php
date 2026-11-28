@@ -179,6 +179,8 @@ exit($failures === 0 ? 0 : 1);
 /** @param list<string> $command  @param array<string, string> $env  @return array{0: int, 1: string} */
 function releaseUpgradeRun(array $command, string $cwd, array $env = [], bool $mustSucceed = true): array
 {
+    // ['redirect', 1] (PHP 7.4+) puts stderr on stdout; the proc_open stub does not know that descriptor.
+    /** @phpstan-ignore-next-line */
     $process = proc_open($command, [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, $cwd, $env + getenv());
     if (!is_resource($process)) throw new RuntimeException('cannot run ' . $command[0]);
     $output = (string)stream_get_contents($pipes[1]);
