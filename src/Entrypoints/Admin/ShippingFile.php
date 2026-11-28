@@ -65,10 +65,12 @@ function shippingFileMethods(): void {
 function shippingFileNotices(): void {
     if (Shipping::fileEdited()) {
         $methods = implode(', ', array_map(static fn(string $k): string => Shipping::methodName($k, I18n::locale()) ?? $k, Shipping::CHECKOUT_METHODS));
-        echo '<p class="flash flash-warn" role="alert" data-shipping-file-edited>', esc(I18n::format('admin.shipping.file_edited', ['methods' => $methods])), "</p>\n";
+        $notice = I18n::format('admin.shipping.file_edited', ['methods' => $methods]);
+        echo '<p class="flash flash-warn" role="alert" data-shipping-file-edited>', esc($notice), "</p>\n";
     }
     if (!empty(DataOverrides::shippingMethods()['invalid'])) {
-        echo '<p class="flash flash-warn" role="alert" data-shipping-methods-file-invalid>', esc(I18n::format('admin.shipping.methods_file_invalid', ['file' => DataOverrides::SHIPPING_METHODS])), "</p>\n";
+        $notice = I18n::format('admin.shipping.methods_file_invalid', ['file' => DataOverrides::SHIPPING_METHODS]);
+        echo '<p class="flash flash-warn" role="alert" data-shipping-methods-file-invalid>', esc($notice), "</p>\n";
     }
 }
 

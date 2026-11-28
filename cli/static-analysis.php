@@ -221,8 +221,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 763, 'functions' => 39, 'max_function_lines' => 74, 'coupling' => 23],
     // R58: Standard/Express of shipping.json switched and priced on the shipping page (settings in the data directory).
     // +5 lines R60: the page saves full Standard/Express settings and "Restore defaults" names the shipping.json values.
-    // +13 lines, +1 function R62: the doctor's shipping "Fix" explains the edited file and unreadable settings in every store (shippingFileNotices).
-    'src/Entrypoints/Admin/ShippingFile.php' => ['lines' => 138, 'functions' => 4, 'max_function_lines' => 50, 'coupling' => 7],
+    // +15 lines, +1 function R62: the doctor's shipping "Fix" explains the edited file and unreadable settings in every store (shippingFileNotices).
+    'src/Entrypoints/Admin/ShippingFile.php' => ['lines' => 140, 'functions' => 4, 'max_function_lines' => 50, 'coupling' => 7],
     // Admin UI refresh: the dashboard moved out of Operations.php (tiles, 14-day revenue, health, checklist, incidents, monitoring).
     'src/Entrypoints/Admin/Dashboard.php' => ['lines' => 240, 'functions' => 11, 'max_function_lines' => 50, 'coupling' => 14],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
