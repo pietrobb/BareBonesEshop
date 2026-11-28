@@ -498,6 +498,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The signed update from 2.1.0, 2.1.1 and 2.1.2 installs again (review round 27, finding 1).** `apply` runs this
+  release's migrations inside the installed updater, whose `DataOverrides` is already loaded with its old code; six
+  new migrations reach `Bootstrap::stores()`, which called `DataOverrides::readStores()` that 2.1.x does not have, so
+  every update ended "Call to undefined method" and rolled back (no data lost). `Bootstrap::stores()` reads
+  `stores.json` itself, with the same 2 MB limit, when the loaded class is older. Two new gates: CI updates a shop
+  installed from each released 2.1.x tree with that release's own updater (`php cli/test-release-upgrade.php`, SQLite,
+  MySQL 8.4 and MariaDB 11.4), and the regression suite follows every migration a release has not applied to any
+  method or constant its updater's loaded classes lack (recorded in `cli/tests/fixtures/updater-preloaded-api.json`).
+  The gate tests every tag from v2.1.0 on and fails, naming the command, once a new release's loaded classes are not
+  recorded there (`php cli/test-release-upgrade.php --from=vX.Y.Z --driver=... --record-preloaded=cli/tests/fixtures/updater-preloaded-api.json`).
+
 - **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
   restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
   backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt

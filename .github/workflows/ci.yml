@@ -420,6 +420,8 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: true
+          # The release upgrade gate below exports the released trees by tag.
+          fetch-depth: 0
 
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
@@ -493,3 +495,29 @@ jobs:
             sleep 1
           done
           php cli/test.php
+
+      # R62 (review round 27, high 1): the signed update as a 2.1.x shop runs it — that release's own updater, whose
+      # loaded classes stay old while this release's migrations run. No other gate updates from a released tree.
+      - name: Signed update from the released 2.1.x trees (SQLite and ${{ matrix.name }})
+        env:
+          TEST_MYSQL_UPDATE_HOST: 127.0.0.1
+          TEST_MYSQL_UPDATE_PORT: '3306'
+          TEST_MYSQL_UPDATE_USER: bbe_ci
+          TEST_MYSQL_UPDATE_PASS: bbe-ci-password
+          DATABASE_IMAGE: ${{ matrix.database }}
+        run: |
+          if [[ "${{ matrix.name }}" == mysql:* ]]; then
+            # 2.1.x restores its update snapshot with the dump as written: MariaDB's dump of MySQL generated columns
+            # does not restore (ERROR 3105), so use the server image's own mysqldump and mysql.
+            mkdir -p /tmp/bbe-release-client
+            for tool in mysqldump mysql; do
+              printf '#!/bin/sh\nexec docker run --rm -i --network host --user "%s" -v /tmp:/tmp "%s" %s "$@"\n' \
+                "$(id -u):$(id -g)" "$DATABASE_IMAGE" "$tool" > "/tmp/bbe-release-client/$tool"
+              chmod +x "/tmp/bbe-release-client/$tool"
+            done
+            export TEST_MYSQL_DUMP_BINARY=/tmp/bbe-release-client/mysqldump TEST_MYSQL_CLIENT_BINARY=/tmp/bbe-release-client/mysql
+          else
+            export TEST_MYSQL_DUMP_BINARY=mariadb-dump TEST_MYSQL_CLIENT_BINARY=mariadb
+          fi
+          php cli/test-release-upgrade.php --driver=sqlite
+          php cli/test-release-upgrade.php --driver=mysql

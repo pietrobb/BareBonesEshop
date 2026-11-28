@@ -11,17 +11,19 @@ require_once __DIR__ . '/cli-only.php';
  * DataOverrides::readStores(). After the update this release's code must find no pending migration, no doctor failure
  * but the example seller data, the seeded orders still there, and a storefront that answers 200.
  *
- *   php cli/test-release-upgrade.php [--from=v2.1.0,v2.1.1,v2.1.2] [--to=HEAD] [--driver=sqlite|mysql]
+ *   php cli/test-release-upgrade.php [--from=v2.1.0,v2.1.1 (default: every tag from v2.1.0)] [--to=HEAD] [--driver=sqlite|mysql]
  *       [--record-preloaded=cli/tests/fixtures/updater-preloaded-api.json] [--keep]
  *
  * MySQL: TEST_MYSQL_UPDATE_HOST/_PORT/_USER/_PASS (the user creates and drops barebones_rel_*), TEST_MYSQL_DUMP_BINARY and
  * TEST_MYSQL_CLIENT_BINARY (a client that matches the server: MariaDB's dump of a MySQL 8 schema does not restore).
  * --record-preloaded writes, per release, which application classes its updater had loaded before the swap and their
- * API: cli/tests/UpdaterCompat.php checks every migration against it in the ordinary suite. Needs git, tar and the tags.
+ * API: cli/tests/UpdaterCompat.php checks every migration against it in the ordinary suite. Without the option the run
+ * fails when that file does not cover a tested release's loaded classes. Needs git, tar and the tags.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
-const RELEASE_UPGRADE_DEFAULT_FROM = 'v2.1.0,v2.1.1,v2.1.2';
+/** Every released tree from the first with this updater on (2.1.0); a new tag is tested with no change here. */
+const RELEASE_UPGRADE_FIRST = '2.1.0';
 
 $options = getopt('', ['from:', 'to:', 'driver:', 'record-preloaded:', 'keep', 'help']);
 if (isset($options['help'])) {
@@ -38,9 +40,13 @@ if (!in_array($driver, ['sqlite', 'mysql'], true)) {
     fwrite(STDERR, "--driver must be sqlite or mysql\n");
     exit(2);
 }
-$tags = array_values(array_filter(array_map('trim', explode(',', (string)($options['from'] ?? RELEASE_UPGRADE_DEFAULT_FROM)))));
+$tags = isset($options['from'])
+    ? array_values(array_filter(array_map('trim', explode(',', (string)$options['from']))))
+    : releaseUpgradeTags($repo);
 $to = (string)($options['to'] ?? 'HEAD');
 $record = isset($options['record-preloaded']) ? (string)$options['record-preloaded'] : null;
+$fixturePath = $record ?? __DIR__ . '/tests/fixtures/updater-preloaded-api.json';
+$fixtureReleases = (json_decode((string)@file_get_contents($fixturePath), true) ?: [])['releases'] ?? [];
 $keep = isset($options['keep']);
 $failures = 0;
 $recorded = [];
@@ -96,9 +102,11 @@ foreach ($tags as $tag) {
         releaseUpgradeRun(['php', 'cli/update.php', 'baseline', "--version={$baseVersion}"], $shop, $updateEnv);
 
         $apply = ['php', 'cli/update.php', 'apply', "--package={$work}/package"];
-        if ($record !== null) {
-            $newMigrations = array_values(array_diff(releaseUpgradeMigrations($work . '/new'), releaseUpgradeMigrations($work . '/old')));
-            if ($newMigrations === []) throw new RuntimeException('--record-preloaded needs a target with a migration the release does not have');
+        // Every run logs what the updater loaded before the swap (when there is a migration to mark the swap with: without
+        // one no migration runs under it either), so a release the fixture does not cover yet fails here, not on shops.
+        $newMigrations = array_values(array_diff(releaseUpgradeMigrations($work . '/new'), releaseUpgradeMigrations($work . '/old')));
+        if ($record !== null && $newMigrations === []) throw new RuntimeException('--record-preloaded needs a target with a migration the release does not have');
+        if ($newMigrations !== []) {
             $updateEnv += ['BBE_UPGRADE_PROBE_LOG' => $work . '/preloaded.log', 'BBE_UPGRADE_PROBE_MARKER' => $shop . '/migrations/' . $newMigrations[0] . '.php'];
             array_splice($apply, 1, 0, ['-d', 'auto_prepend_file=' . __DIR__ . '/tests/release-upgrade-probe.php']);
         }
@@ -123,7 +131,19 @@ foreach ($tags as $tag) {
         $status = releaseUpgradeStorefront($shop);
         if ($status !== 200) throw new RuntimeException("the updated storefront answers {$status}");
 
-        if ($record !== null) $recorded[$baseVersion] = releaseUpgradePreloaded($work, $shop);
+        if ($newMigrations !== []) {
+            $preloaded = releaseUpgradePreloaded($work, $shop);
+            if ($record !== null) {
+                $recorded[$baseVersion] = $preloaded;
+            } else {
+                $missing = array_diff(array_keys($preloaded['classes']), array_keys($fixtureReleases[$baseVersion]['classes'] ?? []));
+                if (!isset($fixtureReleases[$baseVersion]) || $missing !== []) {
+                    throw new RuntimeException("{$fixturePath} does not record that the {$baseVersion} updater ({$driver}) had "
+                        . implode(', ', $missing ?: ['its classes']) . ' loaded, so the regression suite cannot check the migrations'
+                        . " against them: php cli/test-release-upgrade.php --from={$tag} --driver={$driver} --record-preloaded={$fixturePath}");
+                }
+            }
+        }
         echo "[PASS] {$label}: {$ordersBefore} order(s) and {$invoicesBefore} invoice(s) kept, no migration left, storefront 200\n";
     } catch (Throwable $e) {
         $failures++;
@@ -144,7 +164,12 @@ if ($record !== null && $failures === 0) {
     $fixture = is_file($record) ? (json_decode((string)file_get_contents($record), true) ?: []) : [];
     $fixture['_about'] = 'Application classes each release\'s updater has loaded before it swaps the files, with their API, and the'
         . ' migrations that release has. Written by php cli/test-release-upgrade.php --record-preloaded; read by cli/tests/UpdaterCompat.php.';
-    foreach ($recorded as $version => $release) $fixture['releases'][$version] = $release;
+    // Per release the union over drivers: the MySQL path loads classes the SQLite one does not.
+    foreach ($recorded as $version => $release) {
+        $release['classes'] += $fixture['releases'][$version]['classes'] ?? [];
+        ksort($release['classes']);
+        $fixture['releases'][$version] = $release;
+    }
     ksort($fixture['releases']);
     file_put_contents($record, json_encode($fixture, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
     echo "Recorded the preloaded classes of " . implode(', ', array_keys($recorded)) . " in {$record}\n";
@@ -163,6 +188,17 @@ function releaseUpgradeRun(array $command, string $cwd, array $env = [], bool $m
         throw new RuntimeException(implode(' ', array_slice($command, 0, 3)) . " exited {$code}:\n" . releaseUpgradeTail($output, 15));
     }
     return [$code, $output];
+}
+
+/** @return list<string> the vX.Y.Z tags from RELEASE_UPGRADE_FIRST on, oldest first */
+function releaseUpgradeTags(string $repo): array
+{
+    [, $out] = releaseUpgradeRun(['git', 'tag', '--list', 'v[0-9]*.[0-9]*.[0-9]*'], $repo);
+    $tags = array_values(array_filter(array_map('trim', explode("\n", $out)), static fn(string $t): bool =>
+        preg_match('/^v\d+\.\d+\.\d+$/', $t) === 1 && version_compare(substr($t, 1), RELEASE_UPGRADE_FIRST, '>=')));
+    usort($tags, static fn(string $a, string $b): int => version_compare(substr($a, 1), substr($b, 1)));
+    if ($tags === []) throw new RuntimeException('no release tag v' . RELEASE_UPGRADE_FIRST . ' or later: fetch the tags (git fetch --tags, or actions/checkout with fetch-depth: 0)');
+    return $tags;
 }
 
 function releaseUpgradeTail(string $output, int $lines): string
