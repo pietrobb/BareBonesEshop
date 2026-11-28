@@ -433,7 +433,7 @@ function pageOrder(): void {
                 <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc(OrderStatusLabels::transaction((string)$tx['status'])) ?></span></td>
                 <td><?= esc(AdminEventLabels::provider((string)$tx['provider'])) ?></td>
                 <td class="muted"><?= esc($tx['provider_ref']) ?></td>
-                <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
+                <td><?php /* R62 (finding 5): a refund paid by hand books no money row; its amount is in the event. */ ?><?= I18n::price((int)$tx['amount'] === 0 && (int)($raw['refunded_by_hand'] ?? 0) > 0 ? (int)$raw['refunded_by_hand'] : (int)$tx['amount'], $tx['currency']) ?></td>
                 <td class="muted"><?= esc(AuditLogLabels::note('payment_status', $id, (string)($raw['event_type'] ?? ''))) ?></td>
                 <td class="muted"><?= esc(implode(' · ', $details)) ?></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$tx['created_at'])) ?></td>
@@ -604,7 +604,9 @@ function pageRma(): void {
                 <td style="white-space:nowrap">
                     <?php [$outside, $due] = isset($next[$r['status']]['refunded']) ? Rma::owedAfterOutside((int)$r['id'], (int)$r['order_id']) : [0, 0]; ?>
                     <?php $currency = (string)(Orders::byId((int)$r['order_id'])['currency'] ?? 'eur'); ?>
-                    <?php if ($outside > 0): ?>
+                    <?php $invoicePending = isset($next[$r['status']]['refunded']) && !InvoiceService::byOrderId((int)$r['order_id']); // R62 (finding 13): no refund before the invoice (was: "Refunded in full: 0 Ft", refused) ?>
+                    <?php if ($invoicePending): ?><p class="muted" data-rma-invoice-pending style="white-space:normal;margin:0 0 4px"><?= esc(I18n::t('admin.rma.invoice_pending')) ?></p><?php endif; ?>
+                    <?php if ($outside > 0 && !$invoicePending): ?>
                     <p class="muted" data-rma-refunded-outside data-rma-due="<?= (int)$due ?>" style="white-space:normal;margin:0 0 4px"><?= esc(I18n::format('admin.rma.refunded_outside_hint', ['amount' => I18n::price($outside, $currency), 'due' => I18n::price($due, $currency)])) ?></p>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -623,7 +625,7 @@ function pageRma(): void {
                         <button class="btn btn-sm" type="submit" data-rma-keep-amount="<?= (int)$keep ?>"><?= esc(I18n::format('admin.rma.refund_keep_outside', ['amount' => I18n::price($keep, $currency)])) ?></button>
                     </form>
                     <?php endif; ?>
-                    <?php foreach ($outside > 0 ? [] : ($next[$r['status']] ?? []) as $to => $label): ?>
+                    <?php foreach ($outside > 0 ? [] : array_diff_key($next[$r['status']] ?? [], $invoicePending ? ['refunded' => true] : []) as $to => $label): ?>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
@@ -692,8 +694,9 @@ function handleRmaStatus(): void {
             // One key per attempt: a concurrent double submit shares it, a retry after a failed refund gets a new credit note.
             $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id), $outside > 0 && !$keepOutside, $keepOutside);
             if (trim((string)(Orders::byId((int)$rma['order_id'])['payment_id'] ?? '')) === '' && Rma::completeRefund((int)$credit['refund_id'], 'manual-admin')) {
-                PaymentService::mailManualItemRefund((int)$rma['order_id'], (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0), (int)$credit['id']);
-                PaymentService::settleManualItemRefund((int)$rma['order_id']);
+                $byHand = (int)(Rma::refundById((int)$credit['refund_id'])['amount'] ?? 0);
+                PaymentService::mailManualItemRefund((int)$rma['order_id'], $byHand, (int)$credit['id']);
+                PaymentService::settleManualItemRefund((int)$rma['order_id'], $byHand, Security::adminUser());
             }
         } elseif ($status !== 'refunded' && !Rma::setStatus($id, $status)) {
             throw new LogicException(I18n::t('admin.rma.transition_refused'));

@@ -530,6 +530,17 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   dumps in the default recovery directory `<private_runtime_dir>/restore-recovery` when `backup_recovery_dir` is
   empty (was: not looked at). The restore warning and the runbook name the shipping copy `shipping-methods.json`.
 
+- **Returns, delivery times and the domain check, smaller fixes (review round 27, findings 5–8 and 13).** The order
+  timeline names returns refunded by hand in the admin's language, with the money paid and the admin who recorded it
+  (was: `refund.manual_item_completed`, 0,00 € by "admin"). A return offers no refund before the worker has issued the
+  order's invoice and says it waits for it (was: "Refunded in full: 0 Ft", refused). `setup.php shipping-import` reads
+  the unit of a delivery time: hours are rounded up to days, weeks are 7 days and months are not taken (was: "24h" became
+  24 days, "2-3 weeks" 2-3 days). The domain check's lookup gives the A address when a name server drops AAAA queries
+  (was: untested at every save), asks a truncated answer again over TCP, and leaves the domain untested instead of a
+  fatal error or the unbounded system resolver when `disable_functions` or `open_basedir` keep it from the socket
+  functions or `/etc/resolv.conf`. The doctor's shipping "Fix" in a HUF, CZK or PLN store explains the edited
+  `shipping.json` or the unreadable delivery settings (was: only that Standard and Express are priced in EUR).
+
 - **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
   restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
   backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt

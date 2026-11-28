@@ -1541,12 +1541,15 @@ class PaymentService {
      * R61 (review round 26, low 13): an item refund paid back by hand ('manual-admin') that brings what went back to the
      * order's total moves the payment to refunded and closes the returned order (was: it stayed partially_refunded with
      * nothing left to refund). No money row: the item refund holds that money (offLedgerCredits()).
+     * R62 (review round 27, finding 5): the timeline row names the refund paid by hand ($amount, shown in place of the
+     * row's 0) and the admin who recorded it (was: 0,00 € by "admin").
      */
-    public static function settleManualItemRefund(int $orderId): void {
-        $moved = self::withLockedOrder($orderId, static function (array $order) use ($orderId): bool {
+    public static function settleManualItemRefund(int $orderId, int $amount = 0, string $actor = ''): void {
+        $moved = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $amount, $actor): bool {
             if (!in_array((string)($order['payment_status'] ?? ''), ['paid', 'partially_refunded'], true)) return false;
             if (self::refundedAmount($orderId) + self::offLedgerCredits($order) < (int)$order['total']) return false;
-            return self::applyTransition($order, 'refunded', 'refund.manual_item_completed', 0, 'manual_item_refunded_' . $orderId, ['actor' => 'admin']);
+            return self::applyTransition($order, 'refunded', 'refund.manual_item_completed', 0, 'manual_item_refunded_' . $orderId,
+                ['actor' => $actor !== '' ? $actor : 'admin'] + ($amount > 0 ? ['refunded_by_hand' => $amount] : []));
         });
         if ($moved) self::closeRefundedOrder($orderId, 'Returns refunded by hand');
     }
