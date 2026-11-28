@@ -621,6 +621,23 @@ class BackupService
         return $found;
     }
 
+    private static ?int $processUid = null;
+
+    /** The user this process runs as: posix_geteuid(), or without ext-posix the owner of a file it makes (null: unknown). */
+    private static function processUid(): ?int
+    {
+        if (function_exists('posix_geteuid')) return posix_geteuid();
+        if (self::$processUid === null) {
+            $probe = @tempnam(sys_get_temp_dir(), 'bbe-uid-');
+            if (is_string($probe)) {
+                $owner = @fileowner($probe);
+                @unlink($probe);
+                if (is_int($owner)) self::$processUid = $owner;
+            }
+        }
+        return self::$processUid;
+    }
+
     /** Removes the staging directories whose process is gone (their .owner lock is free). */
     private static function sweepStaging(): void
     {
@@ -630,8 +647,18 @@ class BackupService
                 || (int)@filemtime($dir) > time() - 60) continue;
             // R61 (review round 26, low 13): only a directory as stagingPath() makes it: this user's, private (0700). Was:
             // any match in a shared temp directory, so a shop run as root removed what another user's process staged there.
-            $stat = @stat($dir);
-            if (!is_array($stat) || (function_exists('posix_geteuid') && (($stat['mode'] & 0077) !== 0 || (int)$stat['uid'] !== posix_geteuid()))) continue;
+            // R62 (review round 27, finding 14): lstat, so a directory swapped for a link after is_link() is not followed;
+            // without ext-posix the user is the owner of a file this process makes (was: stat(), and no check at all).
+            $stat = @lstat($dir);
+            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0040000) continue;
+            if (PHP_OS_FAMILY !== 'Windows') {
+                $uid = self::processUid();
+                if ($uid === null) {
+                    self::log("Staging: {$dir} left in place: the user this process runs as is unknown (no ext-posix, temp directory not writable)");
+                    continue;
+                }
+                if (($stat['mode'] & 0077) !== 0 || (int)$stat['uid'] !== $uid) continue;
+            }
             $owner = @fopen($dir . DIRECTORY_SEPARATOR . '.owner', 'rb');
             if ($owner === false || is_link($dir . DIRECTORY_SEPARATOR . '.owner')) {
                 if ($owner !== false) fclose($owner);

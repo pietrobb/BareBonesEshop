@@ -134,13 +134,20 @@ class OrderWorkflow {
      */
     public static function transition(int $orderId, string $to, ?string $note = null): void {
         $db = Db::get();
-        $db->beginTransaction();
-        try {
-            $deferredJobs = self::transitionWithin($orderId, $to, $note);
-            $db->commit();
-        } catch (\Throwable $e) {
-            if ($db->inTransaction()) $db->rollBack();
-            throw $e;
+        // R62 (review round 27, finding 14): MySQL may pick a cancellation (stock restore) as the victim of a deadlock with a
+        // stock write; it rolled back everything and its jobs are pushed only after the commit: try again, as
+        // Orders::replaceItems() does (was: the admin got an error and the order stayed as it was).
+        for ($attempt = 1; ; $attempt++) {
+            $db->beginTransaction();
+            try {
+                $deferredJobs = self::transitionWithin($orderId, $to, $note);
+                $db->commit();
+                break;
+            } catch (\Throwable $e) {
+                if ($db->inTransaction()) $db->rollBack();
+                if ($attempt >= 3 || !Db::deadlocked($e)) throw $e;
+                usleep(random_int(5_000, 40_000) * $attempt);
+            }
         }
         self::pushDeferredJobs($deferredJobs);
     }

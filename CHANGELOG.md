@@ -541,6 +541,12 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   functions or `/etc/resolv.conf`. The doctor's shipping "Fix" in a HUF, CZK or PLN store explains the edited
   `shipping.json` or the unreadable delivery settings (was: only that Standard and Express are priced in EUR).
 
+- **An order cancellation picked as a MySQL deadlock victim runs again (review round 27, finding 14).** Like an order
+  edit (round 26), up to three attempts; its e-mails and jobs are queued only after the commit (was: the admin got an
+  error and the order stayed open). The backup staging sweep checks the directory itself (`lstat`, it must be a
+  directory) and, without ext-posix, takes the user from a file it makes, so another user's staging directory is still
+  left alone (was: `stat`, and no owner or mode check without ext-posix).
+
 - **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
   restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
   backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt
