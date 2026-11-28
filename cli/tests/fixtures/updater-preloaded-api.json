@@ -73,6 +73,37 @@
                 "20261101150000_price_list_repair"
             ],
             "classes": {
+                "BackupService": {
+                    "methods": [
+                        "buildRemotePath",
+                        "config",
+                        "create",
+                        "currentSchemaVersion",
+                        "detectLivePath",
+                        "gc",
+                        "init",
+                        "isCompressedCopy",
+                        "isEnabled",
+                        "latestRestorePoint",
+                        "list",
+                        "livePath",
+                        "loadConfig",
+                        "log",
+                        "mysqlBinary",
+                        "reserveUniquePath",
+                        "reset",
+                        "restore",
+                        "restoreFiles",
+                        "storage",
+                        "useMysqlDatabase",
+                        "useMysqlDumper"
+                    ],
+                    "constants": [
+                        "ROTATION_EXEMPT_LABELS",
+                        "SNAPSHOT_LABEL"
+                    ],
+                    "props": []
+                },
                 "DataOverrides": {
                     "methods": [
                         "atomicWrite",
@@ -127,6 +158,22 @@
                         "removeTree"
                     ],
                     "constants": [],
+                    "props": []
+                },
+                "MysqlUpdateDatabaseBackup": {
+                    "methods": [
+                        "__construct",
+                        "countDumpRows",
+                        "create",
+                        "database",
+                        "dumpTo",
+                        "probe",
+                        "restore",
+                        "restoreBackupDump"
+                    ],
+                    "constants": [
+                        "RESTORE_FAILED_AFTER_DROP"
+                    ],
                     "props": []
                 },
                 "Security": {
@@ -329,6 +376,15 @@
                     ],
                     "props": []
                 },
+                "UpdateDatabaseBackup": {
+                    "methods": [
+                        "create",
+                        "probe",
+                        "restore"
+                    ],
+                    "constants": [],
+                    "props": []
+                },
                 "UpdatePackage": {
                     "methods": [
                         "__construct",
@@ -447,6 +503,38 @@
                 "20261103150000_fulfillment_status_grant"
             ],
             "classes": {
+                "BackupService": {
+                    "methods": [
+                        "buildRemotePath",
+                        "config",
+                        "create",
+                        "currentSchemaVersion",
+                        "defaultFileSources",
+                        "detectLivePath",
+                        "gc",
+                        "init",
+                        "isCompressedCopy",
+                        "isEnabled",
+                        "latestRestorePoint",
+                        "list",
+                        "livePath",
+                        "loadConfig",
+                        "log",
+                        "mysqlBinary",
+                        "reserveUniquePath",
+                        "reset",
+                        "restore",
+                        "restoreFiles",
+                        "storage",
+                        "useMysqlDatabase",
+                        "useMysqlDumper"
+                    ],
+                    "constants": [
+                        "ROTATION_EXEMPT_LABELS",
+                        "SNAPSHOT_LABEL"
+                    ],
+                    "props": []
+                },
                 "DataOverrides": {
                     "methods": [
                         "atomicWrite",
@@ -518,6 +606,22 @@
                     "constants": [
                         "FILE",
                         "STALE_AFTER"
+                    ],
+                    "props": []
+                },
+                "MysqlUpdateDatabaseBackup": {
+                    "methods": [
+                        "__construct",
+                        "countDumpRows",
+                        "create",
+                        "database",
+                        "dumpTo",
+                        "probe",
+                        "restore",
+                        "restoreBackupDump"
+                    ],
+                    "constants": [
+                        "RESTORE_FAILED_AFTER_DROP"
                     ],
                     "props": []
                 },
@@ -720,6 +824,15 @@
                         "CANDIDATE_DIRECTORIES",
                         "PROBE"
                     ],
+                    "props": []
+                },
+                "UpdateDatabaseBackup": {
+                    "methods": [
+                        "create",
+                        "probe",
+                        "restore"
+                    ],
+                    "constants": [],
                     "props": []
                 },
                 "UpdateKeyRotation": {
@@ -863,6 +976,39 @@
                 "20261104120000_back_in_stock_double_opt_in"
             ],
             "classes": {
+                "BackupService": {
+                    "methods": [
+                        "buildRemotePath",
+                        "config",
+                        "create",
+                        "currentSchemaVersion",
+                        "defaultFileSources",
+                        "detectLivePath",
+                        "gc",
+                        "init",
+                        "isCompressedCopy",
+                        "isEnabled",
+                        "latestRestorePoint",
+                        "list",
+                        "livePath",
+                        "loadConfig",
+                        "log",
+                        "mysqlBinary",
+                        "reserveUniquePath",
+                        "reset",
+                        "restore",
+                        "restoreFiles",
+                        "storage",
+                        "storagePath",
+                        "useMysqlDatabase",
+                        "useMysqlDumper"
+                    ],
+                    "constants": [
+                        "ROTATION_EXEMPT_LABELS",
+                        "SNAPSHOT_LABEL"
+                    ],
+                    "props": []
+                },
                 "DataOverrides": {
                     "methods": [
                         "atomicWrite",
@@ -935,6 +1081,22 @@
                     "constants": [
                         "FILE",
                         "STALE_AFTER"
+                    ],
+                    "props": []
+                },
+                "MysqlUpdateDatabaseBackup": {
+                    "methods": [
+                        "__construct",
+                        "countDumpRows",
+                        "create",
+                        "database",
+                        "dumpTo",
+                        "probe",
+                        "restore",
+                        "restoreBackupDump"
+                    ],
+                    "constants": [
+                        "RESTORE_FAILED_AFTER_DROP"
                     ],
                     "props": []
                 },
@@ -1137,6 +1299,15 @@
                         "CANDIDATE_DIRECTORIES",
                         "PROBE"
                     ],
+                    "props": []
+                },
+                "UpdateDatabaseBackup": {
+                    "methods": [
+                        "create",
+                        "probe",
+                        "restore"
+                    ],
+                    "constants": [],
                     "props": []
                 },
                 "UpdateKeyRotation": {
