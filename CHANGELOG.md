@@ -509,6 +509,15 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   The gate tests every tag from v2.1.0 on and fails, naming the command, once a new release's loaded classes are not
   recorded there (`php cli/test-release-upgrade.php --from=vX.Y.Z --driver=... --record-preloaded=cli/tests/fixtures/updater-preloaded-api.json`).
 
+- **Return credit notes after a cancelled unshipped rest credit VAT that fits their net again (review round 27,
+  findings 2–4, a regression of 2.1.3's low 13).** When money refunded by hand came first and the cancelled goods'
+  refund credited part of their value at other rates, a later return moved that money's credit between rates by gross
+  only: one credit note reversed 2.26 € at 5 % with 0.72 € of VAT and credited its 23 % goods with 1.15 € of VAT on
+  8.25 € (each document off by up to 2.34 €, the next one evened it out). The net now moves with the gross. With
+  cancelled goods at two rates, the shortfall of one that the refund credited at the other no longer stays counted at
+  the first (19 % kept 0.19 € uncredited although every 19 % item was cancelled). "Refunded in full" and returns after
+  ones an older release closed without payout no longer credit a cent more VAT at a rate than the invoice has.
+
 - **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
   restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
   backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt
