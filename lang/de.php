@@ -1700,6 +1700,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.operations_backup' => 'Backups sind nicht eingerichtet',
     'admin.doctor.operations_cron' => 'Der Cron-Eintrag für Hintergrundaufgaben ist nicht hinterlegt',
     'admin.doctor.backup_restore_leftovers' => 'Eine nicht abgeschlossene Wiederherstellung hat eine Datenbankkopie hinterlassen',
+    'admin.doctor.backup_set_aside' => 'Eine Wiederherstellung hat Dateien beiseitegelegt, die dem Shop fehlen (GDPR-Salt, stores.json, Versand- oder E-Mail-Einstellungen)',
     'admin.doctor.shipping_file_edited' => 'shipping.json wurde von Hand bearbeitet',
     'admin.doctor.shipping_methods_file' => 'Die gespeicherten Einstellungen der Versandarten sind nicht lesbar',
     'admin.doctor.operations_gdpr_retention_gc' => 'Alte personenbezogene Daten werden nicht gelöscht',

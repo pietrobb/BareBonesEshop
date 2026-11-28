@@ -1700,6 +1700,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.operations_backup' => 'Zálohy nejsou nastaveny',
     'admin.doctor.operations_cron' => 'Cron pro úlohy na pozadí není zaznamenán',
     'admin.doctor.backup_restore_leftovers' => 'Nedokončená obnova zálohy zanechala kopii databáze',
+    'admin.doctor.backup_set_aside' => 'Obnova zálohy odložila soubory, které obchod nemá (GDPR salt, stores.json, nastavení dopravy nebo e-mailu)',
     'admin.doctor.shipping_file_edited' => 'Soubor shipping.json byl upraven ručně',
     'admin.doctor.shipping_methods_file' => 'Uložená nastavení způsobů doručení nelze přečíst',
     'admin.doctor.operations_gdpr_retention_gc' => 'Stará osobní data se nemažou',

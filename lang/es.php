@@ -1855,6 +1855,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.operations_backup' => 'Las copias de seguridad no están configuradas',
     'admin.doctor.operations_cron' => 'La entrada cron de las tareas en segundo plano no está registrada',
     'admin.doctor.backup_restore_leftovers' => 'Una restauración que no terminó dejó una copia de la base de datos',
+    'admin.doctor.backup_set_aside' => 'Una restauración apartó archivos que la tienda no tiene (sal GDPR, stores.json, ajustes de envío o de correo)',
     'admin.doctor.shipping_file_edited' => 'shipping.json se editó a mano',
     'admin.doctor.shipping_methods_file' => 'No se pueden leer los ajustes guardados de los métodos de envío',
     'admin.doctor.operations_gdpr_retention_gc' => 'Los datos personales antiguos no se están eliminando',

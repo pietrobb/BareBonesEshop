@@ -1700,6 +1700,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.operations_backup' => 'Kopie zapasowe nie są skonfigurowane',
     'admin.doctor.operations_cron' => 'Wpis cron dla zadań w tle nie jest zapisany',
     'admin.doctor.backup_restore_leftovers' => 'Nieukończone przywracanie kopii zapasowej pozostawiło kopię bazy danych',
+    'admin.doctor.backup_set_aside' => 'Przywracanie odłożyło pliki, których sklep nie ma (sól GDPR, stores.json, ustawienia wysyłki lub e-maila)',
     'admin.doctor.shipping_file_edited' => 'Plik shipping.json został zmieniony ręcznie',
     'admin.doctor.shipping_methods_file' => 'Nie można odczytać zapisanych ustawień metod dostawy',
     'admin.doctor.operations_gdpr_retention_gc' => 'Stare dane osobowe nie są usuwane',

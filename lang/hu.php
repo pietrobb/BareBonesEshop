@@ -1700,6 +1700,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.doctor.operations_backup' => 'A biztonsági mentés nincs beállítva',
     'admin.doctor.operations_cron' => 'A háttérfeladatok cron-bejegyzése nincs rögzítve',
     'admin.doctor.backup_restore_leftovers' => 'Egy befejezetlen visszaállítás az adatbázis egy másolatát hagyta hátra',
+    'admin.doctor.backup_set_aside' => 'Egy visszaállítás félretett olyan fájlokat, amelyek a boltból hiányoznak (GDPR só, stores.json, szállítási vagy e-mail beállítások)',
     'admin.doctor.shipping_file_edited' => 'A shipping.json kézzel lett módosítva',
     'admin.doctor.shipping_methods_file' => 'A szállítási módok mentett beállításai nem olvashatók',
     'admin.doctor.operations_gdpr_retention_gc' => 'A régi személyes adatok törlése nem fut',

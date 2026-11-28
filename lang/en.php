@@ -1700,6 +1700,7 @@ return [
     'admin.doctor.operations_backup' => 'Backups are not set up',
     'admin.doctor.operations_cron' => 'The worker cron entry is not recorded',
     'admin.doctor.backup_restore_leftovers' => 'A restore that did not finish left a copy of a database',
+    'admin.doctor.backup_set_aside' => 'A restore set aside files the shop does not have (GDPR salt, stores.json, shipping or e-mail settings)',
     'admin.doctor.shipping_file_edited' => 'shipping.json was edited by hand',
     'admin.doctor.shipping_methods_file' => 'The saved delivery method settings cannot be read',
     'admin.doctor.operations_gdpr_retention_gc' => 'Old personal data is not being deleted',

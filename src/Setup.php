@@ -223,8 +223,16 @@ class Setup
             $legacyStores ? 'Run php cli/setup.php apply: it writes the upgraded copy to private_runtime_dir/stores.json (the main store becomes "default").'
                 : 'Define default_store and its store record.');
         $onExample = basename($storesPath) === DataOverrides::STORES_EXAMPLE;
+        // R62 (review round 27, finding 9): after a restore onto a new server the backup's stores.json is set aside; apply
+        // would start the shop on the example stores instead.
+        $storesAside = $onExample ? (RestoreRecovery::missingLive(RestoreRecovery::directory($config, $root),
+            BackupService::defaultFileSources($config, $root))['stores'] ?? null) : null;
         $add($onExample ? 'warn' : 'pass', 'stores.file', $onExample ? 'The shop runs on the shipped stores.example.json.' : "Stores file: {$storesPath}",
-            $onExample ? 'Run php cli/setup.php apply: it copies the example into private_runtime_dir/stores.json, the file the admin edits (git tracks only the example).' : '');
+            match (true) {
+                $storesAside !== null => "A restore set the backup's stores.json aside: check it, then move it into place (mv {$storesAside['copy']} {$storesAside['live']}); php cli/setup.php apply would copy the example instead.",
+                $onExample => 'Run php cli/setup.php apply: it copies the example into private_runtime_dir/stores.json, the file the admin edits (git tracks only the example).',
+                default => '',
+            });
         // Invoice / credit-note series that would issue the same numbers are refused at issue time: report them now.
         $numbering = is_array($stores) ? InvoiceService::numberingConflicts($stores) : [];
         $add($numbering === [] ? 'pass' : 'fail', 'stores.invoice_numbering', $numbering === []
@@ -954,12 +962,25 @@ class Setup
         }, 'Set operations.worker_cron to the worker\'s crontab line (or its schedule) and install that entry in the scheduler.');
         // R61 (review round 26, low): a killed or failed restore's rollback dump (the whole database) or replacement copy
         // stayed in the private directories and nothing said so.
-        $leftovers = BackupService::restoreLeftovers((string)($config['backup_recovery_dir'] ?? ''),
+        // R62 (review round 27, finding 11): also in the default recovery directory (backup_recovery_dir empty, as
+        // BackupService uses it), the live database a killed SQLite restore moved aside and a MySQL scratch database.
+        $recoveryDir = RestoreRecovery::directory($config, $root);
+        $asideMissing = RestoreRecovery::missingLive($recoveryDir, BackupService::defaultFileSources($config, $root));
+        $leftovers = BackupService::restoreLeftovers($recoveryDir,
             ($config['db_driver'] ?? 'sqlite') === 'mysql' ? '' : (string)($config['db_sqlite_path'] ?? ''));
         if ($leftovers !== []) {
             $add('warn', 'backup.restore_leftovers', 'A restore that did not finish left ' . count($leftovers) . ' copy(ies) of a database: '
                 . implode(', ', array_slice($leftovers, 0, 3)) . (count($leftovers) > 3 ? ', ...' : '') . '.',
-                'Once the shop runs on the database you want and no restore is running, delete them (they hold customers\' personal data).');
+                'Once the shop runs on the database you want and no restore is running, delete the files and drop a MySQL scratch database'
+                . ' (DROP DATABASE, then delete its marker; the next restore also drops it): they hold customers\' personal data.');
+        }
+        // R62 (review round 27, finding 9): a restore onto a new server set the backup's stores.json, GDPR salt, shipping
+        // or e-mail settings aside and the shop has none of its own; nothing said so, and the shop ran on the example stores.
+        if ($asideMissing !== []) {
+            $add('warn', 'backup.set_aside', 'A restore set aside ' . count($asideMissing) . ' file(s) of the backup the shop does not have: '
+                . implode(', ', array_map(static fn(array $c): string => $c['copy'] . ' -> ' . $c['live'], $asideMissing)) . '.',
+                'Check where the backup came from, then move each copy you recognise into place (mv <copy> <live path>). Until the GDPR salt'
+                . ' is moved in, the shop refuses to hash personal data rather than start a new salt that would not match the restored records.');
         }
         $backupPath = $root . '/config/backup.json';
         $backup = is_file($backupPath) ? json_decode((string)file_get_contents($backupPath), true) : null;

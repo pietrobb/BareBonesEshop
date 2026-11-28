@@ -1705,6 +1705,7 @@ return [
     'admin.doctor.operations_backup' => 'Zálohy nie sú nastavené',
     'admin.doctor.operations_cron' => 'Cron pre úlohy na pozadí nie je zaznamenaný',
     'admin.doctor.backup_restore_leftovers' => 'Nedokončená obnova zálohy nechala kópiu databázy',
+    'admin.doctor.backup_set_aside' => 'Obnova zálohy odložila súbory, ktoré obchod nemá (GDPR salt, stores.json, nastavenia dopravy alebo e-mailu)',
     'admin.doctor.shipping_file_edited' => 'Súbor shipping.json bol upravený ručne',
     'admin.doctor.shipping_methods_file' => 'Uložené nastavenia spôsobov doručenia sa nedajú prečítať',
     'admin.doctor.operations_gdpr_retention_gc' => 'Staré osobné údaje sa nemažú',

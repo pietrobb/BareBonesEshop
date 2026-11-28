@@ -518,6 +518,18 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
   the first (19 % kept 0.19 € uncredited although every 19 % item was cancelled). "Refunded in full" and returns after
   ones an older release closed without payout no longer credit a cent more VAT at a rate than the invoice has.
 
+- **After a restore onto a new server the shop no longer starts a new GDPR salt by itself (review round 27, findings
+  9–12).** The restore sets the backup's salt aside, and the first pseudonymised record then made a fresh salt: the
+  restored records no longer matched, and moving the copy in later orphaned the new ones. While a copy is set aside and
+  no salt is in place, hashing personal data now fails with the `mv` that moves it in. `setup.php doctor` lists every
+  copy the shop still lacks (`backup.set_aside`: GDPR salt, `stores.json`, `shipping-methods.json`, `mail.json`) and,
+  on the example stores, advises moving the backup's `stores.json` in instead of `setup.php apply`. A legal text that
+  differs from the backup is set aside too, also with `--force` (it is shown unescaped; was: written over the live
+  text). `backup.restore_leftovers` also reports the live database a killed SQLite restore moved aside
+  (`<db>.pre-restore-<hex>.rollback`), a MySQL scratch database left behind (by its `scratch-<name>.marker`) and the
+  dumps in the default recovery directory `<private_runtime_dir>/restore-recovery` when `backup_recovery_dir` is
+  empty (was: not looked at). The restore warning and the runbook name the shipping copy `shipping-methods.json`.
+
 - **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
   restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
   backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt
