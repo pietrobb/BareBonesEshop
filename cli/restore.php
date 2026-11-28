@@ -283,10 +283,11 @@ if ($withFiles) {
     $emit('  set aside:    ' . (count($files['set_aside']) + count($files['quarantined'])));
     // R61 (review round 26, low): each copy with the place the shop reads it from (was: a count and the directory).
     if ($files['set_aside'] !== []) {
-        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) of config.php, stores.json (stores, sellers, IBAN), shipping.json, the e-mail settings"
-            . " (mail.json), the GDPR salt, themes or the job queue differ from the live ones or are missing there, and were written to the private directory "
+        fwrite(STDERR, 'WARNING: ' . count($files['set_aside']) . " file(s) of config.php, stores.json (stores, sellers, IBAN), the shipping settings"
+            . " (shipping-methods.json), the e-mail settings (mail.json), the GDPR salt, legal texts, themes or the job queue differ from the live ones or are missing there, and were written to the private directory "
             . $files['aside_dir'] . ", not into the shop. Check where the backup came from, compare them and move in by hand only what you recognise"
-            . " (a job runs as soon as it is in the queue; a stores.json sets the bank account of every bank-transfer instruction):\n");
+            . " (a job runs as soon as it is in the queue; a stores.json sets the bank account of every bank-transfer instruction; a legal"
+            . " text is shown unescaped). On a new server the shop refuses to hash personal data until the GDPR salt is moved in:\n");
         foreach ($files['set_aside'] as $entry) {
             $where = $files['destinations'][$entry] ?? null;
             fwrite(STDERR, '  ' . ($where === null ? $entry : $where['aside'] . ' -> ' . $where['live']) . "\n");

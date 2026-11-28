@@ -137,14 +137,13 @@ class GdprService {
 
     /** Returns the persistent GDPR hash salt (autogenerates on first call). */
     public static function salt(): string {
-        if (self::$cachedSalt !== null) return self::$cachedSalt;
+        return self::$cachedSalt ??= self::saltOf(self::config());
+    }
 
-        $cfg = self::config();
+    /** The salt of config $cfg: configured, read from gdpr_salt_file, else created there. */
+    private static function saltOf(array $cfg): string {
         $configured = (string)($cfg['gdpr_hash_salt'] ?? '');
-        if ($configured !== '') {
-            self::$cachedSalt = $configured;
-            return $configured;
-        }
+        if ($configured !== '') return $configured;
 
         $saltFile = (string)($cfg['gdpr_salt_file'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/secrets/gdpr_salt');
         $normalizedSalt = rtrim(str_replace('\\', '/', $saltFile), '/');
@@ -203,8 +202,17 @@ class GdprService {
                     'GDPR salt file is unsafe, empty or corrupt. Restore it from backup; regeneration breaks existing hash matches.'
                 );
             }
-            self::$cachedSalt = $stored;
             return $stored;
+        }
+
+        // R62 (review round 27, finding 9): a restore onto a new server sets the backup's salt aside; a fresh one made here
+        // would never match the pseudonyms of the restored records, and the copy moved in later would orphan every hash
+        // made meanwhile. Refused until the copy is moved in (or deleted to start a new salt on purpose).
+        $aside = RestoreRecovery::asideCopies(RestoreRecovery::directory($cfg, dirname(__DIR__)), basename($saltFile))[0] ?? null;
+        if ($aside !== null) {
+            throw new RuntimeException("GDPR salt file {$saltFile} is missing and a restore set the backup's salt aside at {$aside}:"
+                . " move it into place (mv {$aside} {$saltFile}) before the shop hashes personal data. A new salt would not match the"
+                . ' restored records; delete the copy only to start one on purpose.');
         }
 
         $new = bin2hex(random_bytes(32));
@@ -225,7 +233,6 @@ class GdprService {
             fclose($handle);
         }
         @chmod($saltFile, 0600);
-        self::$cachedSalt = $new;
         return $new;
     }
 

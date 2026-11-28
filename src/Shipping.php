@@ -116,7 +116,22 @@ class Shipping {
     public static function normalizeDeliveryDays(string $text): ?string {
         $text = trim($text);
         if ($text === '' || preg_match(self::DELIVERY_DAYS_PATTERN, $text) === 1) return $text;
-        return preg_match('/^([0-9]{1,3}(?:\s*[–-]\s*[0-9]{1,3})?)(?![0-9])/u', $text, $m) === 1 ? (string)preg_replace('/\s+/u', '', $m[1]) : null;
+        if (preg_match('/^([0-9]{1,3})(?:\s*[–-]\s*([0-9]{1,3}))?(?![0-9])\s*(.*)$/us', $text, $m) !== 1) return null;
+        // R62 (review round 27, finding 6): the unit after the number decides ("24h" was 24 days, "2-3 weeks" 2-3 days):
+        // hours are rounded up to days, weeks are 7 days, months and other spans are not taken.
+        $unit = mb_strtolower(trim($m[3]));
+        $end = '(?![\p{L}])';
+        $toDays = match (true) {
+            preg_match('/^(?:(?:w|wks?|weeks?|wochen?|hét|hete|semanas?)' . $end . '|týž|tyzd|týd|tyd|tydz|tygod|wo\.)/u', $unit) === 1 => static fn(int $n): int => $n * 7,
+            preg_match('/^(?:h|hrs?|hours?|hod|hodin\p{L}*|hodín|std|stunden?|godz\p{L}*|óra\p{L}*|horas?)' . $end . '/u', $unit) === 1 => static fn(int $n): int => max(1, intdiv($n + 23, 24)),
+            preg_match('/^(?:d|days?|dn\p{L}*|dní|deň|den|tag\p{L}*|werktag\p{L}*|arbeitstag\p{L}*|nap\p{L}*|días?|dias?|working|business|pracovn\p{L}*|robocz\p{L}*|munkanap\p{L}*|hábiles?)' . $end . '/u', $unit) === 1,
+            $unit === '' || preg_match('/^[(,.;:\/]/u', $unit) === 1 => static fn(int $n): int => $n,
+            default => null,
+        };
+        if ($toDays === null) return null;
+        $from = $toDays((int)$m[1]);
+        $to = $m[2] !== '' ? $toDays((int)$m[2]) : $from;
+        return $to > $from ? $from . '-' . $to : (string)$from;
     }
 
     /** R60: whether $path (the installation's shipping.json by default) is no shipped version of it, i.e. edited by hand. */

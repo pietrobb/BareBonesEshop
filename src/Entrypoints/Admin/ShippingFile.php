@@ -27,14 +27,12 @@ function shippingFileMethods(): void {
     ?>
     <div class="card" data-shipping-file-methods>
         <h3><?= esc(I18n::t('admin.shipping.file_methods')) ?></h3>
+        <?php shippingFileNotices(); ?>
         <?php if ($fileCurrency !== $storeCurrency): ?>
         <p class="muted" data-shipping-file-other-currency><?= esc(I18n::format('admin.shipping.file_other_currency', ['currency' => $fileCurrency, 'store_currency' => $storeCurrency])) ?></p>
     </div>
         <?php return; endif; ?>
         <p class="muted"><?= esc(I18n::format('admin.shipping.file_help', ['currency' => $fileCurrency])) ?></p>
-        <?php if (Shipping::fileEdited()): ?>
-        <p class="flash flash-warn" role="alert" data-shipping-file-edited><?= esc(I18n::format('admin.shipping.file_edited', ['methods' => implode(', ', array_map(static fn(string $k): string => Shipping::methodName($k, I18n::locale()) ?? $k, Shipping::CHECKOUT_METHODS))])) ?></p>
-        <?php endif; ?>
         <?php foreach ($methods as $key => $zones): $first = $zones[0]; ?>
         <form method="post" action="admin.php?p=shipping&amp;action=file_method_save" data-shipping-file-method="<?= esc($key) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -59,6 +57,23 @@ function shippingFileMethods(): void {
     </div>
     <?php
 }
+
+/**
+ * R62 (review round 27, finding 8): what the doctor's shipping.file_edited and shipping.methods_file "Fix" lead to, shown
+ * in every store (was: a HUF/CZK/PLN store showed only that Standard and Express are priced in EUR, no way out).
+ */
+function shippingFileNotices(): void {
+    if (Shipping::fileEdited()) {
+        $methods = implode(', ', array_map(static fn(string $k): string => Shipping::methodName($k, I18n::locale()) ?? $k, Shipping::CHECKOUT_METHODS));
+        $notice = I18n::format('admin.shipping.file_edited', ['methods' => $methods]);
+        echo '<p class="flash flash-warn" role="alert" data-shipping-file-edited>', esc($notice), "</p>\n";
+    }
+    if (!empty(DataOverrides::shippingMethods()['invalid'])) {
+        $notice = I18n::format('admin.shipping.methods_file_invalid', ['file' => DataOverrides::SHIPPING_METHODS]);
+        echo '<p class="flash flash-warn" role="alert" data-shipping-methods-file-invalid>', esc($notice), "</p>\n";
+    }
+}
+
 /**
  * R58 (review round 23, medium S4): save one shipping.json method's settings from Admin → Shipping into the data
  * directory (DataOverrides::saveShippingMethods()), so shipping.json itself is never edited.

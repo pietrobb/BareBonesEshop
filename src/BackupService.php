@@ -79,8 +79,7 @@ class BackupService
             if (self::$cfg['include_files'] ?? true) {
                 self::$fileSources = self::defaultFileSources($appCfg, self::$rootDir);
             }
-            self::$recoveryDir = (string)($appCfg['backup_recovery_dir'] ?? '')
-                ?: rtrim((string)($appCfg['private_runtime_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private'), '/\\') . '/restore-recovery';
+            self::$recoveryDir = RestoreRecovery::directory($appCfg, self::$rootDir);
             if (self::driverName($db) === 'mysql') {
                 self::$mysqlDatabaseFactory = static fn(): MysqlUpdateDatabaseBackup => new MysqlUpdateDatabaseBackup(
                     (string)($appCfg['db_host'] ?? ''),
@@ -601,13 +600,42 @@ class BackupService
             foreach (glob(rtrim($recoveryDir, '/\\') . DIRECTORY_SEPARATOR . 'pre-restore-*.sql') ?: [] as $dump) {
                 if (!is_link($dump) && is_file($dump)) $found[] = $dump;
             }
+            // R62 (review round 27, finding 11): the scratch database a killed MySQL restore left (a full copy of the
+            // backup), known by the marker restoreBackupDump() writes before creating it and removes once it is dropped.
+            foreach (glob(rtrim($recoveryDir, '/\\') . DIRECTORY_SEPARATOR . 'scratch-*.marker') ?: [] as $marker) {
+                if (is_link($marker) || !is_file($marker)) continue;
+                $scratch = trim((string)@file_get_contents($marker, false, null, 0, 256));
+                if ($scratch !== '') $found[] = "MySQL database {$scratch} (marker {$marker})";
+            }
         }
         if ($sqlitePath !== '') {
             foreach (self::restoreTemps($sqlitePath) as $temp) {
                 if ((int)@filemtime($temp) <= time() - self::RESTORE_TEMP_STALE) $found[] = $temp;
             }
+            // R62 (review round 27, finding 11): and the live database a killed SQLite restore had moved aside (a running
+            // restore holds it for the moment of the swap only).
+            foreach (glob($sqlitePath . '.pre-restore-*.rollback') ?: [] as $rollback) {
+                if (preg_match('/\.pre-restore-[0-9a-f]{12}\.rollback$/D', $rollback) === 1 && !is_link($rollback) && is_file($rollback)) $found[] = $rollback;
+            }
         }
         return $found;
+    }
+
+    private static ?int $processUid = null;
+
+    /** The user this process runs as: posix_geteuid(), or without ext-posix the owner of a file it makes (null: unknown). */
+    private static function processUid(): ?int
+    {
+        if (function_exists('posix_geteuid')) return posix_geteuid();
+        if (self::$processUid === null) {
+            $probe = @tempnam(sys_get_temp_dir(), 'bbe-uid-');
+            if (is_string($probe)) {
+                $owner = @fileowner($probe);
+                @unlink($probe);
+                if (is_int($owner)) self::$processUid = $owner;
+            }
+        }
+        return self::$processUid;
     }
 
     /** Removes the staging directories whose process is gone (their .owner lock is free). */
@@ -619,8 +647,18 @@ class BackupService
                 || (int)@filemtime($dir) > time() - 60) continue;
             // R61 (review round 26, low 13): only a directory as stagingPath() makes it: this user's, private (0700). Was:
             // any match in a shared temp directory, so a shop run as root removed what another user's process staged there.
-            $stat = @stat($dir);
-            if (!is_array($stat) || (function_exists('posix_geteuid') && (($stat['mode'] & 0077) !== 0 || (int)$stat['uid'] !== posix_geteuid()))) continue;
+            // R62 (review round 27, finding 14): lstat, so a directory swapped for a link after is_link() is not followed;
+            // without ext-posix the user is the owner of a file this process makes (was: stat(), and no check at all).
+            $stat = @lstat($dir);
+            if (!is_array($stat) || ($stat['mode'] & 0170000) !== 0040000) continue;
+            if (PHP_OS_FAMILY !== 'Windows') {
+                $uid = self::processUid();
+                if ($uid === null) {
+                    self::log("Staging: {$dir} left in place: the user this process runs as is unknown (no ext-posix, temp directory not writable)");
+                    continue;
+                }
+                if (($stat['mode'] & 0077) !== 0 || (int)$stat['uid'] !== $uid) continue;
+            }
             $owner = @fopen($dir . DIRECTORY_SEPARATOR . '.owner', 'rb');
             if ($owner === false || is_link($dir . DIRECTORY_SEPARATOR . '.owner')) {
                 if ($owner !== false) fclose($owner);
@@ -1578,6 +1616,9 @@ class BackupService
                     // delivered order and an email_send mailed a store-branded link anywhere on a new server.
                     // R61 (review round 26, medium 1): so are stores.json (a forged one put its IBAN into every bank-transfer
                     // instruction), shipping.json and the GDPR salt, also where the live shop lacks them (a new server).
+                    // R55 (review round 20, low): so is a legal text the live shop lacks; R62 (review round 27, finding 10):
+                    // and one that differs, also with --force. It is rendered unescaped ({{{content_html}}}): a forged
+                    // backup's terms.html loaded a script. Was: written over the live text with --force.
                     if ($differs || ($name !== 'config' && !is_file($target))) {
                         // R51: in the private recovery directory, never next to the live source: config.php.from-backup
                         // and themes.from-backup/ in the web root were served (database password, gateway keys).
@@ -1586,12 +1627,6 @@ class BackupService
                         $base = $asideDir;
                         $isAside = true;
                     }
-                } elseif ($name === 'legal' && !is_link($target) && !file_exists($target)) {
-                    // R55 (review round 20, low): a legal text the live shop lacks is set aside too: it is rendered unescaped
-                    // ({{{content_html}}}), and a forged backup's terms.html loaded a script. Was: written in place, unreported.
-                    $asideDir = $asideRun ??= self::createAsideRun();
-                    [$target, $base] = [$asideDir . '/' . $name . '/' . $rest, $asideDir];
-                    $isAside = true;
                 }
                 if (isset($targets[$target])) {
                     $refused[] = "{$entry} (same target as {$targets[$target]})";
@@ -1942,9 +1977,9 @@ class BackupService
      * would point the shop at another database, a theme file the release changed would go back to the old version,
      * and a queue that has already run would send its mails again. Only a missing config.php is restored in place
      * (R60: a missing mail.json, theme file or job is set aside too; R61: stores.json, shipping.json and the GDPR salt,
-     * differing or missing).
+     * differing or missing; R62: the legal texts, differing or missing).
      */
-    private const ASIDE_SOURCES = ['config', 'themes', 'jobs', 'mail', 'stores', 'shipping', 'gdpr_salt'];
+    private const ASIDE_SOURCES = ['config', 'themes', 'jobs', 'mail', 'stores', 'shipping', 'gdpr_salt', 'legal'];
 
     /** The default sources that are one file (defaultFileSources()); the others are directories. */
     private const FILE_SOURCES = ['gdpr_salt', 'stores', 'mail', 'shipping', 'config'];

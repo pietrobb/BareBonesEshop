@@ -490,6 +490,11 @@ final class InvoiceService
             $gross = min($left, $short);
             $netLeft = max(0, (int)$rates[$key]['net'] - (int)($used[$key]['net'] ?? 0));
             $net = min($netLeft, (int)round((int)$rates[$key]['net'] * $gross / max(1, (int)$rates[$key]['gross'])), $gross);
+            // R62 (review round 27, low 3): nor more VAT than the rate has left beside the capped lines (capToUncredited()
+            // bounds those, not these). Was: the net in the rate's proportion next to lines that took a cent more VAT than
+            // theirs, so "Refunded in full" credited 6.85 € of VAT at 23 % on an invoice with 6.84 €.
+            $vatLeft = (int)$rates[$key]['gross'] - (int)$rates[$key]['net'] - (int)($used[$key]['gross'] ?? 0) + (int)($used[$key]['net'] ?? 0);
+            if ($gross - $net > max(0, $vatLeft)) $net = min($gross, $netLeft, $gross - max(0, $vatLeft));
             $supply = $rates[$key]['supply'] ?? [];
             $spilled[] = [
                 'order_item_id' => (int)$base['order_item_id'], 'rma_item_id' => -((int)$base['rma_item_id'] * 16 + (++$number)),
@@ -859,19 +864,7 @@ final class InvoiceService
         $remaining = Rma::refundedOutsideReturns($orderId);
         if ($remaining <= 0) return [];
         $db = Db::get();
-        $pools = [];
-        foreach (Rma::outsideRefunds($orderId) as [$ledgerKey, $amount]) {
-            $note = $ledgerKey !== '' ? self::refundCreditByKey($db, $orderId, $ledgerKey) : null;
-            if (!$note || (string)($note['status'] ?? '') === self::STATUS_CANCELLED) continue;
-            foreach (json_decode((string)$note['vat_breakdown'], true) ?: [] as $key => $info) {
-                $gross = is_array($info) ? -((int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0)) : 0;
-                $gross = min($gross, $amount);
-                if ($gross <= 0) continue;
-                $pools[(string)$key] = ($pools[(string)$key] ?? 0) + $gross;
-                $amount -= $gross;
-            }
-        }
-        $pools = self::poolsAfterUnshippedSpill($db, $orderId, $pools);
+        [$pools] = self::poolsAfterUnshippedSpill($db, $orderId, self::outsidePools($db, $orderId));
         foreach (Rma::outsideCounted($orderId)['keys'] as $key => $counted) {
             if ($key !== '' && isset($pools[$key])) $pools[$key] = max(0, $pools[$key] - $counted);
         }
@@ -911,35 +904,86 @@ final class InvoiceService
     }
 
     /**
+     * Per VAT breakdown key, the gross the credit notes of the money refunded outside the order's returns credited there,
+     * up to that money.
+     * @return array<string, int>
+     */
+    private static function outsidePools(PDO $db, int $orderId): array {
+        $pools = [];
+        foreach (Rma::outsideRefunds($orderId) as [$ledgerKey, $amount]) {
+            $note = $ledgerKey !== '' ? self::refundCreditByKey($db, $orderId, $ledgerKey) : null;
+            if (!$note || (string)($note['status'] ?? '') === self::STATUS_CANCELLED) continue;
+            foreach (json_decode((string)$note['vat_breakdown'], true) ?: [] as $key => $info) {
+                $gross = is_array($info) ? -((int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0)) : 0;
+                $gross = min($gross, $amount);
+                if ($gross <= 0) continue;
+                $pools[(string)$key] = ($pools[(string)$key] ?? 0) + $gross;
+                $amount -= $gross;
+            }
+        }
+        return $pools;
+    }
+
+    /**
      * R61 (review round 26, low 13): the refund of the cancelled unshipped rest credits its goods' rates as far as an
      * earlier outside refund's credit note left them room, the rest at the other rates (R60). That much of the outside
      * money's credit at the goods' rates is the goods' now, the money counts at those other rates instead. Was: the
      * outside money stayed counted at the cancelled goods' rate, a return reversed it there (the rate then had uncredited
      * what nobody kept) and the returned goods' rate came up short: their credit was capped, the customer paid less.
+     * R62 (review round 27, finding 2): each move also names the net it carries at its new key (that refund's net there in
+     * proportion), so outsideCredited() moves the net with the gross. Was: the gross only, so a return reversed the moved
+     * gross with the net of the old key (5 %: -226/-154, 72 of VAT) and its goods kept too much net (19 %: 879/830/49).
      * @param array<string, int> $pools
-     * @return array<string, int>
+     * @return array{0: array<string, int>, 1: list<array{0: string, 1: string, 2: int, 3: int}>} the pools, and every move
+     *     [from key, to key, gross, net at the new key]
      */
     private static function poolsAfterUnshippedSpill(PDO $db, int $orderId, array $pools): array {
-        if ($pools === []) return $pools;
+        if ($pools === []) return [$pools, []];
+        $moves = [];
         $stmt = $db->prepare("SELECT vat_breakdown, credit_snapshot FROM invoices WHERE order_id = :order AND store_id = :store AND type = 'credit_note' AND status <> :cancelled ORDER BY id");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
         $notes = array_filter($stmt->fetchAll(PDO::FETCH_ASSOC), static fn(array $note): bool => ((json_decode((string)$note['credit_snapshot'], true) ?: [])['split'] ?? '') === 'unshipped');
         $order = $notes !== [] ? Orders::byId($orderId) : null;
         $goods = $order ? self::unshippedParts($order) : null;
-        if (!$goods) return $pools;
+        if (!$goods) return [$pools, []];
+        $credited = [];
         foreach ($notes as $note) {
             foreach (json_decode((string)$note['vat_breakdown'], true) ?: [] as $key => $info) {
-                $spill = is_array($info) && !isset($goods[(string)$key]) ? -((int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0)) : 0;
-                foreach (array_keys($goods) as $goodsKey) {
-                    $move = min($spill, (int)($pools[(string)$goodsKey] ?? 0));
-                    if ($move <= 0) continue;
-                    $pools[(string)$goodsKey] -= $move;
-                    $pools[(string)$key] = ($pools[(string)$key] ?? 0) + $move;
-                    $spill -= $move;
-                }
+                if (!is_array($info)) continue;
+                $credited[(string)$key]['gross'] = ($credited[(string)$key]['gross'] ?? 0) - (int)($info['net'] ?? 0) - (int)($info['vat'] ?? 0);
+                $credited[(string)$key]['net'] = ($credited[(string)$key]['net'] ?? 0) - (int)($info['net'] ?? 0);
             }
         }
-        return array_filter($pools, static fn(int $pool): bool => $pool > 0);
+        // R62 (review round 27, finding 4): what those refunds credited beyond the goods' own value at a key, also at a key
+        // of other cancelled goods, is the spill; it replaces the outside money only at the goods' keys left short. Was:
+        // only keys without cancelled goods counted, so of cancelled 19 % and 5 % goods the 19 % shortfall the refund
+        // credited at 5 % stayed counted at 19 %, a return reversed it there and 19 % kept 0.19 € uncredited for good.
+        $short = [];
+        foreach ($goods as $key => $part) {
+            $left = (int)$part['gross'] - (int)($credited[(string)$key]['gross'] ?? 0);
+            if ($left > 0) $short[(string)$key] = $left;
+        }
+        foreach ($credited as $key => $part) {
+            $key = (string)$key;
+            $own = $goods[$key] ?? ['gross' => 0, 'net' => 0];
+            $spill = $part['gross'] - (int)$own['gross'];
+            if ($spill <= 0) continue;
+            $spillNet = isset($goods[$key]) ? max(0, min($spill, $part['net'] - (int)$own['net'])) : min($spill, max(0, $part['net']));
+            [$spillGross, $netLeft] = [$spill, $spillNet];
+            foreach ($short as $goodsKey => $shortfall) {
+                $goodsKey = (string)$goodsKey;
+                $move = min($spill, $shortfall, (int)($pools[$goodsKey] ?? 0));
+                if ($move <= 0) continue;
+                $net = $move === $spill ? $netLeft : min($netLeft, self::netOf($move, ['gross' => $spillGross, 'net' => $spillNet]));
+                $pools[$goodsKey] -= $move;
+                $pools[$key] = ($pools[$key] ?? 0) + $move;
+                $short[$goodsKey] -= $move;
+                $spill -= $move;
+                $netLeft -= $net;
+                $moves[] = [$goodsKey, $key, $move, $net];
+            }
+        }
+        return [array_filter($pools, static fn(int $pool): bool => $pool > 0), $moves];
     }
 
     /**
@@ -1015,6 +1059,14 @@ final class InvoiceService
                 $credited[(string)$key]['gross'] = ($credited[(string)$key]['gross'] ?? 0) - (int)($info['net'] ?? 0) - (int)($info['vat'] ?? 0);
                 $credited[(string)$key]['net'] = ($credited[(string)$key]['net'] ?? 0) - (int)($info['net'] ?? 0);
             }
+        }
+        // R62 (review round 27, finding 2): what poolsAfterUnshippedSpill() moved to the other keys, with its net there.
+        [, $moves] = self::poolsAfterUnshippedSpill(Db::get(), $orderId, self::outsidePools(Db::get(), $orderId));
+        foreach ($moves as [$from, $to, $gross, $net]) {
+            if (!isset($credited[$from]) || $credited[$from]['gross'] <= 0) continue;
+            $gross = min($gross, $credited[$from]['gross']);
+            $credited[$from] = ['gross' => $credited[$from]['gross'] - $gross, 'net' => $credited[$from]['net'] - self::netOf($gross, $credited[$from])];
+            $credited[$to] = ['gross' => ($credited[$to]['gross'] ?? 0) + $gross, 'net' => ($credited[$to]['net'] ?? 0) + min($net, $gross)];
         }
         return array_filter($credited, static fn(array $part): bool => $part['gross'] > 0);
     }

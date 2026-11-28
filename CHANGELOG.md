@@ -498,6 +498,55 @@ Run `php cli/update.php doctor --package=...` before `apply`, and `php cli/setup
 
 ### Changes
 
+- **The signed update from 2.1.0, 2.1.1 and 2.1.2 installs again (review round 27, finding 1).** `apply` runs this
+  release's migrations inside the installed updater, whose `DataOverrides` is already loaded with its old code; six
+  new migrations reach `Bootstrap::stores()`, which called `DataOverrides::readStores()` that 2.1.x does not have, so
+  every update ended "Call to undefined method" and rolled back (no data lost). `Bootstrap::stores()` reads
+  `stores.json` itself, with the same 2 MB limit, when the loaded class is older. Two new gates: CI updates a shop
+  installed from each released 2.1.x tree with that release's own updater (`php cli/test-release-upgrade.php`, SQLite,
+  MySQL 8.4 and MariaDB 11.4), and the regression suite follows every migration a release has not applied to any
+  method or constant its updater's loaded classes lack (recorded in `cli/tests/fixtures/updater-preloaded-api.json`).
+  The gate tests every tag from v2.1.0 on and fails, naming the command, once a new release's loaded classes are not
+  recorded there (`php cli/test-release-upgrade.php --from=vX.Y.Z --driver=... --record-preloaded=cli/tests/fixtures/updater-preloaded-api.json`).
+
+- **Return credit notes after a cancelled unshipped rest credit VAT that fits their net again (review round 27,
+  findings 2–4, a regression of 2.1.3's low 13).** When money refunded by hand came first and the cancelled goods'
+  refund credited part of their value at other rates, a later return moved that money's credit between rates by gross
+  only: one credit note reversed 2.26 € at 5 % with 0.72 € of VAT and credited its 23 % goods with 1.15 € of VAT on
+  8.25 € (each document off by up to 2.34 €, the next one evened it out). The net now moves with the gross. With
+  cancelled goods at two rates, the shortfall of one that the refund credited at the other no longer stays counted at
+  the first (19 % kept 0.19 € uncredited although every 19 % item was cancelled). "Refunded in full" and returns after
+  ones an older release closed without payout no longer credit a cent more VAT at a rate than the invoice has.
+
+- **After a restore onto a new server the shop no longer starts a new GDPR salt by itself (review round 27, findings
+  9–12).** The restore sets the backup's salt aside, and the first pseudonymised record then made a fresh salt: the
+  restored records no longer matched, and moving the copy in later orphaned the new ones. While a copy is set aside and
+  no salt is in place, hashing personal data now fails with the `mv` that moves it in. `setup.php doctor` lists every
+  copy the shop still lacks (`backup.set_aside`: GDPR salt, `stores.json`, `shipping-methods.json`, `mail.json`) and,
+  on the example stores, advises moving the backup's `stores.json` in instead of `setup.php apply`. A legal text that
+  differs from the backup is set aside too, also with `--force` (it is shown unescaped; was: written over the live
+  text). `backup.restore_leftovers` also reports the live database a killed SQLite restore moved aside
+  (`<db>.pre-restore-<hex>.rollback`), a MySQL scratch database left behind (by its `scratch-<name>.marker`) and the
+  dumps in the default recovery directory `<private_runtime_dir>/restore-recovery` when `backup_recovery_dir` is
+  empty (was: not looked at). The restore warning and the runbook name the shipping copy `shipping-methods.json`.
+
+- **Returns, delivery times and the domain check, smaller fixes (review round 27, findings 5–8 and 13).** The order
+  timeline names returns refunded by hand in the admin's language, with the money paid and the admin who recorded it
+  (was: `refund.manual_item_completed`, 0,00 € by "admin"). A return offers no refund before the worker has issued the
+  order's invoice and says it waits for it (was: "Refunded in full: 0 Ft", refused). `setup.php shipping-import` reads
+  the unit of a delivery time: hours are rounded up to days, weeks are 7 days and months are not taken (was: "24h" became
+  24 days, "2-3 weeks" 2-3 days). The domain check's lookup gives the A address when a name server drops AAAA queries
+  (was: untested at every save), asks a truncated answer again over TCP, and leaves the domain untested instead of a
+  fatal error or the unbounded system resolver when `disable_functions` or `open_basedir` keep it from the socket
+  functions or `/etc/resolv.conf`. The doctor's shipping "Fix" in a HUF, CZK or PLN store explains the edited
+  `shipping.json` or the unreadable delivery settings (was: only that Standard and Express are priced in EUR).
+
+- **An order cancellation picked as a MySQL deadlock victim runs again (review round 27, finding 14).** Like an order
+  edit (round 26), up to three attempts; its e-mails and jobs are queued only after the commit (was: the admin got an
+  error and the order stayed open). The backup staging sweep checks the directory itself (`lstat`, it must be a
+  directory) and, without ext-posix, takes the user from a file it makes, so another user's staging directory is still
+  left alone (was: `stat`, and no owner or mode check without ext-posix).
+
 - **A forged backup can no longer change the shop's bank account (review round 26, finding 1).** `stores.json` was
   restored in place when the live shop had none (a new server) and over a differing one with `--force`: a forged
   backup's `legal.iban` then appeared in every bank-transfer instruction. `shipping.json` (prices) and the GDPR salt
